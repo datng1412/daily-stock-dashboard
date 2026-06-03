@@ -27,9 +27,13 @@ from data_provider.mozyfin_fetcher import (
 LIQUIDITY_TARGET_AVG_VOLUME = 1_000_000
 VN_CACHE_TTL_SECONDS = {
     "ohlcv": 300,
+    # Quote includes foreign flow and may include latest price in future Mozyfin outputs.
+    # Keep at 60s for now; if quote becomes the live price source, 15-30s can be evaluated later.
     "quote": 60,
+    "intraday_ohlcv": 60,
     "news": 1800,
 }
+VN_INTRADAY_WARNING = "Intraday 1H candle data is not a realtime matched quote."
 STALE_CACHE_WARNING = "Live refresh failed; showing stale cached data."
 VN_STATUS_RULE_METADATA = {
     "rule_set_name": "Vietnam neutral technical labels",
@@ -63,6 +67,25 @@ VN_FORBIDDEN_STATUS_LABELS = {
     "Target price",
     "Entry price",
 }
+VN_ALLOWED_INTRADAY_LABELS = {
+    "Intraday up",
+    "Intraday down",
+    "Intraday flat",
+    "Intraday volume expansion",
+    "Intraday wide range",
+    "Intraday data limited",
+    "Not realtime quote",
+}
+VN_FORBIDDEN_INTRADAY_LABELS = {
+    "Buy",
+    "Sell",
+    "Hold",
+    "Accumulate",
+    "Cut loss",
+    "Take profit",
+    "Entry",
+    "Target",
+}
 VN_DASHBOARD_UNITS = {
     "latest_price": "VND",
     "ohlcv_close": "VND",
@@ -91,6 +114,8 @@ VN_DASHBOARD_UNITS = {
     "distance_to_20d_low_pct": "percent",
     "foreign_net_5d": "row-specific",
     "foreign_net_20d": "row-specific",
+    "intraday_1h_price": "VND",
+    "intraday_1h_volume": "shares",
 }
 logger = logging.getLogger(__name__)
 
@@ -171,6 +196,9 @@ class VietnamDashboardConfig:
     liquidity_target_avg_volume: int = LIQUIDITY_TARGET_AVG_VOLUME
     history_days: int = 90
     news_limit: int = 3
+    include_intraday: bool = True
+    intraday_timeframe: str = "1h"
+    intraday_limit: int = 8
 
 
 def _safe_float(value: Any) -> Optional[float]:
@@ -363,6 +391,180 @@ def _status_detail(label: str, severity: str, reason: str, inputs: Optional[Dict
         "reason": reason,
         "inputs": inputs or {},
     }
+
+
+def _intraday_detail(label: str, severity: str, reason: str, inputs: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    if label not in VN_ALLOWED_INTRADAY_LABELS:
+        raise ValueError(f"Unsupported Vietnam intraday label: {label}")
+    if label in VN_FORBIDDEN_INTRADAY_LABELS:
+        raise ValueError(f"Forbidden intraday recommendation label: {label}")
+    return {
+        "label": label,
+        "severity": severity,
+        "reason": reason,
+        "inputs": inputs or {},
+    }
+
+
+def normalize_intraday_candles(df: Optional[pd.DataFrame], limit: int = 8) -> List[Dict[str, Any]]:
+    """Normalize intraday OHLCV rows for API output."""
+    if df is None or df.empty:
+        return []
+    rows = []
+    for raw in df.tail(limit).to_dict("records"):
+        rows.append(
+            {
+                "timestamp": raw.get("timestamp"),
+                "date_time": raw.get("date_time") or raw.get("datetime") or raw.get("date"),
+                "open": _safe_float(raw.get("open")),
+                "high": _safe_float(raw.get("high")),
+                "low": _safe_float(raw.get("low")),
+                "close": _safe_float(raw.get("close")),
+                "volume": _safe_float(raw.get("volume")),
+            }
+        )
+    return rows
+
+
+def calculate_intraday_pulse(candles: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Calculate neutral intraday pulse metrics from available 1H candles."""
+    if not candles:
+        return {
+            "latest_1h_close": None,
+            "latest_1h_open": None,
+            "latest_1h_high": None,
+            "latest_1h_low": None,
+            "latest_1h_volume": None,
+            "latest_1h_change": None,
+            "latest_1h_change_percent": None,
+            "session_high_from_1h": None,
+            "session_low_from_1h": None,
+            "cumulative_1h_volume": None,
+            "direction": "unknown",
+            "range_percent": None,
+            "volume_vs_avg_1h": None,
+        }
+
+    latest = candles[-1]
+    latest_open = _safe_float(latest.get("open"))
+    latest_high = _safe_float(latest.get("high"))
+    latest_low = _safe_float(latest.get("low"))
+    latest_close = _safe_float(latest.get("close"))
+    latest_volume = _safe_float(latest.get("volume"))
+    latest_change = latest_close - latest_open if latest_close is not None and latest_open is not None else None
+    latest_change_pct = latest_change / latest_open * 100 if latest_change is not None and latest_open else None
+    highs = [_safe_float(candle.get("high")) for candle in candles]
+    lows = [_safe_float(candle.get("low")) for candle in candles]
+    volumes = [_safe_float(candle.get("volume")) for candle in candles]
+    previous_volumes = [value for value in volumes[:-1] if value is not None]
+    avg_previous_volume = sum(previous_volumes) / len(previous_volumes) if len(previous_volumes) >= 2 else None
+
+    if latest_change is None:
+        direction = "unknown"
+    elif latest_change > 0:
+        direction = "up"
+    elif latest_change < 0:
+        direction = "down"
+    else:
+        direction = "flat"
+
+    return {
+        "latest_1h_close": _round_optional(latest_close),
+        "latest_1h_open": _round_optional(latest_open),
+        "latest_1h_high": _round_optional(latest_high),
+        "latest_1h_low": _round_optional(latest_low),
+        "latest_1h_volume": _round_optional(latest_volume, 0),
+        "latest_1h_change": _round_optional(latest_change),
+        "latest_1h_change_percent": _round_optional(latest_change_pct, 2),
+        "session_high_from_1h": _round_optional(max(value for value in highs if value is not None)) if any(value is not None for value in highs) else None,
+        "session_low_from_1h": _round_optional(min(value for value in lows if value is not None)) if any(value is not None for value in lows) else None,
+        "cumulative_1h_volume": _round_optional(sum(value for value in volumes if value is not None), 0) if any(value is not None for value in volumes) else None,
+        "direction": direction,
+        "range_percent": _round_optional((latest_high - latest_low) / latest_open * 100, 2) if latest_high is not None and latest_low is not None and latest_open else None,
+        "volume_vs_avg_1h": _round_optional(latest_volume / avg_previous_volume, 2) if latest_volume is not None and avg_previous_volume else None,
+    }
+
+
+def derive_intraday_details(candles: List[Dict[str, Any]], pulse: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Return neutral intraday condition labels with reasons."""
+    details: List[Dict[str, Any]] = [
+        _intraday_detail(
+            "Not realtime quote",
+            "caution",
+            "Intraday 1H candle data is separate from a realtime matched quote.",
+            {"source": "Mozyfin OHLCV", "is_realtime_quote": False},
+        )
+    ]
+    if len(candles) < 3:
+        details.append(
+            _intraday_detail(
+                "Intraday data limited",
+                "caution",
+                "Fewer than 3 intraday candles are available.",
+                {"candles_loaded": len(candles)},
+            )
+        )
+
+    direction = pulse.get("direction")
+    if direction == "up":
+        details.append(
+            _intraday_detail(
+                "Intraday up",
+                "info",
+                "Latest 1H candle close is above its open.",
+                {"latest_1h_open": pulse.get("latest_1h_open"), "latest_1h_close": pulse.get("latest_1h_close")},
+            )
+        )
+    elif direction == "down":
+        details.append(
+            _intraday_detail(
+                "Intraday down",
+                "info",
+                "Latest 1H candle close is below its open.",
+                {"latest_1h_open": pulse.get("latest_1h_open"), "latest_1h_close": pulse.get("latest_1h_close")},
+            )
+        )
+    elif direction == "flat":
+        details.append(
+            _intraday_detail(
+                "Intraday flat",
+                "info",
+                "Latest 1H candle close equals its open.",
+                {"latest_1h_open": pulse.get("latest_1h_open"), "latest_1h_close": pulse.get("latest_1h_close")},
+            )
+        )
+
+    volume_ratio = _safe_float(pulse.get("volume_vs_avg_1h"))
+    if volume_ratio is not None and volume_ratio >= 1.5:
+        details.append(
+            _intraday_detail(
+                "Intraday volume expansion",
+                "info",
+                "Latest 1H volume is at least 1.5 times the average of previous available 1H candles.",
+                {"volume_vs_avg_1h": volume_ratio},
+            )
+        )
+
+    range_percent = _safe_float(pulse.get("range_percent"))
+    if range_percent is not None and range_percent >= 1.5:
+        details.append(
+            _intraday_detail(
+                "Intraday wide range",
+                "caution",
+                "Latest 1H candle range is at least 1.5% of its open.",
+                {"range_percent": range_percent},
+            )
+        )
+
+    seen = set()
+    deduped = []
+    for detail in details:
+        label = detail["label"]
+        if label in seen:
+            continue
+        seen.add(label)
+        deduped.append(detail)
+    return deduped
 
 
 def derive_neutral_status_details(
@@ -648,14 +850,32 @@ class VietnamMarketService:
         self.manager = manager or DataFetcherManager()
         self.config = config or VietnamDashboardConfig()
 
-    def build_watchlist(self, tickers: Optional[Iterable[str]] = None, force_refresh: bool = False) -> Dict[str, Any]:
+    def build_watchlist(
+        self,
+        tickers: Optional[Iterable[str]] = None,
+        force_refresh: bool = False,
+        include_intraday: Optional[bool] = None,
+        intraday_timeframe: Optional[str] = None,
+        intraday_limit: Optional[int] = None,
+    ) -> Dict[str, Any]:
         symbols = [vn_ticker(t) for t in (tickers or VN_WATCHLIST) if vn_ticker(t)]
         rows = []
         fixture_mode = _is_fixture_mode(self.manager)
         refresh_time = datetime.now(timezone.utc).isoformat()
+        use_intraday = self.config.include_intraday if include_intraday is None else include_intraday
+        effective_intraday_timeframe = intraday_timeframe or self.config.intraday_timeframe
+        effective_intraday_limit = intraday_limit or self.config.intraday_limit
         for symbol in symbols:
             try:
-                rows.append(self._build_symbol(symbol, force_refresh=force_refresh))
+                rows.append(
+                    self._build_symbol(
+                        symbol,
+                        force_refresh=force_refresh,
+                        include_intraday=use_intraday,
+                        intraday_timeframe=effective_intraday_timeframe,
+                        intraday_limit=effective_intraday_limit,
+                    )
+                )
             except Exception as exc:
                 logger.warning("Vietnam dashboard failed for %s: %s", symbol, exc)
                 rows.append(
@@ -689,9 +909,18 @@ class VietnamMarketService:
                         "trend": {},
                         "warnings": ["Data unavailable for this ticker; check Mozyfin credentials, symbol, or fixture coverage."],
                         "news": [],
+                        "intraday_timeframe": effective_intraday_timeframe,
+                        "intraday_source": "Mozyfin OHLCV",
+                        "intraday_is_realtime_quote": False,
+                        "intraday_warning": VN_INTRADAY_WARNING,
+                        "intraday_candles": [],
+                        "intraday_pulse": calculate_intraday_pulse([]),
+                        "intraday_labels": ["Not realtime quote", "Intraday data limited"],
+                        "intraday_details": derive_intraday_details([], calculate_intraday_pulse([])),
                         "cache_status": {
                             "ohlcv_cache": "error",
                             "quote_cache": "error",
+                            "intraday_cache": "error" if use_intraday else "missing",
                             "news_cache": "error",
                         },
                     }
@@ -723,6 +952,10 @@ class VietnamMarketService:
                 "distance_to_20d_low_pct": "(close - low_20d) / low_20d * 100",
                 "foreign_net_sums": "sum(foreign_net) over the latest 5 or 20 rows when foreign_net history is available",
                 "neutral_status_labels": "Rule-based neutral condition labels only; no trading recommendations are generated",
+                "intraday_1h_change": "latest_1h_close - latest_1h_open",
+                "intraday_1h_change_percent": "(latest_1h_close - latest_1h_open) / latest_1h_open * 100",
+                "intraday_range_percent": "(latest_1h_high - latest_1h_low) / latest_1h_open * 100",
+                "intraday_volume_vs_avg_1h": "latest_1h_volume / average(previous available 1H candle volumes), when at least 2 previous candles exist",
             },
         }
 
@@ -783,6 +1016,13 @@ class VietnamMarketService:
         latest = df.iloc[-1]
         quote_key = _cache_key("quote", symbol, limit=1)
         quote_entry = _get_cache_entry(quote_key)
+        intraday_key = _cache_key(
+            "intraday_ohlcv",
+            symbol,
+            timeframe=self.config.intraday_timeframe,
+            limit=self.config.intraday_limit,
+        )
+        intraday_entry = _get_cache_entry(intraday_key)
         news_key = _cache_key("news", symbol, limit=self.config.news_limit)
         news_entry = _get_cache_entry(news_key)
         foreign = quote_entry.value if quote_entry else {
@@ -799,16 +1039,19 @@ class VietnamMarketService:
             "cache_status": {
                 "ohlcv_cache": "hit" if ohlcv_entry.expires_at > _utc_now() else "stale",
                 "quote_cache": "hit" if quote_entry and quote_entry.expires_at > _utc_now() else "stale" if quote_entry else "missing",
+                "intraday_cache": "hit" if intraday_entry and intraday_entry.expires_at > _utc_now() else "stale" if intraday_entry else "missing",
                 "news_cache": "hit" if news_entry and news_entry.expires_at > _utc_now() else "stale" if news_entry else "missing",
             },
             "cache_last_fetched_at": {
                 "ohlcv": _iso(ohlcv_entry.fetched_at),
                 "quote": _iso(quote_entry.fetched_at) if quote_entry else None,
+                "intraday_ohlcv": _iso(intraday_entry.fetched_at) if intraday_entry else None,
                 "news": _iso(news_entry.fetched_at) if news_entry else None,
             },
             "cache_next_refresh_at": {
                 "ohlcv": _iso(ohlcv_entry.expires_at),
                 "quote": _iso(quote_entry.expires_at) if quote_entry else None,
+                "intraday_ohlcv": _iso(intraday_entry.expires_at) if intraday_entry else None,
                 "news": _iso(news_entry.expires_at) if news_entry else None,
             },
         }
@@ -840,7 +1083,14 @@ class VietnamMarketService:
             "units": VN_DASHBOARD_UNITS,
         }
 
-    def _build_symbol(self, symbol: str, force_refresh: bool = False) -> Dict[str, Any]:
+    def _build_symbol(
+        self,
+        symbol: str,
+        force_refresh: bool = False,
+        include_intraday: bool = True,
+        intraday_timeframe: str = "1h",
+        intraday_limit: int = 8,
+    ) -> Dict[str, Any]:
         ohlcv_key = _cache_key("ohlcv", symbol, timeframe="1d", limit=260, days=self.config.history_days)
         ohlcv_result = _read_cache(
             ohlcv_key,
@@ -849,15 +1099,22 @@ class VietnamMarketService:
             force_refresh=force_refresh,
         )
         df, source = ohlcv_result["value"]
-        cache_status = {"ohlcv_cache": ohlcv_result["status"], "quote_cache": "missing", "news_cache": "missing"}
+        cache_status = {
+            "ohlcv_cache": ohlcv_result["status"],
+            "quote_cache": "missing",
+            "intraday_cache": "missing",
+            "news_cache": "missing",
+        }
         cache_last_fetched_at = {
             "ohlcv": _iso(ohlcv_result["entry"].fetched_at),
             "quote": None,
+            "intraday_ohlcv": None,
             "news": None,
         }
         cache_next_refresh_at = {
             "ohlcv": _iso(ohlcv_result["entry"].expires_at),
             "quote": None,
+            "intraday_ohlcv": None,
             "news": None,
         }
         cache_errors = {}
@@ -881,6 +1138,14 @@ class VietnamMarketService:
                     _status_detail("Watch", "info", "No OHLCV rows were returned for rule evaluation.", {})
                 ],
                 "warnings": ["No OHLCV rows were returned."],
+                "intraday_timeframe": intraday_timeframe,
+                "intraday_source": "Mozyfin OHLCV",
+                "intraday_is_realtime_quote": False,
+                "intraday_warning": VN_INTRADAY_WARNING,
+                "intraday_candles": [],
+                "intraday_pulse": calculate_intraday_pulse([]),
+                "intraday_labels": ["Not realtime quote", "Intraday data limited"],
+                "intraday_details": derive_intraday_details([], calculate_intraday_pulse([])),
                 "cache_status": cache_status,
                 "cache_last_fetched_at": cache_last_fetched_at,
                 "cache_next_refresh_at": cache_next_refresh_at,
@@ -910,6 +1175,9 @@ class VietnamMarketService:
             "net_unit": "unknown",
             "buy_raw_field": "foreign_buy" if _last_value(df, "foreign_buy") is not None else None,
             "sell_raw_field": "foreign_sell" if _last_value(df, "foreign_sell") is not None else None,
+            "latest_price": None,
+            "price_raw_field": None,
+            "price_date": None,
         }
         if fetcher and hasattr(fetcher, "get_foreign_trading"):
             try:
@@ -937,6 +1205,49 @@ class VietnamMarketService:
         foreign_net_unit = str(foreign.get("net_unit") or "unknown")
         foreign_buy_raw_field = foreign.get("buy_raw_field")
         foreign_sell_raw_field = foreign.get("sell_raw_field")
+        quote_latest_price = _safe_float(foreign.get("latest_price"))
+        quote_price_raw_field = foreign.get("price_raw_field")
+        quote_price_date = _valid_date_string(foreign.get("price_date"))
+        if quote_latest_price is not None and quote_price_raw_field:
+            latest_price = quote_latest_price
+            latest_price_source = "quote"
+            latest_price_raw_field = str(quote_price_raw_field)
+            latest_price_date = quote_price_date
+            price_source_warning = None
+        else:
+            latest_price = close
+            latest_price_source = "ohlcv" if close is not None else "unknown"
+            latest_price_raw_field = "close" if close is not None else None
+            latest_price_date = ohlcv_date
+            price_source_warning = "Quote does not provide a reliable latest price field; latest price uses OHLCV close."
+        intraday_candles: List[Dict[str, Any]] = []
+        if include_intraday and fetcher and hasattr(fetcher, "get_intraday_ohlcv"):
+            try:
+                intraday_key = _cache_key(
+                    "intraday_ohlcv",
+                    symbol,
+                    timeframe=intraday_timeframe,
+                    limit=intraday_limit,
+                )
+                intraday_result = _read_cache(
+                    intraday_key,
+                    "intraday_ohlcv",
+                    lambda: fetcher.get_intraday_ohlcv(symbol, intraday_timeframe, intraday_limit),
+                    force_refresh=force_refresh,
+                )
+                intraday_candles = normalize_intraday_candles(intraday_result["value"], intraday_limit)
+                cache_status["intraday_cache"] = intraday_result["status"]
+                cache_last_fetched_at["intraday_ohlcv"] = _iso(intraday_result["entry"].fetched_at)
+                cache_next_refresh_at["intraday_ohlcv"] = _iso(intraday_result["entry"].expires_at)
+                if intraday_result["error"]:
+                    cache_errors["intraday_ohlcv"] = intraday_result["error"]
+            except Exception as exc:
+                logger.debug("Intraday OHLCV unavailable for %s: %s", symbol, exc)
+                cache_status["intraday_cache"] = "error"
+                cache_errors["intraday_ohlcv"] = str(exc)
+        intraday_pulse = calculate_intraday_pulse(intraday_candles)
+        intraday_details = derive_intraday_details(intraday_candles, intraday_pulse)
+        intraday_labels = [detail["label"] for detail in intraday_details]
         validation = validate_vietnam_row(latest, foreign)
         indicators = calculate_vietnam_indicators(df, foreign)
         candle_status = "unknown"
@@ -945,7 +1256,7 @@ class VietnamMarketService:
         status_details = derive_neutral_status_details(
             indicators,
             change_pct,
-            latest_price=close,
+            latest_price=latest_price,
             final_close_status=final_close_status,
             candle_status=candle_status,
             adjusted_price_status=adjusted_price_status,
@@ -986,6 +1297,8 @@ class VietnamMarketService:
             warnings.append("Foreign net date does not match OHLCV date.")
         if foreign_date_match != "matched":
             warnings.append("Foreign net is not confirmed as same-day flow.")
+        if price_source_warning:
+            warnings.append(price_source_warning)
         warnings.append("Final close status is unknown; daily candle may still be in progress.")
         if price_adjustment_status == "unknown":
             warnings.append("Adjusted/unadjusted price status is unknown.")
@@ -998,6 +1311,10 @@ class VietnamMarketService:
             warnings.append("Latest close is within 0.5% of the exchange daily price limit band.")
         if foreign_net is None:
             warnings.append("Foreign trading signal is unavailable from the current Mozy output.")
+        if include_intraday:
+            warnings.append(VN_INTRADAY_WARNING)
+            if cache_status.get("intraday_cache") == "error":
+                warnings.append("Intraday 1H candles are unavailable for this ticker.")
 
         return {
             "ticker": symbol,
@@ -1007,9 +1324,15 @@ class VietnamMarketService:
             "source": source,
             "rows_loaded": len(df),
             "date": latest.get("date").strftime("%Y-%m-%d") if hasattr(latest.get("date"), "strftime") else str(latest.get("date")),
-            "latest_price": close,
+            "latest_price": latest_price,
+            "latest_price_source": latest_price_source,
+            "latest_price_raw_field": latest_price_raw_field,
+            "latest_price_date": latest_price_date,
+            "quote_price_date": quote_price_date,
+            "quote_price_raw_field": str(quote_price_raw_field) if quote_price_raw_field else None,
+            "price_source_warning": price_source_warning,
             "ohlcv_close": close,
-            "price_date": ohlcv_date,
+            "price_date": latest_price_date,
             "ohlcv_date": ohlcv_date,
             "quote_date": quote_date,
             "foreign_net_date": foreign_net_date,
@@ -1049,6 +1372,14 @@ class VietnamMarketService:
             "trend": {},
             "warnings": warnings,
             "news": news,
+            "intraday_timeframe": intraday_timeframe,
+            "intraday_source": "Mozyfin OHLCV",
+            "intraday_is_realtime_quote": False,
+            "intraday_warning": VN_INTRADAY_WARNING,
+            "intraday_candles": intraday_candles,
+            "intraday_pulse": intraday_pulse,
+            "intraday_labels": intraday_labels,
+            "intraday_details": intraday_details,
             "cache_status": cache_status,
             "cache_last_fetched_at": cache_last_fetched_at,
             "cache_next_refresh_at": cache_next_refresh_at,

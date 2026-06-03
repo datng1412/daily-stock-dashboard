@@ -14,7 +14,7 @@ import os
 import shutil
 import subprocess
 import tempfile
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -128,6 +128,25 @@ def _normalize_date_value(value: Any) -> Any:
     return value
 
 
+def _normalize_datetime_value(value: Any) -> Optional[str]:
+    if value in (None, ""):
+        return None
+    text = str(value).strip()
+    try:
+        numeric = float(text)
+    except ValueError:
+        parsed = pd.to_datetime(text, errors="coerce")
+        if pd.isna(parsed):
+            return text
+        timestamp = parsed.to_pydatetime()
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
+        return timestamp.astimezone(timezone.utc).isoformat()
+    if numeric > 1_000_000_000:
+        return datetime.fromtimestamp(numeric, tz=timezone.utc).isoformat()
+    return text
+
+
 def _parse_markdown_table(text: str) -> List[Dict[str, str]]:
     lines = [line.strip() for line in text.splitlines() if line.strip().startswith("|")]
     if len(lines) < 2:
@@ -234,6 +253,12 @@ class MozyfinFetcher(BaseFetcher):
         rows = self._run_csv_command("ohlcv", entity, "--timeframe", "1d", "--limit", "260")
         return pd.DataFrame(rows)
 
+    def get_intraday_ohlcv(self, stock_code: str, timeframe: str = "1h", limit: int = 8) -> pd.DataFrame:
+        """Return latest intraday OHLCV candles from Mozyfin."""
+        entity = normalize_vn_symbol(stock_code)
+        rows = self._run_csv_command("ohlcv", entity, "--timeframe", timeframe, "--limit", str(limit))
+        return self._normalize_intraday_data(pd.DataFrame(rows), stock_code)
+
     def _normalize_data(self, df: pd.DataFrame, stock_code: str) -> pd.DataFrame:
         rows: List[Dict[str, Any]] = []
         prev_close: Optional[float] = None
@@ -310,6 +335,27 @@ class MozyfinFetcher(BaseFetcher):
 
         return pd.DataFrame(rows)
 
+    def _normalize_intraday_data(self, df: pd.DataFrame, stock_code: str) -> pd.DataFrame:
+        rows: List[Dict[str, Any]] = []
+        for raw in df.to_dict("records"):
+            timestamp = _first_value(raw, "timestamp", "time", "datetime", "date_time", "date")
+            rows.append(
+                {
+                    "timestamp": _to_int(timestamp),
+                    "date_time": _normalize_datetime_value(timestamp),
+                    "open": _to_float(_first_value(raw, "open", "o")),
+                    "high": _to_float(_first_value(raw, "high", "h")),
+                    "low": _to_float(_first_value(raw, "low", "l")),
+                    "close": _to_float(_first_value(raw, "close", "c", "price")),
+                    "volume": _to_int(_first_value(raw, "volume", "vol", "v")),
+                    "ticker": vn_ticker(stock_code),
+                }
+            )
+        result = pd.DataFrame(rows)
+        if not result.empty and "date_time" in result.columns:
+            result = result.sort_values("date_time").reset_index(drop=True)
+        return result
+
     def get_realtime_quote(self, stock_code: str) -> Optional[UnifiedRealtimeQuote]:
         entity = normalize_vn_symbol(stock_code)
         rows = self._run_csv_command("quote", entity, "--limit", "1")
@@ -351,8 +397,14 @@ class MozyfinFetcher(BaseFetcher):
                 "net_unit": "unknown",
                 "buy_raw_field": None,
                 "sell_raw_field": None,
+                "latest_price": None,
+                "price_raw_field": None,
+                "price_date": None,
             }
         latest = rows[-1]
+        price_raw_field = _first_present_key(latest, "last_price", "latest_price", "match_price", "matched_price", "current_price", "price", "close")
+        quote_price = _to_float(_first_value(latest, "last_price", "latest_price", "match_price", "matched_price", "current_price", "price", "close"))
+        quote_date = _normalize_date_value(_first_value(latest, "date", "trading_date", "timestamp", "time", "datetime"))
         buy_raw_field = _first_present_key(latest, "foreign_buy", "foreign_buy_volume", "buy_foreign_quantity")
         sell_raw_field = _first_present_key(latest, "foreign_sell", "foreign_sell_volume", "sell_foreign_quantity")
         buy = _to_float(_first_value(latest, "foreign_buy", "foreign_buy_volume", "buy_foreign_quantity"))
@@ -366,10 +418,13 @@ class MozyfinFetcher(BaseFetcher):
             "buy": buy,
             "sell": sell,
             "net": net,
-            "date": _normalize_date_value(_first_value(latest, "date", "trading_date", "time", "timestamp", "datetime")),
+            "date": quote_date,
             "net_unit": net_unit,
             "buy_raw_field": buy_raw_field,
             "sell_raw_field": sell_raw_field,
+            "latest_price": quote_price,
+            "price_raw_field": price_raw_field,
+            "price_date": quote_date,
         }
 
     def get_main_indices(self, region: str = "vn") -> Optional[List[Dict[str, Any]]]:

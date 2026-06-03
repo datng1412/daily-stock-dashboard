@@ -428,10 +428,19 @@ def get_vietnam_watchlist_health(
 def get_vietnam_watchlist(
     tickers: Optional[str] = Query(None, description="Comma-separated VN tickers. Defaults to FPT,VPB,MSB,SCS,ACV,ACB"),
     force_refresh: bool = Query(False, description="Bypass VN in-memory cache and refresh Mozyfin data"),
+    include_intraday: bool = Query(True, description="Include Mozyfin OHLCV intraday candle pulse data"),
+    intraday_timeframe: str = Query("1h", description="Intraday OHLCV timeframe. Defaults to 1h"),
+    intraday_limit: int = Query(8, ge=1, le=48, description="Number of latest intraday candles to load"),
 ) -> VietnamWatchlistResponse:
     try:
         symbols = [item.strip().upper() for item in tickers.split(",") if item.strip()] if tickers else None
-        payload = VietnamMarketService().build_watchlist(symbols, force_refresh=force_refresh)
+        payload = VietnamMarketService().build_watchlist(
+            symbols,
+            force_refresh=force_refresh,
+            include_intraday=include_intraday,
+            intraday_timeframe=intraday_timeframe,
+            intraday_limit=intraday_limit,
+        )
         return VietnamWatchlistResponse(**payload)
     except Exception as e:
         logger.error("Vietnam watchlist failed: %s", e, exc_info=True)

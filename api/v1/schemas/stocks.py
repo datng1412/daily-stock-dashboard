@@ -119,6 +119,12 @@ class VietnamWatchItem(BaseModel):
     rows_loaded: Optional[int] = None
     date: Optional[str] = None
     latest_price: Optional[float] = None
+    latest_price_source: Optional[str] = None
+    latest_price_raw_field: Optional[str] = None
+    latest_price_date: Optional[str] = None
+    quote_price_date: Optional[str] = None
+    quote_price_raw_field: Optional[str] = None
+    price_source_warning: Optional[str] = None
     ohlcv_close: Optional[float] = None
     price_date: Optional[str] = None
     ohlcv_date: Optional[str] = None
@@ -150,6 +156,14 @@ class VietnamWatchItem(BaseModel):
     trend: Dict[str, Any] = Field(default_factory=dict)
     warnings: List[str] = Field(default_factory=list)
     news: List[Dict[str, Any]] = Field(default_factory=list)
+    intraday_timeframe: Optional[str] = None
+    intraday_source: Optional[str] = None
+    intraday_is_realtime_quote: bool = False
+    intraday_warning: Optional[str] = None
+    intraday_candles: List[Dict[str, Any]] = Field(default_factory=list)
+    intraday_pulse: Dict[str, Any] = Field(default_factory=dict)
+    intraday_labels: List[str] = Field(default_factory=list)
+    intraday_details: List[Dict[str, Any]] = Field(default_factory=list)
     cache_status: Dict[str, Any] = Field(default_factory=dict)
     cache_last_fetched_at: Dict[str, Any] = Field(default_factory=dict)
     cache_next_refresh_at: Dict[str, Any] = Field(default_factory=dict)

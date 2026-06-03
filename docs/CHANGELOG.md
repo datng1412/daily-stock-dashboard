@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [改进] 越南行情看板新增 Asia/Ho_Chi_Minh 时间格式化与数据新鲜度展示，并将原始时间戳、字段名和缓存调试信息收纳到 Advanced/Raw Data。
+
+- [改进] 越南行情看板新增 Mozyfin OHLCV 1H Intraday Pulse 面板、60 秒独立缓存和中性盘中标签，明确不作为实时撮合报价。
+
+- [改进] 越南行情看板新增默认关闭的自动刷新开关，支持 60/180/300 秒间隔、隐藏标签页暂停和倒计时展示。
+
+- [改进] 越南行情看板新增最新价来源字段，Mozyfin quote 无可靠价格字段时明确回退到 OHLCV close 并展示提示。
 - [改进] 越南行情看板新增中性技术状态标签、结构化规则原因和风险提示，不生成交易建议。
 - [改进] 越南行情看板明确区分最新价与 OHLCV 日线 close，补充最终收盘状态、外资日期对齐、外资单位来源和 Wilder/RMA RSI 元数据。
 

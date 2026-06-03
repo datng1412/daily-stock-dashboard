@@ -21,6 +21,12 @@ export type VietnamWatchItem = {
   rowsLoaded?: number | null;
   date?: string | null;
   latestPrice?: number | null;
+  latestPriceSource?: string | null;
+  latestPriceRawField?: string | null;
+  latestPriceDate?: string | null;
+  quotePriceDate?: string | null;
+  quotePriceRawField?: string | null;
+  priceSourceWarning?: string | null;
   ohlcvClose?: number | null;
   priceDate?: string | null;
   ohlcvDate?: string | null;
@@ -81,6 +87,41 @@ export type VietnamWatchItem = {
   trend: { signalScore?: number; buySignal?: string; trendStatus?: string; volumeRatio5d?: number };
   warnings: string[];
   news: Array<{ title?: string; url?: string; source?: string; publishedAt?: string; summary?: string }>;
+  intradayTimeframe?: string | null;
+  intradaySource?: string | null;
+  intradayIsRealtimeQuote?: boolean;
+  intradayWarning?: string | null;
+  intradayCandles?: Array<{
+    timestamp?: number | null;
+    dateTime?: string | null;
+    open?: number | null;
+    high?: number | null;
+    low?: number | null;
+    close?: number | null;
+    volume?: number | null;
+  }>;
+  intradayPulse?: {
+    latest1hClose?: number | null;
+    latest1hOpen?: number | null;
+    latest1hHigh?: number | null;
+    latest1hLow?: number | null;
+    latest1hVolume?: number | null;
+    latest1hChange?: number | null;
+    latest1hChangePercent?: number | null;
+    sessionHighFrom1h?: number | null;
+    sessionLowFrom1h?: number | null;
+    cumulative1hVolume?: number | null;
+    direction?: 'up' | 'down' | 'flat' | 'unknown' | null;
+    rangePercent?: number | null;
+    volumeVsAvg1h?: number | null;
+  };
+  intradayLabels?: string[];
+  intradayDetails?: Array<{
+    label: string;
+    severity: 'info' | 'caution' | 'risk';
+    reason: string;
+    inputs?: Record<string, unknown>;
+  }>;
   cacheStatus: Record<string, string>;
   cacheLastFetchedAt: Record<string, string | null>;
   cacheNextRefreshAt: Record<string, string | null>;
@@ -163,11 +204,18 @@ export const stocksApi = {
     throw new Error('请提供文件或粘贴文本');
   },
 
-  async getVietnamWatchlist(tickers?: string[], forceRefresh = false): Promise<VietnamWatchlistResponse> {
+  async getVietnamWatchlist(
+    tickers?: string[],
+    forceRefresh = false,
+    options?: { includeIntraday?: boolean; intradayTimeframe?: string; intradayLimit?: number },
+  ): Promise<VietnamWatchlistResponse> {
     const response = await apiClient.get('/api/v1/stocks/vn/watchlist', {
       params: {
         ...(tickers?.length ? { tickers: tickers.join(',') } : {}),
         ...(forceRefresh ? { force_refresh: true } : {}),
+        ...(options?.includeIntraday !== undefined ? { include_intraday: options.includeIntraday } : {}),
+        ...(options?.intradayTimeframe ? { intraday_timeframe: options.intradayTimeframe } : {}),
+        ...(options?.intradayLimit ? { intraday_limit: options.intradayLimit } : {}),
       },
       timeout: 120000,
     });

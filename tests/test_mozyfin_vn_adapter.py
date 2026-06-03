@@ -14,13 +14,16 @@ from src.services import vietnam_market_service as vn_service
 from src.services.vietnam_market_service import (
     VietnamDashboardConfig,
     VietnamMarketService,
+    calculate_intraday_pulse,
     calculate_rsi14,
     calculate_liquidity_score,
     calculate_price_limit_state,
     calculate_vietnam_indicators,
     derive_neutral_status_details,
+    derive_intraday_details,
     clear_vietnam_cache,
     derive_neutral_status_labels,
+    normalize_intraday_candles,
 )
 
 
@@ -39,8 +42,11 @@ class _StubFetcher:
     foreign = {"buy": 10, "sell": 15, "net": -5}
     quote_calls = 0
     news_calls = 0
+    intraday_calls = 0
     fail_quote = False
     fail_news = False
+    fail_intraday = False
+    intraday = None
 
     def get_foreign_trading(self, symbol):
         self.quote_calls += 1
@@ -54,13 +60,20 @@ class _StubFetcher:
             raise RuntimeError("news failed")
         return []
 
+    def get_intraday_ohlcv(self, symbol, timeframe="1h", limit=8):
+        self.intraday_calls += 1
+        if self.fail_intraday:
+            raise RuntimeError("intraday failed")
+        return (self.intraday if self.intraday is not None else _sample_intraday_rows()).copy()
+
 
 class _StubManager:
-    def __init__(self, df, fixture_dir=None, foreign=None, fail_daily=False):
+    def __init__(self, df, fixture_dir=None, foreign=None, fail_daily=False, intraday=None):
         self.df = df
         self.daily_calls = 0
         self.fail_daily = fail_daily
         self.fetcher = _StubFetcher()
+        self.fetcher.intraday = intraday
         if foreign is not None:
             self.fetcher.foreign = foreign
         if fixture_dir is not None:
@@ -81,6 +94,17 @@ def _sample_vn_rows():
         [
             {"date": f"2026-05-{day:02d}", "open": 10 + day, "high": 11 + day, "low": 9 + day, "close": 10 + day, "volume": 100 + day}
             for day in range(1, 22)
+        ]
+    )
+
+
+def _sample_intraday_rows():
+    return pd.DataFrame(
+        [
+            {"timestamp": 1780459200, "date_time": "2026-06-03T04:00:00+00:00", "open": 100, "high": 101, "low": 99, "close": 100, "volume": 1000},
+            {"timestamp": 1780462800, "date_time": "2026-06-03T05:00:00+00:00", "open": 100, "high": 102, "low": 100, "close": 101, "volume": 1100},
+            {"timestamp": 1780466400, "date_time": "2026-06-03T06:00:00+00:00", "open": 101, "high": 102, "low": 100, "close": 101, "volume": 900},
+            {"timestamp": 1780470000, "date_time": "2026-06-03T07:00:00+00:00", "open": 101, "high": 105, "low": 100, "close": 104, "volume": 2500},
         ]
     )
 
@@ -176,6 +200,11 @@ def test_price_semantics_and_foreign_date_match(monkeypatch):
     item = payload["watchlist"][0]
 
     assert item["latest_price"] == item["ohlcv_close"] == item["close"]
+    assert item["latest_price_source"] == "ohlcv"
+    assert item["latest_price_raw_field"] == "close"
+    assert item["latest_price_date"] == "2026-05-21"
+    assert item["quote_price_date"] is None
+    assert item["price_source_warning"] == "Quote does not provide a reliable latest price field; latest price uses OHLCV close."
     assert item["price_date"] == "2026-05-21"
     assert item["ohlcv_date"] == "2026-05-21"
     assert item["quote_date"] == "2026-05-21"
@@ -189,7 +218,97 @@ def test_price_semantics_and_foreign_date_match(monkeypatch):
     assert item["foreign_sell_raw_field"] == "sell_foreign_quantity"
     assert any("Final close status is unknown" in warning for warning in item["warnings"])
     assert any("daily candle whose final status is unknown" in warning for warning in item["warnings"])
-    assert payload["cache_metadata"]["cache_miss_count"] == 3
+    assert payload["cache_metadata"]["cache_miss_count"] == 4
+
+
+def test_quote_price_field_sets_latest_price_source_quote(monkeypatch):
+    monkeypatch.delenv("MOZYFIN_FIXTURE_DIR", raising=False)
+    rows = _sample_vn_rows()
+    manager = _StubManager(
+        rows,
+        foreign={
+            "buy": 100,
+            "sell": 40,
+            "net": 60,
+            "date": "2026-05-21",
+            "net_unit": "shares",
+            "buy_raw_field": "buy_foreign_quantity",
+            "sell_raw_field": "sell_foreign_quantity",
+            "latest_price": 99,
+            "price_raw_field": "match_price",
+            "price_date": "2026-05-21",
+        },
+    )
+    service = VietnamMarketService(manager=manager, config=VietnamDashboardConfig(history_days=30, news_limit=1))
+
+    payload = service.build_watchlist(["FPT"])
+    item = payload["watchlist"][0]
+
+    assert item["latest_price"] == 99
+    assert item["latest_price_source"] == "quote"
+    assert item["latest_price_raw_field"] == "match_price"
+    assert item["latest_price_date"] == "2026-05-21"
+    assert item["quote_price_date"] == "2026-05-21"
+    assert item["ohlcv_close"] == 31
+    assert item["indicators"]["close"] == 31
+    assert item["price_source_warning"] is None
+    assert payload["cache_metadata"]["cache_miss_count"] == 4
+    assert item["status_labels"]
+
+
+def test_status_labels_match_status_details(monkeypatch):
+    monkeypatch.delenv("MOZYFIN_FIXTURE_DIR", raising=False)
+    rows = _sample_vn_rows()
+    manager = _StubManager(
+        rows,
+        foreign={
+            "buy": 100,
+            "sell": 40,
+            "net": 60,
+            "date": "2026-05-21",
+            "net_unit": "shares",
+            "buy_raw_field": "buy_foreign_quantity",
+            "sell_raw_field": "sell_foreign_quantity",
+        },
+    )
+    service = VietnamMarketService(manager=manager, config=VietnamDashboardConfig(history_days=30, news_limit=1))
+
+    item = service.build_watchlist(["FPT"])["watchlist"][0]
+    detail_labels = [detail["label"] for detail in item["status_details"]]
+
+    assert len(item["status_labels"]) == len(item["status_details"])
+    assert set(item["status_labels"]) == set(detail_labels)
+
+
+def test_missing_quote_price_falls_back_to_ohlcv_with_warning(monkeypatch):
+    monkeypatch.delenv("MOZYFIN_FIXTURE_DIR", raising=False)
+    rows = _sample_vn_rows()
+    manager = _StubManager(
+        rows,
+        foreign={
+            "buy": 100,
+            "sell": 40,
+            "net": 60,
+            "date": "2026-05-21",
+            "net_unit": "shares",
+            "buy_raw_field": "buy_foreign_quantity",
+            "sell_raw_field": "sell_foreign_quantity",
+            "latest_price": None,
+            "price_raw_field": None,
+            "price_date": None,
+        },
+    )
+    service = VietnamMarketService(manager=manager, config=VietnamDashboardConfig(history_days=30, news_limit=1))
+
+    item = service.build_watchlist(["FPT"])["watchlist"][0]
+
+    assert item["latest_price"] == item["ohlcv_close"] == 31
+    assert item["latest_price_source"] == "ohlcv"
+    assert item["latest_price_raw_field"] == "close"
+    assert item["latest_price_date"] == "2026-05-21"
+    assert item["quote_price_date"] is None
+    assert "Quote does not provide a reliable latest price field" in item["price_source_warning"]
+    assert any("Quote does not provide a reliable latest price field" in warning for warning in item["warnings"])
 
 
 def test_foreign_date_mismatch_warns(monkeypatch):
@@ -517,6 +636,110 @@ def test_indicator_helpers_are_stable():
     )
 
 
+def test_intraday_candle_normalization():
+    raw = pd.DataFrame(
+        [
+            {"timestamp": "1780470000", "open": "77500", "high": "77600", "low": "76500", "close": "76600", "volume": "4622300"},
+        ]
+    )
+    fetcher = MozyfinFetcher(fixture_dir=str(FIXTURE_DIR))
+
+    normalized = fetcher._normalize_intraday_data(raw, "FPT")
+
+    assert normalized.iloc[0]["timestamp"] == 1780470000
+    assert normalized.iloc[0]["date_time"].startswith("2026-06-03T")
+    assert normalized.iloc[0]["open"] == 77500
+    assert normalized.iloc[0]["volume"] == 4622300
+
+
+def test_intraday_pulse_calculation_and_labels():
+    candles = normalize_intraday_candles(_sample_intraday_rows(), 8)
+    pulse = calculate_intraday_pulse(candles)
+    details = derive_intraday_details(candles, pulse)
+    labels = _labels(details)
+
+    assert pulse["latest_1h_close"] == 104
+    assert pulse["latest_1h_open"] == 101
+    assert pulse["latest_1h_change"] == 3
+    assert pulse["latest_1h_change_percent"] == pytest.approx(2.97)
+    assert pulse["session_high_from_1h"] == 105
+    assert pulse["session_low_from_1h"] == 99
+    assert pulse["cumulative_1h_volume"] == 5500
+    assert pulse["direction"] == "up"
+    assert pulse["range_percent"] == pytest.approx(4.95)
+    assert pulse["volume_vs_avg_1h"] == pytest.approx(2.5)
+    assert "Intraday up" in labels
+    assert "Intraday volume expansion" in labels
+    assert "Intraday wide range" in labels
+    assert "Not realtime quote" in labels
+
+
+@pytest.mark.parametrize(
+    ("latest_open", "latest_close", "expected_label", "expected_direction"),
+    [
+        (100, 101, "Intraday up", "up"),
+        (100, 99, "Intraday down", "down"),
+        (100, 100, "Intraday flat", "flat"),
+    ],
+)
+def test_intraday_direction_labels(latest_open, latest_close, expected_label, expected_direction):
+    rows = _sample_intraday_rows()
+    rows.loc[rows.index[-1], "open"] = latest_open
+    rows.loc[rows.index[-1], "close"] = latest_close
+    candles = normalize_intraday_candles(rows, 8)
+    pulse = calculate_intraday_pulse(candles)
+    labels = _labels(derive_intraday_details(candles, pulse))
+
+    assert pulse["direction"] == expected_direction
+    assert expected_label in labels
+
+
+def test_intraday_limited_data_and_forbidden_labels():
+    candles = normalize_intraday_candles(_sample_intraday_rows().head(2), 8)
+    pulse = calculate_intraday_pulse(candles)
+    labels = set(_labels(derive_intraday_details(candles, pulse)))
+
+    assert "Intraday data limited" in labels
+    assert "Not realtime quote" in labels
+    assert labels.isdisjoint({"Buy", "Sell", "Hold", "Accumulate", "Cut loss", "Take profit", "Entry", "Target"})
+
+
+def test_watchlist_intraday_fields_and_latest_price_unchanged(monkeypatch):
+    monkeypatch.delenv("MOZYFIN_FIXTURE_DIR", raising=False)
+    rows = _sample_vn_rows()
+    manager = _StubManager(rows, intraday=_sample_intraday_rows())
+    service = VietnamMarketService(manager=manager, config=VietnamDashboardConfig(history_days=30, news_limit=1))
+
+    item = service.build_watchlist(["FPT"])["watchlist"][0]
+
+    assert item["latest_price"] == item["ohlcv_close"] == 31
+    assert item["intraday_timeframe"] == "1h"
+    assert item["intraday_source"] == "Mozyfin OHLCV"
+    assert item["intraday_is_realtime_quote"] is False
+    assert item["intraday_warning"] == "Intraday 1H candle data is not a realtime matched quote."
+    assert item["intraday_candles"][-1]["close"] == 104
+    assert item["intraday_pulse"]["latest_1h_close"] == 104
+    assert "Not realtime quote" in item["intraday_labels"]
+    assert item["cache_status"]["intraday_cache"] == "miss"
+
+
+def test_intraday_cache_hit_miss_behavior(monkeypatch):
+    monkeypatch.delenv("MOZYFIN_FIXTURE_DIR", raising=False)
+    rows = _sample_vn_rows()
+    manager = _StubManager(rows, intraday=_sample_intraday_rows())
+    service = VietnamMarketService(manager=manager, config=VietnamDashboardConfig(history_days=30, news_limit=1))
+
+    first = service.build_watchlist(["FPT"])
+    second = service.build_watchlist(["FPT"])
+    _expire_cache_entry("intraday_ohlcv", timeframe="1h", limit=8)
+    refreshed = service.build_watchlist(["FPT"])
+
+    assert first["watchlist"][0]["cache_status"]["intraday_cache"] == "miss"
+    assert second["watchlist"][0]["cache_status"]["intraday_cache"] == "hit"
+    assert refreshed["watchlist"][0]["cache_status"]["intraday_cache"] == "refresh"
+    assert manager.fetcher.intraday_calls == 2
+
+
 def test_validation_warns_for_missing_fields_without_crashing(monkeypatch):
     monkeypatch.delenv("MOZYFIN_FIXTURE_DIR", raising=False)
     rows = pd.DataFrame(
@@ -572,20 +795,23 @@ def test_watchlist_cache_miss_then_hit(monkeypatch):
     first = service.build_watchlist(["FPT"])
     second = service.build_watchlist(["FPT"])
 
-    assert first["cache_metadata"]["cache_miss_count"] == 3
+    assert first["cache_metadata"]["cache_miss_count"] == 4
     assert first["watchlist"][0]["cache_status"] == {
         "ohlcv_cache": "miss",
         "quote_cache": "miss",
+        "intraday_cache": "miss",
         "news_cache": "miss",
     }
-    assert second["cache_metadata"]["cache_hit_count"] == 3
+    assert second["cache_metadata"]["cache_hit_count"] == 4
     assert second["watchlist"][0]["cache_status"] == {
         "ohlcv_cache": "hit",
         "quote_cache": "hit",
+        "intraday_cache": "hit",
         "news_cache": "hit",
     }
     assert manager.daily_calls == 1
     assert manager.fetcher.quote_calls == 1
+    assert manager.fetcher.intraday_calls == 1
     assert manager.fetcher.news_calls == 1
 
 
@@ -601,15 +827,18 @@ def test_watchlist_cache_mixed_ttl_expires_independently(monkeypatch):
     assert first["watchlist"][0]["cache_status"] == {
         "ohlcv_cache": "miss",
         "quote_cache": "miss",
+        "intraday_cache": "miss",
         "news_cache": "miss",
     }
     assert second["watchlist"][0]["cache_status"] == {
         "ohlcv_cache": "hit",
         "quote_cache": "hit",
+        "intraday_cache": "hit",
         "news_cache": "hit",
     }
     assert manager.daily_calls == 1
     assert manager.fetcher.quote_calls == 1
+    assert manager.fetcher.intraday_calls == 1
     assert manager.fetcher.news_calls == 1
 
     _expire_cache_entry("quote", limit=1)
@@ -617,22 +846,27 @@ def test_watchlist_cache_mixed_ttl_expires_independently(monkeypatch):
     assert after_quote_ttl["watchlist"][0]["cache_status"] == {
         "ohlcv_cache": "hit",
         "quote_cache": "refresh",
+        "intraday_cache": "hit",
         "news_cache": "hit",
     }
     assert manager.daily_calls == 1
     assert manager.fetcher.quote_calls == 2
+    assert manager.fetcher.intraday_calls == 1
     assert manager.fetcher.news_calls == 1
 
     _expire_cache_entry("ohlcv", timeframe="1d", limit=260, days=30)
     _expire_cache_entry("quote", limit=1)
+    _expire_cache_entry("intraday_ohlcv", timeframe="1h", limit=8)
     after_ohlcv_ttl = service.build_watchlist(["FPT"])
     assert after_ohlcv_ttl["watchlist"][0]["cache_status"] == {
         "ohlcv_cache": "refresh",
         "quote_cache": "refresh",
+        "intraday_cache": "refresh",
         "news_cache": "hit",
     }
     assert manager.daily_calls == 2
     assert manager.fetcher.quote_calls == 3
+    assert manager.fetcher.intraday_calls == 2
     assert manager.fetcher.news_calls == 1
 
     _expire_cache_entry("news", limit=1)
@@ -640,10 +874,12 @@ def test_watchlist_cache_mixed_ttl_expires_independently(monkeypatch):
     assert after_news_ttl["watchlist"][0]["cache_status"] == {
         "ohlcv_cache": "hit",
         "quote_cache": "hit",
+        "intraday_cache": "hit",
         "news_cache": "refresh",
     }
     assert manager.daily_calls == 2
     assert manager.fetcher.quote_calls == 3
+    assert manager.fetcher.intraday_calls == 2
     assert manager.fetcher.news_calls == 2
 
 
@@ -658,9 +894,11 @@ def test_force_refresh_bypasses_cache(monkeypatch):
 
     assert forced["watchlist"][0]["cache_status"]["ohlcv_cache"] == "refresh"
     assert forced["watchlist"][0]["cache_status"]["quote_cache"] == "refresh"
+    assert forced["watchlist"][0]["cache_status"]["intraday_cache"] == "refresh"
     assert forced["watchlist"][0]["cache_status"]["news_cache"] == "refresh"
     assert manager.daily_calls == 2
     assert manager.fetcher.quote_calls == 2
+    assert manager.fetcher.intraday_calls == 2
     assert manager.fetcher.news_calls == 2
 
 
@@ -673,6 +911,7 @@ def test_stale_cache_returned_when_live_refresh_fails(monkeypatch):
 
     manager.fail_daily = True
     manager.fetcher.fail_quote = True
+    manager.fetcher.fail_intraday = True
     manager.fetcher.fail_news = True
     stale = service.build_watchlist(["FPT"], force_refresh=True)
 
@@ -680,9 +919,10 @@ def test_stale_cache_returned_when_live_refresh_fails(monkeypatch):
     assert item["cache_status"] == {
         "ohlcv_cache": "stale",
         "quote_cache": "stale",
+        "intraday_cache": "stale",
         "news_cache": "stale",
     }
-    assert stale["cache_metadata"]["stale_cache_used_count"] == 3
+    assert stale["cache_metadata"]["stale_cache_used_count"] == 4
     assert any("stale cached data" in warning for warning in item["warnings"])
 
 
