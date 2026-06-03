@@ -113,6 +113,35 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         ],
         "warning_codes": [],
     },
+    "MARKET": {
+        "title": "Market",
+        "description": "Primary market routing. Use VN to enable the Mozyfin Vietnam market adapter.",
+        "category": "base",
+        "data_type": "string",
+        "ui_control": "select",
+        "is_sensitive": False,
+        "is_required": False,
+        "is_editable": True,
+        "default_value": "CN",
+        "options": [
+            {"label": "China A/HK/US default", "value": "CN"},
+            {"label": "Vietnam", "value": "VN"},
+        ],
+        "validation": {"enum": ["CN", "VN"]},
+        "display_order": 11,
+        "help_key": "settings.base.MARKET",
+        "examples": [
+            "MARKET=CN",
+            "MARKET=VN",
+        ],
+        "docs": [
+            {
+                "label": "Vietnam setup",
+                "href": "README_VN.md",
+            },
+        ],
+        "warning_codes": [],
+    },
     # ------------------------------------------------------------------
     # AI Model – LiteLLM unified config
     # ------------------------------------------------------------------

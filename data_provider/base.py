@@ -573,6 +573,7 @@ class DataFetcherManager:
         "LongbridgeFetcher": {"hk", "us"},
         "FinnhubFetcher": {"us"},
         "AlphaVantageFetcher": {"us"},
+        "MozyfinFetcher": {"vn"},
     }
 
     def __init__(self, fetchers: Optional[List[BaseFetcher]] = None):
@@ -695,7 +696,7 @@ class DataFetcherManager:
         market: str,
     ) -> List[BaseFetcher]:
         """Skip built-in daily fetchers that are known not to support a market."""
-        if market not in {"cn", "hk", "us"}:
+        if market not in {"cn", "hk", "us", "vn"}:
             return fetchers
 
         kept: List[BaseFetcher] = []
@@ -1059,6 +1060,17 @@ class DataFetcherManager:
         from .yfinance_fetcher import YfinanceFetcher
         from .longbridge_fetcher import LongbridgeFetcher
         config = get_config()
+        if (getattr(config, "market", "") or "").upper() == "VN":
+            from .mozyfin_fetcher import MozyfinFetcher
+
+            self._ensure_concurrency_guards()
+            with self._fetchers_lock:
+                self._fetchers = [MozyfinFetcher()]
+                self._fetchers.sort(key=lambda f: f.priority)
+                self._refresh_fetcher_indexes_locked()
+            priority_info = ", ".join([f"{f.name}(P{f.priority})" for f in self._get_fetchers_snapshot()])
+            logger.info(f"Initialized {len(self._fetchers)} Vietnam market data source(s): {priority_info}")
+            return
         # 创建所有数据源实例（优先级在各 Fetcher 的 __init__ 中确定）
         efinance = EfinanceFetcher()
         akshare = AkshareFetcher()
@@ -1165,6 +1177,12 @@ class DataFetcherManager:
         is_us_index = is_us_index_code(stock_code)
         is_us = is_us_index or is_us_stock_code(stock_code)
         is_hk = (not is_us) and _is_hk_market(stock_code)
+        is_vn = any(fetcher.name == "MozyfinFetcher" for fetcher in fetchers)
+        if is_vn:
+            is_us = False
+            is_us_index = False
+            is_hk = False
+            fetchers = self._filter_daily_fetchers_for_market(fetchers, "vn")
         if is_hk:
             fetchers = self._filter_daily_fetchers_for_market(fetchers, "hk")
         fetchers = self._filter_fetchers_by_capability(fetchers, capability="daily_data")

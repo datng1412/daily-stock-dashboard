@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [改进] 越南行情看板新增中性技术状态标签、结构化规则原因和风险提示，不生成交易建议。
+- [改进] 越南行情看板明确区分最新价与 OHLCV 日线 close，补充最终收盘状态、外资日期对齐、外资单位来源和 Wilder/RMA RSI 元数据。
+
 - [改进] 首次运行配置校验补充缺失 AI Key、空 STOCK_LIST、Telegram/邮件成对字段和 Webhook URL 前缀诊断。
 - [改进] AlphaSift 选股入口在 Web 侧边栏中移动到“问股”下方，贴近 Agent/研究辅助工作流。
 - [改进] Docker 镜像构建阶段预置默认 AlphaSift 适配层，与桌面发布包一样避免运行期额外安装。

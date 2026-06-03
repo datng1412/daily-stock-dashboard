@@ -25,6 +25,8 @@ from api.v1.schemas.stocks import (
     KLineData,
     StockHistoryResponse,
     StockQuote,
+    VietnamWatchlistHealthResponse,
+    VietnamWatchlistResponse,
 )
 from api.v1.schemas.history import WatchlistRequest, WatchlistResponse
 from api.v1.schemas.common import ErrorResponse
@@ -40,6 +42,7 @@ from src.services.import_parser import (
 )
 from src.services.stock_service import StockService
 from src.services.system_config_service import SystemConfigService
+from src.services.vietnam_market_service import VietnamMarketService
 from data_provider.base import normalize_stock_code
 
 logger = logging.getLogger(__name__)
@@ -392,6 +395,49 @@ def remove_from_watchlist(
         raise HTTPException(
             status_code=500,
             detail={"error": "internal_error", "message": f"从自选删除失败: {str(e)}"},
+        )
+
+
+@router.get(
+    "/vn/watchlist/health",
+    response_model=VietnamWatchlistHealthResponse,
+    summary="Vietnam watchlist data health",
+    description="Return data-quality metadata for the Vietnam watchlist.",
+)
+def get_vietnam_watchlist_health(
+    tickers: Optional[str] = Query(None, description="Comma-separated VN tickers. Defaults to FPT,VPB,MSB,SCS,ACV,ACB"),
+) -> VietnamWatchlistHealthResponse:
+    try:
+        symbols = [item.strip().upper() for item in tickers.split(",") if item.strip()] if tickers else None
+        payload = VietnamMarketService().build_health(symbols)
+        return VietnamWatchlistHealthResponse(**payload)
+    except Exception as e:
+        logger.error("Vietnam watchlist health failed: %s", e, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={"error": "vn_watchlist_health_failed", "message": str(e)},
+        )
+
+
+@router.get(
+    "/vn/watchlist",
+    response_model=VietnamWatchlistResponse,
+    summary="Vietnam watchlist dashboard",
+    description="Return Vietnam watchlist monitoring data from mozyfin-cli.",
+)
+def get_vietnam_watchlist(
+    tickers: Optional[str] = Query(None, description="Comma-separated VN tickers. Defaults to FPT,VPB,MSB,SCS,ACV,ACB"),
+    force_refresh: bool = Query(False, description="Bypass VN in-memory cache and refresh Mozyfin data"),
+) -> VietnamWatchlistResponse:
+    try:
+        symbols = [item.strip().upper() for item in tickers.split(",") if item.strip()] if tickers else None
+        payload = VietnamMarketService().build_watchlist(symbols, force_refresh=force_refresh)
+        return VietnamWatchlistResponse(**payload)
+    except Exception as e:
+        logger.error("Vietnam watchlist failed: %s", e, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={"error": "vn_watchlist_failed", "message": str(e)},
         )
 
 

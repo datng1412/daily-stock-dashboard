@@ -30,6 +30,13 @@ const settingsHelpZhCN: SettingsHelpMap = {
       '修改后保存配置即可供后续任务读取。',
     ],
   },
+  'settings.base.MARKET': {
+    title: 'Market',
+    summary: 'Selects the primary market routing mode for data adapters.',
+    usage: 'Use CN for the original China-market flow, or VN for the Vietnam Mozyfin-backed watchlist flow.',
+    valueNotes: ['VN mode routes daily data requests through the Mozyfin adapter for supported Vietnam tickers.'],
+    impact: ['Affects which market data provider is selected for stock history and dashboard data.'],
+  },
   'settings.ai_model.LITELLM_MODEL': {
     title: '主模型',
     summary: '指定普通分析流程默认使用的 LLM 模型。',
@@ -987,6 +994,13 @@ const settingsHelpEnUS: SettingsHelpMap = {
     ],
     impact: ['Affects analysis scope, notification content, and saved history reports.'],
     notes: ['Use English commas between symbols.', 'Save the setting before later tasks can read it.'],
+  },
+  'settings.base.MARKET': {
+    title: 'Market',
+    summary: 'Selects the primary market routing mode for data adapters.',
+    usage: 'Use CN for the original China-market flow, or VN for the Vietnam Mozyfin-backed watchlist flow.',
+    valueNotes: ['VN mode routes daily data requests through the Mozyfin adapter for supported Vietnam tickers.'],
+    impact: ['Affects which market data provider is selected for stock history and dashboard data.'],
   },
   'settings.ai_model.LITELLM_MODEL': {
     title: 'Primary Model',

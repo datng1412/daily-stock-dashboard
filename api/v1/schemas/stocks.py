@@ -9,7 +9,7 @@
 2. 定义历史 K 线数据模型
 """
 
-from typing import Optional, List
+from typing import Any, Dict, Optional, List
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -106,3 +106,81 @@ class StockHistoryResponse(BaseModel):
             "data": []
         }
     })
+
+
+class VietnamWatchItem(BaseModel):
+    """Vietnam watchlist dashboard row."""
+
+    ticker: str
+    entity: Optional[str] = None
+    exchange: Optional[str] = None
+    market_index: Optional[str] = None
+    source: Optional[str] = None
+    rows_loaded: Optional[int] = None
+    date: Optional[str] = None
+    latest_price: Optional[float] = None
+    ohlcv_close: Optional[float] = None
+    price_date: Optional[str] = None
+    ohlcv_date: Optional[str] = None
+    quote_date: Optional[str] = None
+    foreign_net_date: Optional[str] = None
+    foreign_date_match: Optional[str] = None
+    candle_status: Optional[str] = None
+    final_close_status: Optional[str] = None
+    price_adjustment_status: Optional[str] = None
+    adjusted_price_status: Optional[str] = None
+    open: Optional[float] = None
+    high: Optional[float] = None
+    low: Optional[float] = None
+    close: Optional[float] = None
+    previous_close: Optional[float] = None
+    change_pct: Optional[float] = None
+    volume: Optional[float] = None
+    amount: Optional[float] = None
+    liquidity: Dict[str, Any] = Field(default_factory=dict)
+    price_limit: Dict[str, Any] = Field(default_factory=dict)
+    foreign: Dict[str, Any] = Field(default_factory=dict)
+    foreign_net_unit: Optional[str] = None
+    foreign_buy_raw_field: Optional[str] = None
+    foreign_sell_raw_field: Optional[str] = None
+    indicators: Dict[str, Any] = Field(default_factory=dict)
+    status_labels: List[str] = Field(default_factory=list)
+    status_details: List[Dict[str, Any]] = Field(default_factory=list)
+    validation: Dict[str, Any] = Field(default_factory=dict)
+    trend: Dict[str, Any] = Field(default_factory=dict)
+    warnings: List[str] = Field(default_factory=list)
+    news: List[Dict[str, Any]] = Field(default_factory=list)
+    cache_status: Dict[str, Any] = Field(default_factory=dict)
+    cache_last_fetched_at: Dict[str, Any] = Field(default_factory=dict)
+    cache_next_refresh_at: Dict[str, Any] = Field(default_factory=dict)
+    cache_errors: Dict[str, Any] = Field(default_factory=dict)
+    error: Optional[str] = None
+
+
+class VietnamWatchlistResponse(BaseModel):
+    """Vietnam watchlist dashboard response."""
+
+    market: str = "VN"
+    source: str = "Mozyfin live"
+    fixture_mode: bool = False
+    last_refresh_time: Optional[str] = None
+    units: Dict[str, str] = Field(default_factory=dict)
+    data_quality: Dict[str, Any] = Field(default_factory=dict)
+    cache_metadata: Dict[str, Any] = Field(default_factory=dict)
+    watchlist: List[VietnamWatchItem] = Field(default_factory=list)
+    rule_metadata: Dict[str, Any] = Field(default_factory=dict)
+    formulas: Dict[str, str] = Field(default_factory=dict)
+
+
+class VietnamWatchlistHealthResponse(BaseModel):
+    """Vietnam watchlist data-quality health response."""
+
+    source: str = "Mozyfin live"
+    fixture_mode: bool = False
+    symbols_loaded: int = 0
+    last_trading_date: Optional[str] = None
+    missing_fields: Dict[str, List[str]] = Field(default_factory=dict)
+    errors: Dict[str, List[str]] = Field(default_factory=dict)
+    last_refresh_time: Optional[str] = None
+    units: Dict[str, str] = Field(default_factory=dict)
+    cache_metadata: Dict[str, Any] = Field(default_factory=dict)

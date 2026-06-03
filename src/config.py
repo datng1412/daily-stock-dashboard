@@ -615,6 +615,7 @@ class Config:
     
     # === 自选股配置 ===
     stock_list: List[str] = field(default_factory=list)
+    market: str = "CN"
 
     # === 飞书云文档配置 ===
     feishu_app_id: Optional[str] = None
@@ -1124,6 +1125,10 @@ class Config:
             for c in stock_list_str.split(',')
             if (c or "").strip()
         ]
+        market = (
+            cls._resolve_env_value("MARKET", default="CN", prefer_env_file=True)
+            or "CN"
+        ).strip().upper()
         
         # === LiteLLM multi-key parsing ===
         # GEMINI_API_KEYS (comma-separated) > GEMINI_API_KEY (single)
@@ -1419,6 +1424,7 @@ class Config:
 
         return cls(
             stock_list=stock_list,
+            market=market,
             feishu_app_id=os.getenv('FEISHU_APP_ID'),
             feishu_app_secret=os.getenv('FEISHU_APP_SECRET'),
             feishu_folder_token=os.getenv('FEISHU_FOLDER_TOKEN'),

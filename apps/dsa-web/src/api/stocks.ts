@@ -12,6 +12,117 @@ export type ExtractFromImageResponse = {
   rawText?: string;
 };
 
+export type VietnamWatchItem = {
+  ticker: string;
+  entity?: string | null;
+  exchange?: string | null;
+  marketIndex?: string | null;
+  source?: string | null;
+  rowsLoaded?: number | null;
+  date?: string | null;
+  latestPrice?: number | null;
+  ohlcvClose?: number | null;
+  priceDate?: string | null;
+  ohlcvDate?: string | null;
+  quoteDate?: string | null;
+  foreignNetDate?: string | null;
+  foreignDateMatch?: string | null;
+  candleStatus?: string | null;
+  finalCloseStatus?: string | null;
+  priceAdjustmentStatus?: string | null;
+  adjustedPriceStatus?: string | null;
+  open?: number | null;
+  high?: number | null;
+  low?: number | null;
+  close?: number | null;
+  previousClose?: number | null;
+  changePct?: number | null;
+  volume?: number | null;
+  amount?: number | null;
+  liquidity: { avgVolume20d?: number | null; score?: number | null };
+  priceLimit: {
+    limitPct?: number | null;
+    ceilingPrice?: number | null;
+    floorPrice?: number | null;
+    distanceToLimitPct?: number | null;
+    nearLimit?: boolean;
+  };
+  foreign: { buy?: number | null; sell?: number | null; net?: number | null; signal?: string | null };
+  foreignNetUnit?: string | null;
+  foreignBuyRawField?: string | null;
+  foreignSellRawField?: string | null;
+  indicators: {
+    close?: number | null;
+    ma20?: number | null;
+    ma50?: number | null;
+    rsi14?: number | null;
+    rsi14Wilder?: number | null;
+    rsi14SimpleDebug?: number | null;
+    rsiMethod?: string | null;
+    bollinger?: { middle?: number | null; upper?: number | null; lower?: number | null };
+    avgVolume20d?: number | null;
+    volumeRatio?: number | null;
+    high20d?: number | null;
+    low20d?: number | null;
+    distanceTo20dHighPct?: number | null;
+    distanceTo20dLowPct?: number | null;
+    foreignNet5d?: number | null;
+    foreignNet20d?: number | null;
+    foreignNetLatest?: number | null;
+  };
+  statusLabels: string[];
+  statusDetails?: Array<{
+    label: string;
+    severity: 'info' | 'caution' | 'risk';
+    reason: string;
+    inputs?: Record<string, unknown>;
+  }>;
+  validation: { valid?: boolean; tradingDate?: string | null; missingFields?: string[]; errors?: string[] };
+  trend: { signalScore?: number; buySignal?: string; trendStatus?: string; volumeRatio5d?: number };
+  warnings: string[];
+  news: Array<{ title?: string; url?: string; source?: string; publishedAt?: string; summary?: string }>;
+  cacheStatus: Record<string, string>;
+  cacheLastFetchedAt: Record<string, string | null>;
+  cacheNextRefreshAt: Record<string, string | null>;
+  cacheErrors: Record<string, string>;
+  error?: string | null;
+};
+
+export type VietnamCacheMetadata = {
+  cacheHitCount: number;
+  cacheMissCount: number;
+  staleCacheUsedCount: number;
+  cacheTtlSeconds: Record<string, number>;
+  lastFetchedAt: Record<string, Record<string, string | null>>;
+  nextRefreshAt: Record<string, Record<string, string | null>>;
+  symbols: Record<string, Record<string, string>>;
+};
+
+export type VietnamWatchlistHealthResponse = {
+  source: string;
+  fixtureMode: boolean;
+  symbolsLoaded: number;
+  lastTradingDate?: string | null;
+  missingFields: Record<string, string[]>;
+  errors: Record<string, string[]>;
+  lastRefreshTime?: string | null;
+  units: Record<string, string>;
+  cacheMetadata?: VietnamCacheMetadata;
+};
+
+export type VietnamWatchlistResponse = {
+  market: 'VN';
+  source: string;
+  fixtureMode: boolean;
+  lastRefreshTime?: string | null;
+  units: Record<string, string>;
+  dataQuality: VietnamWatchlistHealthResponse;
+  cacheMetadata: VietnamCacheMetadata;
+  watchlist: VietnamWatchItem[];
+  ruleMetadata?: { ruleSetName?: string; ruleSetVersion?: string; noRecommendation?: boolean };
+  formulas: Record<string, string>;
+};
+
 export const stocksApi = {
   async extractFromImage(file: File): Promise<ExtractFromImageResponse> {
     const formData = new FormData();
@@ -50,5 +161,26 @@ export const stocksApi = {
       return { codes: data.codes ?? [], items: data.items };
     }
     throw new Error('请提供文件或粘贴文本');
+  },
+
+  async getVietnamWatchlist(tickers?: string[], forceRefresh = false): Promise<VietnamWatchlistResponse> {
+    const response = await apiClient.get('/api/v1/stocks/vn/watchlist', {
+      params: {
+        ...(tickers?.length ? { tickers: tickers.join(',') } : {}),
+        ...(forceRefresh ? { force_refresh: true } : {}),
+      },
+      timeout: 120000,
+    });
+    const { toCamelCase } = await import('./utils');
+    return toCamelCase<VietnamWatchlistResponse>(response.data);
+  },
+
+  async getVietnamWatchlistHealth(tickers?: string[]): Promise<VietnamWatchlistHealthResponse> {
+    const response = await apiClient.get('/api/v1/stocks/vn/watchlist/health', {
+      params: tickers?.length ? { tickers: tickers.join(',') } : undefined,
+      timeout: 120000,
+    });
+    const { toCamelCase } = await import('./utils');
+    return toCamelCase<VietnamWatchlistHealthResponse>(response.data);
   },
 };
