@@ -1,5 +1,17 @@
 # AGENTS.md
 
+## Codex continuity docs
+
+When resuming work with Codex or another coding agent, read these project-management docs before changing implementation:
+
+- `docs/PROJECT_STATE.md` for current repository and Vietnam dashboard state.
+- `docs/DECISIONS.md` for active product and engineering decisions.
+- `docs/RUNBOOK_VN.md` for live/fixture Vietnam dashboard operations.
+- `docs/CODEX_TASK_TEMPLATE.md` for starting a scoped Codex task.
+- `docs/REVIEW_CHECKLIST.md` for review and handoff checks.
+
+For Vietnam dashboard work, keep live/fixture mode explicit, do not print Mozyfin secrets, do not present quote output as a reliable realtime matched price unless source semantics change, treat the intraday pulse as 1H OHLCV rather than realtime quote, keep RSI14 as Wilder/RMA, and preserve neutral labels with no buy/sell recommendations.
+
 本文件用于约束本仓库的默认开发流程，目标是减少重复沟通、减少返工，并让改动和当前项目结构保持一致。
 
 如果本文件与仓库中的脚本、工作流、代码现状不一致，以实际可执行内容为准，并在相关改动中顺手修正文档，避免规则继续漂移。

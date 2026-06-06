@@ -6,6 +6,10 @@
 .env.*.local
 !.env.example
 
+# Local Mozyfin/CLI config may contain authentication material.
+/.config/
+/.config/mozyfin-cli/
+
 # 测试文件（可能包含敏感配置）
 # 仅忽略仓库根目录下的临时 test_*.py 脚本；tests/ 目录下的单元测试需要纳入版本控制。
 /test_*.py
@@ -57,6 +61,16 @@ env/
 # 数据和日志
 /data/
 logs/
+server*.log
+server.pid
+fpt_check.csv
+fpt_1h_check.csv
+fpt_quote_check.csv
+*_check.csv
+*_quote_check.csv
+*_1h_check.csv
+*.tmp.csv
+tmp_*.csv
 reports/
 *.db
 *.sqlite

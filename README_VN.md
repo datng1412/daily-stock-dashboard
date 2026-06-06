@@ -16,15 +16,17 @@ npm install
 
 ```bash
 npm install -g mozyfin-cli
-mozyfin login --api-key mozy_ak_xxx
+mozyfin login --api-key <mozyfin-api-key>
 ```
 
 You can also skip global install and let the adapter call `npx mozyfin-cli`.
-For authenticated live data, set:
+For authenticated live data, either log in with `mozyfin-cli` or set:
 
 ```bash
-MOZYFIN_API_KEY=mozy_ak_xxx
+MOZYFIN_API_KEY=<mozyfin-api-key>
 ```
+
+Do not set `MOZYFIN_FIXTURE_DIR` for live data. Set it only when you intentionally want fixture/test mode.
 
 3. Enable Vietnam market routing:
 
@@ -53,7 +55,7 @@ python main.py --webui-only
 
 - Market data adapters: `data_provider/`, especially `data_provider/base.py` and `data_provider/mozyfin_fetcher.py`.
 - Stock OHLCV flow: `DataFetcherManager.get_daily_data()` returns the existing standard dataframe columns: `date`, `open`, `high`, `low`, `close`, `volume`, `amount`, `pct_chg`.
-- Realtime stock data API: `src/services/stock_service.py` and `api/v1/endpoints/stocks.py`.
+- Stock data API: `src/services/stock_service.py` and `api/v1/endpoints/stocks.py`. The VN dashboard does not currently use Mozyfin quote as a reliable realtime matched price source.
 - News flow: existing global search is in `src/search_service.py`; VN dashboard news uses `MozyfinFetcher.get_news()` when Mozy output is available.
 - Indicators/core analysis: `src/stock_analyzer.py` computes MA, bias, volume, MACD, RSI, and signal score. This was not changed.
 - Dashboard output: `src/services/vietnam_market_service.py`, `api/v1/endpoints/stocks.py`, and `apps/dsa-web/src/pages/VietnamDashboardPage.tsx`.
@@ -89,6 +91,8 @@ Current live Mozyfin quote output exposes foreign flow through quantity fields:
 
 These foreign flow values are share quantities, not VND value. Price fields are VND and volume fields are shares.
 
+Current Mozyfin quote output does not expose a reliable latest/matched/current price for the VN dashboard. `latest_price` uses the OHLCV daily close. Intraday Pulse uses Mozyfin OHLCV `1h` candles; those candles are not realtime matched quotes.
+
 ## Data Quality
 
 The VN dashboard includes a data-quality panel backed by:
@@ -106,6 +110,13 @@ The endpoint returns:
 - `missing_fields`: per-symbol missing fields
 - `errors`: per-symbol validation errors
 
+In live mode, health should show:
+
+```text
+source: Mozyfin live
+fixture_mode: false
+```
+
 Validation rules are implemented in `src/services/vietnam_market_service.py`:
 
 - `close` must be greater than `0`
@@ -120,7 +131,7 @@ Validation rules are implemented in `src/services/vietnam_market_service.py`:
 - Liquidity score: `min(100, avg_volume_20d / 1,000,000 * 100)`.
 - MA20: 20-day simple moving average of close.
 - MA50: 50-day simple moving average of close.
-- RSI14: `100 - 100 / (1 + average_gain_14 / average_loss_14)`.
+- RSI14: Wilder/RMA RSI using the first 14 periods as the seed average, then recursive smoothing.
 - Bollinger Band 20,2:
   - middle: `MA20`
   - upper: `MA20 + 2 * standard_deviation_20`
@@ -131,6 +142,7 @@ Validation rules are implemented in `src/services/vietnam_market_service.py`:
 - Distance to 20-day high: `(close - high_20d) / high_20d * 100`.
 - Distance to 20-day low: `(close - low_20d) / low_20d * 100`.
 - Foreign net 5D/20D: sum of `foreign_net` over the latest 5 or 20 rows when historical foreign net is available.
+- Foreign net same-day status: same-day only when `foreign_date_match == "matched"`; otherwise treat it as stale, unavailable, or not aligned with the OHLCV date.
 - Price limit bands:
   - HOSE: `previous_close * (1 +/- 7%)`
   - HNX: `previous_close * (1 +/- 10%)`
@@ -160,3 +172,24 @@ Neutral status labels are rule-based descriptors, not buy/sell recommendations:
 - Near-limit threshold: `calculate_price_limit_state()` in `src/services/vietnam_market_service.py`.
 - Indicator calculations: `calculate_vietnam_indicators()` in `src/services/vietnam_market_service.py`.
 - Neutral status labels: `derive_neutral_status_labels()` in `src/services/vietnam_market_service.py`.
+
+## Troubleshooting Old Fixture Data
+
+If the dashboard shows old fixture data:
+
+1. Stop old backend processes that are running `main.py --webui-only`, `main.py --serve-only`, or serving port `8000`.
+2. Confirm `MOZYFIN_FIXTURE_DIR` is unset for live mode.
+3. Confirm Mozyfin authentication is available through `mozyfin-cli login` or `MOZYFIN_API_KEY`.
+4. Call `GET /api/v1/stocks/vn/watchlist/health` and check `source` and `fixture_mode`.
+5. Force a live refresh:
+
+```text
+GET /api/v1/stocks/vn/watchlist?tickers=FPT,VPB,MSB&force_refresh=true&include_intraday=true
+```
+
+Interpretation:
+
+- `source: Mozyfin fixture` or `fixture_mode: true`: fixture mode is active.
+- Direct CLI data old and API data old: Mozyfin source is stale.
+- Direct CLI data fresh but API data old: backend process or cache issue.
+- API data fresh but UI data old: frontend/backend port or browser cache issue.
