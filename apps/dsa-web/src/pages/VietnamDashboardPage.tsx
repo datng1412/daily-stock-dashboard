@@ -1,13 +1,21 @@
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, Banknote, DatabaseZap, RefreshCw, ShieldAlert } from 'lucide-react';
+import { Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, Banknote, DatabaseZap, Plus, RefreshCw, RotateCcw, ShieldAlert, X } from 'lucide-react';
 import { stocksApi, type VietnamWatchItem, type VietnamWatchlistResponse } from '../api/stocks';
-import { AppPage, Badge, Button, Loading } from '../components/common';
+import { AppPage, Badge, Button, Input, Loading } from '../components/common';
 import { cn } from '../utils/cn';
 import { formatRelativeAge, formatVietnamDateTime, formatVietnamTime, parseMozyTimestamp } from '../utils/vietnamTime';
+import {
+  VIETNAM_WATCHLIST_MAX_SIZE,
+  normalizeVietnamWatchlist,
+  readVietnamWatchlist,
+  validateVietnamTicker,
+  writeVietnamWatchlist,
+} from '../utils/vietnamWatchlist';
 
 const DEFAULT_TICKERS = ['FPT', 'VPB', 'MSB', 'SCS', 'ACV', 'ACB'];
 const AUTO_REFRESH_INTERVALS = [60, 180, 300];
+const DEFAULT_WATCHLIST = normalizeVietnamWatchlist(DEFAULT_TICKERS) ?? DEFAULT_TICKERS;
 
 const formatNumber = (value?: number | null, maximumFractionDigits = 0) => {
   if (value === null || value === undefined || Number.isNaN(value)) return '-';
@@ -719,11 +727,18 @@ const StockDetailView: React.FC<{ item?: VietnamWatchItem | null }> = ({ item })
 };
 
 const VietnamDashboardPage: React.FC = () => {
+  const initialWatchlist = useMemo(() => readVietnamWatchlist(DEFAULT_WATCHLIST), []);
+  const [watchlist, setWatchlist] = useState<string[]>(initialWatchlist.tickers);
+  const [watchlistInput, setWatchlistInput] = useState('');
+  const [watchlistError, setWatchlistError] = useState<string | null>(null);
+  const [storageWarning, setStorageWarning] = useState<string | null>(
+    initialWatchlist.usedFallback ? 'Saved watchlist was invalid and default tickers were restored.' : null,
+  );
   const [data, setData] = useState<VietnamWatchlistResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [forceLoading, setForceLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [selectedTicker, setSelectedTicker] = useState<string | null>(DEFAULT_TICKERS[0]);
+  const [selectedTicker, setSelectedTicker] = useState<string | null>(initialWatchlist.tickers[0] ?? DEFAULT_WATCHLIST[0]);
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(false);
   const [autoRefreshInterval, setAutoRefreshInterval] = useState(180);
   const [lastRefreshKind, setLastRefreshKind] = useState<'manual' | 'auto' | 'force live'>('manual');
@@ -731,29 +746,75 @@ const VietnamDashboardPage: React.FC = () => {
   const [nextRefreshAt, setNextRefreshAt] = useState<number | null>(null);
   const [countdownSeconds, setCountdownSeconds] = useState<number | null>(null);
   const [isTabHidden, setIsTabHidden] = useState(() => typeof document !== 'undefined' && document.visibilityState === 'hidden');
-  const requestInFlightRef = useRef(false);
+  const requestIdRef = useRef(0);
   const nextRefreshAtRef = useRef(0);
 
-  const load = useCallback(async (forceRefresh = false, refreshKind: 'manual' | 'auto' | 'force live' = forceRefresh ? 'force live' : 'manual') => {
-    if (requestInFlightRef.current) {
+  const persistWatchlist = useCallback((nextTickers: string[]) => {
+    try {
+      writeVietnamWatchlist(nextTickers);
+      setStorageWarning(null);
+    } catch {
+      setStorageWarning('Watchlist changed for this session, but localStorage could not be updated.');
+    }
+  }, []);
+
+  const handleAddTicker = useCallback((event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const result = validateVietnamTicker(watchlistInput, watchlist);
+    if (!result.valid) {
+      setWatchlistError(result.error);
       return;
     }
-    requestInFlightRef.current = true;
+    const nextTickers = [...watchlist, result.ticker];
+    setWatchlist(nextTickers);
+    setSelectedTicker(result.ticker);
+    setWatchlistInput('');
+    setWatchlistError(null);
+    persistWatchlist(nextTickers);
+  }, [persistWatchlist, watchlist, watchlistInput]);
+
+  const handleRemoveTicker = useCallback((ticker: string) => {
+    if (watchlist.length <= 1) {
+      setWatchlistError('Watchlist must contain at least one ticker.');
+      return;
+    }
+    const nextTickers = watchlist.filter((item) => item !== ticker);
+    setWatchlist(nextTickers);
+    setSelectedTicker((current) => (current === ticker ? nextTickers[0] ?? null : current));
+    setWatchlistError(null);
+    persistWatchlist(nextTickers);
+  }, [persistWatchlist, watchlist]);
+
+  const handleResetWatchlist = useCallback(() => {
+    setWatchlist(DEFAULT_WATCHLIST);
+    setSelectedTicker(DEFAULT_WATCHLIST[0] ?? null);
+    setWatchlistInput('');
+    setWatchlistError(null);
+    persistWatchlist(DEFAULT_WATCHLIST);
+  }, [persistWatchlist]);
+
+  const load = useCallback(async (forceRefresh = false, refreshKind: 'manual' | 'auto' | 'force live' = forceRefresh ? 'force live' : 'manual') => {
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
     setLoading(true);
     setForceLoading(forceRefresh);
     setError(null);
     try {
-      setData(await stocksApi.getVietnamWatchlist(DEFAULT_TICKERS, forceRefresh));
+      const nextData = await stocksApi.getVietnamWatchlist(watchlist, forceRefresh);
+      if (requestId !== requestIdRef.current) return;
+      setData(nextData);
       setLastRefreshKind(refreshKind);
       setLastRefreshAt(new Date().toISOString());
     } catch (err) {
+      if (requestId !== requestIdRef.current) return;
       setError(err instanceof Error ? err.message : 'Failed to load Vietnam dashboard');
     } finally {
-      setLoading(false);
-      setForceLoading(false);
-      requestInFlightRef.current = false;
+      if (requestId === requestIdRef.current) {
+        setLoading(false);
+        setForceLoading(false);
+      }
     }
-  }, []);
+  }, [watchlist]);
 
   useEffect(() => {
     void load();
@@ -926,6 +987,70 @@ const VietnamDashboardPage: React.FC = () => {
         <div className="mt-3 rounded-lg border border-border/60 bg-elevated/30 p-3 text-xs text-secondary-text">
           Latest price currently uses OHLCV candle close because Mozyfin quote does not expose a reliable realtime matched price.
         </div>
+      </section>
+
+      <section className="rounded-lg border border-border/70 bg-card p-4">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-base font-semibold text-foreground">Edit Watchlist</h2>
+              <Badge variant="default">{watchlist.length}/{VIETNAM_WATCHLIST_MAX_SIZE}</Badge>
+            </div>
+            <p className="mt-1 text-xs text-secondary-text">
+              Saved locally in this browser. Changes refresh through the normal cached watchlist request.
+            </p>
+          </div>
+          <Button variant="ghost" size="sm" onClick={handleResetWatchlist}>
+            <RotateCcw className="h-4 w-4" />
+            Reset to default
+          </Button>
+        </div>
+        <form className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-start" onSubmit={handleAddTicker}>
+          <Input
+            label="Ticker"
+            value={watchlistInput}
+            onChange={(event) => {
+              setWatchlistInput(event.target.value);
+              if (watchlistError) setWatchlistError(null);
+            }}
+            error={watchlistError ?? undefined}
+            placeholder="FPT or FPT.VN"
+            autoComplete="off"
+            autoCapitalize="characters"
+            className="uppercase"
+          />
+          <Button type="submit" variant="secondary" className="mt-0 sm:mt-7">
+            <Plus className="h-4 w-4" />
+            Add ticker
+          </Button>
+        </form>
+        {storageWarning ? (
+          <div className="mt-3 flex gap-2 rounded-lg border border-warning/20 bg-warning/10 p-3 text-xs text-warning">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>{storageWarning}</span>
+          </div>
+        ) : null}
+        <div className="mt-4 flex flex-wrap gap-2">
+          {watchlist.map((ticker) => (
+            <span
+              key={ticker}
+              className="inline-flex h-8 items-center gap-2 rounded-lg border border-border/70 bg-elevated px-3 text-sm font-medium text-foreground"
+            >
+              {ticker}
+              <button
+                type="button"
+                onClick={() => handleRemoveTicker(ticker)}
+                className="inline-flex h-5 w-5 items-center justify-center rounded-md text-secondary-text transition-colors hover:bg-danger/10 hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/25"
+                aria-label={`Remove ${ticker}`}
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </span>
+          ))}
+        </div>
+        <p className="mt-3 text-xs text-secondary-text">
+          Accepted symbols use letters and numbers only, up to 10 characters. A trailing .VN suffix is removed before saving.
+        </p>
       </section>
 
       <section className="grid gap-3 md:grid-cols-4">
