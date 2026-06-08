@@ -1,15 +1,29 @@
 import { describe, expect, it } from 'vitest';
 import {
   VIETNAM_WATCHLIST_MAX_SIZE,
+  VIETNAM_WATCHLIST_PRESETS,
   VIETNAM_WATCHLIST_STORAGE_KEY,
+  getVietnamPresetTickers,
+  moveVietnamTicker,
   normalizeVietnamTicker,
   readVietnamWatchlist,
   validateVietnamTicker,
+  writeVietnamWatchlist,
 } from '../vietnamWatchlist';
 
 const makeStorage = (initialValue: string | null) => ({
   getItem: (key: string) => (key === VIETNAM_WATCHLIST_STORAGE_KEY ? initialValue : null),
 });
+
+const makeWritableStorage = () => {
+  const values = new Map<string, string>();
+  return {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => {
+      values.set(key, value);
+    },
+  };
+};
 
 describe('Vietnam watchlist helpers', () => {
   it('normalizes ticker input', () => {
@@ -61,5 +75,44 @@ describe('Vietnam watchlist helpers', () => {
       tickers: ['FPT', 'VPB'],
       usedFallback: true,
     });
+  });
+
+  it('defines normalized preset lists within the max watchlist size', () => {
+    expect(VIETNAM_WATCHLIST_PRESETS.map((preset) => preset.id)).toEqual(['vn30', 'banks', 'tech']);
+    for (const preset of VIETNAM_WATCHLIST_PRESETS) {
+      const normalized = getVietnamPresetTickers(preset.id);
+      expect(normalized).toEqual(preset.tickers);
+      expect(normalized?.length).toBeLessThanOrEqual(VIETNAM_WATCHLIST_MAX_SIZE);
+    }
+  });
+
+  it('returns preset tickers and handles invalid preset ids safely', () => {
+    expect(getVietnamPresetTickers('banks')).toContain('VCB');
+    expect(getVietnamPresetTickers('tech')).toEqual(['FPT', 'CMG', 'ELC', 'VGI', 'VTP', 'CTR']);
+    expect(getVietnamPresetTickers('my', [' fpt.vn ', 'vpB'])).toEqual(['FPT', 'VPB']);
+    expect(getVietnamPresetTickers('missing' as never)).toBeNull();
+  });
+
+  it('moves tickers up and down without changing invalid edge positions', () => {
+    expect(moveVietnamTicker(['FPT', 'VPB', 'MSB'], 'MSB', 'up')).toEqual(['FPT', 'MSB', 'VPB']);
+    expect(moveVietnamTicker(['FPT', 'VPB', 'MSB'], 'FPT', 'down')).toEqual(['VPB', 'FPT', 'MSB']);
+    expect(moveVietnamTicker(['FPT', 'VPB'], 'FPT', 'up')).toEqual(['FPT', 'VPB']);
+    expect(moveVietnamTicker(['FPT', 'VPB'], 'VPB', 'down')).toEqual(['FPT', 'VPB']);
+    expect(moveVietnamTicker(['FPT', 'VPB'], 'MSB', 'up')).toEqual(['FPT', 'VPB']);
+  });
+
+  it('persists reordered watchlists as normalized arrays', () => {
+    const storage = makeWritableStorage();
+    writeVietnamWatchlist(['fpt.vn', 'MSB', 'VPB'], storage);
+    expect(readVietnamWatchlist(['FPT'], storage)).toEqual({
+      tickers: ['FPT', 'MSB', 'VPB'],
+      usedFallback: false,
+    });
+  });
+
+  it('does not persist invalid watchlists', () => {
+    const storage = makeWritableStorage();
+    expect(() => writeVietnamWatchlist(['FPT', 'FPT'], storage)).toThrow('Invalid Vietnam watchlist');
+    expect(storage.getItem(VIETNAM_WATCHLIST_STORAGE_KEY)).toBeNull();
   });
 });

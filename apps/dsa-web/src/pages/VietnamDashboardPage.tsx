@@ -1,21 +1,26 @@
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, Banknote, DatabaseZap, Plus, RefreshCw, RotateCcw, ShieldAlert, X } from 'lucide-react';
+import { Activity, AlertTriangle, ArrowDown, ArrowDownRight, ArrowUp, ArrowUpRight, Banknote, DatabaseZap, Plus, RefreshCw, RotateCcw, ShieldAlert, X } from 'lucide-react';
 import { stocksApi, type VietnamWatchItem, type VietnamWatchlistResponse } from '../api/stocks';
 import { AppPage, Badge, Button, Input, Loading } from '../components/common';
 import { cn } from '../utils/cn';
 import { formatRelativeAge, formatVietnamDateTime, formatVietnamTime, parseMozyTimestamp } from '../utils/vietnamTime';
 import {
   VIETNAM_WATCHLIST_MAX_SIZE,
+  VIETNAM_WATCHLIST_PRESETS,
+  getVietnamPresetTickers,
+  moveVietnamTicker,
   normalizeVietnamWatchlist,
   readVietnamWatchlist,
   validateVietnamTicker,
+  type VietnamWatchlistPresetId,
   writeVietnamWatchlist,
 } from '../utils/vietnamWatchlist';
 
 const DEFAULT_TICKERS = ['FPT', 'VPB', 'MSB', 'SCS', 'ACV', 'ACB'];
 const AUTO_REFRESH_INTERVALS = [60, 180, 300];
 const DEFAULT_WATCHLIST = normalizeVietnamWatchlist(DEFAULT_TICKERS) ?? DEFAULT_TICKERS;
+const DETAIL_NEWS_LIMIT = 8;
 
 const formatNumber = (value?: number | null, maximumFractionDigits = 0) => {
   if (value === null || value === undefined || Number.isNaN(value)) return '-';
@@ -94,6 +99,8 @@ const cacheLabel = (status?: string | null) => status ?? 'missing';
 const rawDateLabel = (value?: string | number | null) => (value === null || value === undefined || value === '' ? '—' : String(value));
 
 const compactLabels = (labels?: string[], max = 4) => (labels ?? ['Watch']).slice(0, max);
+
+const hasEncodingArtifacts = (value?: string | null) => Boolean(value && /(?:Ã|Â|â€|�)/.test(value));
 
 const latestFetchedValue = (item: VietnamWatchItem) => {
   const values = [
@@ -687,6 +694,46 @@ const StockDetailView: React.FC<{ item?: VietnamWatchItem | null }> = ({ item })
           </div>
         </div>
       ) : null}
+      <div className="mt-4 rounded-lg border border-border/60 bg-elevated/30 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-sm font-semibold text-foreground">Latest news</h3>
+          <Badge variant="default">{Math.min(item.news.length, DETAIL_NEWS_LIMIT)} shown</Badge>
+        </div>
+        {item.news.length ? (
+          <div className="mt-3 grid gap-3">
+            {item.news.slice(0, DETAIL_NEWS_LIMIT).map((news, index) => {
+              const summaryHasArtifacts = hasEncodingArtifacts(news.summary);
+              const titleHasArtifacts = hasEncodingArtifacts(news.title);
+              return (
+                <article key={`${item.ticker}-detail-news-${news.url ?? news.title ?? index}`} className="rounded-lg border border-border/50 bg-card/50 p-3">
+                  <a
+                    href={news.url || '#'}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-sm font-medium text-cyan hover:underline"
+                  >
+                    {news.title || 'Untitled news'}
+                  </a>
+                  <div className="mt-1 flex flex-wrap gap-2 text-xs text-secondary-text">
+                    {news.source ? <span>{news.source}</span> : null}
+                    {news.publishedAt ? <span>{formatVietnamDateTime(news.publishedAt)}</span> : null}
+                  </div>
+                  {news.summary && !summaryHasArtifacts ? (
+                    <p className="mt-2 line-clamp-2 text-sm text-secondary-text">{news.summary}</p>
+                  ) : summaryHasArtifacts ? (
+                    <p className="mt-2 text-xs text-warning">Summary hidden because text encoding looks damaged.</p>
+                  ) : null}
+                  {titleHasArtifacts ? (
+                    <p className="mt-2 text-xs text-warning">Title may contain source encoding artifacts.</p>
+                  ) : null}
+                </article>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="mt-3 text-sm text-secondary-text">No recent news returned for this ticker.</p>
+        )}
+      </div>
       <details className="mt-4 rounded-lg border border-border/60 bg-elevated/30 p-3 text-xs text-secondary-text">
         <summary className="cursor-pointer font-medium text-foreground">Advanced / Raw Data</summary>
         <div className="mt-3 grid gap-3 md:grid-cols-2">
@@ -729,6 +776,7 @@ const StockDetailView: React.FC<{ item?: VietnamWatchItem | null }> = ({ item })
 const VietnamDashboardPage: React.FC = () => {
   const initialWatchlist = useMemo(() => readVietnamWatchlist(DEFAULT_WATCHLIST), []);
   const [watchlist, setWatchlist] = useState<string[]>(initialWatchlist.tickers);
+  const [activePresetId, setActivePresetId] = useState<VietnamWatchlistPresetId>('my');
   const [watchlistInput, setWatchlistInput] = useState('');
   const [watchlistError, setWatchlistError] = useState<string | null>(null);
   const [storageWarning, setStorageWarning] = useState<string | null>(
@@ -758,6 +806,32 @@ const VietnamDashboardPage: React.FC = () => {
     }
   }, []);
 
+  const applyWatchlist = useCallback((nextTickers: string[], presetId: VietnamWatchlistPresetId = 'my', nextSelectedTicker?: string | null) => {
+    setWatchlist(nextTickers);
+    setActivePresetId(presetId);
+    setSelectedTicker(nextSelectedTicker ?? nextTickers[0] ?? null);
+    persistWatchlist(nextTickers);
+  }, [persistWatchlist]);
+
+  const handlePresetChange = useCallback((event: React.ChangeEvent<HTMLSelectElement>) => {
+    const presetId = event.target.value as VietnamWatchlistPresetId;
+    if (presetId === 'my') {
+      const storedWatchlist = readVietnamWatchlist(DEFAULT_WATCHLIST);
+      setStorageWarning(storedWatchlist.usedFallback ? 'Saved watchlist was invalid and default tickers were restored.' : null);
+      setWatchlist(storedWatchlist.tickers);
+      setActivePresetId('my');
+      setSelectedTicker(storedWatchlist.tickers[0] ?? null);
+      return;
+    }
+    const presetTickers = getVietnamPresetTickers(presetId);
+    if (!presetTickers) {
+      setWatchlistError('Preset list is unavailable.');
+      return;
+    }
+    setWatchlistError(null);
+    applyWatchlist(presetTickers, presetId);
+  }, [applyWatchlist]);
+
   const handleAddTicker = useCallback((event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const result = validateVietnamTicker(watchlistInput, watchlist);
@@ -766,12 +840,10 @@ const VietnamDashboardPage: React.FC = () => {
       return;
     }
     const nextTickers = [...watchlist, result.ticker];
-    setWatchlist(nextTickers);
-    setSelectedTicker(result.ticker);
+    applyWatchlist(nextTickers, 'my', result.ticker);
     setWatchlistInput('');
     setWatchlistError(null);
-    persistWatchlist(nextTickers);
-  }, [persistWatchlist, watchlist, watchlistInput]);
+  }, [applyWatchlist, watchlist, watchlistInput]);
 
   const handleRemoveTicker = useCallback((ticker: string) => {
     if (watchlist.length <= 1) {
@@ -779,19 +851,23 @@ const VietnamDashboardPage: React.FC = () => {
       return;
     }
     const nextTickers = watchlist.filter((item) => item !== ticker);
-    setWatchlist(nextTickers);
-    setSelectedTicker((current) => (current === ticker ? nextTickers[0] ?? null : current));
+    const nextSelectedTicker = selectedTicker === ticker ? nextTickers[0] ?? null : selectedTicker;
+    applyWatchlist(nextTickers, 'my', nextSelectedTicker);
     setWatchlistError(null);
-    persistWatchlist(nextTickers);
-  }, [persistWatchlist, watchlist]);
+  }, [applyWatchlist, selectedTicker, watchlist]);
+
+  const handleMoveTicker = useCallback((ticker: string, direction: 'up' | 'down') => {
+    const nextTickers = moveVietnamTicker(watchlist, ticker, direction);
+    if (nextTickers === watchlist) return;
+    applyWatchlist(nextTickers, 'my', ticker);
+    setWatchlistError(null);
+  }, [applyWatchlist, watchlist]);
 
   const handleResetWatchlist = useCallback(() => {
-    setWatchlist(DEFAULT_WATCHLIST);
-    setSelectedTicker(DEFAULT_WATCHLIST[0] ?? null);
+    applyWatchlist(DEFAULT_WATCHLIST, 'my');
     setWatchlistInput('');
     setWatchlistError(null);
-    persistWatchlist(DEFAULT_WATCHLIST);
-  }, [persistWatchlist]);
+  }, [applyWatchlist]);
 
   const load = useCallback(async (forceRefresh = false, refreshKind: 'manual' | 'auto' | 'force live' = forceRefresh ? 'force live' : 'manual') => {
     const requestId = requestIdRef.current + 1;
@@ -999,11 +1075,32 @@ const VietnamDashboardPage: React.FC = () => {
             <p className="mt-1 text-xs text-secondary-text">
               Saved locally in this browser. Changes refresh through the normal cached watchlist request.
             </p>
+            <p className="mt-1 text-xs text-secondary-text">
+              Preset lists are convenience lists, not investment suggestions.
+            </p>
           </div>
           <Button variant="ghost" size="sm" onClick={handleResetWatchlist}>
             <RotateCcw className="h-4 w-4" />
             Reset to default
           </Button>
+        </div>
+        <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,260px)_1fr] lg:items-end">
+          <label className="flex flex-col text-sm text-secondary-text">
+            Preset list
+            <select
+              value={activePresetId}
+              onChange={handlePresetChange}
+              className="mt-2 h-10 rounded-lg border border-border/70 bg-elevated px-3 text-sm text-foreground"
+            >
+              <option value="my">My Watchlist</option>
+              {VIETNAM_WATCHLIST_PRESETS.map((preset) => (
+                <option key={preset.id} value={preset.id}>{preset.label}</option>
+              ))}
+            </select>
+          </label>
+          <p className="text-xs text-secondary-text">
+            Selecting a preset replaces the active list and refreshes normally through the cached watchlist endpoint.
+          </p>
         </div>
         <form className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-start" onSubmit={handleAddTicker}>
           <Input
@@ -1031,12 +1128,30 @@ const VietnamDashboardPage: React.FC = () => {
           </div>
         ) : null}
         <div className="mt-4 flex flex-wrap gap-2">
-          {watchlist.map((ticker) => (
+          {watchlist.map((ticker, index) => (
             <span
               key={ticker}
-              className="inline-flex h-8 items-center gap-2 rounded-lg border border-border/70 bg-elevated px-3 text-sm font-medium text-foreground"
+              className="inline-flex h-9 items-center gap-1 rounded-lg border border-border/70 bg-elevated px-2 text-sm font-medium text-foreground"
             >
-              {ticker}
+              <span className="px-1">{ticker}</span>
+              <button
+                type="button"
+                onClick={() => handleMoveTicker(ticker, 'up')}
+                disabled={index === 0}
+                className="inline-flex h-6 w-6 items-center justify-center rounded-md text-secondary-text transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan/25 disabled:pointer-events-none disabled:opacity-35"
+                aria-label={`Move ${ticker} up`}
+              >
+                <ArrowUp className="h-3.5 w-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => handleMoveTicker(ticker, 'down')}
+                disabled={index === watchlist.length - 1}
+                className="inline-flex h-6 w-6 items-center justify-center rounded-md text-secondary-text transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan/25 disabled:pointer-events-none disabled:opacity-35"
+                aria-label={`Move ${ticker} down`}
+              >
+                <ArrowDown className="h-3.5 w-3.5" />
+              </button>
               <button
                 type="button"
                 onClick={() => handleRemoveTicker(ticker)}

@@ -56,6 +56,9 @@ class _StubFetcher:
 
     def get_news(self, symbol, limit=3):
         self.news_calls += 1
+        if not hasattr(self, "news_limits"):
+            self.news_limits = []
+        self.news_limits.append(limit)
         if self.fail_news:
             raise RuntimeError("news failed")
         return []
@@ -113,6 +116,17 @@ def _expire_cache_entry(data_type, symbol="FPT", **params):
     key = vn_service._cache_key(data_type, symbol, **params)
     with vn_service._VN_CACHE_LOCK:
         vn_service._VN_CACHE[key].expires_at = vn_service._utc_now() - timedelta(seconds=1)
+
+
+def test_default_vietnam_news_limit_is_five(monkeypatch):
+    monkeypatch.delenv("MOZYFIN_FIXTURE_DIR", raising=False)
+    rows = _sample_vn_rows()
+    manager = _StubManager(rows)
+    service = VietnamMarketService(manager=manager, config=VietnamDashboardConfig(history_days=30))
+
+    service.build_watchlist(["FPT"])
+
+    assert manager.fetcher.news_limits == [5]
 
 
 def test_mozyfin_fetcher_maps_fixture_to_standard_ohlcv():

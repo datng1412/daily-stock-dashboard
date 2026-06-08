@@ -1,6 +1,15 @@
 export const VIETNAM_WATCHLIST_STORAGE_KEY = 'vietnamDashboard.watchlist.v1';
 export const VIETNAM_WATCHLIST_MAX_SIZE = 30;
 
+export type VietnamWatchlistPresetId = 'my' | 'vn30' | 'banks' | 'tech';
+
+export type VietnamWatchlistPreset = {
+  id: Exclude<VietnamWatchlistPresetId, 'my'>;
+  label: string;
+  description: string;
+  tickers: string[];
+};
+
 export type VietnamWatchlistLoadResult = {
   tickers: string[];
   usedFallback: boolean;
@@ -9,6 +18,58 @@ export type VietnamWatchlistLoadResult = {
 export type VietnamTickerValidationResult =
   | { valid: true; ticker: string }
   | { valid: false; ticker?: string; error: string };
+
+export const VIETNAM_WATCHLIST_PRESETS: VietnamWatchlistPreset[] = [
+  {
+    id: 'vn30',
+    label: 'VN30',
+    description: 'Static VN30 convenience list; not an investment suggestion.',
+    tickers: [
+      'VIC',
+      'VHM',
+      'VRE',
+      'VCB',
+      'BID',
+      'CTG',
+      'TCB',
+      'VPB',
+      'MBB',
+      'ACB',
+      'STB',
+      'HDB',
+      'VIB',
+      'MSB',
+      'SSI',
+      'VND',
+      'HCM',
+      'HPG',
+      'HSG',
+      'GAS',
+      'PLX',
+      'POW',
+      'FPT',
+      'MWG',
+      'PNJ',
+      'SAB',
+      'VNM',
+      'MSN',
+      'GVR',
+      'BCM',
+    ],
+  },
+  {
+    id: 'banks',
+    label: 'Banks',
+    description: 'Common VN bank tickers; preset list only.',
+    tickers: ['VCB', 'BID', 'CTG', 'TCB', 'VPB', 'MBB', 'ACB', 'STB', 'HDB', 'VIB', 'SHB', 'MSB', 'TPB', 'LPB', 'SSB', 'EIB'],
+  },
+  {
+    id: 'tech',
+    label: 'Tech',
+    description: 'Common VN technology and telecom infrastructure tickers; preset list only.',
+    tickers: ['FPT', 'CMG', 'ELC', 'VGI', 'VTP', 'CTR'],
+  },
+];
 
 export const normalizeVietnamTicker = (value: string) => {
   const trimmed = value.trim().toUpperCase();
@@ -48,6 +109,24 @@ export const normalizeVietnamWatchlist = (values: string[], maxSize = VIETNAM_WA
   return tickers.length ? tickers : null;
 };
 
+export const getVietnamPresetTickers = (presetId: VietnamWatchlistPresetId, myWatchlist: string[] = []) => {
+  if (presetId === 'my') {
+    return normalizeVietnamWatchlist(myWatchlist);
+  }
+  const preset = VIETNAM_WATCHLIST_PRESETS.find((item) => item.id === presetId);
+  return preset ? normalizeVietnamWatchlist(preset.tickers) : null;
+};
+
+export const moveVietnamTicker = (tickers: string[], ticker: string, direction: 'up' | 'down') => {
+  const index = tickers.indexOf(ticker);
+  if (index < 0) return tickers;
+  const nextIndex = direction === 'up' ? index - 1 : index + 1;
+  if (nextIndex < 0 || nextIndex >= tickers.length) return tickers;
+  const nextTickers = [...tickers];
+  [nextTickers[index], nextTickers[nextIndex]] = [nextTickers[nextIndex], nextTickers[index]];
+  return nextTickers;
+};
+
 export const readVietnamWatchlist = (
   defaultTickers: string[],
   storage: Pick<Storage, 'getItem'> | null | undefined = typeof window === 'undefined' ? null : window.localStorage,
@@ -78,5 +157,9 @@ export const writeVietnamWatchlist = (
   storage: Pick<Storage, 'setItem'> | null | undefined = typeof window === 'undefined' ? null : window.localStorage,
 ) => {
   if (!storage) return;
-  storage.setItem(VIETNAM_WATCHLIST_STORAGE_KEY, JSON.stringify(tickers));
+  const normalized = normalizeVietnamWatchlist(tickers);
+  if (!normalized) {
+    throw new Error('Invalid Vietnam watchlist');
+  }
+  storage.setItem(VIETNAM_WATCHLIST_STORAGE_KEY, JSON.stringify(normalized));
 };

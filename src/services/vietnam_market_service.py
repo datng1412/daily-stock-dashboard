@@ -195,7 +195,7 @@ def _read_cache(
 class VietnamDashboardConfig:
     liquidity_target_avg_volume: int = LIQUIDITY_TARGET_AVG_VOLUME
     history_days: int = 90
-    news_limit: int = 3
+    news_limit: int = 5
     include_intraday: bool = True
     intraday_timeframe: str = "1h"
     intraday_limit: int = 8
