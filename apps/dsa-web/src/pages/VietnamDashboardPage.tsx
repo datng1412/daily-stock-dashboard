@@ -4,6 +4,7 @@ import { Activity, AlertTriangle, ArrowDown, ArrowDownRight, ArrowUp, ArrowUpRig
 import { stocksApi, type VietnamWatchItem, type VietnamWatchlistResponse } from '../api/stocks';
 import { AppPage, Badge, Button, Input, Loading } from '../components/common';
 import { cn } from '../utils/cn';
+import { buildVietnamConditionSummary, VIETNAM_CONDITION_SUMMARY_SUBTITLE } from '../utils/vietnamConditionSummary';
 import { formatRelativeAge, formatVietnamDateTime, formatVietnamTime, parseMozyTimestamp } from '../utils/vietnamTime';
 import {
   VIETNAM_WATCHLIST_MAX_SIZE,
@@ -498,11 +499,12 @@ const IndicatorTable: React.FC<{
   </section>
 );
 
-const StockDetailView: React.FC<{ item?: VietnamWatchItem | null }> = ({ item }) => {
+const StockDetailView: React.FC<{ item?: VietnamWatchItem | null; fixtureMode?: boolean }> = ({ item, fixtureMode = false }) => {
   if (!item) return null;
   const indicators = item.indicators;
   const latestIntradayCandle = item.intradayCandles?.at(-1);
   const displayWarnings = importantWarnings(item);
+  const conditionSummary = buildVietnamConditionSummary({ item, fixtureMode });
   return (
     <section className="rounded-lg border border-border/70 bg-card p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -518,6 +520,15 @@ const StockDetailView: React.FC<{ item?: VietnamWatchItem | null }> = ({ item })
       </div>
       <div className="mt-3 rounded-lg border border-border/60 bg-elevated/30 p-3 text-xs text-secondary-text">
         Labels are neutral condition tags, not trading recommendations.
+      </div>
+      <div className="mt-4 rounded-lg border border-border/60 bg-elevated/30 p-4">
+        <h3 className="text-sm font-semibold text-foreground">Condition Summary</h3>
+        <p className="mt-1 text-xs text-secondary-text">{VIETNAM_CONDITION_SUMMARY_SUBTITLE}</p>
+        <ul className="mt-3 list-disc space-y-2 pl-5 text-sm text-secondary-text">
+          {conditionSummary.map((bullet) => (
+            <li key={`${item.ticker}-condition-${bullet}`}>{bullet}</li>
+          ))}
+        </ul>
       </div>
       {displayWarnings.length > 0 ? (
         <div className="mt-3 grid gap-2">
@@ -1258,7 +1269,7 @@ const VietnamDashboardPage: React.FC = () => {
       ) : (
         <>
           <IndicatorTable items={data?.watchlist ?? []} selectedTicker={selectedItem?.ticker} onSelect={setSelectedTicker} />
-          <StockDetailView item={selectedItem} />
+          <StockDetailView item={selectedItem} fixtureMode={data?.fixtureMode} />
           <section className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
             {(data?.watchlist ?? []).map((item) => (
               <WatchCard key={item.ticker} item={item} />
