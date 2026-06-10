@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [docs] Add a concise local Windows quick runbook for starting the Vietnam dashboard in live or fixture mode.
+
 - [docs] Add Vietnam dashboard continuity and guardrail documentation, protect local Mozyfin config/runtime artifacts in `.gitignore`, update `.env.example` with VN live-mode placeholders, and clarify README/RUNBOOK semantics for Mozyfin quote limitations plus live/fixture mode checks.
 
 - [改进] 越南行情看板新增 Asia/Ho_Chi_Minh 时间格式化与数据新鲜度展示，并将原始时间戳、字段名和缓存调试信息收纳到 Advanced/Raw Data。
