@@ -17,6 +17,9 @@ This document gives Codex and other agents enough context to resume project work
 - Vietnam dashboard page: `apps/dsa-web/src/pages/VietnamDashboardPage.tsx`
 - Vietnam time utilities: `apps/dsa-web/src/utils/vietnamTime.ts`
 - VN setup reference: `README_VN.md`
+- Future provider reference docs:
+  - `docs/resources/realtime-data/`
+  - `docs/resources/news-sources/`
 
 ## Vietnam Dashboard Current State
 
@@ -27,6 +30,10 @@ This document gives Codex and other agents enough context to resume project work
 - The default VN watchlist is `FPT,VPB,MSB,SCS,ACV,ACB`.
 - The `/vietnam` page is served by the built frontend through the FastAPI backend when running `python main.py --webui-only`.
 - The dashboard does not generate buy or sell recommendations. It only displays neutral condition labels.
+- Current active provider remains Mozyfin.
+- Realtime provider integration beyond current Mozyfin behavior is not implemented.
+- News provider integration beyond current Mozyfin news behavior is not implemented.
+- Docs under `docs/resources/` are for future evaluation only and must not be treated as approved providers.
 
 ## Data Semantics
 

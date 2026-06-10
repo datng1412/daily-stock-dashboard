@@ -20,6 +20,17 @@ Operational rule:
 - `MOZYFIN_API_KEY` must be present or the Mozyfin CLI must have usable stored auth for live mode.
 - Do not mask fixture mode as live mode.
 
+## External Realtime And News Resources
+
+Decision: external realtime and news resource docs may exist under `docs/resources/`, but they are reference-only until explicitly approved.
+
+Operational rule:
+
+- Mozyfin remains the active Vietnam dashboard provider unless changed by a decision record.
+- No provider replacement should happen implicitly.
+- Resource docs must not trigger implementation, new API calls, scraping, or dashboard behavior changes by themselves.
+- Any future provider implementation must first summarize auth, rate limits, timestamp semantics, and data/price semantics.
+
 ## Latest Price Semantics
 
 Decision: `latest_price` uses the latest daily OHLCV close unless Mozyfin quote output provides a reliable latest matched price.
