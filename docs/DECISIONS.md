@@ -31,6 +31,24 @@ Operational rule:
 - Resource docs must not trigger implementation, new API calls, scraping, or dashboard behavior changes by themselves.
 - Any future provider implementation must first summarize auth, rate limits, timestamp semantics, and data/price semantics.
 
+## Future Vietnam Realtime Quote Layer
+
+Decision: future realtime matched price support must be added as a separate optional data layer, not as a replacement for daily OHLCV close.
+
+Rationale:
+
+- Current `latest_price` semantics are auditable because they use Mozyfin daily OHLCV close.
+- Realtime matched price has different licensing, timestamp, delay, and cache semantics.
+- Users must be able to distinguish daily close, 1H intraday pulse, and realtime matched quote at a glance.
+
+Operational rule:
+
+- Do not overwrite `latest_price` with realtime matched price.
+- Do not label daily close as realtime.
+- Do not write realtime quotes into OHLCV, Mozyfin quote/foreign, or intraday OHLCV caches.
+- Do not implement vendor calls until credentials, license, redistribution rights, rate limits, and timestamp semantics are confirmed.
+- Architecture reference: `docs/VIETNAM_REALTIME_ARCHITECTURE.md`.
+
 ## Latest Price Semantics
 
 Decision: `latest_price` uses the latest daily OHLCV close unless Mozyfin quote output provides a reliable latest matched price.
