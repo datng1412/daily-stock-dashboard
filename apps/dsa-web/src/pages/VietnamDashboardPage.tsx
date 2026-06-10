@@ -807,6 +807,7 @@ const VietnamDashboardPage: React.FC = () => {
   const [isTabHidden, setIsTabHidden] = useState(() => typeof document !== 'undefined' && document.visibilityState === 'hidden');
   const requestIdRef = useRef(0);
   const nextRefreshAtRef = useRef(0);
+  const nextWatchlistLoadRef = useRef<{ tickers: string[]; forceRefresh: boolean; refreshKind: 'manual' | 'auto' | 'force live' } | null>(null);
 
   const persistWatchlist = useCallback((nextTickers: string[]) => {
     try {
@@ -823,6 +824,34 @@ const VietnamDashboardPage: React.FC = () => {
     setSelectedTicker(nextSelectedTicker ?? nextTickers[0] ?? null);
     persistWatchlist(nextTickers);
   }, [persistWatchlist]);
+
+  const load = useCallback(async (
+    forceRefresh = false,
+    refreshKind: 'manual' | 'auto' | 'force live' = forceRefresh ? 'force live' : 'manual',
+    tickersOverride?: string[],
+  ) => {
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
+    setLoading(true);
+    setForceLoading(forceRefresh);
+    setError(null);
+    try {
+      const requestedTickers = tickersOverride ?? watchlist;
+      const nextData = await stocksApi.getVietnamWatchlist(requestedTickers, forceRefresh);
+      if (requestId !== requestIdRef.current) return;
+      setData(nextData);
+      setLastRefreshKind(refreshKind);
+      setLastRefreshAt(new Date().toISOString());
+    } catch (err) {
+      if (requestId !== requestIdRef.current) return;
+      setError(err instanceof Error ? err.message : 'Failed to load Vietnam dashboard');
+    } finally {
+      if (requestId === requestIdRef.current) {
+        setLoading(false);
+        setForceLoading(false);
+      }
+    }
+  }, [watchlist]);
 
   const handlePresetChange = useCallback((event: React.ChangeEvent<HTMLSelectElement>) => {
     const presetId = event.target.value as VietnamWatchlistPresetId;
@@ -851,6 +880,7 @@ const VietnamDashboardPage: React.FC = () => {
       return;
     }
     const nextTickers = [...watchlist, result.ticker];
+    nextWatchlistLoadRef.current = { tickers: nextTickers, forceRefresh: true, refreshKind: 'force live' };
     applyWatchlist(nextTickers, 'my', result.ticker);
     setWatchlistInput('');
     setWatchlistError(null);
@@ -880,30 +910,13 @@ const VietnamDashboardPage: React.FC = () => {
     setWatchlistError(null);
   }, [applyWatchlist]);
 
-  const load = useCallback(async (forceRefresh = false, refreshKind: 'manual' | 'auto' | 'force live' = forceRefresh ? 'force live' : 'manual') => {
-    const requestId = requestIdRef.current + 1;
-    requestIdRef.current = requestId;
-    setLoading(true);
-    setForceLoading(forceRefresh);
-    setError(null);
-    try {
-      const nextData = await stocksApi.getVietnamWatchlist(watchlist, forceRefresh);
-      if (requestId !== requestIdRef.current) return;
-      setData(nextData);
-      setLastRefreshKind(refreshKind);
-      setLastRefreshAt(new Date().toISOString());
-    } catch (err) {
-      if (requestId !== requestIdRef.current) return;
-      setError(err instanceof Error ? err.message : 'Failed to load Vietnam dashboard');
-    } finally {
-      if (requestId === requestIdRef.current) {
-        setLoading(false);
-        setForceLoading(false);
-      }
-    }
-  }, [watchlist]);
-
   useEffect(() => {
+    const queuedLoad = nextWatchlistLoadRef.current;
+    if (queuedLoad) {
+      nextWatchlistLoadRef.current = null;
+      void load(queuedLoad.forceRefresh, queuedLoad.refreshKind, queuedLoad.tickers);
+      return;
+    }
     void load();
   }, [load]);
 
@@ -956,10 +969,13 @@ const VietnamDashboardPage: React.FC = () => {
 
   useEffect(() => {
     const rows = data?.watchlist ?? [];
+    if (selectedTicker && watchlist.includes(selectedTicker)) {
+      return;
+    }
     if (rows.length && !rows.some((item) => item.ticker === selectedTicker)) {
       setSelectedTicker(rows[0].ticker);
     }
-  }, [data, selectedTicker]);
+  }, [data, selectedTicker, watchlist]);
 
   const summary = useMemo(() => {
     const rows = data?.watchlist ?? [];
