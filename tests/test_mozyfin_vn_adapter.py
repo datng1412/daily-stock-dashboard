@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 
+import subprocess
 from datetime import timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import pandas as pd
 import pytest
@@ -966,3 +968,56 @@ def test_fixture_mode_missing_file_does_not_fall_through(tmp_path):
         assert "fpt_ohlcv.csv" in str(exc)
     else:
         raise AssertionError("Expected fixture-mode missing file error")
+
+
+def test_mozyfin_cli_error_suppresses_bundled_node_dump(monkeypatch):
+    monkeypatch.delenv("MOZYFIN_FIXTURE_DIR", raising=False)
+    monkeypatch.setenv("MOZYFIN_COMMAND", "mozyfin-cli")
+    huge_stderr = "\n".join(
+        [
+            "Request failed while fetching OHLCV",
+            'file:///usr/local/lib/node_modules/mozyfin-cli/dist/index.js:24 `)}),this}_outputHelpIfRequested(e)',
+            'kClose:Symbol("close"),kDestroy:Symbol("destroy"),undici.error.UND_ERR_CONNECT_TIMEOUT',
+            "Retry later or check network connectivity.",
+            "A" * 500,
+        ]
+    )
+
+    def fake_run(*args, **kwargs):
+        return SimpleNamespace(returncode=1, stdout="", stderr=huge_stderr)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    fetcher = MozyfinFetcher()
+
+    with pytest.raises(DataFetchError) as exc_info:
+        fetcher._run_csv_command("ohlcv", "FPT.VN", "--timeframe", "1d", "--limit", "3")
+
+    message = str(exc_info.value)
+    assert "mozyfin-cli ohlcv for FPT.VN exited with code 1" in message
+    assert "Request failed while fetching OHLCV" in message
+    assert "Retry later or check network connectivity." in message
+    assert "node_modules/mozyfin-cli/dist/index.js" not in message
+    assert "Symbol(" not in message
+    assert "undici.error" not in message
+    assert len(message) < 900
+
+
+def test_mozyfin_cli_timeout_message_omits_full_command_and_key(monkeypatch):
+    monkeypatch.delenv("MOZYFIN_FIXTURE_DIR", raising=False)
+    monkeypatch.setenv("MOZYFIN_COMMAND", "mozyfin-cli")
+    monkeypatch.setenv("MOZYFIN_API_KEY", "secret-value-that-must-not-appear")
+    monkeypatch.setenv("MOZYFIN_TIMEOUT_SECONDS", "1")
+
+    def fake_run(cmd, **kwargs):
+        raise subprocess.TimeoutExpired(cmd=cmd, timeout=1)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    fetcher = MozyfinFetcher()
+
+    with pytest.raises(DataFetchError) as exc_info:
+        fetcher._run_csv_command("ohlcv", "FPT.VN", "--timeframe", "1d", "--limit", "3")
+
+    message = str(exc_info.value)
+    assert message == "mozyfin-cli ohlcv for FPT.VN timed out after 1s"
+    assert "secret-value-that-must-not-appear" not in message
+    assert "--api-key" not in message

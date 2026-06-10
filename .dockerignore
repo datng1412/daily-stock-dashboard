@@ -1,30 +1,48 @@
-# 忽略 Python 缓存
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
+.git/
+.github/
+.claude/reviews/
+.codex/
 
-# 忽略虚拟环境
-venv/
 .venv/
+venv/
 env/
-.env.local
+node_modules/
+apps/dsa-web/node_modules/
 
-# 忽略 IDE
-.idea/
-.vscode/
-*.swp
-*.swo
+static/
+dist/
+build/
+apps/dsa-web/dist/
+apps/dsa-web/build/
+apps/dsa-web/.vite/
+.pytest_cache/
+.coverage
+coverage/
+htmlcov/
+__pycache__/
+**/__pycache__/
+*.py[cod]
 
-# 忽略数据文件（可选，如果想持久化就注释掉）
-# data/
-# logs/
-# reports/
+.env
+.env.*
+!.env.example
+.config/
+**/.config/
+.mozyfin/
+**/.mozyfin/
+mozyfin*.json
+mozyfin*.key
+mozyfin*.token
 
-# 忽略测试文件
-test_*.py
-*_test.py
+*.log
+*.pid
+logs/
+data/
+reports/
 
-# 忽略文档
-*.md
-!README.md
+*_check.csv
+fpt_check.csv
+fpt_1h_check.csv
+fpt_quote_check.csv
+
+tests/fixtures/mozyfin/

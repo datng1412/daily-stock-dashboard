@@ -161,6 +161,55 @@ def _parse_markdown_table(text: str) -> List[Dict[str, str]]:
     return rows
 
 
+def _sanitize_cli_error_output(text: str, *, max_lines: int = 6, max_chars: int = 700) -> str:
+    """Keep actionable CLI diagnostics without leaking bundled Node internals."""
+    if not text:
+        return ""
+    noisy_markers = (
+        "file:///usr/local/lib/node_modules/mozyfin-cli/dist/index.js",
+        "node_modules/mozyfin-cli/dist/index.js",
+        "Symbol(\"",
+        "Symbol.for(\"",
+        "undici.error.",
+        "llhttp",
+        "AGFzbQE",
+        "wasm_",
+        "var ",
+        "Uf.exports",
+        "id.exports",
+    )
+    lines: List[str] = []
+    for raw_line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        line = raw_line.strip()
+        if not line:
+            continue
+        if len(line) > 300 or any(marker in line for marker in noisy_markers):
+            continue
+        lines.append(line)
+        if len(lines) >= max_lines:
+            break
+    compact = "\n".join(lines).strip()
+    if len(compact) > max_chars:
+        compact = compact[:max_chars].rstrip() + "..."
+    return compact
+
+
+def _format_cli_failure(
+    command: str,
+    entity: str,
+    *,
+    returncode: Optional[int] = None,
+    stderr: str = "",
+    stdout: str = "",
+) -> str:
+    detail = _sanitize_cli_error_output(stderr) or _sanitize_cli_error_output(stdout)
+    status = f" exited with code {returncode}" if returncode is not None else " failed"
+    message = f"mozyfin-cli {command} for {entity}{status}"
+    if detail:
+        return f"{message}: {detail}"
+    return f"{message}; internal Node.js stack output was suppressed"
+
+
 class MozyfinFetcher(BaseFetcher):
     """Vietnam OHLCV, quote, index, and news adapter using mozyfin-cli."""
 
@@ -228,17 +277,31 @@ class MozyfinFetcher(BaseFetcher):
             if command not in {"news", "indices"}:
                 cmd.append(entity)
             cmd.extend([*args, "--csv", str(csv_path)])
-            result = subprocess.run(
-                cmd,
-                check=False,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=int(os.getenv("MOZYFIN_TIMEOUT_SECONDS", "45")),
-            )
+            timeout_seconds = int(os.getenv("MOZYFIN_TIMEOUT_SECONDS", "45"))
+            try:
+                result = subprocess.run(
+                    cmd,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=timeout_seconds,
+                )
+            except subprocess.TimeoutExpired as exc:
+                raise DataFetchError(
+                    f"mozyfin-cli {command} for {entity} timed out after {timeout_seconds}s"
+                ) from exc
             if result.returncode != 0:
-                raise DataFetchError(result.stderr.strip() or result.stdout.strip() or "mozyfin-cli failed")
+                raise DataFetchError(
+                    _format_cli_failure(
+                        command,
+                        entity,
+                        returncode=result.returncode,
+                        stderr=result.stderr or "",
+                        stdout=result.stdout or "",
+                    )
+                )
             if csv_path.exists() and csv_path.stat().st_size > 0:
                 return self._read_csv_file(csv_path)
             return _parse_markdown_table(result.stdout)

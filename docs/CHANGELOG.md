@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [docs] Add root Docker and Render deployment support for the Vietnam dashboard, including live-mode environment guidance and fixture-mode guardrails.
+
 - [docs] Add reference-only Vietnam realtime data and news source resource docs for future provider evaluation.
 
 - [docs] Add a concise local Windows quick runbook for starting the Vietnam dashboard in live or fixture mode.
