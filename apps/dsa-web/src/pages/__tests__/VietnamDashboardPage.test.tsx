@@ -10,6 +10,8 @@ import {
 import { VIETNAM_WATCHLIST_STORAGE_KEY } from '../../utils/vietnamWatchlist';
 import VietnamDashboardPage from '../VietnamDashboardPage';
 
+const mockedGetVietnamMarketPhase = vi.fn();
+
 vi.mock('../../api/stocks', () => ({
   stocksApi: {
     getVietnamWatchlist: vi.fn(),
@@ -18,7 +20,21 @@ vi.mock('../../api/stocks', () => ({
   },
 }));
 
+vi.mock('../../utils/vietnamMarketPhase', () => ({
+  getVietnamMarketPhase: () => mockedGetVietnamMarketPhase(),
+}));
+
 const defaultTickers = ['FPT', 'VPB', 'MSB', 'SCS', 'ACV', 'ACB'];
+
+const makeMarketPhase = (phase = 'Continuous afternoon', code = 'continuous_afternoon', isAuction = false) => ({
+  phase,
+  code,
+  isTradingSession: code.includes('continuous') || isAuction,
+  isAuction,
+  isContinuous: code.includes('continuous'),
+  holidayAware: false,
+  nextLabel: isAuction ? 'Post-close' : 'ATC closing auction',
+});
 
 const makeItem = (ticker: string): VietnamWatchItem => ({
   ticker,
@@ -230,6 +246,8 @@ describe('VietnamDashboardPage watchlist loading', () => {
     mockedGetVietnamWatchlist.mockReset();
     mockedGetVietnamRealtimeQuotes.mockReset();
     mockedGetVietnamRealtimeTrades.mockReset();
+    mockedGetVietnamMarketPhase.mockReset();
+    mockedGetVietnamMarketPhase.mockReturnValue(makeMarketPhase());
     mockedGetVietnamWatchlist.mockImplementation(async (tickers) => makeResponse(tickers?.length ? tickers : defaultTickers));
     mockedGetVietnamRealtimeQuotes.mockImplementation(async (tickers) => makeRealtimeResponse(tickers));
     mockedGetVietnamRealtimeTrades.mockImplementation(async (symbol) => makeTradesResponse(symbol));
@@ -294,10 +312,25 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     const panel = dataStatusPanel();
     expect(panel.getByText('Data status')).toBeInTheDocument();
+    expect(panel.getByText('VN market phase')).toBeInTheDocument();
+    expect(panel.getByText('Continuous afternoon')).toBeInTheDocument();
+    expect(panel.getByText('holidayAware=false')).toBeInTheDocument();
     expect(panel.getAllByText('Mozyfin live').length).toBeGreaterThan(0);
     expect(panel.getByText('fixture_mode false')).toBeInTheDocument();
     expect(panel.getByText('Overview refresh')).toBeInTheDocument();
     expect(panel.getByText('Selected detail')).toBeInTheDocument();
+  });
+
+  it('shows auction helper copy during ATC phase', async () => {
+    mockedGetVietnamMarketPhase.mockReturnValue(makeMarketPhase('ATC closing auction', 'atc', true));
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+
+    const panel = dataStatusPanel();
+    expect(panel.getByText('ATC closing auction')).toBeInTheDocument();
+    expect(panel.getByText('Trade tape may differ during auction phases.')).toBeInTheDocument();
   });
 
   it('shows fixture warning in data status when Mozyfin fixture mode is active', async () => {

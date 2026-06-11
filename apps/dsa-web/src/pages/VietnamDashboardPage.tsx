@@ -11,6 +11,7 @@ import {
 import { AppPage, Badge, Button, Input, Loading } from '../components/common';
 import { cn } from '../utils/cn';
 import { buildVietnamConditionSummary, VIETNAM_CONDITION_SUMMARY_SUBTITLE } from '../utils/vietnamConditionSummary';
+import { getVietnamMarketPhase, type VietnamMarketPhase } from '../utils/vietnamMarketPhase';
 import { formatRelativeAge, formatVietnamDateTime, formatVietnamTime, parseMozyTimestamp } from '../utils/vietnamTime';
 import {
   VIETNAM_WATCHLIST_MAX_SIZE,
@@ -511,6 +512,7 @@ const DataStatusPanel: React.FC<{
   kbsAutoRefreshEnabled: boolean;
   kbsQuoteRefreshInterval: number;
   kbsTradeRefreshInterval: number;
+  marketPhase: VietnamMarketPhase;
 }> = ({
   data,
   selectedItem,
@@ -525,6 +527,7 @@ const DataStatusPanel: React.FC<{
   kbsAutoRefreshEnabled,
   kbsQuoteRefreshInterval,
   kbsTradeRefreshInterval,
+  marketPhase,
 }) => {
   const status = kbsProviderStatus(realtimeQuotes, watchlist, realtimeError, tradesError);
   const selectedQuote = selectedItem?.ticker ? realtimeQuotes[selectedItem.ticker] : undefined;
@@ -552,7 +555,14 @@ const DataStatusPanel: React.FC<{
           <Badge variant={status.variant}>KBS {status.label}</Badge>
         </div>
       </div>
-      <dl className="mt-4 grid gap-3 text-sm md:grid-cols-3 xl:grid-cols-6">
+      <dl className="mt-4 grid gap-3 text-sm md:grid-cols-3 xl:grid-cols-7">
+        <div className="rounded-lg bg-elevated/50 p-3">
+          <dt className="text-xs text-secondary-text">VN market phase</dt>
+          <dd className="mt-1 font-medium text-foreground">{marketPhase.phase}</dd>
+          <dd className="mt-1 text-xs text-secondary-text">
+            {marketPhase.holidayAware ? 'Holiday calendar enabled' : 'holidayAware=false'}
+          </dd>
+        </div>
         <div className="rounded-lg bg-elevated/50 p-3">
           <dt className="text-xs text-secondary-text">Mozyfin mode</dt>
           <dd className="mt-1 font-medium text-foreground">{data ? `fixture_mode ${String(data.fixtureMode)}` : '-'}</dd>
@@ -601,6 +611,11 @@ const DataStatusPanel: React.FC<{
       {data?.fixtureMode ? (
         <div className="mt-3 rounded-lg border border-warning/20 bg-warning/10 p-2 text-xs text-warning">
           Fixture mode is active; Mozyfin rows are sample data.
+        </div>
+      ) : null}
+      {marketPhase.isAuction ? (
+        <div className="mt-3 rounded-lg border border-info/20 bg-info/10 p-2 text-xs text-info">
+          Trade tape may differ during auction phases.
         </div>
       ) : null}
       {realtimeError || tradesError ? (
@@ -1098,6 +1113,7 @@ const VietnamDashboardPage: React.FC = () => {
   const [lastKbsQuoteRefreshAt, setLastKbsQuoteRefreshAt] = useState<string | null>(null);
   const [lastKbsTradeRefreshAt, setLastKbsTradeRefreshAt] = useState<string | null>(null);
   const [lastKbsErrorAt, setLastKbsErrorAt] = useState<string | null>(null);
+  const [marketPhase, setMarketPhase] = useState(() => getVietnamMarketPhase());
   const [loading, setLoading] = useState(true);
   const [forceLoading, setForceLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1315,6 +1331,13 @@ const VietnamDashboardPage: React.FC = () => {
       refreshKbsTrades(),
     ]);
   }, [refreshKbsQuotes, refreshKbsTrades]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setMarketPhase(getVietnamMarketPhase());
+    }, 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     const queuedLoad = nextWatchlistLoadRef.current;
@@ -1783,6 +1806,7 @@ const VietnamDashboardPage: React.FC = () => {
         kbsAutoRefreshEnabled={kbsAutoRefreshEnabled}
         kbsQuoteRefreshInterval={kbsQuoteRefreshInterval}
         kbsTradeRefreshInterval={kbsTradeRefreshInterval}
+        marketPhase={marketPhase}
       />
 
       {error ? (
