@@ -163,13 +163,16 @@ const mockedGetVietnamWatchlist = vi.mocked(stocksApi.getVietnamWatchlist);
 const mockedGetVietnamRealtimeQuotes = vi.mocked(stocksApi.getVietnamRealtimeQuotes);
 const mockedGetVietnamRealtimeTrades = vi.mocked(stocksApi.getVietnamRealtimeTrades);
 
-const makeRealtimeResponse = (tickers: string[], options: { stale?: boolean; unavailable?: boolean } = {}): VietnamRealtimeResponse => ({
+const makeRealtimeResponse = (tickers: string[], options: { stale?: boolean; unavailable?: boolean; ageSeconds?: number; isStale?: boolean } = {}): VietnamRealtimeResponse => ({
   market: 'VN',
   source: 'vnstock_kbs',
   status: options.unavailable ? 'unavailable' : 'ok',
   error: options.unavailable ? 'vnstock is not installed' : null,
   requestedTickers: tickers,
-  quotes: tickers.map((ticker) => ({
+  quotes: tickers.map((ticker) => {
+    const rawStale = options.isStale ?? options.stale ?? false;
+    const ageSeconds = options.ageSeconds ?? (rawStale ? 600 : 20);
+    return ({
     symbol: ticker,
     realtimePrice: ticker === 'FPT' ? 101.5 : 100.5,
     realtimeTime: '10:15:00',
@@ -178,9 +181,9 @@ const makeRealtimeResponse = (tickers: string[], options: { stale?: boolean; una
     snapshotTime: '10:15:00',
     snapshotTimeDisplay: '2026-06-11T10:15:00+07:00',
     snapshotNote: 'KBS board snapshot; may differ from trade tape',
-    ageSeconds: options.stale ? 600 : 20,
-    isStale: options.stale ?? false,
-    staleReason: options.stale ? 'age_gt_60s' : null,
+    ageSeconds,
+    isStale: rawStale,
+    staleReason: rawStale ? 'age_gt_60s' : null,
     referencePrice: 100,
     openPrice: 100,
     highPrice: 102,
@@ -200,7 +203,8 @@ const makeRealtimeResponse = (tickers: string[], options: { stale?: boolean; una
     source: 'vnstock_kbs',
     status: options.unavailable ? 'unavailable' : 'ok',
     error: options.unavailable ? 'vnstock is not installed' : null,
-  })),
+  });
+  }),
   cache: { cacheStatus: 'miss' },
 });
 
@@ -352,8 +356,8 @@ describe('VietnamDashboardPage watchlist loading', () => {
     await waitFor(() => expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledWith(defaultTickers));
 
     const panel = dataStatusPanel();
-    expect(panel.getByText('KBS ok')).toBeInTheDocument();
-    expect(panel.getByText('stale 0 | unavailable 0')).toBeInTheDocument();
+    expect(panel.getAllByText('KBS snapshot live').length).toBeGreaterThan(0);
+    expect(panel.getByText('raw stale 0 | unavailable 0')).toBeInTheDocument();
   });
 
   it('realtime failure does not erase overview rows', async () => {
@@ -368,17 +372,32 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(screen.getAllByText('ACB').length).toBeGreaterThan(0);
   });
 
-  it('shows stale badge when KBS marks a snapshot stale', async () => {
+  it('shows active-trading stale warning when KBS marks a snapshot stale during trading', async () => {
     mockedGetVietnamRealtimeQuotes.mockImplementation(async (tickers) => makeRealtimeResponse(tickers, { stale: true }));
 
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledWith(defaultTickers));
 
-    expect(screen.getAllByText('Stale').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('KBS snapshot stale during trading').length).toBeGreaterThan(0);
     expect(screen.getAllByText('2026-06-11T10:15:00+07:00').length).toBeGreaterThan(0);
-    expect(dataStatusPanel().getByText('KBS stale')).toBeInTheDocument();
-    expect(dataStatusPanel().getByText(`stale ${defaultTickers.length} | unavailable 0`)).toBeInTheDocument();
+    expect(dataStatusPanel().getByText(`raw stale ${defaultTickers.length} | unavailable 0`)).toBeInTheDocument();
+    expect(screen.getAllByText('raw age 600s | raw stale true | reason age_gt_60s').length).toBeGreaterThan(0);
+  });
+
+  it('shows last available state after close without active-trading stale wording', async () => {
+    mockedGetVietnamMarketPhase.mockReturnValue(makeMarketPhase('Closed', 'closed'));
+    mockedGetVietnamRealtimeQuotes.mockImplementation(async (tickers) => makeRealtimeResponse(tickers, { stale: true, ageSeconds: 1200 }));
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledWith(defaultTickers));
+
+    expect(screen.getAllByText('Last available KBS snapshot').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Market closed; snapshot may stop updating/).length).toBeGreaterThan(0);
+    expect(screen.queryByText('KBS snapshot stale during trading')).not.toBeInTheDocument();
+    expect(dataStatusPanel().getByText(`raw stale ${defaultTickers.length} | unavailable 0`)).toBeInTheDocument();
+    expect(screen.getAllByText('raw age 1200s | raw stale true | reason age_gt_60s').length).toBeGreaterThan(0);
   });
 
   it('shows KBS unavailable count when snapshot rows are unavailable', async () => {
@@ -389,8 +408,8 @@ describe('VietnamDashboardPage watchlist loading', () => {
     await waitFor(() => expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledWith(defaultTickers));
 
     const panel = dataStatusPanel();
-    expect(panel.getByText('KBS unavailable')).toBeInTheDocument();
-    expect(panel.getByText(`stale 0 | unavailable ${defaultTickers.length}`)).toBeInTheDocument();
+    expect(panel.getAllByText('KBS snapshot unavailable').length).toBeGreaterThan(0);
+    expect(panel.getByText(`raw stale 0 | unavailable ${defaultTickers.length}`)).toBeInTheDocument();
   });
 
   it('refresh KBS calls realtime endpoints only', async () => {

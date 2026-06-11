@@ -33,7 +33,7 @@ VN_EXCHANGE_MAP = {
     "MSB": "HOSE",
     "SCS": "HOSE",
     "ACV": "UPCoM",
-    "ACB": "HNX",
+    "ACB": "HOSE",
 }
 VN_REFERENCE_INDEX = {
     "HOSE": "VNINDEX.VN",

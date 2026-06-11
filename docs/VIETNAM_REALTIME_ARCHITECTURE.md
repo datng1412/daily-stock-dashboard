@@ -81,7 +81,16 @@ KBS timestamps are normalized conservatively:
 - During a trading session, age greater than 60 seconds is stale.
 - Age less than or equal to 60 seconds is fresh.
 
-The dashboard should show stale or unavailable status without erasing Mozyfin rows.
+These backend fields are raw technical freshness metadata. The dashboard keeps
+`age_seconds`, `is_stale`, and `stale_reason` visible, then derives a separate
+phase-aware display state from the VN market phase:
+
+- Active trading phases show live, delayed, or `KBS snapshot stale during trading`.
+- Lunch break, post-close, closed, and weekend phases show the old snapshot as the last available KBS snapshot instead of active-trading stale.
+- Unavailable/error provider status remains unavailable.
+- Missing age on an otherwise available quote is shown as unknown.
+
+The dashboard should show phase-aware stale or unavailable status without erasing Mozyfin rows.
 
 ## Current KBS Trade Tape Endpoint
 
@@ -115,6 +124,7 @@ The Vietnam dashboard currently shows:
 
 - Daily close: existing Mozyfin `latest_price`.
 - KBS snapshot: KBS board snapshot price, time, change, volume, stale/unavailable state.
+- KBS snapshot display state: phase-aware live/delayed/stale/last-available status, with raw age and stale reason kept compactly visible.
 - Latest trade tape: selected ticker trade tape rows with time, price, volume, match type, and source.
 - Data status panel: Mozyfin source/fixture state, KBS status, stale/unavailable counts, selected ticker status, last KBS quote/trade refresh times, and auto-refresh state.
 - VN market phase label: normal-weekday phase in `Asia/Ho_Chi_Minh`.

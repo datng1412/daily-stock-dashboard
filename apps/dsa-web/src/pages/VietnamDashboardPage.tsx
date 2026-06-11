@@ -11,6 +11,7 @@ import {
 import { AppPage, Badge, Button, Input, Loading } from '../components/common';
 import { cn } from '../utils/cn';
 import { buildVietnamConditionSummary, VIETNAM_CONDITION_SUMMARY_SUBTITLE } from '../utils/vietnamConditionSummary';
+import { getKbsSnapshotDisplayState, type KbsSnapshotDisplayResult } from '../utils/kbsSnapshotState';
 import { getVietnamMarketPhase, type VietnamMarketPhase } from '../utils/vietnamMarketPhase';
 import { formatRelativeAge, formatVietnamDateTime, formatVietnamTime, parseMozyTimestamp } from '../utils/vietnamTime';
 import {
@@ -138,33 +139,27 @@ const cacheFreshness = (item: VietnamWatchItem) => {
   return { label: 'cached', variant: 'success' as const };
 };
 
-const parseKbsSnapshotTime = (value?: string | null) => {
-  if (!value) return null;
-  const parsed = new Date(value);
-  if (!Number.isNaN(parsed.getTime())) return parsed;
-  const match = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec(value.trim());
-  if (!match) return null;
-  const today = new Date();
-  today.setHours(Number(match[1]), Number(match[2]), Number(match[3] ?? 0), 0);
-  return today;
+const kbsStateVariant = (state: KbsSnapshotDisplayResult) => {
+  if (state.severity === 'ok') return 'success' as const;
+  if (state.severity === 'info') return 'info' as const;
+  if (state.severity === 'warning') return 'warning' as const;
+  if (state.severity === 'error') return 'danger' as const;
+  return 'default' as const;
 };
 
-const kbsSnapshotState = (quote?: VietnamRealtimeQuote | null) => {
-  if (!quote || quote.status === 'unavailable' || quote.status === 'error') {
-    return { label: 'Unavailable', variant: 'warning' as const };
-  }
-  if (quote.isStale === true) {
-    return { label: 'Stale', variant: 'warning' as const };
-  }
-  if (quote.isStale === false) {
-    return { label: 'KBS snapshot', variant: 'info' as const };
-  }
-  const parsed = parseKbsSnapshotTime(quote.realtimeTime);
-  if (parsed && Date.now() - parsed.getTime() > 15 * 60 * 1000) {
-    return { label: 'Stale', variant: 'warning' as const };
-  }
-  return { label: 'KBS snapshot', variant: 'info' as const };
-};
+const kbsSnapshotState = (quote?: VietnamRealtimeQuote | null, marketPhaseCode?: string | null) =>
+  getKbsSnapshotDisplayState({
+    quoteStatus: quote?.status,
+    ageSeconds: quote?.ageSeconds,
+    isStale: quote?.isStale,
+    staleReason: quote?.staleReason,
+    marketPhaseCode,
+    snapshotTimeDisplay: quote?.snapshotTimeDisplay ?? quote?.realtimeTimeDisplay ?? quote?.snapshotTime ?? quote?.realtimeTime,
+  });
+
+const rawKbsFreshnessText = (quote?: VietnamRealtimeQuote | null) => (
+  `raw age ${quote?.ageSeconds ?? '-'}s | raw stale ${quote?.isStale === null || quote?.isStale === undefined ? '-' : String(quote.isStale)} | reason ${quote?.staleReason ?? '-'}`
+);
 
 const kbsProviderStatus = (
   quotes: Record<string, VietnamRealtimeQuote | undefined>,
@@ -203,13 +198,13 @@ const importantWarnings = (item: VietnamWatchItem) =>
     ].some((needle) => warning.includes(needle)),
   );
 
-const WatchCard: React.FC<{ item: VietnamWatchItem; realtimeQuote?: VietnamRealtimeQuote | null }> = ({ item, realtimeQuote }) => {
+const WatchCard: React.FC<{ item: VietnamWatchItem; realtimeQuote?: VietnamRealtimeQuote | null; marketPhase: VietnamMarketPhase }> = ({ item, realtimeQuote, marketPhase }) => {
   const positive = (item.changePct ?? 0) >= 0;
   const TrendIcon = positive ? ArrowUpRight : ArrowDownRight;
   const displayWarnings = importantWarnings(item);
   const freshness = cacheFreshness(item);
   const lastFetched = latestFetchedValue(item);
-  const kbsState = kbsSnapshotState(realtimeQuote);
+  const kbsState = kbsSnapshotState(realtimeQuote, marketPhase.code);
 
   return (
     <article className="rounded-lg border border-border/70 bg-card p-4 shadow-soft-card">
@@ -249,12 +244,13 @@ const WatchCard: React.FC<{ item: VietnamWatchItem; realtimeQuote?: VietnamRealt
           <p className="text-xs text-secondary-text">KBS snapshot</p>
           <div className="mt-1 flex flex-wrap items-center gap-2">
             <p className="text-lg font-semibold text-foreground">{formatPrice(realtimeQuote?.realtimePrice)}</p>
-            <Badge variant={kbsState.variant}>{kbsState.label}</Badge>
+            <Badge variant={kbsStateVariant(kbsState)}>{kbsState.label}</Badge>
           </div>
           <p className={cn('text-xs', signalTone(realtimeQuote?.priceChange))}>
             {formatPrice(realtimeQuote?.priceChange)} / {formatNumber(realtimeQuote?.percentChange, 2)}%
           </p>
           <p className="text-xs text-secondary-text">KBS time {realtimeQuote?.realtimeTimeDisplay ?? realtimeQuote?.realtimeTime ?? '-'}</p>
+          <p className="text-xs text-secondary-text">{rawKbsFreshnessText(realtimeQuote)}</p>
         </div>
         <div>
           <p className="text-xs text-secondary-text">Volume (shares)</p>
@@ -531,6 +527,7 @@ const DataStatusPanel: React.FC<{
 }) => {
   const status = kbsProviderStatus(realtimeQuotes, watchlist, realtimeError, tradesError);
   const selectedQuote = selectedItem?.ticker ? realtimeQuotes[selectedItem.ticker] : undefined;
+  const selectedKbsState = kbsSnapshotState(selectedQuote, marketPhase.code);
   const latestTrade = realtimeTrades[0];
   const selectedLastFetched = selectedItem ? latestFetchedValue(selectedItem) : null;
   const selectedCacheStatus = selectedItem?.cacheStatus
@@ -552,7 +549,7 @@ const DataStatusPanel: React.FC<{
           <Badge variant={data?.fixtureMode ? 'warning' : data ? 'success' : 'default'}>
             {data?.dataQuality.source ?? 'Mozyfin pending'}
           </Badge>
-          <Badge variant={status.variant}>KBS {status.label}</Badge>
+          <Badge variant={kbsStateVariant(selectedKbsState)}>{selectedKbsState.label}</Badge>
         </div>
       </div>
       <dl className="mt-4 grid gap-3 text-sm md:grid-cols-3 xl:grid-cols-7">
@@ -582,7 +579,7 @@ const DataStatusPanel: React.FC<{
           <dt className="text-xs text-secondary-text">KBS quotes</dt>
           <dd className="mt-1 font-medium text-foreground">{formatVietnamTime(lastKbsQuoteRefreshAt)}</dd>
           <dd className="mt-1 text-xs text-secondary-text">
-            stale {status.staleCount} | unavailable {status.unavailableCount}
+            raw stale {status.staleCount} | unavailable {status.unavailableCount}
           </dd>
         </div>
         <div className="rounded-lg bg-elevated/50 p-3">
@@ -603,6 +600,11 @@ const DataStatusPanel: React.FC<{
         </div>
         <div className="rounded-lg border border-border/60 bg-elevated/30 p-3">
           <span className="font-medium text-foreground">KBS snapshot time</span> {selectedQuote?.realtimeTimeDisplay ?? selectedQuote?.realtimeTime ?? '-'}
+          <div className="mt-1">
+            <Badge variant={kbsStateVariant(selectedKbsState)}>{selectedKbsState.label}</Badge>
+          </div>
+          <div className="mt-1">{selectedKbsState.reason}</div>
+          <div className="mt-1">{rawKbsFreshnessText(selectedQuote)}</div>
         </div>
         <div className="rounded-lg border border-border/60 bg-elevated/30 p-3">
           <span className="font-medium text-foreground">Cache status</span> {selectedCacheStatus}
@@ -633,8 +635,9 @@ const IndicatorTable: React.FC<{
   realtimeLoading?: boolean;
   realtimeError?: string | null;
   selectedTicker?: string | null;
+  marketPhase: VietnamMarketPhase;
   onSelect: (ticker: string) => void;
-}> = ({ items, realtimeQuotes, realtimeLoading = false, realtimeError, selectedTicker, onSelect }) => (
+}> = ({ items, realtimeQuotes, realtimeLoading = false, realtimeError, selectedTicker, marketPhase, onSelect }) => (
   <section className="rounded-lg border border-border/70 bg-card p-4">
     <div className="mb-3 flex items-center justify-between gap-3">
       <h2 className="text-base font-semibold text-foreground">Indicator table</h2>
@@ -671,7 +674,7 @@ const IndicatorTable: React.FC<{
         <tbody>
           {items.map((item) => {
             const quote = realtimeQuotes[item.ticker];
-            const kbsState = kbsSnapshotState(quote);
+            const kbsState = kbsSnapshotState(quote, marketPhase.code);
             return (
               <tr
                 key={item.ticker}
@@ -697,7 +700,7 @@ const IndicatorTable: React.FC<{
                 <td className="px-3 py-3">{item.latestPriceDate ?? item.priceDate ?? '-'}</td>
                 <td className="px-3 py-3 text-right">
                   <div className="font-medium text-foreground">{formatPrice(quote?.realtimePrice)}</div>
-                  <Badge variant={kbsState.variant}>{kbsState.label}</Badge>
+                  <Badge variant={kbsStateVariant(kbsState)}>{kbsState.label}</Badge>
                 </td>
                 <td className={cn('px-3 py-3 text-right', signalTone(quote?.priceChange))}>
                   {formatPrice(quote?.priceChange)} / {formatNumber(quote?.percentChange, 2)}%
@@ -737,12 +740,14 @@ const StockDetailView: React.FC<{
   realtimeTrades?: VietnamRealtimeTrade[];
   tradesLoading?: boolean;
   tradesError?: string | null;
-}> = ({ item, fixtureMode = false, realtimeQuote, realtimeTrades = [], tradesLoading = false, tradesError }) => {
+  marketPhase: VietnamMarketPhase;
+}> = ({ item, fixtureMode = false, realtimeQuote, realtimeTrades = [], tradesLoading = false, tradesError, marketPhase }) => {
   if (!item) return null;
   const indicators = item.indicators;
   const latestIntradayCandle = item.intradayCandles?.at(-1);
   const displayWarnings = importantWarnings(item);
   const conditionSummary = buildVietnamConditionSummary({ item, fixtureMode });
+  const kbsState = kbsSnapshotState(realtimeQuote, marketPhase.code);
   return (
     <section className="rounded-lg border border-border/70 bg-card p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -930,7 +935,7 @@ const StockDetailView: React.FC<{
       <div className="mt-4 rounded-lg border border-border/60 bg-elevated/30 p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-sm font-semibold text-foreground">KBS snapshot</h3>
-          <Badge variant={kbsSnapshotState(realtimeQuote).variant}>KBS snapshot</Badge>
+          <Badge variant={kbsStateVariant(kbsState)}>{kbsState.label}</Badge>
         </div>
         <dl className="mt-3 grid gap-3 text-sm md:grid-cols-4">
           <div>
@@ -952,6 +957,12 @@ const StockDetailView: React.FC<{
             <dd className="mt-1 font-medium text-foreground">{formatNumber(realtimeQuote?.volumeAccumulated)}</dd>
           </div>
         </dl>
+        <p className="mt-3 text-xs text-secondary-text">
+          {kbsState.reason}
+        </p>
+        <p className="mt-1 text-xs text-secondary-text">
+          {rawKbsFreshnessText(realtimeQuote)}
+        </p>
         <p className="mt-3 text-xs text-secondary-text">
           {realtimeQuote?.snapshotNote ?? 'KBS board snapshot; may differ from trade tape'}
         </p>
@@ -1881,6 +1892,7 @@ const VietnamDashboardPage: React.FC = () => {
             realtimeLoading={realtimeLoading}
             realtimeError={realtimeError}
             selectedTicker={selectedItem?.ticker}
+            marketPhase={marketPhase}
             onSelect={setSelectedTicker}
           />
           <StockDetailView
@@ -1890,10 +1902,11 @@ const VietnamDashboardPage: React.FC = () => {
             realtimeTrades={realtimeTrades}
             tradesLoading={tradesLoading}
             tradesError={tradesError}
+            marketPhase={marketPhase}
           />
           <section className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
             {(data?.watchlist ?? []).map((item) => (
-              <WatchCard key={item.ticker} item={item} realtimeQuote={realtimeQuotes[item.ticker]} />
+              <WatchCard key={item.ticker} item={item} realtimeQuote={realtimeQuotes[item.ticker]} marketPhase={marketPhase} />
             ))}
           </section>
         </>

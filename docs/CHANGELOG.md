@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [改进] Add phase-aware Vietnam KBS snapshot display state so closed/post-close/weekend snapshots are shown as last available while raw stale age and reasons remain visible.
 - [新功能] Add optional vnstock KBS snapshot API endpoints `/api/v1/stocks/vn/realtime` and `/api/v1/stocks/vn/realtime/trades` while preserving Mozyfin `latest_price` semantics.
 - [改进] Add separate Vietnam dashboard display for Daily close, KBS snapshot, and Latest trade tape, including KBS staleness status and compact failure states.
 - [改进] Add manual and automatic KBS refresh with split intervals: quotes 10/15/30 seconds and latest trade tape 5/10/15 seconds, without reloading Mozyfin overview/detail data.
