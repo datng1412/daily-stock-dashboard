@@ -1,12 +1,12 @@
 # Decisions
 
-Last updated: 2026-06-06
+Last updated: 2026-06-11
 
 This file records current product and engineering decisions that should not be re-litigated without explicit user direction.
 
 ## Vietnam Dashboard Data Source
 
-Decision: use Mozyfin as the Vietnam market data adapter, with a fixture mode for local deterministic testing.
+Decision: use Mozyfin as the Vietnam daily OHLCV, overview, selected detail, news, and intraday 1H adapter, with a fixture mode for local deterministic testing.
 
 Rationale:
 
@@ -19,6 +19,7 @@ Operational rule:
 - `MOZYFIN_FIXTURE_DIR` must be unset for live mode.
 - `MOZYFIN_API_KEY` must be present or the Mozyfin CLI must have usable stored auth for live mode.
 - Do not mask fixture mode as live mode.
+- KBS/vnstock snapshot and trade tape endpoints are optional separate layers. They must not replace Mozyfin daily or intraday fields.
 
 ## External Realtime And News Resources
 
@@ -31,23 +32,42 @@ Operational rule:
 - Resource docs must not trigger implementation, new API calls, scraping, or dashboard behavior changes by themselves.
 - Any future provider implementation must first summarize auth, rate limits, timestamp semantics, and data/price semantics.
 
-## Future Vietnam Realtime Quote Layer
+## Vietnam KBS Snapshot Layer
 
-Decision: future realtime matched price support must be added as a separate optional data layer, not as a replacement for daily OHLCV close.
+Decision: vnstock/KBS snapshot support is an implemented optional data layer, not a replacement for daily OHLCV close.
 
 Rationale:
 
 - Current `latest_price` semantics are auditable because they use Mozyfin daily OHLCV close.
-- Realtime matched price has different licensing, timestamp, delay, and cache semantics.
-- Users must be able to distinguish daily close, 1H intraday pulse, and realtime matched quote at a glance.
+- KBS snapshot data has different licensing, timestamp, delay, cache, and provider semantics.
+- Users must be able to distinguish daily close, 1H intraday pulse, KBS board snapshot, and trade tape at a glance.
 
 Operational rule:
 
-- Do not overwrite `latest_price` with realtime matched price.
+- Do not overwrite `latest_price` with KBS snapshot price.
 - Do not label daily close as realtime.
-- Do not write realtime quotes into OHLCV, Mozyfin quote/foreign, or intraday OHLCV caches.
-- Do not implement vendor calls until credentials, license, redistribution rights, rate limits, and timestamp semantics are confirmed.
+- Do not write KBS snapshot or trade tape data into OHLCV, Mozyfin quote/foreign, or intraday OHLCV caches.
+- KBS snapshot fields should remain separate, including `realtime_price`, `snapshot_price`, normalized timestamp display, age, stale, and error/unavailable state.
+- `GET /api/v1/stocks/vn/realtime?tickers=FPT,ACB,VCB` returns KBS board snapshot rows when vnstock is available.
+- `GET /api/v1/stocks/vn/realtime/trades?symbol=FPT&limit=100` returns KBS trade tape rows when vnstock is available.
+- Existing `/api/v1/stocks/vn/watchlist` and `/api/v1/stocks/vn/watchlist/overview` semantics must remain unchanged.
 - Architecture reference: `docs/VIETNAM_REALTIME_ARCHITECTURE.md`.
+
+## KBS Trade Tape Semantics
+
+Decision: KBS `trades()` output is shown as latest trade tape only.
+
+Rationale:
+
+- Trade tape output may exclude auction or ATC prints depending on provider behavior.
+- KBS `price_board()` is the better source for board snapshot or closing board state.
+- The dashboard should explain this difference without synthesizing missing auction rows.
+
+Operational rule:
+
+- Do not fake 14:45 ATC trade rows from snapshot data.
+- Do not use trade tape as Mozyfin daily OHLCV close.
+- Label the section `Latest trade tape` and keep it separate from Daily close and KBS snapshot.
 
 ## Latest Price Semantics
 
@@ -114,12 +134,27 @@ Decision: current Vietnam process-local TTLs are:
 | Quote | 60 seconds |
 | Intraday OHLCV | 60 seconds |
 | News | 1800 seconds |
+| KBS snapshot quotes | 10-15 seconds |
+| KBS trade tape | 5 seconds |
 
 Rationale:
 
 - Daily OHLCV can be cached longer than quote or intraday data.
 - News changes less frequently.
 - Quote TTL can be revisited if quote becomes the reliable price source.
+- KBS quote and trade tape caches are separate from Mozyfin caches so KBS refresh does not reload overview/detail data.
+
+## KBS Refresh Behavior
+
+Decision: KBS UI refresh is independent from Mozyfin overview/detail refresh.
+
+Operational rule:
+
+- Manual `Refresh KBS` refreshes only KBS quotes and selected ticker trade tape.
+- `Auto-refresh KBS` is off by default.
+- KBS quote interval options are 10s, 15s, and 30s, with default 15s.
+- Latest trade tape interval options are 5s, 10s, and 15s, with default 10s.
+- KBS refresh must not call `/watchlist` or `/watchlist/overview`.
 
 ## Time Formatting
 
@@ -129,3 +164,13 @@ Rationale:
 
 - Operators reading the VN dashboard need local market context.
 - Avoid mixing UTC timestamps into visible UI unless the field is explicitly technical/debug.
+
+## VN Market Phase Labels
+
+Decision: the VN dashboard shows frontend-derived normal-weekday market phase labels in `Asia/Ho_Chi_Minh`.
+
+Operational rule:
+
+- Supported labels are `Pre-open`, `ATO opening auction`, `Continuous morning`, `Lunch break`, `Continuous afternoon`, `ATC closing auction`, `Post-close`, `Closed`, and `Weekend / closed`.
+- Holiday calendars are not implemented; the utility reports `holidayAware=false`.
+- Market phase labels are explanatory context only. They do not change data source semantics.

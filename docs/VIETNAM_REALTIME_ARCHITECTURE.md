@@ -1,189 +1,206 @@
-# Vietnam Realtime Quote Architecture
+# Vietnam Realtime Snapshot Architecture
 
-Last updated: 2026-06-10
+Last updated: 2026-06-11
 
 ## Purpose
 
-This document defines the planned architecture for adding Vietnam realtime quote support as a separate optional dashboard data layer.
+This document defines the current optional Vietnam KBS/vnstock snapshot and trade tape architecture.
 
-This is a design document only. It does not approve a vendor, implement vendor calls, add scraping, add endpoints, or change existing Mozyfin daily/intraday behavior.
+The KBS layer is additive. It does not replace Mozyfin, does not change `latest_price`, does not write into Mozyfin caches, and does not change `/api/v1/stocks/vn/watchlist` or `/api/v1/stocks/vn/watchlist/overview` semantics.
 
 ## Current Daily And Intraday Semantics
 
-The current Vietnam dashboard semantics remain unchanged:
+The Vietnam dashboard data semantics remain intentionally conservative:
 
 - `latest_price` equals the Mozyfin daily OHLCV close.
 - `intraday_pulse` is derived from Mozyfin 1H OHLCV candles.
-- Mozyfin quote and foreign output are metadata only unless a source is proven to expose reliable matched-price semantics.
-- The dashboard displays neutral condition labels only and does not emit buy/sell recommendations.
+- Mozyfin quote and foreign output remain metadata unless a source is proven to expose reliable matched-price semantics.
+- Quote and foreign metadata rules remain unchanged.
+- The dashboard displays neutral condition labels only and does not emit trading recommendations.
 
-The current data layers are intentionally conservative because daily OHLCV close, 1H candles, and quote/foreign metadata have different freshness and meaning.
+Daily OHLCV close, 1H candles, KBS board snapshot, and KBS trade tape have different freshness and meaning, so they are displayed separately.
 
-## Realtime Principle
+## Current KBS Snapshot Endpoint
 
-Realtime matched price must be modeled as a separate data layer from daily close.
-
-Rules:
-
-- Do not overwrite `latest_price` with realtime matched price.
-- Do not relabel daily OHLCV close as realtime.
-- Do not mix realtime fields into daily OHLCV, Mozyfin quote, or intraday OHLCV cache entries.
-- Frontend should show daily close and realtime matched price as separate fields.
-- Realtime values must include source, timestamp, and realtime/delayed/stale status.
-
-## Proposed Backend Interface
-
-Use a VN-specific DTO instead of reusing generic realtime quote types directly, so the dashboard can preserve matched-price semantics explicitly.
-
-```python
-from dataclasses import dataclass
-from typing import Optional, Protocol
-
-
-@dataclass(frozen=True)
-class VietnamRealtimeQuote:
-    symbol: str
-    matched_price: Optional[float]
-    change: Optional[float]
-    change_pct: Optional[float]
-    volume: Optional[float]
-    value: Optional[float]
-    bid1: Optional[float]
-    ask1: Optional[float]
-    bid_volume1: Optional[float]
-    ask_volume1: Optional[float]
-    timestamp: Optional[str]
-    source: str
-    is_realtime: bool
-    delay_seconds: Optional[int]
-    status: str
-    error: Optional[str]
-
-
-class RealtimeQuoteProvider(Protocol):
-    name: str
-
-    def is_available(self) -> bool:
-        ...
-
-    def get_quotes(self, symbols: list[str]) -> dict[str, VietnamRealtimeQuote]:
-        ...
-```
-
-Provider design should be batch-first. Realtime vendors commonly rate-limit by request/session, and watchlist refreshes should fetch `FPT,VPB,GMD` in one provider call when the vendor supports it.
-
-Provider implementations should normalize all vendor-specific symbol formats, timestamps, realtime/delayed flags, and bid/ask levels before returning `VietnamRealtimeQuote`.
-
-## Proposed Endpoint
-
-Future endpoint:
+Endpoint:
 
 ```text
-GET /api/v1/stocks/vn/realtime?tickers=FPT,VPB,GMD
+GET /api/v1/stocks/vn/realtime?tickers=FPT,ACB,VCB
 ```
 
-Expected response shape:
+Provider:
 
-```json
-{
-  "market": "VN",
-  "source": "provider_name",
-  "is_realtime": true,
-  "delay_seconds": 0,
-  "last_refresh_time": "2026-06-10T09:30:00+07:00",
-  "ttl_seconds": 5,
-  "quotes": [
-    {
-      "symbol": "FPT",
-      "matched_price": 123400,
-      "change": 1200,
-      "change_pct": 0.98,
-      "volume": 1234567,
-      "value": 152000000000,
-      "bid1": 123300,
-      "ask1": 123500,
-      "bid_volume1": 1000,
-      "ask_volume1": 1500,
-      "timestamp": "2026-06-10T09:30:00+07:00",
-      "source": "provider_name",
-      "is_realtime": true,
-      "delay_seconds": 0,
-      "status": "ok",
-      "error": null
-    }
-  ],
-  "errors": {}
-}
+- Uses `Trading(source="KBS").price_board(tickers)` through vnstock when `vnstock` is installed.
+- Returns unavailable rows instead of crashing app startup when vnstock is missing or unavailable.
+- Requires no app credentials.
+- Must not mutate Mozyfin OHLCV, quote/foreign, intraday, overview, or detail caches.
+
+Quote fields include:
+
+- `symbol`
+- `realtime_price`
+- `realtime_time`
+- `realtime_time_display`
+- `snapshot_price`
+- `snapshot_time`
+- `snapshot_time_display`
+- `snapshot_note`
+- `reference_price`
+- `open_price`
+- `high_price`
+- `low_price`
+- `average_price`
+- `price_change`
+- `percent_change`
+- `volume_accumulated`
+- `total_value`
+- `bid_price_1`
+- `bid_vol_1`
+- `ask_price_1`
+- `ask_vol_1`
+- `foreign_buy_volume`
+- `foreign_sell_volume`
+- `foreign_room`
+- `age_seconds`
+- `is_stale`
+- `stale_reason`
+- `source`
+- `status`
+- `error`
+
+`close_price` from the KBS board is mapped to both `realtime_price` and `snapshot_price` for compatibility and clarity. It must not be copied into Mozyfin `latest_price`.
+
+## Staleness Rules
+
+KBS timestamps are normalized conservatively:
+
+- Epoch milliseconds are parsed as provider timestamps.
+- Datetime strings are parsed as Vietnam-local timestamps where applicable.
+- Missing or unparseable timestamps do not crash the endpoint.
+- Unparseable timestamps return `is_stale=null` and `stale_reason="timestamp_unparseable"`.
+- During a trading session, age greater than 60 seconds is stale.
+- Age less than or equal to 60 seconds is fresh.
+
+The dashboard should show stale or unavailable status without erasing Mozyfin rows.
+
+## Current KBS Trade Tape Endpoint
+
+Endpoint:
+
+```text
+GET /api/v1/stocks/vn/realtime/trades?symbol=FPT&limit=100
 ```
 
-The endpoint should be additive. It should not mutate or backfill `/api/v1/stocks/vn/watchlist` daily fields during initial rollout.
+Provider:
 
-## Proposed Frontend Display
+- Uses `Market().equity(symbol).trades()` through vnstock when available.
+- Returns latest trade tape rows only.
+- Does not synthesize auction or ATC rows from quote data.
+- Must not be used as daily OHLCV close.
 
-The Vietnam dashboard should keep the current daily and intraday sections and add a separate realtime quote strip or column.
+Trade fields include:
 
-Display elements:
+- `time`
+- `price`
+- `volume`
+- `match_type`
+- `id`
+- `source`
 
-- Daily close: current Mozyfin daily OHLCV close.
-- Realtime matched price: separate value from the realtime endpoint.
-- Timestamp: provider timestamp or fetched timestamp with clear label.
-- Best bid/ask: `bid1` / `ask1`, plus sizes when available.
-- Badge:
-  - `Realtime`
-  - `Delayed`
-  - `Stale`
-  - `Daily only`
+Important caveat: KBS trade tape may exclude auction or ATC prints depending on provider output. KBS board snapshot is the better source for current or closing board state.
 
-The UI must never label daily close as realtime. If no realtime provider is configured or a quote fails, the dashboard should keep showing daily-only data and mark the realtime area as `Daily only` or unavailable.
+## Frontend Display
+
+The Vietnam dashboard currently shows:
+
+- Daily close: existing Mozyfin `latest_price`.
+- KBS snapshot: KBS board snapshot price, time, change, volume, stale/unavailable state.
+- Latest trade tape: selected ticker trade tape rows with time, price, volume, match type, and source.
+- Data status panel: Mozyfin source/fixture state, KBS status, stale/unavailable counts, selected ticker status, last KBS quote/trade refresh times, and auto-refresh state.
+- VN market phase label: normal-weekday phase in `Asia/Ho_Chi_Minh`.
+
+KBS failures should display compact warnings and keep existing Mozyfin overview/detail rows intact.
+
+## Refresh Behavior
+
+Manual refresh:
+
+- `Refresh KBS` refreshes KBS quote rows for the active watchlist and KBS trade tape for the selected ticker.
+- It does not call Mozyfin `/watchlist` or `/watchlist/overview`.
+
+Auto refresh:
+
+- `Auto-refresh KBS` is off by default.
+- KBS quotes interval options: 10s, 15s, 30s. Default: 15s.
+- Latest trade tape interval options: 5s, 10s, 15s. Default: 10s.
+- Quote refresh and trade refresh have independent in-flight guards.
+- Browser hidden tabs pause both refresh loops and resume safely when visible.
 
 ## Cache Rules
 
-Add a separate cache bucket:
+KBS caches are process-local and separate from Mozyfin caches:
 
-```python
-VN_CACHE_TTL_SECONDS["realtime_quote"] = 3
+```text
+vnstock_realtime:<ticker_list>
+vnstock_trades:<symbol>
 ```
 
 Rules:
 
-- Realtime quote TTL should be 3-15 seconds depending on vendor license, rate limits, and deployment mode.
-- Stale threshold should be explicit, for example `max(30 seconds, 3 * ttl_seconds)`.
-- Stale quote data may be displayed only with a `Stale` badge.
-- Do not write realtime data into OHLCV daily cache.
-- Do not write realtime data into Mozyfin quote/foreign cache.
-- Do not write realtime data into intraday OHLCV cache.
-- `force_refresh=true` semantics for watchlist should remain scoped to the current watchlist layers unless a separate realtime refresh parameter is explicitly designed.
+- KBS snapshot TTL should remain in the 10-15 second range unless provider limits require a slower interval.
+- KBS trade tape TTL is 5 seconds so a 5 second UI interval is meaningful.
+- Do not write KBS data into OHLCV daily cache.
+- Do not write KBS data into Mozyfin quote/foreign cache.
+- Do not write KBS data into intraday OHLCV cache.
+- `force_refresh=true` for watchlist remains scoped to Mozyfin watchlist calls.
 
-## Candidate Providers
+## VN Market Phase Labels
 
-Investigate only official or commercial channels:
+Frontend market phase labels use `Intl.DateTimeFormat` with `Asia/Ho_Chi_Minh`; do not manually add UTC offsets.
 
-- SSI FastConnect Data.
-- FiinGroup / FiinQuant / FiinTrade.
-- Vietstock DataFeed.
-- FireAnt official/commercial API only.
-- ICE consolidated feed as an enterprise option for HOSE/Vietnam coverage, subject to contract confirmation.
+Normal weekday labels:
 
-Do not scrape public websites. Do not add unofficial endpoints. Do not reverse engineer browser APIs.
+- before 09:00: `Pre-open`
+- 09:00-09:15: `ATO opening auction`
+- 09:15-11:30: `Continuous morning`
+- 11:30-13:00: `Lunch break`
+- 13:00-14:30: `Continuous afternoon`
+- 14:30-14:45: `ATC closing auction`
+- 14:45-15:00: `Post-close`
+- after 15:00: `Closed`
+- Saturday/Sunday: `Weekend / closed`
+
+Holiday calendars are not implemented. The utility reports `holidayAware=false`.
+
+## Deployment
+
+Runtime deployment now includes `vnstock==4.0.4`.
+
+Docker/Render notes:
+
+- vnstock/KBS needs no extra credentials.
+- Render live mode still needs `MOZYFIN_API_KEY` for Mozyfin daily/intraday data.
+- Do not set `MOZYFIN_FIXTURE_DIR` in production.
+- If KBS endpoints return unavailable, check container logs and `python -m pip show vnstock`.
+- Public deployment must review vnstock/KBS license, terms of use, rate limits, and redistribution constraints.
+
+## Validation Status
+
+The current implementation has been validated with:
+
+- `python -m pytest tests/test_vnstock_realtime_fetcher.py -q`
+- `python -m pytest tests/test_mozyfin_vn_adapter.py -q`
+- frontend Vietnam dashboard tests
+- `npm.cmd run build`
+- Docker build
+- Docker compose startup
+- Docker health endpoint smoke checks
+- KBS snapshot and trade endpoint smoke checks in container
 
 ## Risks
 
-- Licensing: realtime exchange data may require paid licensing and explicit redistribution rights.
-- Redistribution restrictions: public dashboard deployment may be prohibited or require a different license tier.
-- Rate limits: provider limits may force batching, backoff, or lower refresh rates.
-- Public cloud deployment restrictions: some vendors restrict IPs, regions, or server-side redistribution.
-- Credentials: keys and tokens must be kept in environment/config only and must never be logged.
-- Downtime: dashboard must display provider status and stale/unavailable states without breaking daily data.
-- Delayed vs realtime ambiguity: source delay must be explicit; delayed data must never be labeled realtime.
-
-## Future Implementation Plan
-
-Phase 1: docs only.
-
-Phase 2: provider interface/stub with fixture-only tests and no vendor calls.
-
-Phase 3: implement one official provider after credentials, license, timestamp semantics, delay semantics, rate limits, and redistribution rules are confirmed.
-
-Phase 4: frontend realtime display as a separate strip or column next to daily close.
-
-Phase 5: cache/stale monitoring, provider health, and operational diagnostics.
+- vnstock/KBS license and usage terms may limit public deployment, commercial use, or redistribution.
+- KBS snapshot is polling/snapshot data and is not guaranteed official exchange realtime.
+- KBS trade tape may exclude auction or ATC prints.
+- Holiday calendar support is not implemented.
+- Provider behavior on public Render deployments should be checked separately from local Docker validation.

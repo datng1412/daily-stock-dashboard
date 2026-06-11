@@ -12,7 +12,8 @@ Do not commit runtime secrets. Pass `MOZYFIN_API_KEY` through environment variab
 - The Vite frontend is built inside the Docker image and copied to `static/`.
 - FastAPI serves `static/index.html` and `/assets/*` through the existing web UI flow.
 - Live Vietnam data uses Mozyfin. Fixture mode is local testing only.
-- The image installs `vnstock` for optional KBS snapshot/trades endpoints. KBS data is separate from Mozyfin daily close and does not replace `latest_price`.
+- The image installs `vnstock==4.0.4` for optional KBS snapshot/trades endpoints. KBS data is separate from Mozyfin daily close and does not replace `latest_price`.
+- KBS snapshot/trade tape endpoints were validated in Docker, but public deployment should still be reviewed against vnstock/KBS license and provider behavior.
 
 ## Local Docker Build
 
@@ -71,6 +72,15 @@ Invoke-RestMethod "http://127.0.0.1:8000/api/v1/stocks/vn/realtime/trades?symbol
 ```
 
 KBS does not require extra credentials. Before public deployment, confirm vnstock/KBS license and usage terms fit the deployment.
+
+Expected KBS indicators when vnstock/KBS is available:
+
+```text
+source: vnstock_kbs
+status: ok
+```
+
+If KBS is unavailable, Mozyfin endpoints should still run or fail independently based on Mozyfin auth/config.
 
 ## Docker Compose
 
@@ -145,7 +155,7 @@ PORT=8000
 
 Render normally injects `PORT` automatically. Do not set `MOZYFIN_FIXTURE_DIR` on Render.
 
-No vnstock-specific environment variables are required for the KBS snapshot/trades endpoints.
+No vnstock-specific environment variables are required for the KBS snapshot/trades endpoints. The KBS layer is optional and does not write to Mozyfin daily OHLCV, quote/foreign, intraday, overview, or detail caches.
 
 After deploy:
 

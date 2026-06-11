@@ -56,6 +56,7 @@ python main.py --webui-only
 - Market data adapters: `data_provider/`, especially `data_provider/base.py` and `data_provider/mozyfin_fetcher.py`.
 - Stock OHLCV flow: `DataFetcherManager.get_daily_data()` returns the existing standard dataframe columns: `date`, `open`, `high`, `low`, `close`, `volume`, `amount`, `pct_chg`.
 - Stock data API: `src/services/stock_service.py` and `api/v1/endpoints/stocks.py`. The VN dashboard does not currently use Mozyfin quote as a reliable realtime matched price source.
+- Optional KBS snapshot/trade tape layer: `data_provider/vnstock_realtime_fetcher.py` and the `/api/v1/stocks/vn/realtime*` endpoints.
 - News flow: existing global search is in `src/search_service.py`; VN dashboard news uses `MozyfinFetcher.get_news()` when Mozy output is available.
 - Indicators/core analysis: `src/stock_analyzer.py` computes MA, bias, volume, MACD, RSI, and signal score. This was not changed.
 - Dashboard output: `src/services/vietnam_market_service.py`, `api/v1/endpoints/stocks.py`, and `apps/dsa-web/src/pages/VietnamDashboardPage.tsx`.
@@ -92,6 +93,52 @@ Current live Mozyfin quote output exposes foreign flow through quantity fields:
 These foreign flow values are share quantities, not VND value. Price fields are VND and volume fields are shares.
 
 Current Mozyfin quote output does not expose a reliable latest/matched/current price for the VN dashboard. `latest_price` uses the OHLCV daily close. Intraday Pulse uses Mozyfin OHLCV `1h` candles; those candles are not realtime matched quotes.
+
+## Optional KBS Snapshot Layer
+
+The dashboard can also display optional vnstock/KBS snapshot data as a separate layer. This does not replace Mozyfin and does not change `latest_price`.
+
+Endpoints:
+
+```text
+GET /api/v1/stocks/vn/realtime?tickers=FPT,ACB,VCB
+GET /api/v1/stocks/vn/realtime/trades?symbol=FPT&limit=100
+```
+
+KBS snapshot fields include:
+
+- `realtime_price`
+- `realtime_time`
+- `realtime_time_display`
+- `snapshot_price`
+- `snapshot_time`
+- `snapshot_time_display`
+- `snapshot_note`
+- `age_seconds`
+- `is_stale`
+- `stale_reason`
+
+KBS trade tape fields include `time`, `price`, `volume`, `match_type`, `id`, and `source`. Trade tape may exclude auction or ATC prints depending on provider output, so the dashboard keeps it separate from the KBS board snapshot.
+
+Runtime notes:
+
+- `vnstock==4.0.4` is installed in Docker/Render runtime dependencies.
+- vnstock/KBS requires no extra app credentials.
+- If vnstock is unavailable, the endpoints should return unavailable status instead of crashing the app.
+- Before public deployment, confirm vnstock/KBS license, usage, and redistribution terms.
+
+Dashboard behavior:
+
+- Daily close remains Mozyfin `latest_price`.
+- KBS snapshot is shown separately from Daily close.
+- Latest trade tape is shown separately for the selected ticker.
+- `Refresh KBS` refreshes only KBS quote/trade endpoints.
+- `Auto-refresh KBS` is off by default.
+- KBS quotes refresh options are 10s, 15s, and 30s; default 15s.
+- Latest trade tape refresh options are 5s, 10s, and 15s; default 10s.
+- KBS refresh does not reload Mozyfin overview/detail data.
+- The Data status panel shows Mozyfin source/fixture state, KBS status, stale/unavailable counts, selected ticker status, and refresh timing.
+- VN market phase labels are frontend-derived for normal weekdays: `Pre-open`, `ATO opening auction`, `Continuous morning`, `Lunch break`, `Continuous afternoon`, `ATC closing auction`, `Post-close`, `Closed`, and `Weekend / closed`. Holiday calendar support is not implemented and reports `holidayAware=false`.
 
 ## Data Quality
 

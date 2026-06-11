@@ -9,7 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-- [docs] Document the planned Vietnam realtime quote architecture as a separate optional layer that preserves Mozyfin daily OHLCV and 1H intraday semantics.
+- [新功能] Add optional vnstock KBS snapshot API endpoints `/api/v1/stocks/vn/realtime` and `/api/v1/stocks/vn/realtime/trades` while preserving Mozyfin `latest_price` semantics.
+- [改进] Add separate Vietnam dashboard display for Daily close, KBS snapshot, and Latest trade tape, including KBS staleness status and compact failure states.
+- [改进] Add manual and automatic KBS refresh with split intervals: quotes 10/15/30 seconds and latest trade tape 5/10/15 seconds, without reloading Mozyfin overview/detail data.
+- [改进] Add Vietnam dashboard Data status panel with Mozyfin source/fixture state, KBS status, selected ticker state, stale/unavailable counts, and KBS refresh timestamps.
+- [改进] Add VN market phase labels for normal weekdays, including ATO, continuous sessions, lunch break, ATC, post-close, closed, and weekend/closed states with `holidayAware=false`.
+- [chore] Add `vnstock==4.0.4` as a runtime deployment dependency and validate Docker/Render KBS snapshot readiness.
+
+- [docs] Document the Vietnam KBS/vnstock snapshot architecture as a separate optional layer that preserves Mozyfin daily OHLCV and 1H intraday semantics.
 
 - [docs] Add root Docker and Render deployment support for the Vietnam dashboard, including live-mode environment guidance and fixture-mode guardrails.
 
