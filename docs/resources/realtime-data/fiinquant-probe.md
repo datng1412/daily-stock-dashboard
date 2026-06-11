@@ -4,6 +4,8 @@ This note describes a standalone probe for evaluating whether a FiinQuantX accou
 
 The probe is not integrated into the application. It must not change Mozyfin behavior, daily OHLCV semantics, or dashboard `latest_price` semantics.
 
+Scope: this probe tests only FiinQuantX `Trading_Data_Stream`. It does not test BidAsk, orderbook, depth-of-market, or other realtime stream APIs.
+
 ## Install
 
 ```powershell
@@ -71,6 +73,7 @@ For realtime architecture planning, the key questions are:
 
 ## Semantic Guardrails
 
+- This probe covers `Trading_Data_Stream` only; do not treat its result as evidence about BidAsk/orderbook availability.
 - FiinQuant realtime matched price must remain separate from Mozyfin daily OHLCV close.
 - Realtime matched price must not replace `latest_price`.
 - Daily OHLCV close must never be labeled realtime.
