@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 
 import subprocess
+import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -26,6 +28,7 @@ from src.services.vietnam_market_service import (
     clear_vietnam_cache,
     derive_neutral_status_labels,
     normalize_intraday_candles,
+    normalize_vietnam_tickers,
 )
 
 
@@ -73,10 +76,11 @@ class _StubFetcher:
 
 
 class _StubManager:
-    def __init__(self, df, fixture_dir=None, foreign=None, fail_daily=False, intraday=None):
+    def __init__(self, df, fixture_dir=None, foreign=None, fail_daily=False, intraday=None, daily_delay=0):
         self.df = df
         self.daily_calls = 0
         self.fail_daily = fail_daily
+        self.daily_delay = daily_delay
         self.fetcher = _StubFetcher()
         self.fetcher.intraday = intraday
         if foreign is not None:
@@ -86,6 +90,8 @@ class _StubManager:
 
     def get_daily_data(self, stock_code, days=30):
         self.daily_calls += 1
+        if self.daily_delay:
+            time.sleep(self.daily_delay)
         if self.fail_daily:
             raise RuntimeError("ohlcv failed")
         return self.df.copy(), "MozyfinFetcher"
@@ -129,6 +135,40 @@ def test_default_vietnam_news_limit_is_five(monkeypatch):
     service.build_watchlist(["FPT"])
 
     assert manager.fetcher.news_limits == [5]
+
+
+def test_normalize_vietnam_tickers_dedupes_preserving_first_seen_order():
+    assert normalize_vietnam_tickers(["fpt", "FPT", "FPT.VN", " acb", "", "bad-value", "ACB.VN"]) == ["FPT", "ACB"]
+
+
+def test_watchlist_dedupes_before_fetching(monkeypatch):
+    monkeypatch.delenv("MOZYFIN_FIXTURE_DIR", raising=False)
+    rows = _sample_vn_rows()
+    manager = _StubManager(rows)
+    service = VietnamMarketService(manager=manager, config=VietnamDashboardConfig(history_days=30, news_limit=0))
+
+    payload = service.build_watchlist(["fpt", "FPT", "FPT.VN", " acb"], include_intraday=False)
+
+    assert [item["ticker"] for item in payload["watchlist"]] == ["FPT", "ACB"]
+    assert manager.daily_calls == 2
+
+
+def test_concurrent_identical_watchlist_requests_singleflight_daily_fetch(monkeypatch):
+    monkeypatch.delenv("MOZYFIN_FIXTURE_DIR", raising=False)
+    rows = _sample_vn_rows()
+    manager = _StubManager(rows, daily_delay=0.2)
+    service = VietnamMarketService(manager=manager, config=VietnamDashboardConfig(history_days=30, news_limit=0))
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [
+            executor.submit(service.build_watchlist, ["FPT"], False, False),
+            executor.submit(service.build_watchlist, ["FPT"], False, False),
+        ]
+        results = [future.result() for future in futures]
+
+    assert manager.daily_calls == 1
+    assert [result["watchlist"][0]["ticker"] for result in results] == ["FPT", "FPT"]
+    assert {result["watchlist"][0]["cache_status"]["ohlcv_cache"] for result in results} == {"miss", "hit"}
 
 
 def test_mozyfin_fetcher_maps_fixture_to_standard_ohlcv():

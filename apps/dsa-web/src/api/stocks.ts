@@ -195,6 +195,8 @@ export type VietnamRealtimeQuote = {
   source: 'vnstock_kbs';
   status: 'ok' | 'unavailable' | 'error' | 'stale';
   error?: string | null;
+  errorDetail?: string | null;
+  rawError?: string | null;
 };
 
 export type VietnamRealtimeResponse = {
@@ -202,6 +204,8 @@ export type VietnamRealtimeResponse = {
   source: 'vnstock_kbs';
   status: 'ok' | 'unavailable' | 'error' | 'stale';
   error?: string | null;
+  errorDetail?: string | null;
+  rawError?: string | null;
   requestedTickers: string[];
   quotes: VietnamRealtimeQuote[];
   cache: Record<string, unknown>;
@@ -222,6 +226,8 @@ export type VietnamRealtimeTradesResponse = {
   symbol: string;
   status: 'ok' | 'unavailable' | 'error' | 'stale';
   error?: string | null;
+  errorDetail?: string | null;
+  rawError?: string | null;
   trades: VietnamRealtimeTrade[];
   note?: string | null;
   cache: Record<string, unknown>;

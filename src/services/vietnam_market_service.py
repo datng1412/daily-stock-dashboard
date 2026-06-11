@@ -9,7 +9,7 @@ import os
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from threading import RLock
+from threading import Lock, RLock
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 import pandas as pd
@@ -129,12 +129,16 @@ class _CacheEntry:
 
 _VN_CACHE: Dict[Tuple[Any, ...], _CacheEntry] = {}
 _VN_CACHE_LOCK = RLock()
+_VN_INFLIGHT_LOCKS: Dict[Tuple[Any, ...], Lock] = {}
+_VN_INFLIGHT_LOCKS_LOCK = RLock()
 
 
 def clear_vietnam_cache() -> None:
     """Clear process-local Vietnam cache. Intended for tests and manual diagnostics."""
     with _VN_CACHE_LOCK:
         _VN_CACHE.clear()
+    with _VN_INFLIGHT_LOCKS_LOCK:
+        _VN_INFLIGHT_LOCKS.clear()
 
 
 def _utc_now() -> datetime:
@@ -150,6 +154,24 @@ def _cache_key(data_type: str, symbol: str, **params: Any) -> Tuple[Any, ...]:
     return ("VN", data_type, vn_ticker(symbol), *normalized_params)
 
 
+def normalize_vietnam_tickers(values: Optional[Iterable[str]]) -> List[str]:
+    symbols: List[str] = []
+    seen = set()
+    duplicate_count = 0
+    for value in values or VN_WATCHLIST:
+        ticker = vn_ticker(str(value).strip().upper())
+        if not ticker or not ticker.replace(".", "").isalnum() or len(ticker) > 10:
+            continue
+        if ticker in seen:
+            duplicate_count += 1
+            continue
+        seen.add(ticker)
+        symbols.append(ticker)
+    if duplicate_count:
+        logger.info("Vietnam watchlist removed %s duplicate ticker(s)", duplicate_count)
+    return symbols
+
+
 def _get_cache_entry(key: Tuple[Any, ...]) -> Optional[_CacheEntry]:
     with _VN_CACHE_LOCK:
         return _VN_CACHE.get(key)
@@ -163,6 +185,15 @@ def _set_cache_entry(key: Tuple[Any, ...], value: Any, ttl_seconds: int) -> _Cac
     return entry
 
 
+def _get_inflight_lock(key: Tuple[Any, ...]) -> Lock:
+    with _VN_INFLIGHT_LOCKS_LOCK:
+        lock = _VN_INFLIGHT_LOCKS.get(key)
+        if lock is None:
+            lock = Lock()
+            _VN_INFLIGHT_LOCKS[key] = lock
+        return lock
+
+
 def _read_cache(
     key: Tuple[Any, ...],
     data_type: str,
@@ -173,22 +204,39 @@ def _read_cache(
     now = _utc_now()
     entry = _get_cache_entry(key)
     if entry and entry.expires_at > now and not force_refresh:
+        logger.debug("VN cache hit: %s", key)
         return {"value": entry.value, "status": "hit", "entry": entry, "error": None}
 
-    try:
-        value = fetch()
-        refreshed = _set_cache_entry(key, value, ttl_seconds)
-        if force_refresh:
-            status = "refresh"
-        elif entry:
-            status = "refresh"
-        else:
-            status = "miss"
-        return {"value": value, "status": status, "entry": refreshed, "error": None}
-    except Exception as exc:
-        if entry is not None:
-            return {"value": entry.value, "status": "stale", "entry": entry, "error": str(exc)}
-        raise
+    lock = _get_inflight_lock(key)
+    waited = lock.locked()
+    if waited:
+        logger.debug("VN cache single-flight wait: %s", key)
+    with lock:
+        now = _utc_now()
+        current_entry = _get_cache_entry(key)
+        if current_entry and current_entry.expires_at > now:
+            if waited:
+                logger.debug("VN cache single-flight reuse: %s", key)
+                return {"value": current_entry.value, "status": "hit", "entry": current_entry, "error": None}
+            if not force_refresh:
+                logger.debug("VN cache hit: %s", key)
+                return {"value": current_entry.value, "status": "hit", "entry": current_entry, "error": None}
+
+        logger.debug("VN cache %s: %s", "refresh" if current_entry or force_refresh else "miss", key)
+        try:
+            value = fetch()
+            refreshed = _set_cache_entry(key, value, ttl_seconds)
+            if force_refresh:
+                status = "refresh"
+            elif current_entry:
+                status = "refresh"
+            else:
+                status = "miss"
+            return {"value": value, "status": status, "entry": refreshed, "error": None}
+        except Exception as exc:
+            if current_entry is not None:
+                return {"value": current_entry.value, "status": "stale", "entry": current_entry, "error": str(exc)}
+            raise
 
 
 @dataclass(frozen=True)
@@ -858,7 +906,7 @@ class VietnamMarketService:
         intraday_timeframe: Optional[str] = None,
         intraday_limit: Optional[int] = None,
     ) -> Dict[str, Any]:
-        symbols = [vn_ticker(t) for t in (tickers or VN_WATCHLIST) if vn_ticker(t)]
+        symbols = normalize_vietnam_tickers(tickers)
         rows = []
         fixture_mode = _is_fixture_mode(self.manager)
         refresh_time = datetime.now(timezone.utc).isoformat()
@@ -960,7 +1008,7 @@ class VietnamMarketService:
         }
 
     def build_health(self, tickers: Optional[Iterable[str]] = None) -> Dict[str, Any]:
-        symbols = [vn_ticker(t) for t in (tickers or VN_WATCHLIST) if vn_ticker(t)]
+        symbols = normalize_vietnam_tickers(tickers)
         fixture_mode = _is_fixture_mode(self.manager)
         refresh_time = datetime.now(timezone.utc).isoformat()
         rows = []

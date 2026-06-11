@@ -23,6 +23,12 @@ VN_TIMEZONE = ZoneInfo("Asia/Ho_Chi_Minh")
 STALE_THRESHOLD_SECONDS = 60
 SNAPSHOT_NOTE = "KBS board snapshot; may differ from trade tape"
 TRADE_TAPE_NOTE = "Trade tape may exclude auction/ATC prints depending on provider output"
+KBS_TIMEOUT_ERROR = "KBS provider timeout"
+KBS_TIMEOUT_DETAIL = "The upstream KBS provider did not respond in time."
+KBS_NETWORK_ERROR = "KBS network/proxy issue"
+KBS_NETWORK_DETAIL = "Check provider connectivity or retry later."
+KBS_UNAVAILABLE_ERROR = "KBS unavailable"
+KBS_UNAVAILABLE_DETAIL = "Provider returned an unavailable state."
 
 
 @dataclass
@@ -177,6 +183,36 @@ def _row_symbol(row: Dict[str, Any]) -> Optional[str]:
     return None
 
 
+def _shape_provider_error(error: Any) -> Dict[str, Optional[str]]:
+    raw_error = _safe_str(error) or KBS_UNAVAILABLE_ERROR
+    normalized = raw_error.lower()
+    if any(token in normalized for token in ("timeout", "timed out")) or any(
+        token in raw_error
+        for token in (
+            "\xe8\xbf\u017e\xe6\u017d\xa5\xe4\xb8\u0160\xe6\xb8\xb8\xe6\u0153\x8d\xe5\u0160\xa1\xe8\xb6\u2026\xe6\u2014\xb6",
+            "\xe8\xb6\u2026\xe6\u2014\xb6",
+        )
+    ):
+        return {
+            "error": KBS_TIMEOUT_ERROR,
+            "error_detail": KBS_TIMEOUT_DETAIL,
+            "raw_error": raw_error,
+        }
+    if any(token in normalized for token in ("proxy", "network")) or any(
+        token in raw_error for token in ("\xe7\xbd\u2018\xe7\xbb\u0153", "\xe4\xbb\xa3\xe7\x90\u2020")
+    ):
+        return {
+            "error": KBS_NETWORK_ERROR,
+            "error_detail": KBS_NETWORK_DETAIL,
+            "raw_error": raw_error,
+        }
+    return {
+        "error": KBS_UNAVAILABLE_ERROR,
+        "error_detail": KBS_UNAVAILABLE_DETAIL,
+        "raw_error": raw_error,
+    }
+
+
 class VnstockRealtimeFetcher:
     """Optional vnstock KBS realtime/snapshot provider."""
 
@@ -216,11 +252,12 @@ class VnstockRealtimeFetcher:
         try:
             rows, cache = _read_cache(cache_key, self.realtime_ttl_seconds, loader)
         except Exception as exc:
+            shaped_error = _shape_provider_error(exc)
             return self._response(
                 symbols,
-                [self._error_quote(symbol, "error", str(exc)) for symbol in symbols],
+                [self._error_quote(symbol, "error", **shaped_error) for symbol in symbols],
                 status="error",
-                error=str(exc),
+                **shaped_error,
             )
 
         quotes = self._map_quote_rows(symbols, rows)
@@ -251,7 +288,7 @@ class VnstockRealtimeFetcher:
         try:
             rows, cache = _read_cache(cache_key, self.trades_ttl_seconds, loader)
         except Exception as exc:
-            return self._trades_response(ticker, [], status="error", error=str(exc))
+            return self._trades_response(ticker, [], status="error", **_shape_provider_error(exc))
 
         trades = [self._map_trade(row) for row in rows[:limit]]
         return self._trades_response(ticker, trades, status="ok", cache=cache)
@@ -267,7 +304,15 @@ class VnstockRealtimeFetcher:
         for symbol in symbols:
             row = by_symbol.get(symbol)
             if row is None:
-                quotes.append(self._error_quote(symbol, "error", "Ticker not returned by vnstock KBS"))
+                quotes.append(
+                    self._error_quote(
+                        symbol,
+                        "error",
+                        error="KBS ticker unavailable",
+                        error_detail="Ticker was not returned by the KBS snapshot provider.",
+                        raw_error="Ticker not returned by vnstock KBS",
+                    )
+                )
             else:
                 quotes.append(self._map_quote(symbol, row))
         return quotes
@@ -302,9 +347,18 @@ class VnstockRealtimeFetcher:
             "source": VNSTOCK_REALTIME_SOURCE,
             "status": "ok",
             "error": None,
+            "error_detail": None,
+            "raw_error": None,
         }
 
-    def _error_quote(self, symbol: str, status: str, error: str) -> Dict[str, Any]:
+    def _error_quote(
+        self,
+        symbol: str,
+        status: str,
+        error: str,
+        error_detail: Optional[str] = None,
+        raw_error: Optional[str] = None,
+    ) -> Dict[str, Any]:
         return {
             "symbol": symbol,
             "realtime_price": None,
@@ -336,6 +390,8 @@ class VnstockRealtimeFetcher:
             "source": VNSTOCK_REALTIME_SOURCE,
             "status": status,
             "error": error,
+            "error_detail": error_detail,
+            "raw_error": raw_error,
         }
 
     def _map_trade(self, row: Dict[str, Any]) -> Dict[str, Any]:
@@ -349,11 +405,12 @@ class VnstockRealtimeFetcher:
         }
 
     def _unavailable_response(self, symbols: List[str], error: str) -> Dict[str, Any]:
+        shaped_error = _shape_provider_error(error)
         return self._response(
             symbols,
-            [self._error_quote(symbol, "unavailable", error) for symbol in symbols],
+            [self._error_quote(symbol, "unavailable", **shaped_error) for symbol in symbols],
             status="unavailable",
-            error=error,
+            **shaped_error,
         )
 
     def _response(
@@ -363,6 +420,8 @@ class VnstockRealtimeFetcher:
         *,
         status: str,
         error: Optional[str] = None,
+        error_detail: Optional[str] = None,
+        raw_error: Optional[str] = None,
         cache: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         return {
@@ -370,6 +429,8 @@ class VnstockRealtimeFetcher:
             "source": VNSTOCK_REALTIME_SOURCE,
             "status": status,
             "error": error,
+            "error_detail": error_detail,
+            "raw_error": raw_error,
             "requested_tickers": symbols,
             "quotes": quotes,
             "cache": cache or {
@@ -385,6 +446,8 @@ class VnstockRealtimeFetcher:
         *,
         status: str,
         error: Optional[str] = None,
+        error_detail: Optional[str] = None,
+        raw_error: Optional[str] = None,
         cache: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         return {
@@ -393,6 +456,8 @@ class VnstockRealtimeFetcher:
             "symbol": symbol,
             "status": status,
             "error": error,
+            "error_detail": error_detail,
+            "raw_error": raw_error,
             "trades": trades,
             "note": TRADE_TAPE_NOTE,
             "cache": cache or {

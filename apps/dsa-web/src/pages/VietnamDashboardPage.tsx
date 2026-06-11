@@ -19,6 +19,7 @@ import {
   VIETNAM_WATCHLIST_PRESETS,
   getVietnamPresetTickers,
   moveVietnamTicker,
+  normalizeVietnamTicker,
   normalizeVietnamWatchlist,
   readVietnamWatchlist,
   validateVietnamTicker,
@@ -161,6 +162,25 @@ const rawKbsFreshnessText = (quote?: VietnamRealtimeQuote | null) => (
   `raw age ${quote?.ageSeconds ?? '-'}s | raw stale ${quote?.isStale === null || quote?.isStale === undefined ? '-' : String(quote.isStale)} | reason ${quote?.staleReason ?? '-'}`
 );
 
+const kbsErrorMessage = (error?: string | null) => {
+  if (!error) return null;
+  const lower = error.toLowerCase();
+  if (lower.includes('timeout') || lower.includes('timed out') || error.includes('è¶…æ—¶')) return 'KBS provider timeout';
+  if (lower.includes('network') || lower.includes('proxy') || error.includes('ç½‘ç»œ') || error.includes('ä»£ç†')) {
+    return 'KBS network/proxy issue';
+  }
+  return error;
+};
+
+const kbsSnapshotSummaryText = (quote: VietnamRealtimeQuote | null | undefined, state: KbsSnapshotDisplayResult) => {
+  const cleanError = kbsErrorMessage(quote?.error);
+  if (cleanError) return cleanError;
+  const time = quote?.snapshotTimeDisplay ?? quote?.realtimeTimeDisplay ?? quote?.snapshotTime ?? quote?.realtimeTime;
+  if (state.label === 'Last available KBS snapshot' && time) return `Last available · ${formatVietnamTime(time)}`;
+  if (time) return `${state.label} · ${formatVietnamTime(time)}`;
+  return state.label;
+};
+
 const kbsProviderStatus = (
   quotes: Record<string, VietnamRealtimeQuote | undefined>,
   activeTickers: string[],
@@ -249,8 +269,7 @@ const WatchCard: React.FC<{ item: VietnamWatchItem; realtimeQuote?: VietnamRealt
           <p className={cn('text-xs', signalTone(realtimeQuote?.priceChange))}>
             {formatPrice(realtimeQuote?.priceChange)} / {formatNumber(realtimeQuote?.percentChange, 2)}%
           </p>
-          <p className="text-xs text-secondary-text">KBS time {realtimeQuote?.realtimeTimeDisplay ?? realtimeQuote?.realtimeTime ?? '-'}</p>
-          <p className="text-xs text-secondary-text">{rawKbsFreshnessText(realtimeQuote)}</p>
+          <p className="text-xs text-secondary-text">{kbsSnapshotSummaryText(realtimeQuote, kbsState)}</p>
         </div>
         <div>
           <p className="text-xs text-secondary-text">Volume (shares)</p>
@@ -622,7 +641,7 @@ const DataStatusPanel: React.FC<{
       ) : null}
       {realtimeError || tradesError ? (
         <div className="mt-3 rounded-lg border border-warning/20 bg-warning/10 p-2 text-xs text-warning">
-          KBS issue: {realtimeError ?? tradesError}
+          KBS issue: {kbsErrorMessage(realtimeError ?? tradesError) ?? 'KBS unavailable'}
         </div>
       ) : null}
     </section>
@@ -647,7 +666,7 @@ const IndicatorTable: React.FC<{
     </div>
     {realtimeError ? (
       <div className="mb-3 rounded-lg border border-warning/20 bg-warning/10 p-2 text-xs text-warning">
-        KBS snapshot unavailable: {realtimeError}
+        KBS snapshot unavailable: {kbsErrorMessage(realtimeError) ?? 'KBS unavailable'}
       </div>
     ) : null}
     <div className="overflow-x-auto">
@@ -960,9 +979,9 @@ const StockDetailView: React.FC<{
         <p className="mt-3 text-xs text-secondary-text">
           {kbsState.reason}
         </p>
-        <p className="mt-1 text-xs text-secondary-text">
-          {rawKbsFreshnessText(realtimeQuote)}
-        </p>
+        {realtimeQuote?.error ? (
+          <p className="mt-1 text-xs text-secondary-text">{kbsErrorMessage(realtimeQuote.error)}</p>
+        ) : null}
         <p className="mt-3 text-xs text-secondary-text">
           {realtimeQuote?.snapshotNote ?? 'KBS board snapshot; may differ from trade tape'}
         </p>
@@ -977,7 +996,7 @@ const StockDetailView: React.FC<{
         </p>
         {tradesError ? (
           <div className="mt-3 rounded-lg border border-warning/20 bg-warning/10 p-2 text-xs text-warning">
-            Latest trade tape unavailable: {tradesError}
+            Latest trade tape unavailable: {kbsErrorMessage(tradesError) ?? 'KBS unavailable'}
           </div>
         ) : null}
         {!tradesError && !tradesLoading && realtimeTrades.length === 0 ? (
@@ -1143,6 +1162,19 @@ const VietnamDashboardPage: React.FC = () => {
   const [nextRefreshAt, setNextRefreshAt] = useState<number | null>(null);
   const [countdownSeconds, setCountdownSeconds] = useState<number | null>(null);
   const [isTabHidden, setIsTabHidden] = useState(() => typeof document !== 'undefined' && document.visibilityState === 'hidden');
+  const logicalWatchlist = useMemo(() => {
+    const seen = new Set<string>();
+    return watchlist
+      .map((ticker) => normalizeVietnamTicker(ticker))
+      .filter((ticker) => {
+        if (!ticker || seen.has(ticker)) return false;
+        seen.add(ticker);
+        return true;
+      });
+  }, [watchlist]);
+  const logicalWatchlistKey = useMemo(() => logicalWatchlist.join(','), [logicalWatchlist]);
+  const logicalWatchlistRef = useRef(logicalWatchlist);
+  logicalWatchlistRef.current = logicalWatchlist;
   const requestIdRef = useRef(0);
   const realtimeRequestIdRef = useRef(0);
   const tradesRequestIdRef = useRef(0);
@@ -1184,14 +1216,14 @@ const VietnamDashboardPage: React.FC = () => {
       if (requestId !== realtimeRequestIdRef.current) return;
       setRealtimeQuotes(Object.fromEntries(response.quotes.map((quote) => [quote.symbol, quote])));
       setLastKbsQuoteRefreshAt(new Date().toISOString());
-      setRealtimeError(response.status === 'ok' ? null : response.error ?? 'KBS snapshot unavailable');
+      setRealtimeError(response.status === 'ok' ? null : kbsErrorMessage(response.error) ?? 'KBS snapshot unavailable');
       if (response.status !== 'ok') {
         setLastKbsErrorAt(new Date().toISOString());
       }
     } catch (err) {
       if (requestId !== realtimeRequestIdRef.current) return;
       setLastKbsErrorAt(new Date().toISOString());
-      setRealtimeError(err instanceof Error ? err.message : 'KBS snapshot unavailable');
+      setRealtimeError(kbsErrorMessage(err instanceof Error ? err.message : null) ?? (err instanceof Error ? err.message : 'KBS snapshot unavailable'));
     } finally {
       if (requestId === realtimeRequestIdRef.current) {
         setRealtimeLoading(false);
@@ -1213,14 +1245,14 @@ const VietnamDashboardPage: React.FC = () => {
       if (requestId !== tradesRequestIdRef.current) return;
       setRealtimeTrades(response.trades);
       setLastKbsTradeRefreshAt(new Date().toISOString());
-      setTradesError(response.status === 'ok' ? null : response.error ?? 'Latest trade tape unavailable');
+      setTradesError(response.status === 'ok' ? null : kbsErrorMessage(response.error) ?? 'Latest trade tape unavailable');
       if (response.status !== 'ok') {
         setLastKbsErrorAt(new Date().toISOString());
       }
     } catch (err) {
       if (requestId !== tradesRequestIdRef.current) return;
       setLastKbsErrorAt(new Date().toISOString());
-      setTradesError(err instanceof Error ? err.message : 'Latest trade tape unavailable');
+      setTradesError(kbsErrorMessage(err instanceof Error ? err.message : null) ?? (err instanceof Error ? err.message : 'Latest trade tape unavailable'));
     } finally {
       if (requestId === tradesRequestIdRef.current) {
         setTradesLoading(false);
@@ -1232,12 +1264,12 @@ const VietnamDashboardPage: React.FC = () => {
     if (kbsQuoteRefreshInFlightRef.current) return false;
     kbsQuoteRefreshInFlightRef.current = true;
     try {
-      await loadRealtimeQuotes(tickersOverride ?? watchlist);
+      await loadRealtimeQuotes(tickersOverride ?? logicalWatchlistRef.current);
       return true;
     } finally {
       kbsQuoteRefreshInFlightRef.current = false;
     }
-  }, [loadRealtimeQuotes, watchlist]);
+  }, [loadRealtimeQuotes]);
 
   const refreshKbsTrades = useCallback(async (selectedTickerOverride?: string | null) => {
     if (kbsTradeRefreshInFlightRef.current) return false;
@@ -1261,13 +1293,13 @@ const VietnamDashboardPage: React.FC = () => {
     setForceLoading(forceRefresh);
     setError(null);
     try {
-      const requestedTickers = tickersOverride ?? watchlist;
+      const requestedTickers = tickersOverride ?? logicalWatchlistRef.current;
       const nextData = await stocksApi.getVietnamWatchlist(requestedTickers, forceRefresh);
       if (requestId !== requestIdRef.current) return;
       setData(nextData);
       setLastRefreshKind(refreshKind);
       setLastRefreshAt(new Date().toISOString());
-      void refreshKbsQuotes(requestedTickers);
+      void loadRealtimeQuotes(requestedTickers);
     } catch (err) {
       if (requestId !== requestIdRef.current) return;
       setError(err instanceof Error ? err.message : 'Failed to load Vietnam dashboard');
@@ -1277,7 +1309,7 @@ const VietnamDashboardPage: React.FC = () => {
         setForceLoading(false);
       }
     }
-  }, [refreshKbsQuotes, watchlist]);
+  }, [loadRealtimeQuotes]);
 
   const handlePresetChange = useCallback((event: React.ChangeEvent<HTMLSelectElement>) => {
     const presetId = event.target.value as VietnamWatchlistPresetId;
@@ -1357,8 +1389,8 @@ const VietnamDashboardPage: React.FC = () => {
       void load(queuedLoad.forceRefresh, queuedLoad.refreshKind, queuedLoad.tickers);
       return;
     }
-    void load();
-  }, [load]);
+    void load(false, 'manual', logicalWatchlistRef.current);
+  }, [load, logicalWatchlistKey]);
 
   useEffect(() => {
     void refreshKbsTrades(selectedTicker);
@@ -1495,13 +1527,14 @@ const VietnamDashboardPage: React.FC = () => {
 
   useEffect(() => {
     const rows = data?.watchlist ?? [];
-    if (selectedTicker && watchlist.includes(selectedTicker)) {
+    const currentWatchlist = logicalWatchlistRef.current;
+    if (selectedTicker && currentWatchlist.includes(selectedTicker)) {
       return;
     }
     if (rows.length && !rows.some((item) => item.ticker === selectedTicker)) {
       setSelectedTicker(rows[0].ticker);
     }
-  }, [data, selectedTicker, watchlist]);
+  }, [data, logicalWatchlistKey, selectedTicker]);
 
   const summary = useMemo(() => {
     const rows = data?.watchlist ?? [];

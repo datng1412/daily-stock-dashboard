@@ -233,6 +233,8 @@ class VietnamRealtimeQuote(BaseModel):
     source: str = "vnstock_kbs"
     status: str = "ok"
     error: Optional[str] = None
+    error_detail: Optional[str] = None
+    raw_error: Optional[str] = None
 
 
 class VietnamRealtimeResponse(BaseModel):
@@ -242,6 +244,8 @@ class VietnamRealtimeResponse(BaseModel):
     source: str = "vnstock_kbs"
     status: str = "ok"
     error: Optional[str] = None
+    error_detail: Optional[str] = None
+    raw_error: Optional[str] = None
     requested_tickers: List[str] = Field(default_factory=list)
     quotes: List[VietnamRealtimeQuote] = Field(default_factory=list)
     cache: Dict[str, Any] = Field(default_factory=dict)
@@ -266,6 +270,8 @@ class VietnamRealtimeTradesResponse(BaseModel):
     symbol: str
     status: str = "ok"
     error: Optional[str] = None
+    error_detail: Optional[str] = None
+    raw_error: Optional[str] = None
     trades: List[VietnamRealtimeTrade] = Field(default_factory=list)
     note: Optional[str] = None
     cache: Dict[str, Any] = Field(default_factory=dict)

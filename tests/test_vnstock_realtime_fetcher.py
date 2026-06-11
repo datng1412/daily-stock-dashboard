@@ -53,6 +53,24 @@ class _FakeTrading:
         )
 
 
+class _TimeoutTrading:
+    def __init__(self, source=""):
+        self.source = source
+
+    def price_board(self, tickers):
+        raise RuntimeError(
+            "\xe8\xbf\u017e\xe6\u017d\xa5\xe4\xb8\u0160\xe6\xb8\xb8\xe6\u0153\x8d\xe5\u0160\xa1\xe8\xb6\u2026\xe6\u2014\xb6: upstream failed"
+        )
+
+
+class _GenericErrorTrading:
+    def __init__(self, source=""):
+        self.source = source
+
+    def price_board(self, tickers):
+        raise RuntimeError("provider exploded")
+
+
 class _FakeEquity:
     def __init__(self, symbol):
         self.symbol = symbol
@@ -80,6 +98,14 @@ def _fake_load_classes(self):
     return _FakeTrading, _FakeMarket
 
 
+def _timeout_load_classes(self):
+    return _TimeoutTrading, _FakeMarket
+
+
+def _generic_error_load_classes(self):
+    return _GenericErrorTrading, _FakeMarket
+
+
 def test_vnstock_realtime_maps_close_price_to_separate_realtime_price(monkeypatch):
     monkeypatch.setattr(VnstockRealtimeFetcher, "_load_classes", _fake_load_classes)
 
@@ -94,6 +120,9 @@ def test_vnstock_realtime_maps_close_price_to_separate_realtime_price(monkeypatc
     assert quote["snapshot_time"] == "10:00:01"
     assert quote["snapshot_note"] == "KBS board snapshot; may differ from trade tape"
     assert quote["source"] == "vnstock_kbs"
+    assert quote["error"] is None
+    assert quote["error_detail"] is None
+    assert quote["raw_error"] is None
     assert "latest_price" not in quote
 
 
@@ -185,8 +214,39 @@ def test_vnstock_missing_returns_unavailable(monkeypatch):
     payload = VnstockRealtimeFetcher().fetch_quotes(["FPT", "ACB"])
 
     assert payload["status"] == "unavailable"
-    assert payload["error"] == "vnstock is not installed"
+    assert payload["error"] == "KBS unavailable"
+    assert payload["error_detail"] == "Provider returned an unavailable state."
+    assert payload["raw_error"] == "vnstock is not installed"
     assert [quote["status"] for quote in payload["quotes"]] == ["unavailable", "unavailable"]
+    assert [quote["error"] for quote in payload["quotes"]] == ["KBS unavailable", "KBS unavailable"]
+
+
+def test_chinese_timeout_error_is_shaped_and_raw_error_is_preserved(monkeypatch):
+    monkeypatch.setattr(VnstockRealtimeFetcher, "_load_classes", _timeout_load_classes)
+
+    payload = VnstockRealtimeFetcher().fetch_quotes(["FPT"])
+    quote = payload["quotes"][0]
+
+    assert payload["status"] == "error"
+    assert payload["error"] == "KBS provider timeout"
+    assert payload["error_detail"] == "The upstream KBS provider did not respond in time."
+    assert payload["raw_error"]
+    assert payload["raw_error"] != payload["error"]
+    assert "\xe8\xb6\u2026\xe6\u2014\xb6" in payload["raw_error"]
+    assert quote["error"] == "KBS provider timeout"
+    assert quote["error_detail"] == "The upstream KBS provider did not respond in time."
+    assert quote["raw_error"] == payload["raw_error"]
+
+
+def test_generic_quote_exception_becomes_kbs_unavailable(monkeypatch):
+    monkeypatch.setattr(VnstockRealtimeFetcher, "_load_classes", _generic_error_load_classes)
+
+    payload = VnstockRealtimeFetcher().fetch_quotes(["FPT"])
+
+    assert payload["status"] == "error"
+    assert payload["error"] == "KBS unavailable"
+    assert payload["error_detail"] == "Provider returned an unavailable state."
+    assert payload["raw_error"] == "provider exploded"
 
 
 def test_vnstock_trades_mapping(monkeypatch):
