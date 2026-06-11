@@ -158,6 +158,10 @@ const makeRealtimeResponse = (tickers: string[], options: { stale?: boolean; una
     realtimePrice: ticker === 'FPT' ? 101.5 : 100.5,
     realtimeTime: '10:15:00',
     realtimeTimeDisplay: '2026-06-11T10:15:00+07:00',
+    snapshotPrice: ticker === 'FPT' ? 101.5 : 100.5,
+    snapshotTime: '10:15:00',
+    snapshotTimeDisplay: '2026-06-11T10:15:00+07:00',
+    snapshotNote: 'KBS board snapshot; may differ from trade tape',
     ageSeconds: options.stale ? 600 : 20,
     isStale: options.stale ?? false,
     staleReason: options.stale ? 'age_gt_60s' : null,
@@ -200,6 +204,7 @@ const makeTradesResponse = (symbol: string): VietnamRealtimeTradesResponse => ({
       source: 'vnstock_kbs',
     },
   ],
+  note: 'Trade tape may exclude auction/ATC prints depending on provider output',
   cache: { cacheStatus: 'miss' },
 });
 
@@ -268,13 +273,16 @@ describe('VietnamDashboardPage watchlist loading', () => {
     });
   });
 
-  it('keeps Mozyfin daily close separate from KBS snapshot', async () => {
+  it('keeps Mozyfin daily close, KBS snapshot, and trade tape separate', async () => {
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledWith(defaultTickers));
 
     expect(screen.getAllByText(/Daily close/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/KBS snapshot/i).length).toBeGreaterThan(0);
+    expect(await screen.findByRole('heading', { name: 'Latest trade tape' })).toBeInTheDocument();
+    expect(screen.getByText('Trade tape may not include auction/ATC prints.')).toBeInTheDocument();
+    expect(screen.getByText('KBS board snapshot; may differ from trade tape')).toBeInTheDocument();
     expect(screen.getAllByText(/OHLCV close 100/).length).toBeGreaterThan(0);
     expect(screen.getAllByText('101.5').length).toBeGreaterThan(0);
   });
@@ -376,10 +384,13 @@ describe('VietnamDashboardPage watchlist loading', () => {
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
 
     expect(screen.getByRole('checkbox', { name: 'Auto-refresh KBS' })).toBeInTheDocument();
-    expect(screen.getByLabelText('KBS interval')).toHaveValue('15');
+    expect(screen.getByLabelText('KBS quotes')).toHaveValue('15');
+    expect([...screen.getByLabelText('KBS quotes').querySelectorAll('option')].map((option) => option.value)).toEqual(['10', '15', '30']);
+    expect(screen.getByLabelText('Latest trade tape')).toHaveValue('10');
+    expect([...screen.getByLabelText('Latest trade tape').querySelectorAll('option')].map((option) => option.value)).toEqual(['5', '10', '15']);
   });
 
-  it('auto-refresh KBS calls realtime endpoints on interval only', async () => {
+  it('auto-refresh KBS calls trades and quotes on their own intervals only', async () => {
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
@@ -392,17 +403,52 @@ describe('VietnamDashboardPage watchlist loading', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: 'Auto-refresh KBS' }));
 
     await act(async () => {
-      vi.advanceTimersByTime(15000);
+      vi.advanceTimersByTime(10000);
+      await Promise.resolve();
+    });
+
+    expect(mockedGetVietnamRealtimeTrades).toHaveBeenCalledWith('FPT', 100);
+    expect(mockedGetVietnamRealtimeQuotes).not.toHaveBeenCalled();
+    expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistCalls);
+
+    mockedGetVietnamRealtimeTrades.mockClear();
+
+    await act(async () => {
+      vi.advanceTimersByTime(5000);
       await Promise.resolve();
     });
 
     expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledWith(defaultTickers);
-    expect(mockedGetVietnamRealtimeTrades).toHaveBeenCalledWith('FPT', 100);
+    expect(mockedGetVietnamRealtimeTrades).not.toHaveBeenCalled();
     expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistCalls);
-    expect(dataStatusPanel().getByText('on, 15s')).toBeInTheDocument();
+    expect(dataStatusPanel().getByText('on')).toBeInTheDocument();
+    expect(dataStatusPanel().getByText('quotes 15s | trades 10s')).toBeInTheDocument();
   });
 
-  it('auto-refresh KBS skips interval ticks while a refresh is in flight', async () => {
+  it('selected 5s trade tape interval calls only trades endpoint', async () => {
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+    await waitFor(() => expect(mockedGetVietnamRealtimeTrades).toHaveBeenCalledWith('FPT', 100));
+    const watchlistCalls = mockedGetVietnamWatchlist.mock.calls.length;
+    mockedGetVietnamRealtimeQuotes.mockClear();
+    mockedGetVietnamRealtimeTrades.mockClear();
+
+    fireEvent.change(screen.getByLabelText('Latest trade tape'), { target: { value: '5' } });
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Auto-refresh KBS' }));
+
+    await act(async () => {
+      vi.advanceTimersByTime(5000);
+      await Promise.resolve();
+    });
+
+    expect(mockedGetVietnamRealtimeTrades).toHaveBeenCalledWith('FPT', 100);
+    expect(mockedGetVietnamRealtimeQuotes).not.toHaveBeenCalled();
+    expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistCalls);
+  });
+
+  it('auto-refresh KBS skips quote ticks while quote refresh is in flight without blocking trades', async () => {
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
@@ -423,7 +469,9 @@ describe('VietnamDashboardPage watchlist loading', () => {
       await Promise.resolve();
     });
     expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledTimes(1);
+    expect(mockedGetVietnamRealtimeTrades).toHaveBeenCalledWith('FPT', 100);
 
+    mockedGetVietnamRealtimeTrades.mockClear();
     await act(async () => {
       vi.advanceTimersByTime(15000);
       await Promise.resolve();
@@ -432,6 +480,41 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     await act(async () => {
       resolveQuotes?.(makeRealtimeResponse(defaultTickers));
+    });
+  });
+
+  it('auto-refresh KBS skips trade ticks while trade refresh is in flight without blocking quotes', async () => {
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+    await waitFor(() => expect(mockedGetVietnamRealtimeTrades).toHaveBeenCalledWith('FPT', 100));
+    mockedGetVietnamRealtimeQuotes.mockClear();
+    mockedGetVietnamRealtimeTrades.mockClear();
+
+    let resolveTrades: ((response: VietnamRealtimeTradesResponse) => void) | undefined;
+    mockedGetVietnamRealtimeTrades.mockImplementation(() => new Promise((resolve) => {
+      resolveTrades = resolve;
+    }));
+
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Auto-refresh KBS' }));
+
+    await act(async () => {
+      vi.advanceTimersByTime(10000);
+      await Promise.resolve();
+    });
+    expect(mockedGetVietnamRealtimeTrades).toHaveBeenCalledTimes(1);
+    expect(mockedGetVietnamRealtimeQuotes).not.toHaveBeenCalled();
+
+    await act(async () => {
+      vi.advanceTimersByTime(5000);
+      await Promise.resolve();
+    });
+    expect(mockedGetVietnamRealtimeTrades).toHaveBeenCalledTimes(1);
+    expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledWith(defaultTickers);
+
+    await act(async () => {
+      resolveTrades?.(makeTradesResponse('FPT'));
     });
   });
 

@@ -18,9 +18,11 @@ from zoneinfo import ZoneInfo
 
 VNSTOCK_REALTIME_SOURCE = "vnstock_kbs"
 DEFAULT_REALTIME_TTL_SECONDS = 10
-DEFAULT_TRADES_TTL_SECONDS = 10
+DEFAULT_TRADES_TTL_SECONDS = 5
 VN_TIMEZONE = ZoneInfo("Asia/Ho_Chi_Minh")
 STALE_THRESHOLD_SECONDS = 60
+SNAPSHOT_NOTE = "KBS board snapshot; may differ from trade tape"
+TRADE_TAPE_NOTE = "Trade tape may exclude auction/ATC prints depending on provider output"
 
 
 @dataclass
@@ -272,10 +274,15 @@ class VnstockRealtimeFetcher:
 
     def _map_quote(self, symbol: str, row: Dict[str, Any]) -> Dict[str, Any]:
         time_metadata = _parse_realtime_time(row.get("time"))
+        snapshot_price = _safe_float(row.get("close_price"))
         return {
             "symbol": symbol,
-            "realtime_price": _safe_float(row.get("close_price")),
+            "realtime_price": snapshot_price,
             **time_metadata,
+            "snapshot_price": snapshot_price,
+            "snapshot_time": time_metadata["realtime_time"],
+            "snapshot_time_display": time_metadata["realtime_time_display"],
+            "snapshot_note": SNAPSHOT_NOTE,
             "reference_price": _safe_float(row.get("reference_price")),
             "open_price": _safe_float(row.get("open_price")),
             "high_price": _safe_float(row.get("high_price")),
@@ -303,6 +310,10 @@ class VnstockRealtimeFetcher:
             "realtime_price": None,
             "realtime_time": None,
             "realtime_time_display": None,
+            "snapshot_price": None,
+            "snapshot_time": None,
+            "snapshot_time_display": None,
+            "snapshot_note": SNAPSHOT_NOTE,
             "age_seconds": None,
             "is_stale": None,
             "stale_reason": "timestamp_unparseable",
@@ -383,6 +394,7 @@ class VnstockRealtimeFetcher:
             "status": status,
             "error": error,
             "trades": trades,
+            "note": TRADE_TAPE_NOTE,
             "cache": cache or {
                 "cache_status": "unavailable" if status == "unavailable" else "none",
                 "ttl_seconds": self.trades_ttl_seconds,

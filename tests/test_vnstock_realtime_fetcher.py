@@ -90,6 +90,9 @@ def test_vnstock_realtime_maps_close_price_to_separate_realtime_price(monkeypatc
     assert payload["status"] == "ok"
     assert quote["symbol"] == "FPT"
     assert quote["realtime_price"] == 123.4
+    assert quote["snapshot_price"] == 123.4
+    assert quote["snapshot_time"] == "10:00:01"
+    assert quote["snapshot_note"] == "KBS board snapshot; may differ from trade tape"
     assert quote["source"] == "vnstock_kbs"
     assert "latest_price" not in quote
 
@@ -111,6 +114,8 @@ def test_epoch_milliseconds_timestamp_maps_to_display_and_age(monkeypatch):
 
     assert quote["realtime_time"] == "1781150988189"
     assert quote["realtime_time_display"].startswith("2026-06-11T11:09:48")
+    assert quote["snapshot_time"] == "1781150988189"
+    assert quote["snapshot_time_display"].startswith("2026-06-11T11:09:48")
     assert quote["age_seconds"] == 11
     assert quote["is_stale"] is False
     assert quote["stale_reason"] is None
@@ -201,6 +206,15 @@ def test_vnstock_trades_mapping(monkeypatch):
             "source": "vnstock_kbs",
         }
     ]
+    assert payload["note"] == "Trade tape may exclude auction/ATC prints depending on provider output"
+    assert all(trade["time"] != "14:45:00" for trade in payload["trades"])
+
+
+def test_vnstock_quote_and_trade_cache_ttls_are_separate():
+    fetcher = VnstockRealtimeFetcher()
+
+    assert fetcher.realtime_ttl_seconds == 10
+    assert fetcher.trades_ttl_seconds == 5
 
 
 def test_realtime_endpoint_maps_quotes(monkeypatch):
@@ -211,6 +225,7 @@ def test_realtime_endpoint_maps_quotes(monkeypatch):
     assert response.status == "ok"
     assert response.requested_tickers == ["FPT"]
     assert response.quotes[0].realtime_price == 123.4
+    assert response.quotes[0].snapshot_price == 123.4
 
 
 def test_trades_endpoint_maps_trade_rows(monkeypatch):

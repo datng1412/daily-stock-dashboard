@@ -26,7 +26,8 @@ import {
 
 const DEFAULT_TICKERS = ['FPT', 'VPB', 'MSB', 'SCS', 'ACV', 'ACB'];
 const AUTO_REFRESH_INTERVALS = [60, 180, 300];
-const KBS_AUTO_REFRESH_INTERVALS = [10, 15, 30];
+const KBS_QUOTE_REFRESH_INTERVALS = [10, 15, 30];
+const KBS_TRADE_REFRESH_INTERVALS = [5, 10, 15];
 const DEFAULT_WATCHLIST = normalizeVietnamWatchlist(DEFAULT_TICKERS) ?? DEFAULT_TICKERS;
 const DETAIL_NEWS_LIMIT = 8;
 
@@ -508,7 +509,8 @@ const DataStatusPanel: React.FC<{
   lastKbsTradeRefreshAt?: string | null;
   lastKbsErrorAt?: string | null;
   kbsAutoRefreshEnabled: boolean;
-  kbsAutoRefreshInterval: number;
+  kbsQuoteRefreshInterval: number;
+  kbsTradeRefreshInterval: number;
 }> = ({
   data,
   selectedItem,
@@ -521,7 +523,8 @@ const DataStatusPanel: React.FC<{
   lastKbsTradeRefreshAt,
   lastKbsErrorAt,
   kbsAutoRefreshEnabled,
-  kbsAutoRefreshInterval,
+  kbsQuoteRefreshInterval,
+  kbsTradeRefreshInterval,
 }) => {
   const status = kbsProviderStatus(realtimeQuotes, watchlist, realtimeError, tradesError);
   const selectedQuote = selectedItem?.ticker ? realtimeQuotes[selectedItem.ticker] : undefined;
@@ -579,7 +582,8 @@ const DataStatusPanel: React.FC<{
         </div>
         <div className="rounded-lg bg-elevated/50 p-3">
           <dt className="text-xs text-secondary-text">KBS auto-refresh</dt>
-          <dd className="mt-1 font-medium text-foreground">{kbsAutoRefreshEnabled ? `on, ${kbsAutoRefreshInterval}s` : 'off'}</dd>
+          <dd className="mt-1 font-medium text-foreground">{kbsAutoRefreshEnabled ? 'on' : 'off'}</dd>
+          <dd className="mt-1 text-xs text-secondary-text">quotes {kbsQuoteRefreshInterval}s | trades {kbsTradeRefreshInterval}s</dd>
           <dd className="mt-1 text-xs text-secondary-text">{lastKbsErrorAt ? `last error ${formatVietnamTime(lastKbsErrorAt)}` : 'last error -'}</dd>
         </div>
       </dl>
@@ -714,10 +718,11 @@ const IndicatorTable: React.FC<{
 const StockDetailView: React.FC<{
   item?: VietnamWatchItem | null;
   fixtureMode?: boolean;
+  realtimeQuote?: VietnamRealtimeQuote | null;
   realtimeTrades?: VietnamRealtimeTrade[];
   tradesLoading?: boolean;
   tradesError?: string | null;
-}> = ({ item, fixtureMode = false, realtimeTrades = [], tradesLoading = false, tradesError }) => {
+}> = ({ item, fixtureMode = false, realtimeQuote, realtimeTrades = [], tradesLoading = false, tradesError }) => {
   if (!item) return null;
   const indicators = item.indicators;
   const latestIntradayCandle = item.intradayCandles?.at(-1);
@@ -909,16 +914,48 @@ const StockDetailView: React.FC<{
       </div>
       <div className="mt-4 rounded-lg border border-border/60 bg-elevated/30 p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-sm font-semibold text-foreground">Latest trades</h3>
+          <h3 className="text-sm font-semibold text-foreground">KBS snapshot</h3>
+          <Badge variant={kbsSnapshotState(realtimeQuote).variant}>KBS snapshot</Badge>
+        </div>
+        <dl className="mt-3 grid gap-3 text-sm md:grid-cols-4">
+          <div>
+            <dt className="text-xs text-secondary-text">Snapshot price</dt>
+            <dd className="mt-1 font-medium text-foreground">{formatPrice(realtimeQuote?.snapshotPrice ?? realtimeQuote?.realtimePrice)}</dd>
+          </div>
+          <div>
+            <dt className="text-xs text-secondary-text">Snapshot time</dt>
+            <dd className="mt-1 font-medium text-foreground">{realtimeQuote?.snapshotTimeDisplay ?? realtimeQuote?.realtimeTimeDisplay ?? realtimeQuote?.snapshotTime ?? realtimeQuote?.realtimeTime ?? '-'}</dd>
+          </div>
+          <div>
+            <dt className="text-xs text-secondary-text">KBS change</dt>
+            <dd className={cn('mt-1 font-medium', signalTone(realtimeQuote?.priceChange))}>
+              {formatPrice(realtimeQuote?.priceChange)} / {formatNumber(realtimeQuote?.percentChange, 2)}%
+            </dd>
+          </div>
+          <div>
+            <dt className="text-xs text-secondary-text">Volume accumulated</dt>
+            <dd className="mt-1 font-medium text-foreground">{formatNumber(realtimeQuote?.volumeAccumulated)}</dd>
+          </div>
+        </dl>
+        <p className="mt-3 text-xs text-secondary-text">
+          {realtimeQuote?.snapshotNote ?? 'KBS board snapshot; may differ from trade tape'}
+        </p>
+      </div>
+      <div className="mt-4 rounded-lg border border-border/60 bg-elevated/30 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-sm font-semibold text-foreground">Latest trade tape</h3>
           <Badge variant={tradesError ? 'warning' : 'info'}>{tradesLoading ? 'Loading' : 'KBS snapshot'}</Badge>
         </div>
+        <p className="mt-2 text-xs text-secondary-text">
+          Trade tape may not include auction/ATC prints.
+        </p>
         {tradesError ? (
           <div className="mt-3 rounded-lg border border-warning/20 bg-warning/10 p-2 text-xs text-warning">
-            Latest trades unavailable: {tradesError}
+            Latest trade tape unavailable: {tradesError}
           </div>
         ) : null}
         {!tradesError && !tradesLoading && realtimeTrades.length === 0 ? (
-          <p className="mt-3 text-xs text-secondary-text">Latest trades unavailable.</p>
+          <p className="mt-3 text-xs text-secondary-text">Latest trade tape unavailable.</p>
         ) : null}
         {realtimeTrades.length > 0 ? (
           <div className="mt-3 overflow-x-auto">
@@ -1068,9 +1105,12 @@ const VietnamDashboardPage: React.FC = () => {
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(false);
   const [autoRefreshInterval, setAutoRefreshInterval] = useState(180);
   const [kbsAutoRefreshEnabled, setKbsAutoRefreshEnabled] = useState(false);
-  const [kbsAutoRefreshInterval, setKbsAutoRefreshInterval] = useState(15);
-  const [kbsNextRefreshAt, setKbsNextRefreshAt] = useState<number | null>(null);
-  const [kbsCountdownSeconds, setKbsCountdownSeconds] = useState<number | null>(null);
+  const [kbsQuoteRefreshInterval, setKbsQuoteRefreshInterval] = useState(15);
+  const [kbsTradeRefreshInterval, setKbsTradeRefreshInterval] = useState(10);
+  const [kbsQuoteNextRefreshAt, setKbsQuoteNextRefreshAt] = useState<number | null>(null);
+  const [kbsTradeNextRefreshAt, setKbsTradeNextRefreshAt] = useState<number | null>(null);
+  const [kbsQuoteCountdownSeconds, setKbsQuoteCountdownSeconds] = useState<number | null>(null);
+  const [kbsTradeCountdownSeconds, setKbsTradeCountdownSeconds] = useState<number | null>(null);
   const [lastRefreshKind, setLastRefreshKind] = useState<'manual' | 'auto' | 'force live'>('manual');
   const [lastRefreshAt, setLastRefreshAt] = useState<string | null>(null);
   const [nextRefreshAt, setNextRefreshAt] = useState<number | null>(null);
@@ -1080,8 +1120,10 @@ const VietnamDashboardPage: React.FC = () => {
   const realtimeRequestIdRef = useRef(0);
   const tradesRequestIdRef = useRef(0);
   const nextRefreshAtRef = useRef(0);
-  const kbsNextRefreshAtRef = useRef(0);
-  const kbsRefreshInFlightRef = useRef(false);
+  const kbsQuoteNextRefreshAtRef = useRef(0);
+  const kbsTradeNextRefreshAtRef = useRef(0);
+  const kbsQuoteRefreshInFlightRef = useRef(false);
+  const kbsTradeRefreshInFlightRef = useRef(false);
   const nextWatchlistLoadRef = useRef<{ tickers: string[]; forceRefresh: boolean; refreshKind: 'manual' | 'auto' | 'force live' } | null>(null);
 
   const persistWatchlist = useCallback((nextTickers: string[]) => {
@@ -1144,20 +1186,42 @@ const VietnamDashboardPage: React.FC = () => {
       if (requestId !== tradesRequestIdRef.current) return;
       setRealtimeTrades(response.trades);
       setLastKbsTradeRefreshAt(new Date().toISOString());
-      setTradesError(response.status === 'ok' ? null : response.error ?? 'Latest trades unavailable');
+      setTradesError(response.status === 'ok' ? null : response.error ?? 'Latest trade tape unavailable');
       if (response.status !== 'ok') {
         setLastKbsErrorAt(new Date().toISOString());
       }
     } catch (err) {
       if (requestId !== tradesRequestIdRef.current) return;
       setLastKbsErrorAt(new Date().toISOString());
-      setTradesError(err instanceof Error ? err.message : 'Latest trades unavailable');
+      setTradesError(err instanceof Error ? err.message : 'Latest trade tape unavailable');
     } finally {
       if (requestId === tradesRequestIdRef.current) {
         setTradesLoading(false);
       }
     }
   }, []);
+
+  const refreshKbsQuotes = useCallback(async (tickersOverride?: string[]) => {
+    if (kbsQuoteRefreshInFlightRef.current) return false;
+    kbsQuoteRefreshInFlightRef.current = true;
+    try {
+      await loadRealtimeQuotes(tickersOverride ?? watchlist);
+      return true;
+    } finally {
+      kbsQuoteRefreshInFlightRef.current = false;
+    }
+  }, [loadRealtimeQuotes, watchlist]);
+
+  const refreshKbsTrades = useCallback(async (selectedTickerOverride?: string | null) => {
+    if (kbsTradeRefreshInFlightRef.current) return false;
+    kbsTradeRefreshInFlightRef.current = true;
+    try {
+      await loadRealtimeTrades(selectedTickerOverride ?? selectedTicker);
+      return true;
+    } finally {
+      kbsTradeRefreshInFlightRef.current = false;
+    }
+  }, [loadRealtimeTrades, selectedTicker]);
 
   const load = useCallback(async (
     forceRefresh = false,
@@ -1176,7 +1240,7 @@ const VietnamDashboardPage: React.FC = () => {
       setData(nextData);
       setLastRefreshKind(refreshKind);
       setLastRefreshAt(new Date().toISOString());
-      void loadRealtimeQuotes(requestedTickers);
+      void refreshKbsQuotes(requestedTickers);
     } catch (err) {
       if (requestId !== requestIdRef.current) return;
       setError(err instanceof Error ? err.message : 'Failed to load Vietnam dashboard');
@@ -1186,7 +1250,7 @@ const VietnamDashboardPage: React.FC = () => {
         setForceLoading(false);
       }
     }
-  }, [loadRealtimeQuotes, watchlist]);
+  }, [refreshKbsQuotes, watchlist]);
 
   const handlePresetChange = useCallback((event: React.ChangeEvent<HTMLSelectElement>) => {
     const presetId = event.target.value as VietnamWatchlistPresetId;
@@ -1245,25 +1309,12 @@ const VietnamDashboardPage: React.FC = () => {
     setWatchlistError(null);
   }, [applyWatchlist]);
 
-  const refreshKbsLayer = useCallback(async (tickersOverride?: string[], selectedTickerOverride?: string | null) => {
-    if (kbsRefreshInFlightRef.current) return false;
-    const requestedTickers = tickersOverride ?? watchlist;
-    const requestedTicker = selectedTickerOverride ?? selectedTicker;
-    kbsRefreshInFlightRef.current = true;
-    try {
-      await Promise.allSettled([
-        loadRealtimeQuotes(requestedTickers),
-        loadRealtimeTrades(requestedTicker),
-      ]);
-      return true;
-    } finally {
-      kbsRefreshInFlightRef.current = false;
-    }
-  }, [loadRealtimeQuotes, loadRealtimeTrades, selectedTicker, watchlist]);
-
   const handleRefreshKbs = useCallback(() => {
-    void refreshKbsLayer();
-  }, [refreshKbsLayer]);
+    void Promise.allSettled([
+      refreshKbsQuotes(),
+      refreshKbsTrades(),
+    ]);
+  }, [refreshKbsQuotes, refreshKbsTrades]);
 
   useEffect(() => {
     const queuedLoad = nextWatchlistLoadRef.current;
@@ -1276,8 +1327,8 @@ const VietnamDashboardPage: React.FC = () => {
   }, [load]);
 
   useEffect(() => {
-    void loadRealtimeTrades(selectedTicker);
-  }, [loadRealtimeTrades, selectedTicker]);
+    void refreshKbsTrades(selectedTicker);
+  }, [refreshKbsTrades, selectedTicker]);
 
   useEffect(() => {
     const onVisibilityChange = () => {
@@ -1289,17 +1340,32 @@ const VietnamDashboardPage: React.FC = () => {
         setNextRefreshAt(next);
         setCountdownSeconds(autoRefreshInterval);
       }
-      if (!hidden && kbsAutoRefreshEnabled && Date.now() >= kbsNextRefreshAtRef.current) {
-        const next = Date.now() + kbsAutoRefreshInterval * 1000;
-        kbsNextRefreshAtRef.current = next;
-        setKbsNextRefreshAt(next);
-        setKbsCountdownSeconds(kbsAutoRefreshInterval);
-        void refreshKbsLayer();
+      if (!hidden && kbsAutoRefreshEnabled && Date.now() >= kbsQuoteNextRefreshAtRef.current) {
+        const next = Date.now() + kbsQuoteRefreshInterval * 1000;
+        kbsQuoteNextRefreshAtRef.current = next;
+        setKbsQuoteNextRefreshAt(next);
+        setKbsQuoteCountdownSeconds(kbsQuoteRefreshInterval);
+        void refreshKbsQuotes();
+      }
+      if (!hidden && kbsAutoRefreshEnabled && Date.now() >= kbsTradeNextRefreshAtRef.current) {
+        const next = Date.now() + kbsTradeRefreshInterval * 1000;
+        kbsTradeNextRefreshAtRef.current = next;
+        setKbsTradeNextRefreshAt(next);
+        setKbsTradeCountdownSeconds(kbsTradeRefreshInterval);
+        void refreshKbsTrades();
       }
     };
     document.addEventListener('visibilitychange', onVisibilityChange);
     return () => document.removeEventListener('visibilitychange', onVisibilityChange);
-  }, [autoRefreshEnabled, autoRefreshInterval, kbsAutoRefreshEnabled, kbsAutoRefreshInterval, refreshKbsLayer]);
+  }, [
+    autoRefreshEnabled,
+    autoRefreshInterval,
+    kbsAutoRefreshEnabled,
+    kbsQuoteRefreshInterval,
+    kbsTradeRefreshInterval,
+    refreshKbsQuotes,
+    refreshKbsTrades,
+  ]);
 
   useEffect(() => {
     if (!autoRefreshEnabled) {
@@ -1335,33 +1401,63 @@ const VietnamDashboardPage: React.FC = () => {
 
   useEffect(() => {
     if (!kbsAutoRefreshEnabled) {
-      setKbsNextRefreshAt(null);
-      setKbsCountdownSeconds(null);
+      setKbsQuoteNextRefreshAt(null);
+      setKbsQuoteCountdownSeconds(null);
       return undefined;
     }
     const scheduleNext = () => {
-      const next = Date.now() + kbsAutoRefreshInterval * 1000;
-      kbsNextRefreshAtRef.current = next;
-      setKbsNextRefreshAt(next);
-      setKbsCountdownSeconds(kbsAutoRefreshInterval);
+      const next = Date.now() + kbsQuoteRefreshInterval * 1000;
+      kbsQuoteNextRefreshAtRef.current = next;
+      setKbsQuoteNextRefreshAt(next);
+      setKbsQuoteCountdownSeconds(kbsQuoteRefreshInterval);
     };
     scheduleNext();
     const timer = window.setInterval(() => {
       if (document.visibilityState === 'hidden') {
         setIsTabHidden(true);
-        setKbsCountdownSeconds(null);
+        setKbsQuoteCountdownSeconds(null);
         return;
       }
       setIsTabHidden(false);
-      setKbsCountdownSeconds(Math.max(0, Math.ceil((kbsNextRefreshAtRef.current - Date.now()) / 1000)));
-      if (Date.now() < kbsNextRefreshAtRef.current) return;
+      setKbsQuoteCountdownSeconds(Math.max(0, Math.ceil((kbsQuoteNextRefreshAtRef.current - Date.now()) / 1000)));
+      if (Date.now() < kbsQuoteNextRefreshAtRef.current) return;
       scheduleNext();
-      if (!kbsRefreshInFlightRef.current) {
-        void refreshKbsLayer();
+      if (!kbsQuoteRefreshInFlightRef.current) {
+        void refreshKbsQuotes();
       }
     }, 1000);
     return () => window.clearInterval(timer);
-  }, [kbsAutoRefreshEnabled, kbsAutoRefreshInterval, refreshKbsLayer]);
+  }, [kbsAutoRefreshEnabled, kbsQuoteRefreshInterval, refreshKbsQuotes]);
+
+  useEffect(() => {
+    if (!kbsAutoRefreshEnabled) {
+      setKbsTradeNextRefreshAt(null);
+      setKbsTradeCountdownSeconds(null);
+      return undefined;
+    }
+    const scheduleNext = () => {
+      const next = Date.now() + kbsTradeRefreshInterval * 1000;
+      kbsTradeNextRefreshAtRef.current = next;
+      setKbsTradeNextRefreshAt(next);
+      setKbsTradeCountdownSeconds(kbsTradeRefreshInterval);
+    };
+    scheduleNext();
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'hidden') {
+        setIsTabHidden(true);
+        setKbsTradeCountdownSeconds(null);
+        return;
+      }
+      setIsTabHidden(false);
+      setKbsTradeCountdownSeconds(Math.max(0, Math.ceil((kbsTradeNextRefreshAtRef.current - Date.now()) / 1000)));
+      if (Date.now() < kbsTradeNextRefreshAtRef.current) return;
+      scheduleNext();
+      if (!kbsTradeRefreshInFlightRef.current) {
+        void refreshKbsTrades();
+      }
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [kbsAutoRefreshEnabled, kbsTradeRefreshInterval, refreshKbsTrades]);
 
   useEffect(() => {
     const rows = data?.watchlist ?? [];
@@ -1475,20 +1571,32 @@ const VietnamDashboardPage: React.FC = () => {
               Auto-refresh KBS
             </label>
             <label className="flex items-center gap-2 text-sm text-secondary-text">
-              KBS interval
+              KBS quotes
               <select
-                value={kbsAutoRefreshInterval}
-                onChange={(event) => setKbsAutoRefreshInterval(Number(event.target.value))}
+                value={kbsQuoteRefreshInterval}
+                onChange={(event) => setKbsQuoteRefreshInterval(Number(event.target.value))}
                 className="h-9 rounded-lg border border-border/70 bg-elevated px-3 text-sm text-foreground"
               >
-                {KBS_AUTO_REFRESH_INTERVALS.map((seconds) => (
+                {KBS_QUOTE_REFRESH_INTERVALS.map((seconds) => (
+                  <option key={seconds} value={seconds}>{seconds}s</option>
+                ))}
+              </select>
+            </label>
+            <label className="flex items-center gap-2 text-sm text-secondary-text">
+              Latest trade tape
+              <select
+                value={kbsTradeRefreshInterval}
+                onChange={(event) => setKbsTradeRefreshInterval(Number(event.target.value))}
+                className="h-9 rounded-lg border border-border/70 bg-elevated px-3 text-sm text-foreground"
+              >
+                {KBS_TRADE_REFRESH_INTERVALS.map((seconds) => (
                   <option key={seconds} value={seconds}>{seconds}s</option>
                 ))}
               </select>
             </label>
           </div>
         </div>
-        <dl className="mt-4 grid gap-3 text-sm md:grid-cols-5">
+        <dl className="mt-4 grid gap-3 text-sm md:grid-cols-6">
           <div className="rounded-lg bg-elevated/50 p-3">
             <dt className="text-xs text-secondary-text">Selected interval</dt>
             <dd className="mt-1 font-medium text-foreground">{autoRefreshInterval}s</dd>
@@ -1512,12 +1620,21 @@ const VietnamDashboardPage: React.FC = () => {
             <dd className="mt-1 font-medium text-foreground">{lastRefreshKind}</dd>
           </div>
           <div className="rounded-lg bg-elevated/50 p-3">
-            <dt className="text-xs text-secondary-text">Next KBS refresh</dt>
+            <dt className="text-xs text-secondary-text">Next KBS quotes</dt>
             <dd className="mt-1 font-medium text-foreground">
-              {kbsAutoRefreshEnabled && !isTabHidden ? formatCountdown(kbsCountdownSeconds) : 'Paused'}
+              {kbsAutoRefreshEnabled && !isTabHidden ? formatCountdown(kbsQuoteCountdownSeconds) : 'Paused'}
             </dd>
             <dd className="mt-1 text-xs text-secondary-text">
-              {kbsAutoRefreshEnabled && !isTabHidden && kbsNextRefreshAt ? formatVietnamTime(kbsNextRefreshAt) : '-'}
+              {kbsAutoRefreshEnabled && !isTabHidden && kbsQuoteNextRefreshAt ? formatVietnamTime(kbsQuoteNextRefreshAt) : '-'}
+            </dd>
+          </div>
+          <div className="rounded-lg bg-elevated/50 p-3">
+            <dt className="text-xs text-secondary-text">Next latest trade tape</dt>
+            <dd className="mt-1 font-medium text-foreground">
+              {kbsAutoRefreshEnabled && !isTabHidden ? formatCountdown(kbsTradeCountdownSeconds) : 'Paused'}
+            </dd>
+            <dd className="mt-1 text-xs text-secondary-text">
+              {kbsAutoRefreshEnabled && !isTabHidden && kbsTradeNextRefreshAt ? formatVietnamTime(kbsTradeNextRefreshAt) : '-'}
             </dd>
           </div>
         </dl>
@@ -1664,7 +1781,8 @@ const VietnamDashboardPage: React.FC = () => {
         lastKbsTradeRefreshAt={lastKbsTradeRefreshAt}
         lastKbsErrorAt={lastKbsErrorAt}
         kbsAutoRefreshEnabled={kbsAutoRefreshEnabled}
-        kbsAutoRefreshInterval={kbsAutoRefreshInterval}
+        kbsQuoteRefreshInterval={kbsQuoteRefreshInterval}
+        kbsTradeRefreshInterval={kbsTradeRefreshInterval}
       />
 
       {error ? (
@@ -1744,6 +1862,7 @@ const VietnamDashboardPage: React.FC = () => {
           <StockDetailView
             item={selectedItem}
             fixtureMode={data?.fixtureMode}
+            realtimeQuote={selectedItem ? realtimeQuotes[selectedItem.ticker] : null}
             realtimeTrades={realtimeTrades}
             tradesLoading={tradesLoading}
             tradesError={tradesError}

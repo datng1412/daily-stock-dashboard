@@ -169,6 +169,10 @@ export type VietnamRealtimeQuote = {
   realtimePrice?: number | null;
   realtimeTime?: string | null;
   realtimeTimeDisplay?: string | null;
+  snapshotPrice?: number | null;
+  snapshotTime?: string | null;
+  snapshotTimeDisplay?: string | null;
+  snapshotNote?: string | null;
   ageSeconds?: number | null;
   isStale?: boolean | null;
   staleReason?: string | null;
@@ -219,6 +223,7 @@ export type VietnamRealtimeTradesResponse = {
   status: 'ok' | 'unavailable' | 'error' | 'stale';
   error?: string | null;
   trades: VietnamRealtimeTrade[];
+  note?: string | null;
   cache: Record<string, unknown>;
 };
 

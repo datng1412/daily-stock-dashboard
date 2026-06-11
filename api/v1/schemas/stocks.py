@@ -207,6 +207,10 @@ class VietnamRealtimeQuote(BaseModel):
     realtime_price: Optional[float] = None
     realtime_time: Optional[str] = None
     realtime_time_display: Optional[str] = None
+    snapshot_price: Optional[float] = None
+    snapshot_time: Optional[str] = None
+    snapshot_time_display: Optional[str] = None
+    snapshot_note: Optional[str] = None
     age_seconds: Optional[int] = None
     is_stale: Optional[bool] = None
     stale_reason: Optional[str] = None
@@ -263,4 +267,5 @@ class VietnamRealtimeTradesResponse(BaseModel):
     status: str = "ok"
     error: Optional[str] = None
     trades: List[VietnamRealtimeTrade] = Field(default_factory=list)
+    note: Optional[str] = None
     cache: Dict[str, Any] = Field(default_factory=dict)
