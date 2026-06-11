@@ -1,6 +1,6 @@
 import type { VietnamWatchItem } from '../api/stocks';
 
-export const VIETNAM_CONDITION_SUMMARY_SUBTITLE = 'Neutral data summary, not a trading recommendation.';
+export const VIETNAM_CONDITION_SUMMARY_SUBTITLE = 'Neutral data summary only.';
 
 export const VIETNAM_CONDITION_SUMMARY_FORBIDDEN_PATTERNS = [
   /\bbuy\b/i,

@@ -1,7 +1,13 @@
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Activity, AlertTriangle, ArrowDown, ArrowDownRight, ArrowUp, ArrowUpRight, Banknote, DatabaseZap, Plus, RefreshCw, RotateCcw, ShieldAlert, X } from 'lucide-react';
-import { stocksApi, type VietnamWatchItem, type VietnamWatchlistResponse } from '../api/stocks';
+import {
+  stocksApi,
+  type VietnamRealtimeQuote,
+  type VietnamRealtimeTrade,
+  type VietnamWatchItem,
+  type VietnamWatchlistResponse,
+} from '../api/stocks';
 import { AppPage, Badge, Button, Input, Loading } from '../components/common';
 import { cn } from '../utils/cn';
 import { buildVietnamConditionSummary, VIETNAM_CONDITION_SUMMARY_SUBTITLE } from '../utils/vietnamConditionSummary';
@@ -20,6 +26,7 @@ import {
 
 const DEFAULT_TICKERS = ['FPT', 'VPB', 'MSB', 'SCS', 'ACV', 'ACB'];
 const AUTO_REFRESH_INTERVALS = [60, 180, 300];
+const KBS_AUTO_REFRESH_INTERVALS = [10, 15, 30];
 const DEFAULT_WATCHLIST = normalizeVietnamWatchlist(DEFAULT_TICKERS) ?? DEFAULT_TICKERS;
 const DETAIL_NEWS_LIMIT = 8;
 
@@ -29,6 +36,10 @@ const formatNumber = (value?: number | null, maximumFractionDigits = 0) => {
 };
 
 const formatPrice = (value?: number | null) => formatNumber(value, 2);
+
+const neutralFormulaText = (value: string) => (
+  /recommend/i.test(value) ? 'Rule-based neutral condition labels only.' : value
+);
 
 const formatCountdown = (seconds?: number | null) => {
   if (seconds === null || seconds === undefined) return '-';
@@ -125,6 +136,58 @@ const cacheFreshness = (item: VietnamWatchItem) => {
   return { label: 'cached', variant: 'success' as const };
 };
 
+const parseKbsSnapshotTime = (value?: string | null) => {
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (!Number.isNaN(parsed.getTime())) return parsed;
+  const match = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec(value.trim());
+  if (!match) return null;
+  const today = new Date();
+  today.setHours(Number(match[1]), Number(match[2]), Number(match[3] ?? 0), 0);
+  return today;
+};
+
+const kbsSnapshotState = (quote?: VietnamRealtimeQuote | null) => {
+  if (!quote || quote.status === 'unavailable' || quote.status === 'error') {
+    return { label: 'Unavailable', variant: 'warning' as const };
+  }
+  if (quote.isStale === true) {
+    return { label: 'Stale', variant: 'warning' as const };
+  }
+  if (quote.isStale === false) {
+    return { label: 'KBS snapshot', variant: 'info' as const };
+  }
+  const parsed = parseKbsSnapshotTime(quote.realtimeTime);
+  if (parsed && Date.now() - parsed.getTime() > 15 * 60 * 1000) {
+    return { label: 'Stale', variant: 'warning' as const };
+  }
+  return { label: 'KBS snapshot', variant: 'info' as const };
+};
+
+const kbsProviderStatus = (
+  quotes: Record<string, VietnamRealtimeQuote | undefined>,
+  activeTickers: string[],
+  quoteError?: string | null,
+  tradesError?: string | null,
+) => {
+  const activeQuotes = activeTickers.map((ticker) => quotes[ticker]).filter((quote): quote is VietnamRealtimeQuote => Boolean(quote));
+  const staleCount = activeQuotes.filter((quote) => quote.isStale === true).length;
+  const unavailableCount = activeQuotes.filter((quote) => quote.status === 'unavailable' || quote.status === 'error').length;
+  if (activeQuotes.some((quote) => quote.status === 'error')) {
+    return { label: 'error', variant: 'danger' as const, staleCount, unavailableCount };
+  }
+  if (unavailableCount > 0 || !activeQuotes.length) {
+    return { label: 'unavailable', variant: 'warning' as const, staleCount, unavailableCount };
+  }
+  if (quoteError || tradesError) {
+    return { label: 'error', variant: 'danger' as const, staleCount, unavailableCount };
+  }
+  if (staleCount > 0) {
+    return { label: 'stale', variant: 'warning' as const, staleCount, unavailableCount };
+  }
+  return { label: 'ok', variant: 'success' as const, staleCount, unavailableCount };
+};
+
 const importantWarnings = (item: VietnamWatchItem) =>
   (item.warnings ?? []).filter((warning) =>
     [
@@ -138,12 +201,13 @@ const importantWarnings = (item: VietnamWatchItem) =>
     ].some((needle) => warning.includes(needle)),
   );
 
-const WatchCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
+const WatchCard: React.FC<{ item: VietnamWatchItem; realtimeQuote?: VietnamRealtimeQuote | null }> = ({ item, realtimeQuote }) => {
   const positive = (item.changePct ?? 0) >= 0;
   const TrendIcon = positive ? ArrowUpRight : ArrowDownRight;
   const displayWarnings = importantWarnings(item);
   const freshness = cacheFreshness(item);
   const lastFetched = latestFetchedValue(item);
+  const kbsState = kbsSnapshotState(realtimeQuote);
 
   return (
     <article className="rounded-lg border border-border/70 bg-card p-4 shadow-soft-card">
@@ -172,12 +236,23 @@ const WatchCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
 
       <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
         <div>
-          <p className="text-xs text-secondary-text">Latest price (VND)</p>
+          <p className="text-xs text-secondary-text">Daily close (VND)</p>
           <div className="mt-1 flex flex-wrap items-center gap-2">
             <p className="text-lg font-semibold text-foreground">{formatPrice(item.latestPrice ?? item.close)}</p>
             <Badge variant={priceSourceVariant(item.latestPriceSource)}>{(item.latestPriceSource ?? 'unknown').toUpperCase()}</Badge>
           </div>
           <p className="text-xs text-secondary-text">OHLCV close {formatPrice(item.ohlcvClose ?? item.close)}</p>
+        </div>
+        <div>
+          <p className="text-xs text-secondary-text">KBS snapshot</p>
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            <p className="text-lg font-semibold text-foreground">{formatPrice(realtimeQuote?.realtimePrice)}</p>
+            <Badge variant={kbsState.variant}>{kbsState.label}</Badge>
+          </div>
+          <p className={cn('text-xs', signalTone(realtimeQuote?.priceChange))}>
+            {formatPrice(realtimeQuote?.priceChange)} / {formatNumber(realtimeQuote?.percentChange, 2)}%
+          </p>
+          <p className="text-xs text-secondary-text">KBS time {realtimeQuote?.realtimeTimeDisplay ?? realtimeQuote?.realtimeTime ?? '-'}</p>
         </div>
         <div>
           <p className="text-xs text-secondary-text">Volume (shares)</p>
@@ -421,25 +496,150 @@ const CacheMetadataPanel: React.FC<{
   );
 };
 
+const DataStatusPanel: React.FC<{
+  data?: VietnamWatchlistResponse | null;
+  selectedItem?: VietnamWatchItem | null;
+  realtimeQuotes: Record<string, VietnamRealtimeQuote | undefined>;
+  realtimeTrades: VietnamRealtimeTrade[];
+  watchlist: string[];
+  realtimeError?: string | null;
+  tradesError?: string | null;
+  lastKbsQuoteRefreshAt?: string | null;
+  lastKbsTradeRefreshAt?: string | null;
+  lastKbsErrorAt?: string | null;
+  kbsAutoRefreshEnabled: boolean;
+  kbsAutoRefreshInterval: number;
+}> = ({
+  data,
+  selectedItem,
+  realtimeQuotes,
+  realtimeTrades,
+  watchlist,
+  realtimeError,
+  tradesError,
+  lastKbsQuoteRefreshAt,
+  lastKbsTradeRefreshAt,
+  lastKbsErrorAt,
+  kbsAutoRefreshEnabled,
+  kbsAutoRefreshInterval,
+}) => {
+  const status = kbsProviderStatus(realtimeQuotes, watchlist, realtimeError, tradesError);
+  const selectedQuote = selectedItem?.ticker ? realtimeQuotes[selectedItem.ticker] : undefined;
+  const latestTrade = realtimeTrades[0];
+  const selectedLastFetched = selectedItem ? latestFetchedValue(selectedItem) : null;
+  const selectedCacheStatus = selectedItem?.cacheStatus
+    ? [
+        `OHLCV ${cacheLabel(selectedItem.cacheStatus.ohlcvCache)}`,
+        `1H ${cacheLabel(selectedItem.cacheStatus.intradayCache)}`,
+        `news ${cacheLabel(selectedItem.cacheStatus.newsCache)}`,
+      ].join(' | ')
+    : '-';
+
+  return (
+    <section className="rounded-lg border border-border/70 bg-card p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <DatabaseZap className="h-5 w-5 text-cyan" />
+          <h2 className="text-base font-semibold text-foreground">Data status</h2>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Badge variant={data?.fixtureMode ? 'warning' : data ? 'success' : 'default'}>
+            {data?.dataQuality.source ?? 'Mozyfin pending'}
+          </Badge>
+          <Badge variant={status.variant}>KBS {status.label}</Badge>
+        </div>
+      </div>
+      <dl className="mt-4 grid gap-3 text-sm md:grid-cols-3 xl:grid-cols-6">
+        <div className="rounded-lg bg-elevated/50 p-3">
+          <dt className="text-xs text-secondary-text">Mozyfin mode</dt>
+          <dd className="mt-1 font-medium text-foreground">{data ? `fixture_mode ${String(data.fixtureMode)}` : '-'}</dd>
+          <dd className="mt-1 text-xs text-secondary-text">{data?.dataQuality.source ?? '-'}</dd>
+        </div>
+        <div className="rounded-lg bg-elevated/50 p-3">
+          <dt className="text-xs text-secondary-text">Overview refresh</dt>
+          <dd className="mt-1 font-medium text-foreground">{formatVietnamTime(data?.dataQuality.lastRefreshTime)}</dd>
+          <dd className="mt-1 text-xs text-secondary-text">{formatRelativeAge(data?.dataQuality.lastRefreshTime)}</dd>
+        </div>
+        <div className="rounded-lg bg-elevated/50 p-3">
+          <dt className="text-xs text-secondary-text">Selected detail</dt>
+          <dd className="mt-1 font-medium text-foreground">{selectedItem?.ticker ?? '-'}</dd>
+          <dd className="mt-1 text-xs text-secondary-text">{formatVietnamTime(selectedLastFetched)}</dd>
+        </div>
+        <div className="rounded-lg bg-elevated/50 p-3">
+          <dt className="text-xs text-secondary-text">KBS quotes</dt>
+          <dd className="mt-1 font-medium text-foreground">{formatVietnamTime(lastKbsQuoteRefreshAt)}</dd>
+          <dd className="mt-1 text-xs text-secondary-text">
+            stale {status.staleCount} | unavailable {status.unavailableCount}
+          </dd>
+        </div>
+        <div className="rounded-lg bg-elevated/50 p-3">
+          <dt className="text-xs text-secondary-text">KBS trades</dt>
+          <dd className="mt-1 font-medium text-foreground">{formatVietnamTime(lastKbsTradeRefreshAt)}</dd>
+          <dd className="mt-1 text-xs text-secondary-text">latest {latestTrade?.time ?? '-'}</dd>
+        </div>
+        <div className="rounded-lg bg-elevated/50 p-3">
+          <dt className="text-xs text-secondary-text">KBS auto-refresh</dt>
+          <dd className="mt-1 font-medium text-foreground">{kbsAutoRefreshEnabled ? `on, ${kbsAutoRefreshInterval}s` : 'off'}</dd>
+          <dd className="mt-1 text-xs text-secondary-text">{lastKbsErrorAt ? `last error ${formatVietnamTime(lastKbsErrorAt)}` : 'last error -'}</dd>
+        </div>
+      </dl>
+      <div className="mt-3 grid gap-2 text-xs text-secondary-text md:grid-cols-3">
+        <div className="rounded-lg border border-border/60 bg-elevated/30 p-3">
+          <span className="font-medium text-foreground">Selected symbol</span> {selectedItem?.ticker ?? '-'} | daily close date {selectedItem?.latestPriceDate ?? selectedItem?.priceDate ?? '-'}
+        </div>
+        <div className="rounded-lg border border-border/60 bg-elevated/30 p-3">
+          <span className="font-medium text-foreground">KBS snapshot time</span> {selectedQuote?.realtimeTimeDisplay ?? selectedQuote?.realtimeTime ?? '-'}
+        </div>
+        <div className="rounded-lg border border-border/60 bg-elevated/30 p-3">
+          <span className="font-medium text-foreground">Cache status</span> {selectedCacheStatus}
+        </div>
+      </div>
+      {data?.fixtureMode ? (
+        <div className="mt-3 rounded-lg border border-warning/20 bg-warning/10 p-2 text-xs text-warning">
+          Fixture mode is active; Mozyfin rows are sample data.
+        </div>
+      ) : null}
+      {realtimeError || tradesError ? (
+        <div className="mt-3 rounded-lg border border-warning/20 bg-warning/10 p-2 text-xs text-warning">
+          KBS issue: {realtimeError ?? tradesError}
+        </div>
+      ) : null}
+    </section>
+  );
+};
+
 const IndicatorTable: React.FC<{
   items: VietnamWatchItem[];
+  realtimeQuotes: Record<string, VietnamRealtimeQuote | undefined>;
+  realtimeLoading?: boolean;
+  realtimeError?: string | null;
   selectedTicker?: string | null;
   onSelect: (ticker: string) => void;
-}> = ({ items, selectedTicker, onSelect }) => (
+}> = ({ items, realtimeQuotes, realtimeLoading = false, realtimeError, selectedTicker, onSelect }) => (
   <section className="rounded-lg border border-border/70 bg-card p-4">
     <div className="mb-3 flex items-center justify-between gap-3">
       <h2 className="text-base font-semibold text-foreground">Indicator table</h2>
-      <span className="text-xs text-secondary-text">Neutral status labels only</span>
+      <span className="text-xs text-secondary-text">
+        Neutral status labels only{realtimeLoading ? ' | loading KBS snapshot' : ''}
+      </span>
     </div>
+    {realtimeError ? (
+      <div className="mb-3 rounded-lg border border-warning/20 bg-warning/10 p-2 text-xs text-warning">
+        KBS snapshot unavailable: {realtimeError}
+      </div>
+    ) : null}
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[1120px] text-left text-sm">
+      <table className="w-full min-w-[1320px] text-left text-sm">
         <thead className="border-b border-border/70 text-xs uppercase text-secondary-text">
           <tr>
             <th className="py-2 pr-3">Ticker</th>
             <th className="px-3 py-2">Status</th>
-            <th className="px-3 py-2 text-right">Latest price</th>
+            <th className="px-3 py-2 text-right">Daily close</th>
             <th className="px-3 py-2">Source</th>
             <th className="px-3 py-2">Price date</th>
+            <th className="px-3 py-2 text-right">KBS snapshot</th>
+            <th className="px-3 py-2 text-right">KBS change</th>
+            <th className="px-3 py-2">KBS time</th>
             <th className="px-3 py-2 text-right">1H change</th>
             <th className="px-3 py-2">Final close</th>
             <th className="px-3 py-2 text-right">MA20</th>
@@ -450,56 +650,74 @@ const IndicatorTable: React.FC<{
           </tr>
         </thead>
         <tbody>
-          {items.map((item) => (
-            <tr
-              key={item.ticker}
-              className={cn(
-                'cursor-pointer border-b border-border/40 text-secondary-text hover:bg-elevated/40',
-                selectedTicker === item.ticker && 'bg-elevated/60 text-foreground',
-              )}
-              onClick={() => onSelect(item.ticker)}
-            >
-              <td className="py-3 pr-3 font-semibold text-foreground">{item.ticker}</td>
-              <td className="px-3 py-3">
-                <div className="flex flex-wrap gap-1">
-                  {compactLabels(item.statusLabels, 3).map((label) => (
-                    <Badge key={label} variant={statusVariant(label)}>{label}</Badge>
-                  ))}
-                  {(item.statusLabels?.length ?? 0) > 3 ? <Badge variant="default">+{(item.statusLabels?.length ?? 0) - 3}</Badge> : null}
-                </div>
-              </td>
-              <td className="px-3 py-3 text-right">{formatPrice(item.latestPrice ?? item.close)}</td>
-              <td className="px-3 py-3">
-                <Badge variant={priceSourceVariant(item.latestPriceSource)}>{(item.latestPriceSource ?? 'unknown').toUpperCase()}</Badge>
-              </td>
-              <td className="px-3 py-3">{item.latestPriceDate ?? item.priceDate ?? '-'}</td>
-              <td className={cn('px-3 py-3 text-right', signalTone(item.intradayPulse?.latest1hChange))}>
-                {formatNumber(item.intradayPulse?.latest1hChangePercent, 2)}%
-              </td>
-              <td className="px-3 py-3">
-                <Badge variant={item.finalCloseStatus === 'final' ? 'success' : item.finalCloseStatus === 'not_final' ? 'warning' : 'default'}>
-                  {item.finalCloseStatus ?? 'unknown'}
-                </Badge>
-              </td>
-              <td className="px-3 py-3 text-right">{formatPrice(item.indicators.ma20)}</td>
-              <td className="px-3 py-3 text-right">{formatNumber(item.indicators.rsi14Wilder ?? item.indicators.rsi14, 2)}</td>
-              <td className="px-3 py-3 text-right">{formatNumber(item.indicators.volumeRatio, 2)}</td>
-              <td className="px-3 py-3">
-                <Badge variant={importantWarnings(item).length ? 'warning' : 'success'}>{importantWarnings(item).length}</Badge>
-              </td>
-              <td className="px-3 py-3">
-                <Badge variant={cacheFreshness(item).variant}>{cacheFreshness(item).label}</Badge>
-                <div className="mt-1 text-xs text-secondary-text">{formatRelativeAge(latestFetchedValue(item))}</div>
-              </td>
-            </tr>
-          ))}
+          {items.map((item) => {
+            const quote = realtimeQuotes[item.ticker];
+            const kbsState = kbsSnapshotState(quote);
+            return (
+              <tr
+                key={item.ticker}
+                className={cn(
+                  'cursor-pointer border-b border-border/40 text-secondary-text hover:bg-elevated/40',
+                  selectedTicker === item.ticker && 'bg-elevated/60 text-foreground',
+                )}
+                onClick={() => onSelect(item.ticker)}
+              >
+                <td className="py-3 pr-3 font-semibold text-foreground">{item.ticker}</td>
+                <td className="px-3 py-3">
+                  <div className="flex flex-wrap gap-1">
+                    {compactLabels(item.statusLabels, 3).map((label) => (
+                      <Badge key={label} variant={statusVariant(label)}>{label}</Badge>
+                    ))}
+                    {(item.statusLabels?.length ?? 0) > 3 ? <Badge variant="default">+{(item.statusLabels?.length ?? 0) - 3}</Badge> : null}
+                  </div>
+                </td>
+                <td className="px-3 py-3 text-right">{formatPrice(item.latestPrice ?? item.close)}</td>
+                <td className="px-3 py-3">
+                  <Badge variant={priceSourceVariant(item.latestPriceSource)}>{(item.latestPriceSource ?? 'unknown').toUpperCase()}</Badge>
+                </td>
+                <td className="px-3 py-3">{item.latestPriceDate ?? item.priceDate ?? '-'}</td>
+                <td className="px-3 py-3 text-right">
+                  <div className="font-medium text-foreground">{formatPrice(quote?.realtimePrice)}</div>
+                  <Badge variant={kbsState.variant}>{kbsState.label}</Badge>
+                </td>
+                <td className={cn('px-3 py-3 text-right', signalTone(quote?.priceChange))}>
+                  {formatPrice(quote?.priceChange)} / {formatNumber(quote?.percentChange, 2)}%
+                </td>
+                <td className="px-3 py-3">{quote?.realtimeTimeDisplay ?? quote?.realtimeTime ?? '-'}</td>
+                <td className={cn('px-3 py-3 text-right', signalTone(item.intradayPulse?.latest1hChange))}>
+                  {formatNumber(item.intradayPulse?.latest1hChangePercent, 2)}%
+                </td>
+                <td className="px-3 py-3">
+                  <Badge variant={item.finalCloseStatus === 'final' ? 'success' : item.finalCloseStatus === 'not_final' ? 'warning' : 'default'}>
+                    {item.finalCloseStatus ?? 'unknown'}
+                  </Badge>
+                </td>
+                <td className="px-3 py-3 text-right">{formatPrice(item.indicators.ma20)}</td>
+                <td className="px-3 py-3 text-right">{formatNumber(item.indicators.rsi14Wilder ?? item.indicators.rsi14, 2)}</td>
+                <td className="px-3 py-3 text-right">{formatNumber(item.indicators.volumeRatio, 2)}</td>
+                <td className="px-3 py-3">
+                  <Badge variant={importantWarnings(item).length ? 'warning' : 'success'}>{importantWarnings(item).length}</Badge>
+                </td>
+                <td className="px-3 py-3">
+                  <Badge variant={cacheFreshness(item).variant}>{cacheFreshness(item).label}</Badge>
+                  <div className="mt-1 text-xs text-secondary-text">{formatRelativeAge(latestFetchedValue(item))}</div>
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
   </section>
 );
 
-const StockDetailView: React.FC<{ item?: VietnamWatchItem | null; fixtureMode?: boolean }> = ({ item, fixtureMode = false }) => {
+const StockDetailView: React.FC<{
+  item?: VietnamWatchItem | null;
+  fixtureMode?: boolean;
+  realtimeTrades?: VietnamRealtimeTrade[];
+  tradesLoading?: boolean;
+  tradesError?: string | null;
+}> = ({ item, fixtureMode = false, realtimeTrades = [], tradesLoading = false, tradesError }) => {
   if (!item) return null;
   const indicators = item.indicators;
   const latestIntradayCandle = item.intradayCandles?.at(-1);
@@ -519,7 +737,7 @@ const StockDetailView: React.FC<{ item?: VietnamWatchItem | null; fixtureMode?: 
         </div>
       </div>
       <div className="mt-3 rounded-lg border border-border/60 bg-elevated/30 p-3 text-xs text-secondary-text">
-        Labels are neutral condition tags, not trading recommendations.
+        Labels are neutral condition tags only.
       </div>
       <div className="mt-4 rounded-lg border border-border/60 bg-elevated/30 p-4">
         <h3 className="text-sm font-semibold text-foreground">Condition Summary</h3>
@@ -689,6 +907,46 @@ const StockDetailView: React.FC<{ item?: VietnamWatchItem | null; fixtureMode?: 
           </div>
         ) : null}
       </div>
+      <div className="mt-4 rounded-lg border border-border/60 bg-elevated/30 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-sm font-semibold text-foreground">Latest trades</h3>
+          <Badge variant={tradesError ? 'warning' : 'info'}>{tradesLoading ? 'Loading' : 'KBS snapshot'}</Badge>
+        </div>
+        {tradesError ? (
+          <div className="mt-3 rounded-lg border border-warning/20 bg-warning/10 p-2 text-xs text-warning">
+            Latest trades unavailable: {tradesError}
+          </div>
+        ) : null}
+        {!tradesError && !tradesLoading && realtimeTrades.length === 0 ? (
+          <p className="mt-3 text-xs text-secondary-text">Latest trades unavailable.</p>
+        ) : null}
+        {realtimeTrades.length > 0 ? (
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full min-w-[520px] text-left text-xs">
+              <thead className="border-b border-border/70 uppercase text-secondary-text">
+                <tr>
+                  <th className="py-2 pr-3">Time</th>
+                  <th className="px-3 py-2 text-right">Price</th>
+                  <th className="px-3 py-2 text-right">Volume</th>
+                  <th className="px-3 py-2">Type</th>
+                  <th className="px-3 py-2">Source</th>
+                </tr>
+              </thead>
+              <tbody>
+                {realtimeTrades.slice(0, 8).map((trade, index) => (
+                  <tr key={`${trade.id ?? index}-${trade.time ?? 'time'}`} className="border-b border-border/40 text-secondary-text">
+                    <td className="py-2 pr-3">{trade.time ?? '-'}</td>
+                    <td className="px-3 py-2 text-right text-foreground">{formatPrice(trade.price)}</td>
+                    <td className="px-3 py-2 text-right">{formatNumber(trade.volume)}</td>
+                    <td className="px-3 py-2">{trade.matchType ?? '-'}</td>
+                    <td className="px-3 py-2">{trade.source}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+      </div>
       {item.statusDetails?.length ? (
         <div className="mt-4">
           <h3 className="text-sm font-semibold text-foreground">Label reasons</h3>
@@ -794,19 +1052,36 @@ const VietnamDashboardPage: React.FC = () => {
     initialWatchlist.usedFallback ? 'Saved watchlist was invalid and default tickers were restored.' : null,
   );
   const [data, setData] = useState<VietnamWatchlistResponse | null>(null);
+  const [realtimeQuotes, setRealtimeQuotes] = useState<Record<string, VietnamRealtimeQuote | undefined>>({});
+  const [realtimeLoading, setRealtimeLoading] = useState(false);
+  const [realtimeError, setRealtimeError] = useState<string | null>(null);
+  const [realtimeTrades, setRealtimeTrades] = useState<VietnamRealtimeTrade[]>([]);
+  const [tradesLoading, setTradesLoading] = useState(false);
+  const [tradesError, setTradesError] = useState<string | null>(null);
+  const [lastKbsQuoteRefreshAt, setLastKbsQuoteRefreshAt] = useState<string | null>(null);
+  const [lastKbsTradeRefreshAt, setLastKbsTradeRefreshAt] = useState<string | null>(null);
+  const [lastKbsErrorAt, setLastKbsErrorAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [forceLoading, setForceLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedTicker, setSelectedTicker] = useState<string | null>(initialWatchlist.tickers[0] ?? DEFAULT_WATCHLIST[0]);
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(false);
   const [autoRefreshInterval, setAutoRefreshInterval] = useState(180);
+  const [kbsAutoRefreshEnabled, setKbsAutoRefreshEnabled] = useState(false);
+  const [kbsAutoRefreshInterval, setKbsAutoRefreshInterval] = useState(15);
+  const [kbsNextRefreshAt, setKbsNextRefreshAt] = useState<number | null>(null);
+  const [kbsCountdownSeconds, setKbsCountdownSeconds] = useState<number | null>(null);
   const [lastRefreshKind, setLastRefreshKind] = useState<'manual' | 'auto' | 'force live'>('manual');
   const [lastRefreshAt, setLastRefreshAt] = useState<string | null>(null);
   const [nextRefreshAt, setNextRefreshAt] = useState<number | null>(null);
   const [countdownSeconds, setCountdownSeconds] = useState<number | null>(null);
   const [isTabHidden, setIsTabHidden] = useState(() => typeof document !== 'undefined' && document.visibilityState === 'hidden');
   const requestIdRef = useRef(0);
+  const realtimeRequestIdRef = useRef(0);
+  const tradesRequestIdRef = useRef(0);
   const nextRefreshAtRef = useRef(0);
+  const kbsNextRefreshAtRef = useRef(0);
+  const kbsRefreshInFlightRef = useRef(false);
   const nextWatchlistLoadRef = useRef<{ tickers: string[]; forceRefresh: boolean; refreshKind: 'manual' | 'auto' | 'force live' } | null>(null);
 
   const persistWatchlist = useCallback((nextTickers: string[]) => {
@@ -825,6 +1100,65 @@ const VietnamDashboardPage: React.FC = () => {
     persistWatchlist(nextTickers);
   }, [persistWatchlist]);
 
+  const loadRealtimeQuotes = useCallback(async (tickers: string[]) => {
+    const requestedTickers = tickers.filter(Boolean);
+    if (!requestedTickers.length) {
+      setRealtimeQuotes({});
+      return;
+    }
+    const requestId = realtimeRequestIdRef.current + 1;
+    realtimeRequestIdRef.current = requestId;
+    setRealtimeLoading(true);
+    setRealtimeError(null);
+    try {
+      const response = await stocksApi.getVietnamRealtimeQuotes(requestedTickers);
+      if (requestId !== realtimeRequestIdRef.current) return;
+      setRealtimeQuotes(Object.fromEntries(response.quotes.map((quote) => [quote.symbol, quote])));
+      setLastKbsQuoteRefreshAt(new Date().toISOString());
+      setRealtimeError(response.status === 'ok' ? null : response.error ?? 'KBS snapshot unavailable');
+      if (response.status !== 'ok') {
+        setLastKbsErrorAt(new Date().toISOString());
+      }
+    } catch (err) {
+      if (requestId !== realtimeRequestIdRef.current) return;
+      setLastKbsErrorAt(new Date().toISOString());
+      setRealtimeError(err instanceof Error ? err.message : 'KBS snapshot unavailable');
+    } finally {
+      if (requestId === realtimeRequestIdRef.current) {
+        setRealtimeLoading(false);
+      }
+    }
+  }, []);
+
+  const loadRealtimeTrades = useCallback(async (symbol: string | null) => {
+    if (!symbol) {
+      setRealtimeTrades([]);
+      return;
+    }
+    const requestId = tradesRequestIdRef.current + 1;
+    tradesRequestIdRef.current = requestId;
+    setTradesLoading(true);
+    setTradesError(null);
+    try {
+      const response = await stocksApi.getVietnamRealtimeTrades(symbol, 100);
+      if (requestId !== tradesRequestIdRef.current) return;
+      setRealtimeTrades(response.trades);
+      setLastKbsTradeRefreshAt(new Date().toISOString());
+      setTradesError(response.status === 'ok' ? null : response.error ?? 'Latest trades unavailable');
+      if (response.status !== 'ok') {
+        setLastKbsErrorAt(new Date().toISOString());
+      }
+    } catch (err) {
+      if (requestId !== tradesRequestIdRef.current) return;
+      setLastKbsErrorAt(new Date().toISOString());
+      setTradesError(err instanceof Error ? err.message : 'Latest trades unavailable');
+    } finally {
+      if (requestId === tradesRequestIdRef.current) {
+        setTradesLoading(false);
+      }
+    }
+  }, []);
+
   const load = useCallback(async (
     forceRefresh = false,
     refreshKind: 'manual' | 'auto' | 'force live' = forceRefresh ? 'force live' : 'manual',
@@ -842,6 +1176,7 @@ const VietnamDashboardPage: React.FC = () => {
       setData(nextData);
       setLastRefreshKind(refreshKind);
       setLastRefreshAt(new Date().toISOString());
+      void loadRealtimeQuotes(requestedTickers);
     } catch (err) {
       if (requestId !== requestIdRef.current) return;
       setError(err instanceof Error ? err.message : 'Failed to load Vietnam dashboard');
@@ -851,7 +1186,7 @@ const VietnamDashboardPage: React.FC = () => {
         setForceLoading(false);
       }
     }
-  }, [watchlist]);
+  }, [loadRealtimeQuotes, watchlist]);
 
   const handlePresetChange = useCallback((event: React.ChangeEvent<HTMLSelectElement>) => {
     const presetId = event.target.value as VietnamWatchlistPresetId;
@@ -910,6 +1245,26 @@ const VietnamDashboardPage: React.FC = () => {
     setWatchlistError(null);
   }, [applyWatchlist]);
 
+  const refreshKbsLayer = useCallback(async (tickersOverride?: string[], selectedTickerOverride?: string | null) => {
+    if (kbsRefreshInFlightRef.current) return false;
+    const requestedTickers = tickersOverride ?? watchlist;
+    const requestedTicker = selectedTickerOverride ?? selectedTicker;
+    kbsRefreshInFlightRef.current = true;
+    try {
+      await Promise.allSettled([
+        loadRealtimeQuotes(requestedTickers),
+        loadRealtimeTrades(requestedTicker),
+      ]);
+      return true;
+    } finally {
+      kbsRefreshInFlightRef.current = false;
+    }
+  }, [loadRealtimeQuotes, loadRealtimeTrades, selectedTicker, watchlist]);
+
+  const handleRefreshKbs = useCallback(() => {
+    void refreshKbsLayer();
+  }, [refreshKbsLayer]);
+
   useEffect(() => {
     const queuedLoad = nextWatchlistLoadRef.current;
     if (queuedLoad) {
@@ -921,6 +1276,10 @@ const VietnamDashboardPage: React.FC = () => {
   }, [load]);
 
   useEffect(() => {
+    void loadRealtimeTrades(selectedTicker);
+  }, [loadRealtimeTrades, selectedTicker]);
+
+  useEffect(() => {
     const onVisibilityChange = () => {
       const hidden = document.visibilityState === 'hidden';
       setIsTabHidden(hidden);
@@ -930,10 +1289,17 @@ const VietnamDashboardPage: React.FC = () => {
         setNextRefreshAt(next);
         setCountdownSeconds(autoRefreshInterval);
       }
+      if (!hidden && kbsAutoRefreshEnabled && Date.now() >= kbsNextRefreshAtRef.current) {
+        const next = Date.now() + kbsAutoRefreshInterval * 1000;
+        kbsNextRefreshAtRef.current = next;
+        setKbsNextRefreshAt(next);
+        setKbsCountdownSeconds(kbsAutoRefreshInterval);
+        void refreshKbsLayer();
+      }
     };
     document.addEventListener('visibilitychange', onVisibilityChange);
     return () => document.removeEventListener('visibilitychange', onVisibilityChange);
-  }, [autoRefreshEnabled, autoRefreshInterval]);
+  }, [autoRefreshEnabled, autoRefreshInterval, kbsAutoRefreshEnabled, kbsAutoRefreshInterval, refreshKbsLayer]);
 
   useEffect(() => {
     if (!autoRefreshEnabled) {
@@ -966,6 +1332,36 @@ const VietnamDashboardPage: React.FC = () => {
     }, 1000);
     return () => window.clearInterval(timer);
   }, [autoRefreshEnabled, autoRefreshInterval, load]);
+
+  useEffect(() => {
+    if (!kbsAutoRefreshEnabled) {
+      setKbsNextRefreshAt(null);
+      setKbsCountdownSeconds(null);
+      return undefined;
+    }
+    const scheduleNext = () => {
+      const next = Date.now() + kbsAutoRefreshInterval * 1000;
+      kbsNextRefreshAtRef.current = next;
+      setKbsNextRefreshAt(next);
+      setKbsCountdownSeconds(kbsAutoRefreshInterval);
+    };
+    scheduleNext();
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'hidden') {
+        setIsTabHidden(true);
+        setKbsCountdownSeconds(null);
+        return;
+      }
+      setIsTabHidden(false);
+      setKbsCountdownSeconds(Math.max(0, Math.ceil((kbsNextRefreshAtRef.current - Date.now()) / 1000)));
+      if (Date.now() < kbsNextRefreshAtRef.current) return;
+      scheduleNext();
+      if (!kbsRefreshInFlightRef.current) {
+        void refreshKbsLayer();
+      }
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [kbsAutoRefreshEnabled, kbsAutoRefreshInterval, refreshKbsLayer]);
 
   useEffect(() => {
     const rows = data?.watchlist ?? [];
@@ -1010,7 +1406,7 @@ const VietnamDashboardPage: React.FC = () => {
             During trading hours, the latest daily candle close may represent the latest traded price. After market close, it represents the final close.
           </p>
           <p className="mt-1 max-w-3xl text-xs text-secondary-text">
-            Labels are neutral condition tags, not trading recommendations.
+            Labels are neutral condition tags only.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -1021,6 +1417,10 @@ const VietnamDashboardPage: React.FC = () => {
           <Button variant="outline" onClick={() => void load(true)} isLoading={forceLoading} loadingText="Refreshing live">
             <DatabaseZap className="h-4 w-4" />
             Force live refresh
+          </Button>
+          <Button variant="secondary" onClick={handleRefreshKbs} isLoading={realtimeLoading || tradesLoading} loadingText="Refreshing KBS">
+            <Activity className="h-4 w-4" />
+            Refresh KBS
           </Button>
         </div>
       </header>
@@ -1033,7 +1433,11 @@ const VietnamDashboardPage: React.FC = () => {
               <Badge variant={autoRefreshEnabled ? 'success' : 'default'}>
                 Auto-refresh {autoRefreshEnabled ? 'ON' : 'OFF'}
               </Badge>
-              {isTabHidden && autoRefreshEnabled ? <Badge variant="warning">Paused while tab hidden</Badge> : null}
+              <Badge variant={kbsAutoRefreshEnabled ? 'success' : 'default'}>
+                Auto-refresh KBS {kbsAutoRefreshEnabled ? 'ON' : 'OFF'}
+              </Badge>
+              {isTabHidden && (autoRefreshEnabled || kbsAutoRefreshEnabled) ? <Badge variant="warning">Paused while tab hidden</Badge> : null}
+              {(realtimeLoading || tradesLoading) ? <Badge variant="info">Refreshing KBS...</Badge> : null}
             </div>
             <p className="mt-1 text-xs text-secondary-text">
               Auto-refresh uses the normal cached watchlist request. Force live refresh remains manual.
@@ -1061,9 +1465,30 @@ const VietnamDashboardPage: React.FC = () => {
                 ))}
               </select>
             </label>
+            <label className="inline-flex items-center gap-2 text-sm text-secondary-text">
+              <input
+                type="checkbox"
+                checked={kbsAutoRefreshEnabled}
+                onChange={(event) => setKbsAutoRefreshEnabled(event.target.checked)}
+                className="h-4 w-4 rounded border-border bg-elevated"
+              />
+              Auto-refresh KBS
+            </label>
+            <label className="flex items-center gap-2 text-sm text-secondary-text">
+              KBS interval
+              <select
+                value={kbsAutoRefreshInterval}
+                onChange={(event) => setKbsAutoRefreshInterval(Number(event.target.value))}
+                className="h-9 rounded-lg border border-border/70 bg-elevated px-3 text-sm text-foreground"
+              >
+                {KBS_AUTO_REFRESH_INTERVALS.map((seconds) => (
+                  <option key={seconds} value={seconds}>{seconds}s</option>
+                ))}
+              </select>
+            </label>
           </div>
         </div>
-        <dl className="mt-4 grid gap-3 text-sm md:grid-cols-4">
+        <dl className="mt-4 grid gap-3 text-sm md:grid-cols-5">
           <div className="rounded-lg bg-elevated/50 p-3">
             <dt className="text-xs text-secondary-text">Selected interval</dt>
             <dd className="mt-1 font-medium text-foreground">{autoRefreshInterval}s</dd>
@@ -1085,6 +1510,15 @@ const VietnamDashboardPage: React.FC = () => {
           <div className="rounded-lg bg-elevated/50 p-3">
             <dt className="text-xs text-secondary-text">Last refresh type</dt>
             <dd className="mt-1 font-medium text-foreground">{lastRefreshKind}</dd>
+          </div>
+          <div className="rounded-lg bg-elevated/50 p-3">
+            <dt className="text-xs text-secondary-text">Next KBS refresh</dt>
+            <dd className="mt-1 font-medium text-foreground">
+              {kbsAutoRefreshEnabled && !isTabHidden ? formatCountdown(kbsCountdownSeconds) : 'Paused'}
+            </dd>
+            <dd className="mt-1 text-xs text-secondary-text">
+              {kbsAutoRefreshEnabled && !isTabHidden && kbsNextRefreshAt ? formatVietnamTime(kbsNextRefreshAt) : '-'}
+            </dd>
           </div>
         </dl>
         <div className="mt-3 rounded-lg border border-border/60 bg-elevated/30 p-3 text-xs text-secondary-text">
@@ -1218,6 +1652,21 @@ const VietnamDashboardPage: React.FC = () => {
         </div>
       </section>
 
+      <DataStatusPanel
+        data={data}
+        selectedItem={selectedItem}
+        realtimeQuotes={realtimeQuotes}
+        realtimeTrades={realtimeTrades}
+        watchlist={watchlist}
+        realtimeError={realtimeError}
+        tradesError={tradesError}
+        lastKbsQuoteRefreshAt={lastKbsQuoteRefreshAt}
+        lastKbsTradeRefreshAt={lastKbsTradeRefreshAt}
+        lastKbsErrorAt={lastKbsErrorAt}
+        kbsAutoRefreshEnabled={kbsAutoRefreshEnabled}
+        kbsAutoRefreshInterval={kbsAutoRefreshInterval}
+      />
+
       {error ? (
         <div className="rounded-lg border border-danger/30 bg-danger/10 p-4 text-sm text-danger">{error}</div>
       ) : null}
@@ -1257,7 +1706,7 @@ const VietnamDashboardPage: React.FC = () => {
             </div>
           </dl>
           <div className="mt-3 rounded-lg border border-border/60 bg-elevated/30 p-3 text-xs text-secondary-text">
-            Units: latest price and OHLCV fields are VND, volume is shares, and foreign net is labeled shares only when Mozyfin quote quantity fields are used.
+            Units: latest price and OHLCV fields are VND, volume is shares, and foreign net is labeled shares only when Mozyfin quote quantity fields are used. KBS snapshot is separate and does not replace daily close.
           </div>
           {Object.keys(data.dataQuality.missingFields).length || Object.keys(data.dataQuality.errors).length ? (
             <div className="mt-3 space-y-2">
@@ -1284,11 +1733,24 @@ const VietnamDashboardPage: React.FC = () => {
         <Loading label="Loading Vietnam watchlist..." />
       ) : (
         <>
-          <IndicatorTable items={data?.watchlist ?? []} selectedTicker={selectedItem?.ticker} onSelect={setSelectedTicker} />
-          <StockDetailView item={selectedItem} fixtureMode={data?.fixtureMode} />
+          <IndicatorTable
+            items={data?.watchlist ?? []}
+            realtimeQuotes={realtimeQuotes}
+            realtimeLoading={realtimeLoading}
+            realtimeError={realtimeError}
+            selectedTicker={selectedItem?.ticker}
+            onSelect={setSelectedTicker}
+          />
+          <StockDetailView
+            item={selectedItem}
+            fixtureMode={data?.fixtureMode}
+            realtimeTrades={realtimeTrades}
+            tradesLoading={tradesLoading}
+            tradesError={tradesError}
+          />
           <section className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
             {(data?.watchlist ?? []).map((item) => (
-              <WatchCard key={item.ticker} item={item} />
+              <WatchCard key={item.ticker} item={item} realtimeQuote={realtimeQuotes[item.ticker]} />
             ))}
           </section>
         </>
@@ -1308,7 +1770,7 @@ const VietnamDashboardPage: React.FC = () => {
             {Object.entries(data.formulas).map(([key, formula]) => (
               <div key={key} className="rounded-lg bg-elevated/50 p-3">
                 <dt className="font-medium text-foreground">{key.replaceAll('_', ' ')}</dt>
-                <dd className="mt-1 text-secondary-text">{formula}</dd>
+                <dd className="mt-1 text-secondary-text">{neutralFormulaText(formula)}</dd>
               </div>
             ))}
           </dl>
