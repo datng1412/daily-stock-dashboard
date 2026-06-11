@@ -198,3 +198,65 @@ class VietnamWatchlistHealthResponse(BaseModel):
     last_refresh_time: Optional[str] = None
     units: Dict[str, str] = Field(default_factory=dict)
     cache_metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class VietnamRealtimeQuote(BaseModel):
+    """Vietnam optional realtime/snapshot quote row."""
+
+    symbol: str
+    realtime_price: Optional[float] = None
+    realtime_time: Optional[str] = None
+    reference_price: Optional[float] = None
+    open_price: Optional[float] = None
+    high_price: Optional[float] = None
+    low_price: Optional[float] = None
+    average_price: Optional[float] = None
+    price_change: Optional[float] = None
+    percent_change: Optional[float] = None
+    volume_accumulated: Optional[float] = None
+    total_value: Optional[float] = None
+    bid_price_1: Optional[float] = None
+    bid_vol_1: Optional[float] = None
+    ask_price_1: Optional[float] = None
+    ask_vol_1: Optional[float] = None
+    foreign_buy_volume: Optional[float] = None
+    foreign_sell_volume: Optional[float] = None
+    foreign_room: Optional[float] = None
+    source: str = "vnstock_kbs"
+    status: str = "ok"
+    error: Optional[str] = None
+
+
+class VietnamRealtimeResponse(BaseModel):
+    """Vietnam optional realtime/snapshot quote response."""
+
+    market: str = "VN"
+    source: str = "vnstock_kbs"
+    status: str = "ok"
+    error: Optional[str] = None
+    requested_tickers: List[str] = Field(default_factory=list)
+    quotes: List[VietnamRealtimeQuote] = Field(default_factory=list)
+    cache: Dict[str, Any] = Field(default_factory=dict)
+
+
+class VietnamRealtimeTrade(BaseModel):
+    """Vietnam optional realtime trade tape row."""
+
+    time: Optional[str] = None
+    price: Optional[float] = None
+    volume: Optional[float] = None
+    match_type: Optional[str] = None
+    id: Optional[str] = None
+    source: str = "vnstock_kbs"
+
+
+class VietnamRealtimeTradesResponse(BaseModel):
+    """Vietnam optional realtime trade tape response."""
+
+    market: str = "VN"
+    source: str = "vnstock_kbs"
+    symbol: str
+    status: str = "ok"
+    error: Optional[str] = None
+    trades: List[VietnamRealtimeTrade] = Field(default_factory=list)
+    cache: Dict[str, Any] = Field(default_factory=dict)

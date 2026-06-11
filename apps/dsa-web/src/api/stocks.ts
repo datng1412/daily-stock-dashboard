@@ -164,6 +164,60 @@ export type VietnamWatchlistResponse = {
   formulas: Record<string, string>;
 };
 
+export type VietnamRealtimeQuote = {
+  symbol: string;
+  realtimePrice?: number | null;
+  realtimeTime?: string | null;
+  referencePrice?: number | null;
+  openPrice?: number | null;
+  highPrice?: number | null;
+  lowPrice?: number | null;
+  averagePrice?: number | null;
+  priceChange?: number | null;
+  percentChange?: number | null;
+  volumeAccumulated?: number | null;
+  totalValue?: number | null;
+  bidPrice1?: number | null;
+  bidVol1?: number | null;
+  askPrice1?: number | null;
+  askVol1?: number | null;
+  foreignBuyVolume?: number | null;
+  foreignSellVolume?: number | null;
+  foreignRoom?: number | null;
+  source: 'vnstock_kbs';
+  status: 'ok' | 'unavailable' | 'error' | 'stale';
+  error?: string | null;
+};
+
+export type VietnamRealtimeResponse = {
+  market: 'VN';
+  source: 'vnstock_kbs';
+  status: 'ok' | 'unavailable' | 'error' | 'stale';
+  error?: string | null;
+  requestedTickers: string[];
+  quotes: VietnamRealtimeQuote[];
+  cache: Record<string, unknown>;
+};
+
+export type VietnamRealtimeTrade = {
+  time?: string | null;
+  price?: number | null;
+  volume?: number | null;
+  matchType?: string | null;
+  id?: string | null;
+  source: 'vnstock_kbs';
+};
+
+export type VietnamRealtimeTradesResponse = {
+  market: 'VN';
+  source: 'vnstock_kbs';
+  symbol: string;
+  status: 'ok' | 'unavailable' | 'error' | 'stale';
+  error?: string | null;
+  trades: VietnamRealtimeTrade[];
+  cache: Record<string, unknown>;
+};
+
 export const stocksApi = {
   async extractFromImage(file: File): Promise<ExtractFromImageResponse> {
     const formData = new FormData();
@@ -230,5 +284,23 @@ export const stocksApi = {
     });
     const { toCamelCase } = await import('./utils');
     return toCamelCase<VietnamWatchlistHealthResponse>(response.data);
+  },
+
+  async getVietnamRealtimeQuotes(tickers: string[]): Promise<VietnamRealtimeResponse> {
+    const response = await apiClient.get('/api/v1/stocks/vn/realtime', {
+      params: { tickers: tickers.join(',') },
+      timeout: 30000,
+    });
+    const { toCamelCase } = await import('./utils');
+    return toCamelCase<VietnamRealtimeResponse>(response.data);
+  },
+
+  async getVietnamRealtimeTrades(symbol: string, limit = 100): Promise<VietnamRealtimeTradesResponse> {
+    const response = await apiClient.get('/api/v1/stocks/vn/realtime/trades', {
+      params: { symbol, limit },
+      timeout: 30000,
+    });
+    const { toCamelCase } = await import('./utils');
+    return toCamelCase<VietnamRealtimeTradesResponse>(response.data);
   },
 };

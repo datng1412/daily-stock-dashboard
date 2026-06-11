@@ -25,6 +25,8 @@ from api.v1.schemas.stocks import (
     KLineData,
     StockHistoryResponse,
     StockQuote,
+    VietnamRealtimeResponse,
+    VietnamRealtimeTradesResponse,
     VietnamWatchlistHealthResponse,
     VietnamWatchlistResponse,
 )
@@ -44,6 +46,7 @@ from src.services.stock_service import StockService
 from src.services.system_config_service import SystemConfigService
 from src.services.vietnam_market_service import VietnamMarketService
 from data_provider.base import normalize_stock_code
+from data_provider.vnstock_realtime_fetcher import VnstockRealtimeFetcher
 
 logger = logging.getLogger(__name__)
 
@@ -447,6 +450,48 @@ def get_vietnam_watchlist(
         raise HTTPException(
             status_code=500,
             detail={"error": "vn_watchlist_failed", "message": str(e)},
+        )
+
+
+@router.get(
+    "/vn/realtime",
+    response_model=VietnamRealtimeResponse,
+    summary="Vietnam realtime snapshot quotes",
+    description="Return optional vnstock KBS realtime/snapshot quotes. Does not modify Mozyfin data or latest_price semantics.",
+)
+def get_vietnam_realtime_quotes(
+    tickers: str = Query(..., description="Comma-separated VN tickers, for example FPT,ACB,VCB"),
+) -> VietnamRealtimeResponse:
+    try:
+        symbols = [item.strip().upper() for item in tickers.split(",") if item.strip()]
+        payload = VnstockRealtimeFetcher().fetch_quotes(symbols)
+        return VietnamRealtimeResponse(**payload)
+    except Exception as e:
+        logger.error("Vietnam realtime quotes failed: %s", e, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={"error": "vn_realtime_failed", "message": str(e)},
+        )
+
+
+@router.get(
+    "/vn/realtime/trades",
+    response_model=VietnamRealtimeTradesResponse,
+    summary="Vietnam realtime trade tape",
+    description="Return optional vnstock KBS trade tape rows for one VN symbol.",
+)
+def get_vietnam_realtime_trades(
+    symbol: str = Query(..., description="VN ticker, for example FPT"),
+    limit: int = Query(100, ge=1, le=500, description="Maximum trade rows to return"),
+) -> VietnamRealtimeTradesResponse:
+    try:
+        payload = VnstockRealtimeFetcher().fetch_trades(symbol.strip().upper(), limit=limit)
+        return VietnamRealtimeTradesResponse(**payload)
+    except Exception as e:
+        logger.error("Vietnam realtime trades failed: %s", e, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={"error": "vn_realtime_trades_failed", "message": str(e)},
         )
 
 
