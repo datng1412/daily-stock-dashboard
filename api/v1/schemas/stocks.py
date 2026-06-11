@@ -206,6 +206,10 @@ class VietnamRealtimeQuote(BaseModel):
     symbol: str
     realtime_price: Optional[float] = None
     realtime_time: Optional[str] = None
+    realtime_time_display: Optional[str] = None
+    age_seconds: Optional[int] = None
+    is_stale: Optional[bool] = None
+    stale_reason: Optional[str] = None
     reference_price: Optional[float] = None
     open_price: Optional[float] = None
     high_price: Optional[float] = None

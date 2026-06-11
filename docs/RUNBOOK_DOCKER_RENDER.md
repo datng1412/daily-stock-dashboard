@@ -12,6 +12,7 @@ Do not commit runtime secrets. Pass `MOZYFIN_API_KEY` through environment variab
 - The Vite frontend is built inside the Docker image and copied to `static/`.
 - FastAPI serves `static/index.html` and `/assets/*` through the existing web UI flow.
 - Live Vietnam data uses Mozyfin. Fixture mode is local testing only.
+- The image installs `vnstock` for optional KBS snapshot/trades endpoints. KBS data is separate from Mozyfin daily close and does not replace `latest_price`.
 
 ## Local Docker Build
 
@@ -58,6 +59,18 @@ Expected live indicators:
 source: Mozyfin live
 fixture_mode: false
 ```
+
+KBS snapshot check:
+
+```powershell
+Invoke-RestMethod "http://127.0.0.1:8000/api/v1/stocks/vn/realtime?tickers=FPT,ACB,VCB" |
+  ConvertTo-Json -Depth 8
+
+Invoke-RestMethod "http://127.0.0.1:8000/api/v1/stocks/vn/realtime/trades?symbol=FPT&limit=10" |
+  ConvertTo-Json -Depth 8
+```
+
+KBS does not require extra credentials. Before public deployment, confirm vnstock/KBS license and usage terms fit the deployment.
 
 ## Docker Compose
 
@@ -132,11 +145,15 @@ PORT=8000
 
 Render normally injects `PORT` automatically. Do not set `MOZYFIN_FIXTURE_DIR` on Render.
 
+No vnstock-specific environment variables are required for the KBS snapshot/trades endpoints.
+
 After deploy:
 
 ```text
 https://<your-render-service>.onrender.com/vietnam
 https://<your-render-service>.onrender.com/api/v1/stocks/vn/watchlist/health
+https://<your-render-service>.onrender.com/api/v1/stocks/vn/realtime?tickers=FPT,ACB,VCB
+https://<your-render-service>.onrender.com/api/v1/stocks/vn/realtime/trades?symbol=FPT&limit=10
 ```
 
 Verify live mode:
@@ -153,8 +170,10 @@ fixture_mode: false
 - Missing API key: set `MOZYFIN_API_KEY` in Render environment variables, or the live Mozyfin path cannot authenticate.
 - Build fails during frontend install/build: check `npm ci` and `npm run build` logs in the Render build output.
 - Mozyfin CLI unavailable: the Docker image installs `mozyfin-cli`; if installation fails, live VN endpoints cannot fetch Mozyfin data.
+- KBS endpoint returns unavailable: confirm `vnstock` installed in the image, for example by checking container logs or running `python -m pip show vnstock` inside the container.
 - Source says fixture: `MOZYFIN_FIXTURE_DIR` is set; remove it for live data.
 - Large watchlists time out: the full watchlist endpoint loads many tickers and can exceed free-tier host/request time limits.
+- Public KBS usage: verify vnstock/KBS license and usage limits before exposing the endpoint on a public deployment.
 
 ## Local Port Cleanup
 

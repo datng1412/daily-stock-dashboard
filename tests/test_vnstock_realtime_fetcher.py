@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 import importlib
+from datetime import datetime
 
 import pandas as pd
 import pytest
@@ -91,6 +92,79 @@ def test_vnstock_realtime_maps_close_price_to_separate_realtime_price(monkeypatc
     assert quote["realtime_price"] == 123.4
     assert quote["source"] == "vnstock_kbs"
     assert "latest_price" not in quote
+
+
+def test_epoch_milliseconds_timestamp_maps_to_display_and_age(monkeypatch):
+    row = {
+        "symbol": "FPT",
+        "time": 1781150988189,
+        "close_price": 123.4,
+    }
+    fetcher = VnstockRealtimeFetcher()
+    monkeypatch.setattr(
+        provider,
+        "_vn_now",
+        lambda: datetime.fromisoformat("2026-06-11T11:10:00+07:00"),
+    )
+
+    quote = fetcher._map_quote("FPT", row)
+
+    assert quote["realtime_time"] == "1781150988189"
+    assert quote["realtime_time_display"].startswith("2026-06-11T11:09:48")
+    assert quote["age_seconds"] == 11
+    assert quote["is_stale"] is False
+    assert quote["stale_reason"] is None
+
+
+def test_datetime_string_timestamp_maps_to_display(monkeypatch):
+    row = {
+        "symbol": "FPT",
+        "time": "2026-06-11 11:09:32",
+        "close_price": 123.4,
+    }
+    fetcher = VnstockRealtimeFetcher()
+    monkeypatch.setattr(
+        provider,
+        "_vn_now",
+        lambda: datetime.fromisoformat("2026-06-11T11:10:00+07:00"),
+    )
+
+    quote = fetcher._map_quote("FPT", row)
+
+    assert quote["realtime_time_display"] == "2026-06-11T11:09:32+07:00"
+    assert quote["age_seconds"] == 28
+    assert quote["is_stale"] is False
+
+
+def test_missing_timestamp_does_not_crash(monkeypatch):
+    fetcher = VnstockRealtimeFetcher()
+
+    quote = fetcher._map_quote("FPT", {"symbol": "FPT", "close_price": 123.4})
+
+    assert quote["realtime_time"] is None
+    assert quote["age_seconds"] is None
+    assert quote["is_stale"] is None
+    assert quote["stale_reason"] == "timestamp_unparseable"
+
+
+def test_stale_quote_is_marked_stale(monkeypatch):
+    row = {
+        "symbol": "FPT",
+        "time": "2026-06-11 11:00:00",
+        "close_price": 123.4,
+    }
+    fetcher = VnstockRealtimeFetcher()
+    monkeypatch.setattr(
+        provider,
+        "_vn_now",
+        lambda: datetime.fromisoformat("2026-06-11T11:10:00+07:00"),
+    )
+
+    quote = fetcher._map_quote("FPT", row)
+
+    assert quote["age_seconds"] == 600
+    assert quote["is_stale"] is True
+    assert quote["stale_reason"] == "age_gt_60s"
 
 
 def test_vnstock_missing_returns_unavailable(monkeypatch):

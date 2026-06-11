@@ -13,11 +13,14 @@ import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 
 VNSTOCK_REALTIME_SOURCE = "vnstock_kbs"
 DEFAULT_REALTIME_TTL_SECONDS = 10
 DEFAULT_TRADES_TTL_SECONDS = 10
+VN_TIMEZONE = ZoneInfo("Asia/Ho_Chi_Minh")
+STALE_THRESHOLD_SECONDS = 60
 
 
 @dataclass
@@ -33,6 +36,10 @@ _CACHE_LOCK = threading.Lock()
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _vn_now() -> datetime:
+    return _utc_now().astimezone(VN_TIMEZONE)
 
 
 def clear_vnstock_realtime_cache() -> None:
@@ -80,6 +87,54 @@ def _safe_str(value: Any) -> Optional[str]:
     if value in (None, ""):
         return None
     return str(value)
+
+
+def _parse_realtime_time(value: Any, now: Optional[datetime] = None) -> Dict[str, Any]:
+    raw_value = _safe_str(value)
+    if not raw_value:
+        return {
+            "realtime_time": None,
+            "realtime_time_display": None,
+            "age_seconds": None,
+            "is_stale": None,
+            "stale_reason": "timestamp_unparseable",
+        }
+
+    parsed: Optional[datetime] = None
+    try:
+        if isinstance(value, (int, float)) or raw_value.isdigit():
+            number = float(raw_value)
+            seconds = number / 1000 if number >= 1_000_000_000_000 else number
+            parsed = datetime.fromtimestamp(seconds, tz=timezone.utc).astimezone(VN_TIMEZONE)
+        else:
+            normalized = raw_value.replace("T", " ")
+            parsed = datetime.fromisoformat(normalized)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=VN_TIMEZONE)
+            else:
+                parsed = parsed.astimezone(VN_TIMEZONE)
+    except Exception:
+        parsed = None
+
+    if parsed is None:
+        return {
+            "realtime_time": raw_value,
+            "realtime_time_display": raw_value,
+            "age_seconds": None,
+            "is_stale": None,
+            "stale_reason": "timestamp_unparseable",
+        }
+
+    reference_now = (now or _vn_now()).astimezone(VN_TIMEZONE)
+    age_seconds = max(0, int((reference_now - parsed).total_seconds()))
+    is_stale = age_seconds > STALE_THRESHOLD_SECONDS
+    return {
+        "realtime_time": raw_value,
+        "realtime_time_display": parsed.isoformat(timespec="seconds"),
+        "age_seconds": age_seconds,
+        "is_stale": is_stale,
+        "stale_reason": "age_gt_60s" if is_stale else None,
+    }
 
 
 def _column_name(column: Any) -> str:
@@ -216,10 +271,11 @@ class VnstockRealtimeFetcher:
         return quotes
 
     def _map_quote(self, symbol: str, row: Dict[str, Any]) -> Dict[str, Any]:
+        time_metadata = _parse_realtime_time(row.get("time"))
         return {
             "symbol": symbol,
             "realtime_price": _safe_float(row.get("close_price")),
-            "realtime_time": _safe_str(row.get("time")),
+            **time_metadata,
             "reference_price": _safe_float(row.get("reference_price")),
             "open_price": _safe_float(row.get("open_price")),
             "high_price": _safe_float(row.get("high_price")),
@@ -246,6 +302,10 @@ class VnstockRealtimeFetcher:
             "symbol": symbol,
             "realtime_price": None,
             "realtime_time": None,
+            "realtime_time_display": None,
+            "age_seconds": None,
+            "is_stale": None,
+            "stale_reason": "timestamp_unparseable",
             "reference_price": None,
             "open_price": None,
             "high_price": None,

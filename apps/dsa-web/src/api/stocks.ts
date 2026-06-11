@@ -168,6 +168,10 @@ export type VietnamRealtimeQuote = {
   symbol: string;
   realtimePrice?: number | null;
   realtimeTime?: string | null;
+  realtimeTimeDisplay?: string | null;
+  ageSeconds?: number | null;
+  isStale?: boolean | null;
+  staleReason?: string | null;
   referencePrice?: number | null;
   openPrice?: number | null;
   highPrice?: number | null;
