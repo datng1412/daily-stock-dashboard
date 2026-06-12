@@ -84,6 +84,11 @@ const priceSourceVariant = (source?: string | null) => {
   return 'default';
 };
 
+const finalCloseDisplayLabel = (status?: string | null) => {
+  if (!status || status === 'unknown' || status === 'not_confirmed') return 'not confirmed';
+  return status.replaceAll('_', ' ');
+};
+
 const statusVariant = (label: string) => {
   if (['Stronger than short-term average', 'Near support', 'Near resistance', 'Volume expansion', 'Foreign net positive'].includes(label)) return 'info';
   if (['Breakout candidate', 'Weak short-term', 'Foreign data stale', 'Foreign net negative', 'Indicator caution', 'Price finality unknown', 'Adjusted price unknown'].includes(label)) return 'warning';
@@ -315,7 +320,7 @@ const WatchCard: React.FC<{ item: VietnamWatchItem; realtimeQuote?: VietnamRealt
         <div className="flex items-center justify-between gap-2">
           <span className="text-secondary-text">Final close</span>
           <Badge variant={item.finalCloseStatus === 'final' ? 'success' : item.finalCloseStatus === 'not_final' ? 'warning' : 'default'}>
-            {item.finalCloseStatus ?? 'unknown'}
+            {finalCloseDisplayLabel(item.finalCloseStatus)}
           </Badge>
         </div>
         <div className="flex items-center justify-between gap-2">
@@ -753,7 +758,7 @@ const IndicatorTable: React.FC<{
                 </td>
                 <td className="px-3 py-3">
                   <Badge variant={item.finalCloseStatus === 'final' ? 'success' : item.finalCloseStatus === 'not_final' ? 'warning' : 'default'}>
-                    {item.finalCloseStatus ?? 'unknown'}
+                    {finalCloseDisplayLabel(item.finalCloseStatus)}
                   </Badge>
                 </td>
                 <td className="px-3 py-3 text-right">{formatPrice(item.indicators.ma20)}</td>
@@ -790,6 +795,18 @@ const StockDetailView: React.FC<{
   const displayWarnings = importantWarnings(item);
   const conditionSummary = buildVietnamConditionSummary({ item, fixtureMode });
   const kbsState = kbsSnapshotState(realtimeQuote, marketPhase.code);
+  const sessionCandlesCount = item.intradayPulse?.sessionCandlesCount ?? 0;
+  const hasSessionCandles = sessionCandlesCount > 0;
+  const hasSessionHighLowFrom1H = item.intradayPulse?.sessionHighFrom1H != null && item.intradayPulse?.sessionLowFrom1H != null;
+  const hasSessionRangeFrom1H = item.intradayPulse?.sessionRangePctFrom1H != null;
+  const hasSessionVolumeFrom1H = item.intradayPulse?.sessionVolumeFrom1H != null;
+  const missingSessionMetricText = hasSessionCandles ? 'Session value unavailable' : 'Not enough session candles';
+  const hasVolumeVsAvg1h = item.intradayPulse?.volumeVsAvg1h != null;
+  const avgVolume20D = indicators.avgVolume20D ?? item.liquidity?.avgVolume20D;
+  const finalCloseLabel = finalCloseDisplayLabel(item.finalCloseStatus);
+  const foreignNet5dLatestAvailable = indicators.foreignNet5dLatestAvailable;
+  const foreignNet20dLatestAvailable = indicators.foreignNet20dLatestAvailable;
+  const foreignHistoryCount = indicators.foreignNetHistoryCount ?? 0;
   return (
     <section className="rounded-lg border border-border/70 bg-card p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -834,7 +851,7 @@ const StockDetailView: React.FC<{
         </div>
         <div className="rounded-lg bg-elevated/50 p-3">
           <dt className="text-xs text-secondary-text">20D average volume (shares)</dt>
-          <dd className="mt-1 font-medium text-foreground">{formatNumber(indicators.avgVolume20d)}</dd>
+          <dd className="mt-1 font-medium text-foreground">{formatNumber(avgVolume20D)}</dd>
         </div>
         <div className="rounded-lg bg-elevated/50 p-3">
           <dt className="text-xs text-secondary-text">Distance to 20D high</dt>
@@ -869,7 +886,7 @@ const StockDetailView: React.FC<{
         </div>
         <div className="rounded-lg bg-elevated/50 p-3">
           <dt className="text-xs text-secondary-text">Price date / final close</dt>
-          <dd className="mt-1 font-medium text-foreground">{item.latestPriceDate ?? item.priceDate ?? '-'} / {item.finalCloseStatus ?? 'unknown'}</dd>
+          <dd className="mt-1 font-medium text-foreground">{item.latestPriceDate ?? item.priceDate ?? '-'} / {finalCloseLabel}</dd>
         </div>
         <div className="rounded-lg bg-elevated/50 p-3">
           <dt className="text-xs text-secondary-text">Last fetched</dt>
@@ -877,12 +894,16 @@ const StockDetailView: React.FC<{
           <dd className="mt-1 text-xs text-secondary-text">{formatRelativeAge(latestFetchedValue(item))}</dd>
         </div>
         <div className="rounded-lg bg-elevated/50 p-3">
-          <dt className="text-xs text-secondary-text">Foreign net 5D ({item.foreignNetUnit ?? 'unknown'})</dt>
-          <dd className={cn('mt-1 font-medium', signalTone(indicators.foreignNet5d))}>{formatNumber(indicators.foreignNet5d)}</dd>
+          <dt className="text-xs text-secondary-text">Foreign net 5D latest available</dt>
+          <dd className={cn('mt-1 font-medium', signalTone(foreignNet5dLatestAvailable))}>
+            {foreignNet5dLatestAvailable == null && foreignHistoryCount < 5 ? 'Need 5 foreign rows' : formatNumber(foreignNet5dLatestAvailable)}
+          </dd>
         </div>
         <div className="rounded-lg bg-elevated/50 p-3">
-          <dt className="text-xs text-secondary-text">Foreign net 20D ({item.foreignNetUnit ?? 'unknown'})</dt>
-          <dd className={cn('mt-1 font-medium', signalTone(indicators.foreignNet20d))}>{formatNumber(indicators.foreignNet20d)}</dd>
+          <dt className="text-xs text-secondary-text">Foreign net 20D latest available</dt>
+          <dd className={cn('mt-1 font-medium', signalTone(foreignNet20dLatestAvailable))}>
+            {foreignNet20dLatestAvailable == null && foreignHistoryCount < 20 ? 'Need 20 foreign rows' : formatNumber(foreignNet20dLatestAvailable)}
+          </dd>
         </div>
         <div className="rounded-lg bg-elevated/50 p-3">
           <dt className="text-xs text-secondary-text">OHLCV / foreign dates</dt>
@@ -895,6 +916,11 @@ const StockDetailView: React.FC<{
           </dd>
         </div>
       </dl>
+      {item.foreignDateMatch === 'mismatched' && item.foreignNetDate && item.ohlcvDate ? (
+        <p className="mt-3 text-xs text-secondary-text">
+          Foreign data as of {item.foreignNetDate}; OHLCV date {item.ohlcvDate}.
+        </p>
+      ) : null}
       <div className="mt-4 rounded-lg border border-border/60 bg-elevated/30 p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -933,26 +959,54 @@ const StockDetailView: React.FC<{
             </dd>
           </div>
           <div className="rounded-lg bg-card/60 p-3">
-            <dt className="text-xs text-secondary-text">1H volume (shares)</dt>
+            <dt className="text-xs text-secondary-text">Latest 1H candle volume</dt>
             <dd className="mt-1 font-medium text-foreground">{formatNumber(item.intradayPulse?.latest1hVolume)}</dd>
           </div>
           <div className="rounded-lg bg-card/60 p-3">
             <dt className="text-xs text-secondary-text">Session high / low from 1H</dt>
-            <dd className="mt-1 font-medium text-foreground">
-              {formatPrice(item.intradayPulse?.sessionHighFrom1h)} / {formatPrice(item.intradayPulse?.sessionLowFrom1h)}
+            <dd
+              className="mt-1 font-medium text-foreground"
+              title={hasSessionHighLowFrom1H ? 'Based on filtered current-session 1H candles only.' : hasSessionCandles ? 'Session high/low could not be calculated from the available session candles.' : 'Session high/low requires current-session intraday candles.'}
+            >
+              {hasSessionHighLowFrom1H
+                ? `${formatPrice(item.intradayPulse?.sessionHighFrom1H)} / ${formatPrice(item.intradayPulse?.sessionLowFrom1H)}`
+                : missingSessionMetricText}
             </dd>
           </div>
           <div className="rounded-lg bg-card/60 p-3">
-            <dt className="text-xs text-secondary-text">Cumulative 1H volume</dt>
-            <dd className="mt-1 font-medium text-foreground">{formatNumber(item.intradayPulse?.cumulative1hVolume)}</dd>
+            <dt className="text-xs text-secondary-text">Session range from 1H</dt>
+            <dd
+              className="mt-1 font-medium text-foreground"
+              title={hasSessionRangeFrom1H ? 'Based on filtered current-session 1H candles only.' : hasSessionCandles ? 'Session range could not be calculated from the available session candles.' : 'Session range requires current-session intraday candles.'}
+            >
+              {hasSessionRangeFrom1H ? `${formatNumber(item.intradayPulse?.sessionRangePctFrom1H, 2)}%` : missingSessionMetricText}
+            </dd>
+          </div>
+          <div className="rounded-lg bg-card/60 p-3">
+            <dt className="text-xs text-secondary-text">Mozyfin session 1H volume</dt>
+            <dd
+              className="mt-1 font-medium text-foreground"
+              title={hasSessionVolumeFrom1H ? 'Sum of filtered current-session Mozyfin 1H candle volumes.' : hasSessionCandles ? 'Session volume could not be calculated from the available session candles.' : 'Session volume requires current-session intraday candles.'}
+            >
+              {hasSessionVolumeFrom1H ? formatNumber(item.intradayPulse?.sessionVolumeFrom1H) : missingSessionMetricText}
+            </dd>
           </div>
           <div className="rounded-lg bg-card/60 p-3">
             <dt className="text-xs text-secondary-text">Volume vs avg 1H</dt>
-            <dd className="mt-1 font-medium text-foreground">{formatNumber(item.intradayPulse?.volumeVsAvg1h, 2)}</dd>
+            <dd
+              className="mt-1 font-medium text-foreground"
+              title={hasVolumeVsAvg1h ? undefined : 'Volume vs average requires enough historical 1H candles.'}
+            >
+              {hasVolumeVsAvg1h ? formatNumber(item.intradayPulse?.volumeVsAvg1h, 2) : 'Avg unavailable'}
+            </dd>
           </div>
           <div className="rounded-lg bg-card/60 p-3">
             <dt className="text-xs text-secondary-text">Candles loaded</dt>
             <dd className="mt-1 font-medium text-foreground">{formatNumber(item.intradayCandles?.length ?? 0)}</dd>
+          </div>
+          <div className="rounded-lg bg-card/60 p-3">
+            <dt className="text-xs text-secondary-text">Session 1H candles</dt>
+            <dd className="mt-1 font-medium text-foreground">{formatNumber(sessionCandlesCount)}</dd>
           </div>
         </dl>
         <div className="mt-3 flex flex-wrap gap-1">
@@ -973,6 +1027,9 @@ const StockDetailView: React.FC<{
             ))}
           </div>
         ) : null}
+        <p className="mt-3 text-xs text-secondary-text">
+          Mozyfin session 1H volume is calculated from filtered 1H candles; KBS session volume comes from the realtime board and may differ.
+        </p>
       </div>
       <div className="mt-4 rounded-lg border border-border/60 bg-elevated/30 p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -995,7 +1052,7 @@ const StockDetailView: React.FC<{
             </dd>
           </div>
           <div>
-            <dt className="text-xs text-secondary-text">Volume accumulated</dt>
+            <dt className="text-xs text-secondary-text">KBS session accumulated volume</dt>
             <dd className="mt-1 font-medium text-foreground">{formatNumber(realtimeQuote?.volumeAccumulated)}</dd>
           </div>
         </dl>

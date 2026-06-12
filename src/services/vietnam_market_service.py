@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from threading import Lock, RLock
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -31,6 +32,8 @@ from src.services.vietnam_observability import (
 
 
 LIQUIDITY_TARGET_AVG_VOLUME = 1_000_000
+FOREIGN_HISTORY_LIMIT = 20
+VN_TIMEZONE = ZoneInfo("Asia/Ho_Chi_Minh")
 VN_CACHE_TTL_SECONDS = {
     "ohlcv": 300,
     # Quote includes foreign flow and may include latest price in future Mozyfin outputs.
@@ -120,6 +123,8 @@ VN_DASHBOARD_UNITS = {
     "distance_to_20d_low_pct": "percent",
     "foreign_net_5d": "row-specific",
     "foreign_net_20d": "row-specific",
+    "foreign_net_5d_latest_available": "row-specific",
+    "foreign_net_20d_latest_available": "row-specific",
     "intraday_1h_price": "VND",
     "intraday_1h_volume": "shares",
 }
@@ -449,6 +454,41 @@ def _foreign_sum(df: pd.DataFrame, window: int) -> Optional[float]:
     return _safe_float(series.tail(window).sum())
 
 
+def _foreign_history_latest(history: Optional[List[Dict[str, Any]]]) -> Optional[Dict[str, Any]]:
+    if not history:
+        return None
+    rows = [row for row in history if _valid_date_string(row.get("date"))]
+    if not rows:
+        return history[0]
+    return max(rows, key=lambda row: _valid_date_string(row.get("date")) or "")
+
+
+def _foreign_history_sum(history: Optional[List[Dict[str, Any]]], window: int) -> Optional[float]:
+    if not history:
+        return None
+    valid_rows = [row for row in history if _safe_float(row.get("net")) is not None]
+    if len(valid_rows) < window:
+        return None
+    ordered_rows = sorted(
+        valid_rows,
+        key=lambda row: _valid_date_string(row.get("date")) or "",
+        reverse=True,
+    )
+    return _safe_float(sum(_safe_float(row.get("net")) or 0 for row in ordered_rows[:window]))
+
+
+def calculate_foreign_history_summary(history: Optional[List[Dict[str, Any]]]) -> Dict[str, Any]:
+    """Calculate latest-available foreign flow sums from quote history rows."""
+    valid_rows = [row for row in (history or []) if _safe_float(row.get("net")) is not None]
+    latest = _foreign_history_latest(valid_rows)
+    return {
+        "foreign_net_5d_latest_available": _round_optional(_foreign_history_sum(valid_rows, 5), 0),
+        "foreign_net_20d_latest_available": _round_optional(_foreign_history_sum(valid_rows, 20), 0),
+        "foreign_net_latest_available_date": _valid_date_string((latest or {}).get("date")),
+        "foreign_net_history_count": len(valid_rows),
+    }
+
+
 def _status_detail(label: str, severity: str, reason: str, inputs: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     if label not in VN_ALLOWED_STATUS_LABELS:
         raise ValueError(f"Unsupported Vietnam status label: {label}")
@@ -495,6 +535,33 @@ def normalize_intraday_candles(df: Optional[pd.DataFrame], limit: int = 8) -> Li
     return rows
 
 
+def _intraday_candle_vn_date(candle: Dict[str, Any]) -> Optional[str]:
+    value = candle.get("date_time") or candle.get("timestamp")
+    if value in (None, ""):
+        return None
+    timestamp: Optional[datetime] = None
+    numeric = _safe_float(value)
+    if numeric is not None and numeric > 1_000_000_000:
+        timestamp = datetime.fromtimestamp(numeric, tz=timezone.utc)
+    else:
+        parsed = pd.to_datetime(value, errors="coerce")
+        if pd.isna(parsed):
+            return None
+        timestamp = parsed.to_pydatetime()
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
+    return timestamp.astimezone(VN_TIMEZONE).date().isoformat()
+
+
+def _latest_vn_session_candles(candles: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    dated = [(candle, _intraday_candle_vn_date(candle)) for candle in candles]
+    dates = [date for _, date in dated if date]
+    if not dates:
+        return []
+    latest_date = max(dates)
+    return [candle for candle, date in dated if date == latest_date]
+
+
 def calculate_intraday_pulse(candles: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Calculate neutral intraday pulse metrics from available 1H candles."""
     if not candles:
@@ -508,7 +575,11 @@ def calculate_intraday_pulse(candles: List[Dict[str, Any]]) -> Dict[str, Any]:
             "latest_1h_change_percent": None,
             "session_high_from_1h": None,
             "session_low_from_1h": None,
+            "session_range_pct_from_1h": None,
+            "session_volume_from_1h": None,
+            "session_candles_count": 0,
             "cumulative_1h_volume": None,
+            "loaded_candles_total_volume": None,
             "direction": "unknown",
             "range_percent": None,
             "volume_vs_avg_1h": None,
@@ -522,9 +593,16 @@ def calculate_intraday_pulse(candles: List[Dict[str, Any]]) -> Dict[str, Any]:
     latest_volume = _safe_float(latest.get("volume"))
     latest_change = latest_close - latest_open if latest_close is not None and latest_open is not None else None
     latest_change_pct = latest_change / latest_open * 100 if latest_change is not None and latest_open else None
-    highs = [_safe_float(candle.get("high")) for candle in candles]
-    lows = [_safe_float(candle.get("low")) for candle in candles]
+    session_candles = _latest_vn_session_candles(candles)
+    session_highs = [_safe_float(candle.get("high")) for candle in session_candles]
+    session_lows = [_safe_float(candle.get("low")) for candle in session_candles]
+    session_volumes = [_safe_float(candle.get("volume")) for candle in session_candles]
+    session_open = _safe_float(session_candles[0].get("open")) if session_candles else None
+    session_high = max(value for value in session_highs if value is not None) if any(value is not None for value in session_highs) else None
+    session_low = min(value for value in session_lows if value is not None) if any(value is not None for value in session_lows) else None
+    session_volume = sum(value for value in session_volumes if value is not None) if any(value is not None for value in session_volumes) else None
     volumes = [_safe_float(candle.get("volume")) for candle in candles]
+    loaded_total_volume = sum(value for value in volumes if value is not None) if any(value is not None for value in volumes) else None
     previous_volumes = [value for value in volumes[:-1] if value is not None]
     avg_previous_volume = sum(previous_volumes) / len(previous_volumes) if len(previous_volumes) >= 2 else None
 
@@ -545,9 +623,13 @@ def calculate_intraday_pulse(candles: List[Dict[str, Any]]) -> Dict[str, Any]:
         "latest_1h_volume": _round_optional(latest_volume, 0),
         "latest_1h_change": _round_optional(latest_change),
         "latest_1h_change_percent": _round_optional(latest_change_pct, 2),
-        "session_high_from_1h": _round_optional(max(value for value in highs if value is not None)) if any(value is not None for value in highs) else None,
-        "session_low_from_1h": _round_optional(min(value for value in lows if value is not None)) if any(value is not None for value in lows) else None,
-        "cumulative_1h_volume": _round_optional(sum(value for value in volumes if value is not None), 0) if any(value is not None for value in volumes) else None,
+        "session_high_from_1h": _round_optional(session_high),
+        "session_low_from_1h": _round_optional(session_low),
+        "session_range_pct_from_1h": _round_optional((session_high - session_low) / session_open * 100, 2) if session_high is not None and session_low is not None and session_open else None,
+        "session_volume_from_1h": _round_optional(session_volume, 0),
+        "session_candles_count": len(session_candles),
+        "cumulative_1h_volume": _round_optional(loaded_total_volume, 0),
+        "loaded_candles_total_volume": _round_optional(loaded_total_volume, 0),
         "direction": direction,
         "range_percent": _round_optional((latest_high - latest_low) / latest_open * 100, 2) if latest_high is not None and latest_low is not None and latest_open else None,
         "volume_vs_avg_1h": _round_optional(latest_volume / avg_previous_volume, 2) if latest_volume is not None and avg_previous_volume else None,
@@ -861,7 +943,11 @@ def derive_neutral_status_labels(indicators: Dict[str, Any], change_pct: Optiona
     return [detail["label"] for detail in derive_neutral_status_details(indicators, change_pct, **kwargs)]
 
 
-def calculate_vietnam_indicators(df: pd.DataFrame, foreign_latest: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def calculate_vietnam_indicators(
+    df: pd.DataFrame,
+    foreign_latest: Optional[Dict[str, Any]] = None,
+    foreign_history: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
     """Calculate neutral Vietnam watchlist indicators for the latest row."""
     if df is None or df.empty:
         return {}
@@ -888,6 +974,7 @@ def calculate_vietnam_indicators(df: pd.DataFrame, foreign_latest: Optional[Dict
     distance_low = ((latest_close - low_20d) / low_20d * 100) if latest_close is not None and low_20d else None
     foreign_net_5d = _foreign_sum(df, 5)
     foreign_net_20d = _foreign_sum(df, 20)
+    foreign_history_summary = calculate_foreign_history_summary(foreign_history)
 
     return {
         "close": _round_optional(latest_close),
@@ -911,6 +998,7 @@ def calculate_vietnam_indicators(df: pd.DataFrame, foreign_latest: Optional[Dict
         "foreign_net_5d": _round_optional(foreign_net_5d, 0),
         "foreign_net_20d": _round_optional(foreign_net_20d, 0),
         "foreign_net_latest": _round_optional(_safe_float((foreign_latest or {}).get("net")), 0),
+        **foreign_history_summary,
     }
 
 
@@ -1084,7 +1172,7 @@ class VietnamMarketService:
             return None
         df = df.sort_values("date").reset_index(drop=True)
         latest = df.iloc[-1]
-        quote_key = _cache_key("quote", symbol, limit=1)
+        quote_key = _cache_key("quote", symbol, limit=FOREIGN_HISTORY_LIMIT)
         quote_entry = _get_cache_entry(quote_key)
         intraday_key = _cache_key(
             "intraday_ohlcv",
@@ -1095,7 +1183,8 @@ class VietnamMarketService:
         intraday_entry = _get_cache_entry(intraday_key)
         news_key = _cache_key("news", symbol, limit=self.config.news_limit)
         news_entry = _get_cache_entry(news_key)
-        foreign = quote_entry.value if quote_entry else {
+        quote_history = quote_entry.value if quote_entry and isinstance(quote_entry.value, list) else None
+        foreign = _foreign_history_latest(quote_history) or {
             "buy": _safe_float(_last_value(df, "foreign_buy")),
             "sell": _safe_float(_last_value(df, "foreign_sell")),
             "net": _safe_float(_last_value(df, "foreign_net")),
@@ -1249,16 +1338,22 @@ class VietnamMarketService:
             "price_raw_field": None,
             "price_date": None,
         }
+        foreign_history: List[Dict[str, Any]] = []
         if fetcher and hasattr(fetcher, "get_foreign_trading"):
             try:
-                quote_key = _cache_key("quote", symbol, limit=1)
+                quote_key = _cache_key("quote", symbol, limit=FOREIGN_HISTORY_LIMIT)
                 quote_result = _read_cache(
                     quote_key,
                     "quote",
-                    lambda: fetcher.get_foreign_trading(symbol),
+                    lambda: (
+                        fetcher.get_foreign_trading_history(symbol, FOREIGN_HISTORY_LIMIT)
+                        if hasattr(fetcher, "get_foreign_trading_history")
+                        else [fetcher.get_foreign_trading(symbol)]
+                    ),
                     force_refresh=force_refresh,
                 )
-                foreign = quote_result["value"]
+                foreign_history = quote_result["value"] or []
+                foreign = _foreign_history_latest(foreign_history) or foreign
                 cache_status["quote_cache"] = quote_result["status"]
                 cache_last_fetched_at["quote"] = _iso(quote_result["entry"].fetched_at)
                 cache_next_refresh_at["quote"] = _iso(quote_result["entry"].expires_at)
@@ -1319,7 +1414,7 @@ class VietnamMarketService:
         intraday_details = derive_intraday_details(intraday_candles, intraday_pulse)
         intraday_labels = [detail["label"] for detail in intraday_details]
         validation = validate_vietnam_row(latest, foreign)
-        indicators = calculate_vietnam_indicators(df, foreign)
+        indicators = calculate_vietnam_indicators(df, foreign, foreign_history)
         candle_status = "unknown"
         final_close_status = "unknown"
         adjusted_price_status = price_adjustment_status

@@ -45,6 +45,7 @@ def _clear_vn_cache_between_tests():
 class _StubFetcher:
     fixture_dir = Path("__missing_fixture_dir__")
     foreign = {"buy": 10, "sell": 15, "net": -5}
+    foreign_history = None
     quote_calls = 0
     news_calls = 0
     intraday_calls = 0
@@ -58,6 +59,14 @@ class _StubFetcher:
         if self.fail_quote:
             raise RuntimeError("quote failed")
         return self.foreign
+
+    def get_foreign_trading_history(self, symbol, limit=20):
+        self.quote_calls += 1
+        if self.fail_quote:
+            raise RuntimeError("quote failed")
+        if self.foreign_history is not None:
+            return self.foreign_history[:limit]
+        return [self.foreign]
 
     def get_news(self, symbol, limit=3):
         self.news_calls += 1
@@ -76,7 +85,7 @@ class _StubFetcher:
 
 
 class _StubManager:
-    def __init__(self, df, fixture_dir=None, foreign=None, fail_daily=False, intraday=None, daily_delay=0):
+    def __init__(self, df, fixture_dir=None, foreign=None, foreign_history=None, fail_daily=False, intraday=None, daily_delay=0):
         self.df = df
         self.daily_calls = 0
         self.fail_daily = fail_daily
@@ -85,6 +94,8 @@ class _StubManager:
         self.fetcher.intraday = intraday
         if foreign is not None:
             self.fetcher.foreign = foreign
+        if foreign_history is not None:
+            self.fetcher.foreign_history = foreign_history
         if fixture_dir is not None:
             self.fetcher.fixture_dir = Path(fixture_dir)
 
@@ -118,6 +129,36 @@ def _sample_intraday_rows():
             {"timestamp": 1780470000, "date_time": "2026-06-03T07:00:00+00:00", "open": 101, "high": 105, "low": 100, "close": 104, "volume": 2500},
         ]
     )
+
+
+def _mixed_session_intraday_rows():
+    return pd.DataFrame(
+        [
+            {"timestamp": 1780372800, "date_time": "2026-06-02T04:00:00+00:00", "open": 90, "high": 120, "low": 80, "close": 95, "volume": 10000},
+            {"timestamp": 1780376400, "date_time": "2026-06-02T05:00:00+00:00", "open": 95, "high": 130, "low": 90, "close": 100, "volume": 20000},
+            {"timestamp": 1780459200, "date_time": "2026-06-03T04:00:00+00:00", "open": 100, "high": 104, "low": 99, "close": 102, "volume": 3000},
+            {"timestamp": 1780462800, "date_time": "2026-06-03T05:00:00+00:00", "open": 102, "high": 106, "low": 101, "close": 105, "volume": 4000},
+        ]
+    )
+
+
+def _foreign_history_rows(count=20, latest_day=21):
+    rows = []
+    for offset in range(count):
+        day = latest_day - offset
+        net = 1000 + offset
+        rows.append(
+            {
+                "buy": 5000 + offset,
+                "sell": 4000,
+                "net": net,
+                "date": f"2026-05-{day:02d}",
+                "net_unit": "shares",
+                "buy_raw_field": "buy_foreign_quantity",
+                "sell_raw_field": "sell_foreign_quantity",
+            }
+        )
+    return rows
 
 
 def _expire_cache_entry(data_type, symbol="FPT", **params):
@@ -182,6 +223,31 @@ def test_mozyfin_fetcher_maps_fixture_to_standard_ohlcv():
     assert df.iloc[-1]["exchange"] == "HOSE"
     assert df.iloc[-1]["market_index"] == "VNINDEX.VN"
     assert df.iloc[-1]["foreign_net"] == 80000
+
+
+def test_mozyfin_quote_history_derives_foreign_net_from_buy_sell(monkeypatch):
+    fetcher = MozyfinFetcher()
+    calls = []
+
+    def fake_run_csv_command(*args):
+        calls.append(args)
+        return [
+            {"date": "2026-05-20", "buy_foreign_quantity": "1500", "sell_foreign_quantity": "400"},
+            {"date": "2026-05-21", "buy_foreign_quantity": "2100", "sell_foreign_quantity": "900"},
+        ]
+
+    monkeypatch.setattr(fetcher, "_run_csv_command", fake_run_csv_command)
+
+    history = fetcher.get_foreign_trading_history("FPT", limit=5)
+
+    assert calls == [("quote", "FPT.VN", "--limit", "5")]
+    assert [row["date"] for row in history] == ["2026-05-21", "2026-05-20"]
+    assert history[0]["buy"] == 2100
+    assert history[0]["sell"] == 900
+    assert history[0]["net"] == 1200
+    assert history[0]["net_unit"] == "shares"
+    assert history[0]["buy_raw_field"] == "buy_foreign_quantity"
+    assert history[0]["sell_raw_field"] == "sell_foreign_quantity"
 
 
 def test_manager_uses_mozyfin_when_market_vn(monkeypatch):
@@ -391,6 +457,41 @@ def test_foreign_date_mismatch_warns(monkeypatch):
     assert item["foreign_date_match"] == "mismatched"
     assert any("Foreign net date does not match OHLCV date." in warning for warning in item["warnings"])
     assert any("Foreign net is not confirmed as same-day flow." in warning for warning in item["warnings"])
+
+
+def test_latest_available_foreign_history_sums_and_preserves_mismatch(monkeypatch):
+    monkeypatch.delenv("MOZYFIN_FIXTURE_DIR", raising=False)
+    rows = _sample_vn_rows()
+    history = _foreign_history_rows(20, latest_day=20)
+    manager = _StubManager(rows, foreign_history=history)
+    service = VietnamMarketService(manager=manager, config=VietnamDashboardConfig(history_days=30, news_limit=1))
+
+    item = service.build_watchlist(["FPT"])["watchlist"][0]
+
+    assert item["ohlcv_date"] == "2026-05-21"
+    assert item["foreign_net_date"] == "2026-05-20"
+    assert item["foreign_date_match"] == "mismatched"
+    assert item["indicators"]["foreign_net_5d_latest_available"] == sum(row["net"] for row in history[:5])
+    assert item["indicators"]["foreign_net_20d_latest_available"] == sum(row["net"] for row in history[:20])
+    assert item["indicators"]["foreign_net_latest_available_date"] == "2026-05-20"
+    assert item["indicators"]["foreign_net_history_count"] == 20
+    assert any("Foreign net date does not match OHLCV date." in warning for warning in item["warnings"])
+    assert any("Foreign net is not confirmed as same-day flow." in warning for warning in item["warnings"])
+
+
+def test_latest_available_foreign_history_requires_twenty_rows_for_20d(monkeypatch):
+    monkeypatch.delenv("MOZYFIN_FIXTURE_DIR", raising=False)
+    rows = _sample_vn_rows()
+    history = _foreign_history_rows(5, latest_day=21)
+    manager = _StubManager(rows, foreign_history=history)
+    service = VietnamMarketService(manager=manager, config=VietnamDashboardConfig(history_days=30, news_limit=1))
+
+    item = service.build_watchlist(["FPT"])["watchlist"][0]
+
+    assert item["foreign_date_match"] == "matched"
+    assert item["indicators"]["foreign_net_5d_latest_available"] == sum(row["net"] for row in history)
+    assert item["indicators"]["foreign_net_20d_latest_available"] is None
+    assert item["indicators"]["foreign_net_history_count"] == 5
 
 
 def test_foreign_unit_unknown_without_quantity_fields(monkeypatch):
@@ -720,7 +821,11 @@ def test_intraday_pulse_calculation_and_labels():
     assert pulse["latest_1h_change_percent"] == pytest.approx(2.97)
     assert pulse["session_high_from_1h"] == 105
     assert pulse["session_low_from_1h"] == 99
+    assert pulse["session_range_pct_from_1h"] == pytest.approx(6.0)
+    assert pulse["session_volume_from_1h"] == 5500
+    assert pulse["session_candles_count"] == 4
     assert pulse["cumulative_1h_volume"] == 5500
+    assert pulse["loaded_candles_total_volume"] == 5500
     assert pulse["direction"] == "up"
     assert pulse["range_percent"] == pytest.approx(4.95)
     assert pulse["volume_vs_avg_1h"] == pytest.approx(2.5)
@@ -728,6 +833,37 @@ def test_intraday_pulse_calculation_and_labels():
     assert "Intraday volume expansion" in labels
     assert "Intraday wide range" in labels
     assert "Not realtime quote" in labels
+
+
+def test_intraday_session_fields_use_latest_vn_date_only():
+    candles = normalize_intraday_candles(_mixed_session_intraday_rows(), 8)
+    pulse = calculate_intraday_pulse(candles)
+
+    assert pulse["latest_1h_close"] == 105
+    assert pulse["latest_1h_volume"] == 4000
+    assert pulse["loaded_candles_total_volume"] == 37000
+    assert pulse["cumulative_1h_volume"] == 37000
+    assert pulse["session_candles_count"] == 2
+    assert pulse["session_high_from_1h"] == 106
+    assert pulse["session_low_from_1h"] == 99
+    assert pulse["session_range_pct_from_1h"] == pytest.approx(7.0)
+    assert pulse["session_volume_from_1h"] == 7000
+
+
+def test_intraday_session_fields_are_empty_when_timestamps_are_unusable():
+    candles = [
+        {"date_time": "not-a-date", "open": 100, "high": 105, "low": 99, "close": 104, "volume": 1000},
+    ]
+    pulse = calculate_intraday_pulse(candles)
+
+    assert pulse["latest_1h_close"] == 104
+    assert pulse["latest_1h_volume"] == 1000
+    assert pulse["loaded_candles_total_volume"] == 1000
+    assert pulse["session_candles_count"] == 0
+    assert pulse["session_high_from_1h"] is None
+    assert pulse["session_low_from_1h"] is None
+    assert pulse["session_range_pct_from_1h"] is None
+    assert pulse["session_volume_from_1h"] is None
 
 
 @pytest.mark.parametrize(
@@ -775,6 +911,9 @@ def test_watchlist_intraday_fields_and_latest_price_unchanged(monkeypatch):
     assert item["intraday_warning"] == "Intraday 1H candle data is not a realtime matched quote."
     assert item["intraday_candles"][-1]["close"] == 104
     assert item["intraday_pulse"]["latest_1h_close"] == 104
+    assert item["intraday_pulse"]["session_volume_from_1h"] == 5500
+    assert item["intraday_pulse"]["loaded_candles_total_volume"] == 5500
+    assert item["intraday_pulse"]["session_candles_count"] == 4
     assert "Not realtime quote" in item["intraday_labels"]
     assert item["cache_status"]["intraday_cache"] == "miss"
 
@@ -897,7 +1036,7 @@ def test_watchlist_cache_mixed_ttl_expires_independently(monkeypatch):
     assert manager.fetcher.intraday_calls == 1
     assert manager.fetcher.news_calls == 1
 
-    _expire_cache_entry("quote", limit=1)
+    _expire_cache_entry("quote", limit=vn_service.FOREIGN_HISTORY_LIMIT)
     after_quote_ttl = service.build_watchlist(["FPT"])
     assert after_quote_ttl["watchlist"][0]["cache_status"] == {
         "ohlcv_cache": "hit",
@@ -911,7 +1050,7 @@ def test_watchlist_cache_mixed_ttl_expires_independently(monkeypatch):
     assert manager.fetcher.news_calls == 1
 
     _expire_cache_entry("ohlcv", timeframe="1d", limit=260, days=30)
-    _expire_cache_entry("quote", limit=1)
+    _expire_cache_entry("quote", limit=vn_service.FOREIGN_HISTORY_LIMIT)
     _expire_cache_entry("intraday_ohlcv", timeframe="1h", limit=8)
     after_ohlcv_ttl = service.build_watchlist(["FPT"])
     assert after_ohlcv_ttl["watchlist"][0]["cache_status"] == {

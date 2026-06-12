@@ -71,7 +71,7 @@ const makeItem = (ticker: string): VietnamWatchItem => ({
   changePct: 1,
   volume: 1000,
   amount: 100000,
-  liquidity: { avgVolume20d: 1000, score: 80 },
+  liquidity: { avgVolume20D: 1000, score: 80 },
   priceLimit: {
     limitPct: 7,
     ceilingPrice: 106,
@@ -90,15 +90,19 @@ const makeItem = (ticker: string): VietnamWatchItem => ({
     rsi14: 55,
     rsi14Wilder: 55,
     bollinger: { middle: 99, upper: 110, lower: 90 },
-    avgVolume20d: 1000,
+    avgVolume20D: 1000,
     volumeRatio: 1,
     high20d: 110,
     low20d: 90,
     distanceTo20dHighPct: -9,
     distanceTo20dLowPct: 11,
-    foreignNet5d: 5,
-    foreignNet20d: 10,
+    foreignNet5D: 5,
+    foreignNet20D: 10,
     foreignNetLatest: 5,
+    foreignNet5dLatestAvailable: 15,
+    foreignNet20dLatestAvailable: 30,
+    foreignNetLatestAvailableDate: '2026-06-10',
+    foreignNetHistoryCount: 20,
   },
   statusLabels: ['Watch'],
   statusDetails: [],
@@ -360,6 +364,264 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(screen.getByText('KBS board snapshot; may differ from trade tape')).toBeInTheDocument();
     expect(screen.getAllByText(/OHLCV close 100/).length).toBeGreaterThan(0);
     expect(screen.getAllByText('101.5').length).toBeGreaterThan(0);
+  });
+
+  it('clarifies Mozyfin 1H and KBS volume labels while preserving numeric values', async () => {
+    const response = makeResponse(defaultTickers);
+    response.watchlist[0] = {
+      ...response.watchlist[0],
+      intradayCandles: [
+        {
+          dateTime: '2026-06-11T10:00:00+07:00',
+          timestamp: 1781161200,
+          open: 100,
+          high: 103,
+          low: 99,
+          close: 102,
+          volume: 1234567,
+        },
+      ],
+      intradayPulse: {
+        latest1hClose: 102,
+        latest1hOpen: 100,
+        latest1hHigh: 103,
+        latest1hLow: 99,
+        latest1hVolume: 1234567,
+        latest1hChange: 2,
+        latest1hChangePercent: 2,
+        sessionHighFrom1H: 103,
+        sessionLowFrom1H: 99,
+        sessionRangePctFrom1H: 4,
+        sessionVolumeFrom1H: 1234567,
+        sessionCandlesCount: 5,
+        cumulative1hVolume: 2345678,
+        loadedCandlesTotalVolume: 2345678,
+        direction: 'up',
+        rangePercent: 4,
+        volumeVsAvg1h: 1.75,
+      },
+    };
+    mockedGetVietnamWatchlist.mockResolvedValue(response);
+    mockedGetVietnamRealtimeQuotes.mockImplementation(async (tickers) => ({
+      ...makeRealtimeResponse(tickers),
+      quotes: makeRealtimeResponse(tickers).quotes.map((quote) => ({
+        ...quote,
+        volumeAccumulated: quote.symbol === 'FPT' ? 3456789 : quote.volumeAccumulated,
+      })),
+    }));
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+
+    expect(screen.getByText('Latest 1H candle volume')).toBeInTheDocument();
+    expect(screen.getByText('Mozyfin session 1H volume')).toBeInTheDocument();
+    expect(screen.queryByText('Loaded 1H candles total volume (all loaded)')).not.toBeInTheDocument();
+    expect(screen.getByText('KBS session accumulated volume')).toBeInTheDocument();
+    expect(screen.getByText('Mozyfin session 1H volume is calculated from filtered 1H candles; KBS session volume comes from the realtime board and may differ.')).toBeInTheDocument();
+    expect(screen.getAllByText('1,234,567').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText('3,456,789')).toBeInTheDocument();
+    expect(screen.getByText('103 / 99')).toBeInTheDocument();
+    expect(screen.getByText('4%')).toBeInTheDocument();
+    const sessionCandlesLabel = screen.getByText('Session 1H candles');
+    expect(within(sessionCandlesLabel.closest('div') as HTMLElement).getByText('5')).toBeInTheDocument();
+    expect(screen.queryByText('Not enough session candles')).not.toBeInTheDocument();
+    expect(screen.getByText('1.75')).toBeInTheDocument();
+  });
+
+  it('shows explanatory intraday empty states instead of bare placeholders', async () => {
+    const response = makeResponse(defaultTickers);
+    response.watchlist[0] = {
+      ...response.watchlist[0],
+      intradayPulse: {
+        latest1hClose: 102,
+        latest1hOpen: 100,
+        latest1hHigh: 103,
+        latest1hLow: 99,
+        latest1hVolume: 1234567,
+        latest1hChange: 2,
+        latest1hChangePercent: 2,
+        sessionHighFrom1H: null,
+        sessionLowFrom1H: null,
+        sessionRangePctFrom1H: null,
+        sessionVolumeFrom1H: null,
+        sessionCandlesCount: 0,
+        cumulative1hVolume: 2345678,
+        loadedCandlesTotalVolume: 2345678,
+        direction: 'up',
+        rangePercent: 4,
+        volumeVsAvg1h: null,
+      },
+    };
+    mockedGetVietnamWatchlist.mockResolvedValue(response);
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+
+    const sessionHighLowLabel = screen.getByText('Session high / low from 1H');
+    const sessionHighLowCard = sessionHighLowLabel.closest('div');
+    expect(within(sessionHighLowCard as HTMLElement).getByText('Not enough session candles')).toHaveAttribute(
+      'title',
+      'Session high/low requires current-session intraday candles.',
+    );
+    expect(within(sessionHighLowCard as HTMLElement).queryByText('- / -')).not.toBeInTheDocument();
+
+    const sessionVolumeLabel = screen.getByText('Mozyfin session 1H volume');
+    const sessionVolumeCard = sessionVolumeLabel.closest('div');
+    expect(within(sessionVolumeCard as HTMLElement).getByText('Not enough session candles')).toHaveAttribute(
+      'title',
+      'Session volume requires current-session intraday candles.',
+    );
+
+    const volumeVsAvgLabel = screen.getByText('Volume vs avg 1H');
+    const volumeVsAvgCard = volumeVsAvgLabel.closest('div');
+    expect(within(volumeVsAvgCard as HTMLElement).getByText('Avg unavailable')).toHaveAttribute(
+      'title',
+      'Volume vs average requires enough historical 1H candles.',
+    );
+    expect(within(volumeVsAvgCard as HTMLElement).queryByText('-')).not.toBeInTheDocument();
+  });
+
+  it('shows unavailable session values when session candles exist but metrics are missing', async () => {
+    const response = makeResponse(defaultTickers);
+    response.watchlist[0] = {
+      ...response.watchlist[0],
+      intradayPulse: {
+        latest1hClose: 102,
+        latest1hOpen: 100,
+        latest1hHigh: 103,
+        latest1hLow: 99,
+        latest1hVolume: 1234567,
+        latest1hChange: 2,
+        latest1hChangePercent: 2,
+        sessionHighFrom1H: null,
+        sessionLowFrom1H: null,
+        sessionRangePctFrom1H: null,
+        sessionVolumeFrom1H: null,
+        sessionCandlesCount: 5,
+        cumulative1hVolume: 2345678,
+        loadedCandlesTotalVolume: 2345678,
+        direction: 'up',
+        rangePercent: 4,
+        volumeVsAvg1h: 1.75,
+      },
+    };
+    mockedGetVietnamWatchlist.mockResolvedValue(response);
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+
+    expect(screen.getByText('Session 1H candles')).toBeInTheDocument();
+    expect(screen.getAllByText('5').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Session value unavailable').length).toBeGreaterThanOrEqual(3);
+    expect(screen.queryByText('Not enough session candles')).not.toBeInTheDocument();
+  });
+
+  it('displays 20D average volume from indicators', async () => {
+    const response = makeResponse(defaultTickers);
+    response.watchlist[0] = {
+      ...response.watchlist[0],
+      indicators: {
+        ...response.watchlist[0].indicators,
+        avgVolume20D: 1234567,
+      },
+      liquidity: { ...response.watchlist[0].liquidity, avgVolume20D: 7654321 },
+    };
+    mockedGetVietnamWatchlist.mockResolvedValue(response);
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+
+    expect(screen.getAllByText('20D average volume (shares)').length).toBeGreaterThan(0);
+    expect(screen.getByText('1,234,567')).toBeInTheDocument();
+  });
+
+  it('falls back to liquidity 20D average volume when indicator value is missing', async () => {
+    const response = makeResponse(defaultTickers);
+    response.watchlist[0] = {
+      ...response.watchlist[0],
+      indicators: {
+        ...response.watchlist[0].indicators,
+        avgVolume20D: null,
+      },
+      liquidity: { ...response.watchlist[0].liquidity, avgVolume20D: 7654321 },
+    };
+    mockedGetVietnamWatchlist.mockResolvedValue(response);
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+
+    expect(screen.getByText('7,654,321')).toBeInTheDocument();
+  });
+
+  it('displays final close as not confirmed instead of unknown', async () => {
+    const response = makeResponse(defaultTickers);
+    response.watchlist[0] = {
+      ...response.watchlist[0],
+      finalCloseStatus: 'unknown',
+    };
+    mockedGetVietnamWatchlist.mockResolvedValue(response);
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+
+    const finalCloseLabel = screen.getByText('Price date / final close');
+    const finalCloseCard = finalCloseLabel.closest('div');
+    expect(within(finalCloseCard as HTMLElement).getByText('2026-06-10 / not confirmed')).toBeInTheDocument();
+    expect(within(finalCloseCard as HTMLElement).queryByText(/unknown/)).not.toBeInTheDocument();
+  });
+
+  it('shows latest-available foreign net labels and mismatch note', async () => {
+    const response = makeResponse(defaultTickers);
+    response.watchlist[0] = {
+      ...response.watchlist[0],
+      ohlcvDate: '2026-06-12',
+      foreignNetDate: '2026-06-11',
+      foreignDateMatch: 'mismatched',
+      indicators: {
+        ...response.watchlist[0].indicators,
+        foreignNet5dLatestAvailable: 12345,
+        foreignNet20dLatestAvailable: -67890,
+        foreignNetHistoryCount: 20,
+      },
+    };
+    mockedGetVietnamWatchlist.mockResolvedValue(response);
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+
+    expect(screen.getByText('Foreign net 5D latest available')).toBeInTheDocument();
+    expect(screen.getByText('Foreign net 20D latest available')).toBeInTheDocument();
+    expect(screen.getByText('12,345')).toBeInTheDocument();
+    expect(screen.getByText('-67,890')).toBeInTheDocument();
+    expect(screen.getByText('Foreign data as of 2026-06-11; OHLCV date 2026-06-12.')).toBeInTheDocument();
+  });
+
+  it('shows latest-available foreign empty states when quote history is short', async () => {
+    const response = makeResponse(defaultTickers);
+    response.watchlist[0] = {
+      ...response.watchlist[0],
+      indicators: {
+        ...response.watchlist[0].indicators,
+        foreignNet5dLatestAvailable: null,
+        foreignNet20dLatestAvailable: null,
+        foreignNetHistoryCount: 4,
+      },
+    };
+    mockedGetVietnamWatchlist.mockResolvedValue(response);
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+
+    expect(screen.getByText('Need 5 foreign rows')).toBeInTheDocument();
+    expect(screen.getByText('Need 20 foreign rows')).toBeInTheDocument();
   });
 
   it('renders data status with Mozyfin source and fixture state', async () => {

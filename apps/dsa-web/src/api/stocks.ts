@@ -45,7 +45,7 @@ export type VietnamWatchItem = {
   changePct?: number | null;
   volume?: number | null;
   amount?: number | null;
-  liquidity: { avgVolume20d?: number | null; score?: number | null };
+  liquidity: { avgVolume20D?: number | null; score?: number | null };
   priceLimit: {
     limitPct?: number | null;
     ceilingPrice?: number | null;
@@ -66,15 +66,19 @@ export type VietnamWatchItem = {
     rsi14SimpleDebug?: number | null;
     rsiMethod?: string | null;
     bollinger?: { middle?: number | null; upper?: number | null; lower?: number | null };
-    avgVolume20d?: number | null;
+    avgVolume20D?: number | null;
     volumeRatio?: number | null;
     high20d?: number | null;
     low20d?: number | null;
     distanceTo20dHighPct?: number | null;
     distanceTo20dLowPct?: number | null;
-    foreignNet5d?: number | null;
-    foreignNet20d?: number | null;
+    foreignNet5D?: number | null;
+    foreignNet20D?: number | null;
     foreignNetLatest?: number | null;
+    foreignNet5dLatestAvailable?: number | null;
+    foreignNet20dLatestAvailable?: number | null;
+    foreignNetLatestAvailableDate?: string | null;
+    foreignNetHistoryCount?: number | null;
   };
   statusLabels: string[];
   statusDetails?: Array<{
@@ -108,9 +112,13 @@ export type VietnamWatchItem = {
     latest1hVolume?: number | null;
     latest1hChange?: number | null;
     latest1hChangePercent?: number | null;
-    sessionHighFrom1h?: number | null;
-    sessionLowFrom1h?: number | null;
+    sessionHighFrom1H?: number | null;
+    sessionLowFrom1H?: number | null;
+    sessionRangePctFrom1H?: number | null;
+    sessionVolumeFrom1H?: number | null;
+    sessionCandlesCount?: number | null;
     cumulative1hVolume?: number | null;
+    loadedCandlesTotalVolume?: number | null;
     direction?: 'up' | 'down' | 'flat' | 'unknown' | null;
     rangePercent?: number | null;
     volumeVsAvg1h?: number | null;

@@ -449,30 +449,16 @@ class MozyfinFetcher(BaseFetcher):
             pre_close=prev_close,
         )
 
-    def get_foreign_trading(self, stock_code: str) -> Dict[str, Any]:
-        rows = self._run_csv_command("quote", normalize_vn_symbol(stock_code), "--limit", "1")
-        if not rows:
-            return {
-                "buy": None,
-                "sell": None,
-                "net": None,
-                "date": None,
-                "net_unit": "unknown",
-                "buy_raw_field": None,
-                "sell_raw_field": None,
-                "latest_price": None,
-                "price_raw_field": None,
-                "price_date": None,
-            }
-        latest = rows[-1]
-        price_raw_field = _first_present_key(latest, "last_price", "latest_price", "match_price", "matched_price", "current_price", "price", "close")
-        quote_price = _to_float(_first_value(latest, "last_price", "latest_price", "match_price", "matched_price", "current_price", "price", "close"))
-        quote_date = _normalize_date_value(_first_value(latest, "date", "trading_date", "timestamp", "time", "datetime"))
-        buy_raw_field = _first_present_key(latest, "foreign_buy", "foreign_buy_volume", "buy_foreign_quantity")
-        sell_raw_field = _first_present_key(latest, "foreign_sell", "foreign_sell_volume", "sell_foreign_quantity")
-        buy = _to_float(_first_value(latest, "foreign_buy", "foreign_buy_volume", "buy_foreign_quantity"))
-        sell = _to_float(_first_value(latest, "foreign_sell", "foreign_sell_volume", "sell_foreign_quantity"))
-        net = _to_float(_first_value(latest, "foreign_net", "foreign_net_volume", "foreign_net_quantity"))
+    @staticmethod
+    def _normalize_foreign_quote_row(raw: Dict[str, Any]) -> Dict[str, Any]:
+        price_raw_field = _first_present_key(raw, "last_price", "latest_price", "match_price", "matched_price", "current_price", "price", "close")
+        quote_price = _to_float(_first_value(raw, "last_price", "latest_price", "match_price", "matched_price", "current_price", "price", "close"))
+        quote_date = _normalize_date_value(_first_value(raw, "date", "trading_date", "timestamp", "time", "datetime"))
+        buy_raw_field = _first_present_key(raw, "foreign_buy", "foreign_buy_volume", "buy_foreign_quantity")
+        sell_raw_field = _first_present_key(raw, "foreign_sell", "foreign_sell_volume", "sell_foreign_quantity")
+        buy = _to_float(_first_value(raw, "foreign_buy", "foreign_buy_volume", "buy_foreign_quantity"))
+        sell = _to_float(_first_value(raw, "foreign_sell", "foreign_sell_volume", "sell_foreign_quantity"))
+        net = _to_float(_first_value(raw, "foreign_net", "foreign_net_volume", "foreign_net_quantity"))
         derived_from_quantity = buy_raw_field == "buy_foreign_quantity" and sell_raw_field == "sell_foreign_quantity"
         if net is None and buy is not None and sell is not None:
             net = buy - sell
@@ -488,6 +474,35 @@ class MozyfinFetcher(BaseFetcher):
             "latest_price": quote_price,
             "price_raw_field": price_raw_field,
             "price_date": quote_date,
+        }
+
+    def get_foreign_trading_history(self, stock_code: str, limit: int = 20) -> List[Dict[str, Any]]:
+        rows = self._run_csv_command("quote", normalize_vn_symbol(stock_code), "--limit", str(limit))
+        normalized = [self._normalize_foreign_quote_row(row) for row in rows]
+
+        def _date_sort_key(row: Dict[str, Any]) -> datetime:
+            parsed = pd.to_datetime(row.get("date"), errors="coerce", utc=True)
+            if pd.isna(parsed):
+                return datetime.min.replace(tzinfo=timezone.utc)
+            return parsed.to_pydatetime()
+
+        return sorted(normalized, key=_date_sort_key, reverse=True)
+
+    def get_foreign_trading(self, stock_code: str) -> Dict[str, Any]:
+        history = self.get_foreign_trading_history(stock_code, limit=1)
+        if history:
+            return history[0]
+        return {
+            "buy": None,
+            "sell": None,
+            "net": None,
+            "date": None,
+            "net_unit": "unknown",
+            "buy_raw_field": None,
+            "sell_raw_field": None,
+            "latest_price": None,
+            "price_raw_field": None,
+            "price_date": None,
         }
 
     def get_main_indices(self, region: str = "vn") -> Optional[List[Dict[str, Any]]]:
