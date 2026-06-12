@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   stocksApi,
+  type VietnamObservabilityResponse,
   type VietnamRealtimeResponse,
   type VietnamRealtimeTradesResponse,
   type VietnamWatchItem,
@@ -17,6 +18,7 @@ vi.mock('../../api/stocks', () => ({
     getVietnamWatchlist: vi.fn(),
     getVietnamRealtimeQuotes: vi.fn(),
     getVietnamRealtimeTrades: vi.fn(),
+    getVietnamObservability: vi.fn(),
   },
 }));
 
@@ -162,6 +164,38 @@ const makeResponse = (tickers: string[], options: { fixtureMode?: boolean } = {}
 const mockedGetVietnamWatchlist = vi.mocked(stocksApi.getVietnamWatchlist);
 const mockedGetVietnamRealtimeQuotes = vi.mocked(stocksApi.getVietnamRealtimeQuotes);
 const mockedGetVietnamRealtimeTrades = vi.mocked(stocksApi.getVietnamRealtimeTrades);
+const mockedGetVietnamObservability = vi.mocked(stocksApi.getVietnamObservability);
+
+const makeObservabilityResponse = (overrides: Partial<VietnamObservabilityResponse> = {}): VietnamObservabilityResponse => ({
+  market: 'VN',
+  status: 'ok',
+  mozyfin: {
+    watchlistRequestsTotal: 3,
+    watchlistCacheHitsTotal: 40,
+    watchlistCacheMissesTotal: 8,
+    singleflightWaitsTotal: 1,
+    lastWatchlistRequestAt: '2026-06-11T08:00:00Z',
+    lastFetchAt: '2026-06-11T08:00:00Z',
+    lastCacheKey: "('VN', 'ohlcv', 'FPT')",
+    lastTickersCount: 6,
+    lastFetchDurationMs: 120,
+  },
+  kbs: {
+    quoteRequestsTotal: 12,
+    quoteSuccessTotal: 10,
+    quoteUnavailableTotal: 2,
+    tradeRequestsTotal: 20,
+    tradeSuccessTotal: 16,
+    tradeUnavailableTotal: 4,
+    lastQuoteRequestAt: '2026-06-11T08:00:00Z',
+    lastTradeRequestAt: '2026-06-11T08:00:00Z',
+    lastQuoteTickersCount: 6,
+    lastTradeSymbol: 'FPT',
+    lastError: 'KBS provider timeout',
+    lastRawErrorPresent: true,
+  },
+  ...overrides,
+});
 
 const makeRealtimeResponse = (
   tickers: string[],
@@ -267,11 +301,13 @@ describe('VietnamDashboardPage watchlist loading', () => {
     mockedGetVietnamWatchlist.mockReset();
     mockedGetVietnamRealtimeQuotes.mockReset();
     mockedGetVietnamRealtimeTrades.mockReset();
+    mockedGetVietnamObservability.mockReset();
     mockedGetVietnamMarketPhase.mockReset();
     mockedGetVietnamMarketPhase.mockReturnValue(makeMarketPhase());
     mockedGetVietnamWatchlist.mockImplementation(async (tickers) => makeResponse(tickers?.length ? tickers : defaultTickers));
     mockedGetVietnamRealtimeQuotes.mockImplementation(async (tickers) => makeRealtimeResponse(tickers));
     mockedGetVietnamRealtimeTrades.mockImplementation(async (symbol) => makeTradesResponse(symbol));
+    mockedGetVietnamObservability.mockImplementation(async () => makeObservabilityResponse());
   });
 
   afterEach(() => {
@@ -340,6 +376,57 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(panel.getByText('fixture_mode false')).toBeInTheDocument();
     expect(panel.getByText('Overview refresh')).toBeInTheDocument();
     expect(panel.getByText('Selected detail')).toBeInTheDocument();
+  });
+
+  it('fetches observability on initial load', async () => {
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+    await waitFor(() => expect(mockedGetVietnamObservability).toHaveBeenCalled());
+  });
+
+  it('observability failure does not break dashboard rendering', async () => {
+    mockedGetVietnamObservability.mockRejectedValue(new Error('observability down'));
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+    expect(await screen.findByRole('heading', { name: 'Data status' })).toBeInTheDocument();
+    expect(screen.getAllByText('FPT').length).toBeGreaterThan(0);
+  });
+
+  it('displays compact observability counters in data status', async () => {
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamObservability).toHaveBeenCalled());
+
+    const panel = dataStatusPanel();
+    expect(panel.getByText('Mozyfin req')).toBeInTheDocument();
+    expect(panel.getAllByText('3').length).toBeGreaterThan(0);
+    expect(panel.getByText('Cache hit/miss')).toBeInTheDocument();
+    expect(panel.getByText('40/8')).toBeInTheDocument();
+    expect(panel.getByText('Single-flight waits')).toBeInTheDocument();
+    expect(panel.getAllByText('1').length).toBeGreaterThan(0);
+    expect(panel.getByText('KBS quote unavailable')).toBeInTheDocument();
+    expect(panel.getByText('2/12')).toBeInTheDocument();
+    expect(panel.getByText('KBS trade unavailable')).toBeInTheDocument();
+    expect(panel.getByText('4/20')).toBeInTheDocument();
+    expect(panel.getByText('KBS provider timeout')).toBeInTheDocument();
+  });
+
+  it('fetching observability does not call watchlist, realtime, or trades by itself', async () => {
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamObservability).toHaveBeenCalled());
+    mockedGetVietnamWatchlist.mockClear();
+    mockedGetVietnamRealtimeQuotes.mockClear();
+    mockedGetVietnamRealtimeTrades.mockClear();
+
+    await stocksApi.getVietnamObservability();
+
+    expect(mockedGetVietnamWatchlist).not.toHaveBeenCalled();
+    expect(mockedGetVietnamRealtimeQuotes).not.toHaveBeenCalled();
+    expect(mockedGetVietnamRealtimeTrades).not.toHaveBeenCalled();
   });
 
   it('shows auction helper copy during ATC phase', async () => {
@@ -463,6 +550,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     const watchlistCalls = mockedGetVietnamWatchlist.mock.calls.length;
     mockedGetVietnamRealtimeQuotes.mockClear();
     mockedGetVietnamRealtimeTrades.mockClear();
+    mockedGetVietnamObservability.mockClear();
 
     fireEvent.click(screen.getByRole('button', { name: /refresh kbs/i }));
 
@@ -470,7 +558,37 @@ describe('VietnamDashboardPage watchlist loading', () => {
       expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledWith(defaultTickers);
       expect(mockedGetVietnamRealtimeTrades).toHaveBeenCalledWith('FPT', 100);
     });
+    await waitFor(() => expect(mockedGetVietnamObservability).toHaveBeenCalled());
     expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistCalls);
+  });
+
+  it('manual Refresh KBS does not create overlapping duplicate requests', async () => {
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+    await waitFor(() => expect(mockedGetVietnamRealtimeTrades).toHaveBeenCalledWith('FPT', 100));
+    mockedGetVietnamRealtimeQuotes.mockClear();
+    mockedGetVietnamRealtimeTrades.mockClear();
+
+    let resolveQuotes: ((response: VietnamRealtimeResponse) => void) | undefined;
+    let resolveTrades: ((response: VietnamRealtimeTradesResponse) => void) | undefined;
+    mockedGetVietnamRealtimeQuotes.mockImplementation(() => new Promise((resolve) => {
+      resolveQuotes = resolve;
+    }));
+    mockedGetVietnamRealtimeTrades.mockImplementation(() => new Promise((resolve) => {
+      resolveTrades = resolve;
+    }));
+
+    fireEvent.click(screen.getByRole('button', { name: /refresh kbs/i }));
+
+    expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledTimes(1);
+    expect(mockedGetVietnamRealtimeTrades).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: /refreshing kbs/i })).toBeDisabled();
+
+    await act(async () => {
+      resolveQuotes?.(makeRealtimeResponse(defaultTickers));
+      resolveTrades?.(makeTradesResponse('FPT'));
+    });
   });
 
   it('shows KBS auto-refresh controls', async () => {
@@ -493,6 +611,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     const watchlistCalls = mockedGetVietnamWatchlist.mock.calls.length;
     mockedGetVietnamRealtimeQuotes.mockClear();
     mockedGetVietnamRealtimeTrades.mockClear();
+    mockedGetVietnamObservability.mockClear();
 
     vi.useFakeTimers();
     fireEvent.click(screen.getByRole('checkbox', { name: 'Auto-refresh KBS' }));
@@ -505,8 +624,10 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(mockedGetVietnamRealtimeTrades).toHaveBeenCalledWith('FPT', 100);
     expect(mockedGetVietnamRealtimeQuotes).not.toHaveBeenCalled();
     expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistCalls);
+    expect(mockedGetVietnamObservability).toHaveBeenCalled();
 
     mockedGetVietnamRealtimeTrades.mockClear();
+    mockedGetVietnamObservability.mockClear();
 
     await act(async () => {
       vi.advanceTimersByTime(5000);
@@ -516,6 +637,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledWith(defaultTickers);
     expect(mockedGetVietnamRealtimeTrades).not.toHaveBeenCalled();
     expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistCalls);
+    expect(mockedGetVietnamObservability).toHaveBeenCalled();
     expect(dataStatusPanel().getByText('on')).toBeInTheDocument();
     expect(dataStatusPanel().getByText('quotes 15s | trades 10s')).toBeInTheDocument();
   });
@@ -649,6 +771,38 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(mockedGetVietnamRealtimeTrades).not.toHaveBeenCalled();
   });
 
+  it('visibility restore fires at most one quote and one trade request', async () => {
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+    await waitFor(() => expect(mockedGetVietnamRealtimeTrades).toHaveBeenCalledWith('FPT', 100));
+    const watchlistCalls = mockedGetVietnamWatchlist.mock.calls.length;
+    mockedGetVietnamRealtimeQuotes.mockClear();
+    mockedGetVietnamRealtimeTrades.mockClear();
+
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Auto-refresh KBS' }));
+
+    await act(async () => {
+      vi.advanceTimersByTime(30000);
+      await Promise.resolve();
+    });
+    expect(mockedGetVietnamRealtimeQuotes).not.toHaveBeenCalled();
+    expect(mockedGetVietnamRealtimeTrades).not.toHaveBeenCalled();
+
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
+    fireEvent(document, new Event('visibilitychange'));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledTimes(1);
+    expect(mockedGetVietnamRealtimeTrades).toHaveBeenCalledTimes(1);
+    expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistCalls);
+  });
+
   it('selecting ticker fetches latest trades without reloading the watchlist', async () => {
     render(<VietnamDashboardPage />);
 
@@ -661,6 +815,33 @@ describe('VietnamDashboardPage watchlist loading', () => {
     await waitFor(() => expect(mockedGetVietnamRealtimeTrades).toHaveBeenCalledWith('ACB', 100));
     expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistCalls);
     expect(await screen.findByText('10:16:00')).toBeInTheDocument();
+  });
+
+  it('selected ticker change does not overlap trade fetches and refreshes pending ticker', async () => {
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+    await waitFor(() => expect(mockedGetVietnamRealtimeTrades).toHaveBeenCalledWith('FPT', 100));
+    const watchlistCalls = mockedGetVietnamWatchlist.mock.calls.length;
+    mockedGetVietnamRealtimeTrades.mockClear();
+
+    let resolveFptTrades: ((response: VietnamRealtimeTradesResponse) => void) | undefined;
+    mockedGetVietnamRealtimeTrades.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveFptTrades = resolve;
+    }));
+
+    fireEvent.click(screen.getByRole('button', { name: /refresh kbs/i }));
+    await waitFor(() => expect(mockedGetVietnamRealtimeTrades).toHaveBeenCalledWith('FPT', 100));
+
+    clickTickerRow('ACB');
+
+    expect(mockedGetVietnamRealtimeTrades).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      resolveFptTrades?.(makeTradesResponse('FPT'));
+    });
+
+    await waitFor(() => expect(mockedGetVietnamRealtimeTrades).toHaveBeenCalledWith('ACB', 100));
+    expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistCalls);
   });
 
   it('rejects invalid tickers without issuing another watchlist request', async () => {

@@ -12,6 +12,7 @@
 """
 
 import logging
+import asyncio
 from typing import Optional
 import re
 
@@ -25,6 +26,7 @@ from api.v1.schemas.stocks import (
     KLineData,
     StockHistoryResponse,
     StockQuote,
+    VietnamObservabilityResponse,
     VietnamRealtimeResponse,
     VietnamRealtimeTradesResponse,
     VietnamWatchlistHealthResponse,
@@ -45,6 +47,7 @@ from src.services.import_parser import (
 from src.services.stock_service import StockService
 from src.services.system_config_service import SystemConfigService
 from src.services.vietnam_market_service import VietnamMarketService
+from src.services.vietnam_observability import vietnam_observability_snapshot
 from data_provider.base import normalize_stock_code
 from data_provider.vnstock_realtime_fetcher import VnstockRealtimeFetcher
 
@@ -454,6 +457,16 @@ def get_vietnam_watchlist(
 
 
 @router.get(
+    "/vn/observability",
+    response_model=VietnamObservabilityResponse,
+    summary="Vietnam dashboard fetch observability",
+    description="Return process-local Mozyfin and KBS fetch counters without triggering provider requests.",
+)
+def get_vietnam_observability() -> VietnamObservabilityResponse:
+    return VietnamObservabilityResponse(**vietnam_observability_snapshot())
+
+
+@router.get(
     "/vn/realtime",
     response_model=VietnamRealtimeResponse,
     summary="Vietnam realtime snapshot quotes",
@@ -466,6 +479,20 @@ def get_vietnam_realtime_quotes(
         symbols = [item.strip().upper() for item in tickers.split(",") if item.strip()]
         payload = VnstockRealtimeFetcher().fetch_quotes(symbols)
         return VietnamRealtimeResponse(**payload)
+    except asyncio.CancelledError as e:
+        logger.info("Vietnam realtime quotes cancelled: %s", e)
+        symbols = [item.strip().upper() for item in tickers.split(",") if item.strip()]
+        return VietnamRealtimeResponse(
+            market="VN",
+            source="vnstock_kbs",
+            status="unavailable",
+            error="KBS request cancelled",
+            error_detail="The KBS request was cancelled before the provider response completed.",
+            raw_error=str(e) or "KBS request cancelled",
+            requested_tickers=symbols,
+            quotes=[],
+            cache={"cache_status": "unavailable"},
+        )
     except Exception as e:
         logger.error("Vietnam realtime quotes failed: %s", e, exc_info=True)
         raise HTTPException(
@@ -487,6 +514,20 @@ def get_vietnam_realtime_trades(
     try:
         payload = VnstockRealtimeFetcher().fetch_trades(symbol.strip().upper(), limit=limit)
         return VietnamRealtimeTradesResponse(**payload)
+    except asyncio.CancelledError as e:
+        logger.info("Vietnam realtime trades cancelled: %s", e)
+        return VietnamRealtimeTradesResponse(
+            market="VN",
+            source="vnstock_kbs",
+            symbol=symbol.strip().upper(),
+            status="unavailable",
+            error="KBS request cancelled",
+            error_detail="The KBS request was cancelled before the provider response completed.",
+            raw_error=str(e) or "KBS request cancelled",
+            trades=[],
+            note="Trade tape may exclude auction/ATC prints depending on provider output",
+            cache={"cache_status": "unavailable"},
+        )
     except Exception as e:
         logger.error("Vietnam realtime trades failed: %s", e, exc_info=True)
         raise HTTPException(

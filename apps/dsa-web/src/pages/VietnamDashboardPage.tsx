@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Activity, AlertTriangle, ArrowDown, ArrowDownRight, ArrowUp, ArrowUpRight, Banknote, DatabaseZap, Plus, RefreshCw, RotateCcw, ShieldAlert, X } from 'lucide-react';
 import {
   stocksApi,
+  type VietnamObservabilityResponse,
   type VietnamRealtimeQuote,
   type VietnamRealtimeTrade,
   type VietnamWatchItem,
@@ -528,6 +529,7 @@ const DataStatusPanel: React.FC<{
   kbsQuoteRefreshInterval: number;
   kbsTradeRefreshInterval: number;
   marketPhase: VietnamMarketPhase;
+  observability?: VietnamObservabilityResponse | null;
 }> = ({
   data,
   selectedItem,
@@ -543,6 +545,7 @@ const DataStatusPanel: React.FC<{
   kbsQuoteRefreshInterval,
   kbsTradeRefreshInterval,
   marketPhase,
+  observability,
 }) => {
   const status = kbsProviderStatus(realtimeQuotes, watchlist, realtimeError, tradesError);
   const selectedQuote = selectedItem?.ticker ? realtimeQuotes[selectedItem.ticker] : undefined;
@@ -644,6 +647,26 @@ const DataStatusPanel: React.FC<{
           KBS issue: {kbsErrorMessage(realtimeError ?? tradesError) ?? 'KBS unavailable'}
         </div>
       ) : null}
+      <div className="mt-3 grid gap-2 rounded-lg border border-border/60 bg-elevated/30 p-3 text-xs text-secondary-text md:grid-cols-3 xl:grid-cols-6">
+        <div>
+          <span className="font-medium text-foreground">Mozyfin req</span> {observability?.mozyfin.watchlistRequestsTotal ?? '-'}
+        </div>
+        <div>
+          <span className="font-medium text-foreground">Cache hit/miss</span> {observability ? `${observability.mozyfin.watchlistCacheHitsTotal}/${observability.mozyfin.watchlistCacheMissesTotal}` : '-'}
+        </div>
+        <div>
+          <span className="font-medium text-foreground">Single-flight waits</span> {observability?.mozyfin.singleflightWaitsTotal ?? '-'}
+        </div>
+        <div>
+          <span className="font-medium text-foreground">KBS quote unavailable</span> {observability ? `${observability.kbs.quoteUnavailableTotal}/${observability.kbs.quoteRequestsTotal}` : '-'}
+        </div>
+        <div>
+          <span className="font-medium text-foreground">KBS trade unavailable</span> {observability ? `${observability.kbs.tradeUnavailableTotal}/${observability.kbs.tradeRequestsTotal}` : '-'}
+        </div>
+        <div className="truncate" title={observability?.kbs.lastError ?? undefined}>
+          <span className="font-medium text-foreground">Last KBS error</span> {observability?.kbs.lastError ?? '-'}
+        </div>
+      </div>
     </section>
   );
 };
@@ -1143,6 +1166,7 @@ const VietnamDashboardPage: React.FC = () => {
   const [lastKbsQuoteRefreshAt, setLastKbsQuoteRefreshAt] = useState<string | null>(null);
   const [lastKbsTradeRefreshAt, setLastKbsTradeRefreshAt] = useState<string | null>(null);
   const [lastKbsErrorAt, setLastKbsErrorAt] = useState<string | null>(null);
+  const [observability, setObservability] = useState<VietnamObservabilityResponse | null>(null);
   const [marketPhase, setMarketPhase] = useState(() => getVietnamMarketPhase());
   const [loading, setLoading] = useState(true);
   const [forceLoading, setForceLoading] = useState(false);
@@ -1175,6 +1199,8 @@ const VietnamDashboardPage: React.FC = () => {
   const logicalWatchlistKey = useMemo(() => logicalWatchlist.join(','), [logicalWatchlist]);
   const logicalWatchlistRef = useRef(logicalWatchlist);
   logicalWatchlistRef.current = logicalWatchlist;
+  const selectedTickerRef = useRef(selectedTicker);
+  selectedTickerRef.current = selectedTicker;
   const requestIdRef = useRef(0);
   const realtimeRequestIdRef = useRef(0);
   const tradesRequestIdRef = useRef(0);
@@ -1183,7 +1209,18 @@ const VietnamDashboardPage: React.FC = () => {
   const kbsTradeNextRefreshAtRef = useRef(0);
   const kbsQuoteRefreshInFlightRef = useRef(false);
   const kbsTradeRefreshInFlightRef = useRef(false);
+  const pendingKbsQuoteTickersRef = useRef<string[] | null>(null);
+  const pendingKbsTradeSymbolRef = useRef<string | null>(null);
   const nextWatchlistLoadRef = useRef<{ tickers: string[]; forceRefresh: boolean; refreshKind: 'manual' | 'auto' | 'force live' } | null>(null);
+
+  const loadObservability = useCallback(async () => {
+    try {
+      const response = await stocksApi.getVietnamObservability();
+      setObservability(response);
+    } catch {
+      // Observability is diagnostic only; keep dashboard data flows independent.
+    }
+  }, []);
 
   const persistWatchlist = useCallback((nextTickers: string[]) => {
     try {
@@ -1220,16 +1257,18 @@ const VietnamDashboardPage: React.FC = () => {
       if (response.status !== 'ok') {
         setLastKbsErrorAt(new Date().toISOString());
       }
+      void loadObservability();
     } catch (err) {
       if (requestId !== realtimeRequestIdRef.current) return;
       setLastKbsErrorAt(new Date().toISOString());
       setRealtimeError(kbsErrorMessage(err instanceof Error ? err.message : null) ?? (err instanceof Error ? err.message : 'KBS snapshot unavailable'));
+      void loadObservability();
     } finally {
       if (requestId === realtimeRequestIdRef.current) {
         setRealtimeLoading(false);
       }
     }
-  }, []);
+  }, [loadObservability]);
 
   const loadRealtimeTrades = useCallback(async (symbol: string | null) => {
     if (!symbol) {
@@ -1243,42 +1282,67 @@ const VietnamDashboardPage: React.FC = () => {
     try {
       const response = await stocksApi.getVietnamRealtimeTrades(symbol, 100);
       if (requestId !== tradesRequestIdRef.current) return;
+      if (symbol !== selectedTickerRef.current) return;
       setRealtimeTrades(response.trades);
       setLastKbsTradeRefreshAt(new Date().toISOString());
       setTradesError(response.status === 'ok' ? null : kbsErrorMessage(response.error) ?? 'Latest trade tape unavailable');
       if (response.status !== 'ok') {
         setLastKbsErrorAt(new Date().toISOString());
       }
+      void loadObservability();
     } catch (err) {
       if (requestId !== tradesRequestIdRef.current) return;
       setLastKbsErrorAt(new Date().toISOString());
       setTradesError(kbsErrorMessage(err instanceof Error ? err.message : null) ?? (err instanceof Error ? err.message : 'Latest trade tape unavailable'));
+      void loadObservability();
     } finally {
       if (requestId === tradesRequestIdRef.current) {
         setTradesLoading(false);
       }
     }
-  }, []);
+  }, [loadObservability]);
 
   const refreshKbsQuotes = useCallback(async (tickersOverride?: string[]) => {
-    if (kbsQuoteRefreshInFlightRef.current) return false;
+    const targetTickers = tickersOverride ?? logicalWatchlistRef.current;
+    if (kbsQuoteRefreshInFlightRef.current) {
+      if (tickersOverride) {
+        pendingKbsQuoteTickersRef.current = targetTickers;
+      }
+      return false;
+    }
     kbsQuoteRefreshInFlightRef.current = true;
     try {
-      await loadRealtimeQuotes(tickersOverride ?? logicalWatchlistRef.current);
+      await loadRealtimeQuotes(targetTickers);
       return true;
     } finally {
       kbsQuoteRefreshInFlightRef.current = false;
+      const pendingTickers = pendingKbsQuoteTickersRef.current;
+      pendingKbsQuoteTickersRef.current = null;
+      if (pendingTickers && pendingTickers.join(',') !== targetTickers.join(',')) {
+        void refreshKbsQuotes(pendingTickers);
+      }
     }
   }, [loadRealtimeQuotes]);
 
   const refreshKbsTrades = useCallback(async (selectedTickerOverride?: string | null) => {
-    if (kbsTradeRefreshInFlightRef.current) return false;
+    const targetTicker = selectedTickerOverride ?? selectedTicker;
+    if (kbsTradeRefreshInFlightRef.current) {
+      if (targetTicker) {
+        pendingKbsTradeSymbolRef.current = targetTicker;
+      }
+      return false;
+    }
     kbsTradeRefreshInFlightRef.current = true;
     try {
-      await loadRealtimeTrades(selectedTickerOverride ?? selectedTicker);
+      await loadRealtimeTrades(targetTicker);
       return true;
     } finally {
       kbsTradeRefreshInFlightRef.current = false;
+      const pendingSymbol = pendingKbsTradeSymbolRef.current;
+      pendingKbsTradeSymbolRef.current = null;
+      if (pendingSymbol && pendingSymbol !== targetTicker) {
+        void refreshKbsTrades(pendingSymbol);
+      }
     }
   }, [loadRealtimeTrades, selectedTicker]);
 
@@ -1299,7 +1363,8 @@ const VietnamDashboardPage: React.FC = () => {
       setData(nextData);
       setLastRefreshKind(refreshKind);
       setLastRefreshAt(new Date().toISOString());
-      void loadRealtimeQuotes(requestedTickers);
+      void loadObservability();
+      void refreshKbsQuotes(requestedTickers);
     } catch (err) {
       if (requestId !== requestIdRef.current) return;
       setError(err instanceof Error ? err.message : 'Failed to load Vietnam dashboard');
@@ -1309,7 +1374,7 @@ const VietnamDashboardPage: React.FC = () => {
         setForceLoading(false);
       }
     }
-  }, [loadRealtimeQuotes]);
+  }, [loadObservability, refreshKbsQuotes]);
 
   const handlePresetChange = useCallback((event: React.ChangeEvent<HTMLSelectElement>) => {
     const presetId = event.target.value as VietnamWatchlistPresetId;
@@ -1851,6 +1916,7 @@ const VietnamDashboardPage: React.FC = () => {
         kbsQuoteRefreshInterval={kbsQuoteRefreshInterval}
         kbsTradeRefreshInterval={kbsTradeRefreshInterval}
         marketPhase={marketPhase}
+        observability={observability}
       />
 
       {error ? (

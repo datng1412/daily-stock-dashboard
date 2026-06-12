@@ -8,14 +8,24 @@ the dashboard daily ``latest_price``.
 
 from __future__ import annotations
 
+import asyncio
 import importlib
+import logging
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
+from src.services.vietnam_observability import (
+    observe_kbs_quote_request,
+    observe_kbs_quote_result,
+    observe_kbs_trade_request,
+    observe_kbs_trade_result,
+)
 
+
+logger = logging.getLogger(__name__)
 VNSTOCK_REALTIME_SOURCE = "vnstock_kbs"
 DEFAULT_REALTIME_TTL_SECONDS = 10
 DEFAULT_TRADES_TTL_SECONDS = 5
@@ -29,6 +39,8 @@ KBS_NETWORK_ERROR = "KBS network/proxy issue"
 KBS_NETWORK_DETAIL = "Check provider connectivity or retry later."
 KBS_UNAVAILABLE_ERROR = "KBS unavailable"
 KBS_UNAVAILABLE_DETAIL = "Provider returned an unavailable state."
+KBS_CANCELLED_ERROR = "KBS request cancelled"
+KBS_CANCELLED_DETAIL = "The KBS request was cancelled before the provider response completed."
 
 
 @dataclass
@@ -40,6 +52,13 @@ class _CacheEntry:
 
 _CACHE: Dict[str, _CacheEntry] = {}
 _CACHE_LOCK = threading.Lock()
+
+
+def _observe(action: Callable[..., None], *args: Any, **kwargs: Any) -> None:
+    try:
+        action(*args, **kwargs)
+    except Exception as exc:
+        logger.warning("KBS observability update failed: %s", exc)
 
 
 def _utc_now() -> datetime:
@@ -213,6 +232,14 @@ def _shape_provider_error(error: Any) -> Dict[str, Optional[str]]:
     }
 
 
+def _shape_cancelled_error(error: Any) -> Dict[str, Optional[str]]:
+    return {
+        "error": KBS_CANCELLED_ERROR,
+        "error_detail": KBS_CANCELLED_DETAIL,
+        "raw_error": _safe_str(error) or KBS_CANCELLED_ERROR,
+    }
+
+
 class VnstockRealtimeFetcher:
     """Optional vnstock KBS realtime/snapshot provider."""
 
@@ -235,13 +262,28 @@ class VnstockRealtimeFetcher:
 
     def fetch_quotes(self, tickers: List[str]) -> Dict[str, Any]:
         symbols = [ticker.strip().upper() for ticker in tickers if ticker.strip()]
+        _observe(observe_kbs_quote_request, len(symbols))
         if not symbols:
-            return self._response(symbols, [], status="error", error="No tickers requested")
+            payload = self._response(symbols, [], status="error", error="No tickers requested")
+            _observe(observe_kbs_quote_result, payload["status"], error=payload.get("error"), raw_error_present=bool(payload.get("raw_error")))
+            return payload
 
         try:
             Trading, _ = self._load_classes()
+        except asyncio.CancelledError as exc:
+            shaped_error = _shape_cancelled_error(exc)
+            payload = self._response(
+                symbols,
+                [self._error_quote(symbol, "unavailable", **shaped_error) for symbol in symbols],
+                status="unavailable",
+                **shaped_error,
+            )
+            _observe(observe_kbs_quote_result, payload["status"], error=payload.get("error"), raw_error_present=bool(payload.get("raw_error")))
+            return payload
         except RuntimeError as exc:
-            return self._unavailable_response(symbols, str(exc))
+            payload = self._unavailable_response(symbols, str(exc))
+            _observe(observe_kbs_quote_result, payload["status"], error=payload.get("error"), raw_error_present=bool(payload.get("raw_error")))
+            return payload
 
         cache_key = "vnstock_realtime:" + ",".join(symbols)
 
@@ -251,33 +293,65 @@ class VnstockRealtimeFetcher:
 
         try:
             rows, cache = _read_cache(cache_key, self.realtime_ttl_seconds, loader)
-        except Exception as exc:
-            shaped_error = _shape_provider_error(exc)
-            return self._response(
+        except asyncio.CancelledError as exc:
+            shaped_error = _shape_cancelled_error(exc)
+            payload = self._response(
                 symbols,
-                [self._error_quote(symbol, "error", **shaped_error) for symbol in symbols],
-                status="error",
+                [self._error_quote(symbol, "unavailable", **shaped_error) for symbol in symbols],
+                status="unavailable",
                 **shaped_error,
             )
+            _observe(observe_kbs_quote_result, payload["status"], error=payload.get("error"), raw_error_present=bool(payload.get("raw_error")))
+            return payload
+        except Exception as exc:
+            shaped_error = _shape_provider_error(exc)
+            payload = self._response(
+                symbols,
+                [self._error_quote(symbol, "unavailable", **shaped_error) for symbol in symbols],
+                status="unavailable",
+                **shaped_error,
+            )
+            _observe(observe_kbs_quote_result, payload["status"], error=payload.get("error"), raw_error_present=bool(payload.get("raw_error")))
+            return payload
 
-        quotes = self._map_quote_rows(symbols, rows)
-        status = "ok" if any(quote["status"] == "ok" for quote in quotes) else "error"
-        return self._response(symbols, quotes, status=status, cache=cache)
+        try:
+            quotes = self._map_quote_rows(symbols, rows)
+            status = "ok" if any(quote["status"] == "ok" for quote in quotes) else "error"
+            payload = self._response(symbols, quotes, status=status, cache=cache)
+        except Exception as exc:
+            shaped_error = _shape_provider_error(exc)
+            payload = self._response(
+                symbols,
+                [self._error_quote(symbol, "unavailable", **shaped_error) for symbol in symbols],
+                status="unavailable",
+                **shaped_error,
+            )
+        _observe(observe_kbs_quote_result, payload["status"], error=payload.get("error"), raw_error_present=bool(payload.get("raw_error")))
+        return payload
 
     def fetch_trades(self, symbol: str, limit: int = 100) -> Dict[str, Any]:
         ticker = symbol.strip().upper()
+        _observe(observe_kbs_trade_request, ticker)
         if not ticker:
-            return self._trades_response(ticker, [], status="error", error="No symbol requested")
+            payload = self._trades_response(ticker, [], status="error", error="No symbol requested")
+            _observe(observe_kbs_trade_result, payload["status"], error=payload.get("error"), raw_error_present=bool(payload.get("raw_error")))
+            return payload
 
         try:
             _, Market = self._load_classes()
+        except asyncio.CancelledError as exc:
+            payload = self._trades_response(ticker, [], status="unavailable", **_shape_cancelled_error(exc))
+            _observe(observe_kbs_trade_result, payload["status"], error=payload.get("error"), raw_error_present=bool(payload.get("raw_error")))
+            return payload
         except RuntimeError as exc:
-            return self._trades_response(
+            payload = self._trades_response(
                 ticker,
                 [],
                 status="unavailable",
                 error=str(exc),
             )
+            _observe(observe_kbs_trade_result, payload["status"], error=payload.get("error"), raw_error_present=bool(payload.get("raw_error")))
+            return payload
 
         cache_key = f"vnstock_trades:{ticker}"
 
@@ -287,11 +361,22 @@ class VnstockRealtimeFetcher:
 
         try:
             rows, cache = _read_cache(cache_key, self.trades_ttl_seconds, loader)
+        except asyncio.CancelledError as exc:
+            payload = self._trades_response(ticker, [], status="unavailable", **_shape_cancelled_error(exc))
+            _observe(observe_kbs_trade_result, payload["status"], error=payload.get("error"), raw_error_present=bool(payload.get("raw_error")))
+            return payload
         except Exception as exc:
-            return self._trades_response(ticker, [], status="error", **_shape_provider_error(exc))
+            payload = self._trades_response(ticker, [], status="unavailable", **_shape_provider_error(exc))
+            _observe(observe_kbs_trade_result, payload["status"], error=payload.get("error"), raw_error_present=bool(payload.get("raw_error")))
+            return payload
 
-        trades = [self._map_trade(row) for row in rows[:limit]]
-        return self._trades_response(ticker, trades, status="ok", cache=cache)
+        try:
+            trades = [self._map_trade(row) for row in rows[:limit]]
+            payload = self._trades_response(ticker, trades, status="ok", cache=cache)
+        except Exception as exc:
+            payload = self._trades_response(ticker, [], status="unavailable", **_shape_provider_error(exc))
+        _observe(observe_kbs_trade_result, payload["status"], error=payload.get("error"), raw_error_present=bool(payload.get("raw_error")))
+        return payload
 
     def _map_quote_rows(self, symbols: List[str], rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         by_symbol: Dict[str, Dict[str, Any]] = {}

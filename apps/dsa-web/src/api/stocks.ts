@@ -233,6 +233,36 @@ export type VietnamRealtimeTradesResponse = {
   cache: Record<string, unknown>;
 };
 
+export type VietnamObservabilityResponse = {
+  market: 'VN';
+  status: 'ok' | 'error';
+  mozyfin: {
+    watchlistRequestsTotal: number;
+    watchlistCacheHitsTotal: number;
+    watchlistCacheMissesTotal: number;
+    singleflightWaitsTotal: number;
+    lastWatchlistRequestAt?: string | null;
+    lastFetchAt?: string | null;
+    lastCacheKey?: string | null;
+    lastTickersCount: number;
+    lastFetchDurationMs?: number | null;
+  };
+  kbs: {
+    quoteRequestsTotal: number;
+    quoteSuccessTotal: number;
+    quoteUnavailableTotal: number;
+    tradeRequestsTotal: number;
+    tradeSuccessTotal: number;
+    tradeUnavailableTotal: number;
+    lastQuoteRequestAt?: string | null;
+    lastTradeRequestAt?: string | null;
+    lastQuoteTickersCount: number;
+    lastTradeSymbol?: string | null;
+    lastError?: string | null;
+    lastRawErrorPresent: boolean;
+  };
+};
+
 export const stocksApi = {
   async extractFromImage(file: File): Promise<ExtractFromImageResponse> {
     const formData = new FormData();
@@ -317,5 +347,13 @@ export const stocksApi = {
     });
     const { toCamelCase } = await import('./utils');
     return toCamelCase<VietnamRealtimeTradesResponse>(response.data);
+  },
+
+  async getVietnamObservability(): Promise<VietnamObservabilityResponse> {
+    const response = await apiClient.get('/api/v1/stocks/vn/observability', {
+      timeout: 10000,
+    });
+    const { toCamelCase } = await import('./utils');
+    return toCamelCase<VietnamObservabilityResponse>(response.data);
   },
 };

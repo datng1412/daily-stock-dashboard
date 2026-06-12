@@ -126,10 +126,59 @@ The Vietnam dashboard currently shows:
 - KBS snapshot: KBS board snapshot price, time, change, volume, stale/unavailable state.
 - KBS snapshot display state: phase-aware live/delayed/stale/last-available status, with raw age and stale reason kept compactly visible.
 - Latest trade tape: selected ticker trade tape rows with time, price, volume, match type, and source.
-- Data status panel: Mozyfin source/fixture state, KBS status, stale/unavailable counts, selected ticker status, last KBS quote/trade refresh times, and auto-refresh state.
+- Data status panel: Mozyfin source/fixture state, KBS status, stale/unavailable counts, selected ticker status, last KBS quote/trade refresh times, auto-refresh state, and compact fetch observability counters.
 - VN market phase label: normal-weekday phase in `Asia/Ho_Chi_Minh`.
 
 KBS failures should display compact warnings and keep existing Mozyfin overview/detail rows intact.
+
+## Observability
+
+Endpoint:
+
+```text
+GET /api/v1/stocks/vn/observability
+```
+
+The endpoint returns process-local in-memory counters only. It does not trigger
+Mozyfin or KBS provider requests, does not use a database, and does not expose
+API keys, request headers, or raw provider payloads.
+
+Response shape:
+
+```json
+{
+  "market": "VN",
+  "status": "ok",
+  "mozyfin": {
+    "watchlist_requests_total": 0,
+    "watchlist_cache_hits_total": 0,
+    "watchlist_cache_misses_total": 0,
+    "singleflight_waits_total": 0,
+    "last_watchlist_request_at": null,
+    "last_fetch_at": null,
+    "last_cache_key": null,
+    "last_tickers_count": 0,
+    "last_fetch_duration_ms": null
+  },
+  "kbs": {
+    "quote_requests_total": 0,
+    "quote_success_total": 0,
+    "quote_unavailable_total": 0,
+    "trade_requests_total": 0,
+    "trade_success_total": 0,
+    "trade_unavailable_total": 0,
+    "last_quote_request_at": null,
+    "last_trade_request_at": null,
+    "last_quote_tickers_count": 0,
+    "last_trade_symbol": null,
+    "last_error": null,
+    "last_raw_error_present": false
+  }
+}
+```
+
+`last_error` stores the normalized short provider error only. Raw upstream error
+text is reduced to `last_raw_error_present`.
 
 ## Refresh Behavior
 
@@ -144,7 +193,13 @@ Auto refresh:
 - KBS quotes interval options: 10s, 15s, 30s. Default: 15s.
 - Latest trade tape interval options: 5s, 10s, 15s. Default: 10s.
 - Quote refresh and trade refresh have independent in-flight guards.
+- Watchlist-triggered, manual, interval, and visibility-resume KBS refreshes share those guards. If the active ticker changes while a trade request is in flight, the stale response is ignored and the latest pending ticker is refreshed after the in-flight request settles.
 - Browser hidden tabs pause both refresh loops and resume safely when visible.
+
+Failure handling:
+
+- KBS provider errors, mapping errors, and cancellations return compact `status=unavailable` responses with normalized error text where possible.
+- Observability counter failures are logged and must not affect Mozyfin or KBS data responses.
 
 ## Cache Rules
 

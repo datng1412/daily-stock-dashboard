@@ -22,6 +22,12 @@ from data_provider.mozyfin_fetcher import (
     normalize_vn_symbol,
     vn_ticker,
 )
+from src.services.vietnam_observability import (
+    monotonic_ms,
+    observe_mozyfin_cache_result,
+    observe_mozyfin_fetch,
+    observe_mozyfin_watchlist_request,
+)
 
 
 LIQUIDITY_TARGET_AVG_VOLUME = 1_000_000
@@ -120,6 +126,13 @@ VN_DASHBOARD_UNITS = {
 logger = logging.getLogger(__name__)
 
 
+def _observe(action: Callable[..., None], *args: Any, **kwargs: Any) -> None:
+    try:
+        action(*args, **kwargs)
+    except Exception as exc:
+        logger.warning("Vietnam observability update failed: %s", exc)
+
+
 @dataclass
 class _CacheEntry:
     value: Any
@@ -205,6 +218,7 @@ def _read_cache(
     entry = _get_cache_entry(key)
     if entry and entry.expires_at > now and not force_refresh:
         logger.debug("VN cache hit: %s", key)
+        _observe(observe_mozyfin_cache_result, "hit", key)
         return {"value": entry.value, "status": "hit", "entry": entry, "error": None}
 
     lock = _get_inflight_lock(key)
@@ -217,14 +231,18 @@ def _read_cache(
         if current_entry and current_entry.expires_at > now:
             if waited:
                 logger.debug("VN cache single-flight reuse: %s", key)
+                _observe(observe_mozyfin_cache_result, "hit", key, waited=True)
                 return {"value": current_entry.value, "status": "hit", "entry": current_entry, "error": None}
             if not force_refresh:
                 logger.debug("VN cache hit: %s", key)
+                _observe(observe_mozyfin_cache_result, "hit", key)
                 return {"value": current_entry.value, "status": "hit", "entry": current_entry, "error": None}
 
         logger.debug("VN cache %s: %s", "refresh" if current_entry or force_refresh else "miss", key)
+        started_ms = monotonic_ms()
         try:
             value = fetch()
+            _observe(observe_mozyfin_fetch, key, monotonic_ms() - started_ms)
             refreshed = _set_cache_entry(key, value, ttl_seconds)
             if force_refresh:
                 status = "refresh"
@@ -232,10 +250,13 @@ def _read_cache(
                 status = "refresh"
             else:
                 status = "miss"
+            _observe(observe_mozyfin_cache_result, status, key, waited=waited)
             return {"value": value, "status": status, "entry": refreshed, "error": None}
         except Exception as exc:
             if current_entry is not None:
+                _observe(observe_mozyfin_cache_result, "stale", key, waited=waited)
                 return {"value": current_entry.value, "status": "stale", "entry": current_entry, "error": str(exc)}
+            _observe(observe_mozyfin_cache_result, "error", key, waited=waited)
             raise
 
 
@@ -907,6 +928,7 @@ class VietnamMarketService:
         intraday_limit: Optional[int] = None,
     ) -> Dict[str, Any]:
         symbols = normalize_vietnam_tickers(tickers)
+        _observe(observe_mozyfin_watchlist_request, len(symbols))
         rows = []
         fixture_mode = _is_fixture_mode(self.manager)
         refresh_time = datetime.now(timezone.utc).isoformat()

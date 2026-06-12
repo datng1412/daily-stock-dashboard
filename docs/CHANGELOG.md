@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [改进] Add lightweight in-memory Vietnam dashboard fetch observability for Mozyfin/KBS counters and compact Data status display.
+- [修复] Harden Vietnam KBS refresh loops and provider error paths so overlapping refreshes, stale trade responses, cancellations, and diagnostic counter failures do not break the dashboard.
 - [改进] Add phase-aware Vietnam KBS snapshot display state so closed/post-close/weekend snapshots are shown as last available while raw stale age and reasons remain visible.
 - [新功能] Add optional vnstock KBS snapshot API endpoints `/api/v1/stocks/vn/realtime` and `/api/v1/stocks/vn/realtime/trades` while preserving Mozyfin `latest_price` semantics.
 - [改进] Add separate Vietnam dashboard display for Daily close, KBS snapshot, and Latest trade tape, including KBS staleness status and compact failure states.

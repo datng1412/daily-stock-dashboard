@@ -89,13 +89,30 @@ class _FakeEquity:
         )
 
 
+class _TimeoutEquity:
+    def __init__(self, symbol):
+        self.symbol = symbol
+
+    def trades(self):
+        raise RuntimeError("upstream trade timeout")
+
+
 class _FakeMarket:
     def equity(self, symbol):
         return _FakeEquity(symbol)
 
 
+class _TimeoutMarket:
+    def equity(self, symbol):
+        return _TimeoutEquity(symbol)
+
+
 def _fake_load_classes(self):
     return _FakeTrading, _FakeMarket
+
+
+def _trade_timeout_load_classes(self):
+    return _FakeTrading, _TimeoutMarket
 
 
 def _timeout_load_classes(self):
@@ -227,7 +244,7 @@ def test_chinese_timeout_error_is_shaped_and_raw_error_is_preserved(monkeypatch)
     payload = VnstockRealtimeFetcher().fetch_quotes(["FPT"])
     quote = payload["quotes"][0]
 
-    assert payload["status"] == "error"
+    assert payload["status"] == "unavailable"
     assert payload["error"] == "KBS provider timeout"
     assert payload["error_detail"] == "The upstream KBS provider did not respond in time."
     assert payload["raw_error"]
@@ -243,7 +260,7 @@ def test_generic_quote_exception_becomes_kbs_unavailable(monkeypatch):
 
     payload = VnstockRealtimeFetcher().fetch_quotes(["FPT"])
 
-    assert payload["status"] == "error"
+    assert payload["status"] == "unavailable"
     assert payload["error"] == "KBS unavailable"
     assert payload["error_detail"] == "Provider returned an unavailable state."
     assert payload["raw_error"] == "provider exploded"
@@ -268,6 +285,18 @@ def test_vnstock_trades_mapping(monkeypatch):
     ]
     assert payload["note"] == "Trade tape may exclude auction/ATC prints depending on provider output"
     assert all(trade["time"] != "14:45:00" for trade in payload["trades"])
+
+
+def test_vnstock_trade_provider_exception_returns_unavailable_payload(monkeypatch):
+    monkeypatch.setattr(VnstockRealtimeFetcher, "_load_classes", _trade_timeout_load_classes)
+
+    payload = VnstockRealtimeFetcher().fetch_trades("FPT", limit=100)
+
+    assert payload["status"] == "unavailable"
+    assert payload["error"] == "KBS provider timeout"
+    assert payload["error_detail"] == "The upstream KBS provider did not respond in time."
+    assert payload["raw_error"] == "upstream trade timeout"
+    assert payload["trades"] == []
 
 
 def test_vnstock_quote_and_trade_cache_ttls_are_separate():

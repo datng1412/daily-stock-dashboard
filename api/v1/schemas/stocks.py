@@ -275,3 +275,43 @@ class VietnamRealtimeTradesResponse(BaseModel):
     trades: List[VietnamRealtimeTrade] = Field(default_factory=list)
     note: Optional[str] = None
     cache: Dict[str, Any] = Field(default_factory=dict)
+
+
+class VietnamMozyfinObservability(BaseModel):
+    """Process-local Mozyfin fetch counters for the Vietnam dashboard."""
+
+    watchlist_requests_total: int = 0
+    watchlist_cache_hits_total: int = 0
+    watchlist_cache_misses_total: int = 0
+    singleflight_waits_total: int = 0
+    last_watchlist_request_at: Optional[str] = None
+    last_fetch_at: Optional[str] = None
+    last_cache_key: Optional[str] = None
+    last_tickers_count: int = 0
+    last_fetch_duration_ms: Optional[int] = None
+
+
+class VietnamKbsObservability(BaseModel):
+    """Process-local KBS fetch counters for the Vietnam dashboard."""
+
+    quote_requests_total: int = 0
+    quote_success_total: int = 0
+    quote_unavailable_total: int = 0
+    trade_requests_total: int = 0
+    trade_success_total: int = 0
+    trade_unavailable_total: int = 0
+    last_quote_request_at: Optional[str] = None
+    last_trade_request_at: Optional[str] = None
+    last_quote_tickers_count: int = 0
+    last_trade_symbol: Optional[str] = None
+    last_error: Optional[str] = None
+    last_raw_error_present: bool = False
+
+
+class VietnamObservabilityResponse(BaseModel):
+    """Vietnam dashboard in-memory observability response."""
+
+    market: str = "VN"
+    status: str = "ok"
+    mozyfin: VietnamMozyfinObservability = Field(default_factory=VietnamMozyfinObservability)
+    kbs: VietnamKbsObservability = Field(default_factory=VietnamKbsObservability)
