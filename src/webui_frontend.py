@@ -107,14 +107,14 @@ def _needs_frontend_build(frontend_dir: Path, force_build: bool) -> tuple[bool, 
 def _run_frontend_commands(commands: Sequence[Sequence[str]], frontend_dir: Path) -> bool:
     try:
         for command in commands:
-            logger.info("执行前端命令: %s", " ".join(command))
+            logger.info("Running frontend command: %s", " ".join(command))
             subprocess.run(command, cwd=frontend_dir, check=True)
-        logger.info("前端静态资源构建完成")
+        logger.info("Frontend static assets build completed")
         return True
     except subprocess.CalledProcessError as exc:
         cmd_display = " ".join(exc.cmd) if isinstance(exc.cmd, (list, tuple)) else str(exc.cmd)
         logger.error(
-            "前端命令执行失败（exit_code=%s）: %s",
+            "Frontend command failed (exit_code=%s): %s",
             getattr(exc, "returncode", "N/A"),
             cmd_display,
         )
@@ -151,17 +151,18 @@ def _warn_if_assets_missing(artifact_index: Path, frontend_dir: Path) -> None:
     assets_dir = static_dir / "assets"
     if not _has_static_assets(static_dir):
         logger.warning(
-            "检测到 %s 但 %s 目录不存在或无 CSS/JS 文件，"
-            "WebUI 将因缺少样式与脚本而显示异常（元素过大、布局错乱）",
+            "Detected %s, but %s does not exist or contains no CSS/JS files; "
+            "WebUI will render incorrectly without styles and scripts "
+            "(oversized elements, broken layout)",
             artifact_index,
             assets_dir,
         )
         logger.warning(
-            "请重新构建前端以修复此问题: %s",
+            "Rebuild the frontend to fix this: %s",
             _manual_build_command(frontend_dir),
         )
         logger.warning(
-            "Docker 用户请执行: docker-compose -f ./docker/docker-compose.yml build --no-cache"
+            "Docker users should run: docker-compose -f ./docker/docker-compose.yml build --no-cache"
         )
 
 
@@ -183,33 +184,33 @@ def prepare_webui_frontend_assets() -> bool:
 
     if not auto_build_enabled:
         if artifact_index.exists():
-            logger.info("WEBUI_AUTO_BUILD=false，检测到前端静态产物: %s", artifact_index)
+            logger.info("WEBUI_AUTO_BUILD=false, detected frontend static build: %s", artifact_index)
             _warn_if_assets_missing(artifact_index, frontend_dir)
             return True
-        logger.warning("未检测到 WebUI 前端静态产物: %s", artifact_index)
-        logger.warning("当前配置 WEBUI_AUTO_BUILD=false，不会在后端启动时自动编译前端")
-        logger.warning("请先手动构建前端: %s", _manual_build_command(frontend_dir))
-        logger.warning("如需启动时自动构建，可设置 WEBUI_AUTO_BUILD=true")
+        logger.warning("WebUI frontend static build was not found: %s", artifact_index)
+        logger.warning("WEBUI_AUTO_BUILD=false is configured, so the backend will not auto-build the frontend at startup")
+        logger.warning("Build the frontend manually first: %s", _manual_build_command(frontend_dir))
+        logger.warning("Set WEBUI_AUTO_BUILD=true to build automatically at startup")
         return False
 
     force_build = _is_truthy_env("WEBUI_FORCE_BUILD", "false")
     needs_build, artifact_index = _needs_frontend_build(frontend_dir=frontend_dir, force_build=force_build)
 
     if not needs_build:
-        logger.info("检测到可直接复用的前端静态产物，跳过运行时自动构建: %s", artifact_index)
+        logger.info("Reusable frontend static build detected; skipping runtime auto-build: %s", artifact_index)
         _warn_if_assets_missing(artifact_index, frontend_dir)
         return True
 
     package_json = frontend_dir / "package.json"
     if not package_json.exists():
-        logger.warning("未找到前端项目，无法自动构建: %s", package_json)
-        logger.warning("可先手动检查前端目录或关闭 WEBUI_AUTO_BUILD")
+        logger.warning("Frontend project was not found, cannot auto-build: %s", package_json)
+        logger.warning("Check the frontend directory manually or disable WEBUI_AUTO_BUILD")
         return False
 
     npm_path = shutil.which("npm")
     if not npm_path:
-        logger.warning("未检测到 npm，无法自动构建前端")
-        logger.warning("请先手动构建前端静态资源: %s", _manual_build_command(frontend_dir))
+        logger.warning("npm was not found, cannot auto-build frontend")
+        logger.warning("Build frontend static assets manually first: %s", _manual_build_command(frontend_dir))
         return False
 
     lock_file = frontend_dir / "package-lock.json"
@@ -228,7 +229,7 @@ def prepare_webui_frontend_assets() -> bool:
         commands.append([npm_path, "run", "build"])
 
     logger.info(
-        "前端构建检查结果: needs_install=%s, needs_build=%s, artifact=%s",
+        "Frontend build check result: needs_install=%s, needs_build=%s, artifact=%s",
         needs_install,
         needs_build,
         artifact_index,

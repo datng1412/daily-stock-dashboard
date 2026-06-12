@@ -441,7 +441,7 @@ class BaseFetcher(ABC):
             start_date = start_dt.strftime('%Y-%m-%d')
 
         request_start = time.time()
-        logger.info(f"[{self.name}] 开始获取 {stock_code} 日线数据: 范围={start_date} ~ {end_date}")
+        logger.info(f"[{self.name}] Start fetching {stock_code} daily data: range={start_date} ~ {end_date}")
         
         try:
             # Step 1: 获取原始数据
@@ -461,7 +461,7 @@ class BaseFetcher(ABC):
 
             elapsed = time.time() - request_start
             logger.info(
-                f"[{self.name}] {stock_code} 获取成功: 范围={start_date} ~ {end_date}, "
+                f"[{self.name}] {stock_code} fetch succeeded: range={start_date} ~ {end_date}, "
                 f"rows={len(df)}, elapsed={elapsed:.2f}s"
             )
             return df
@@ -470,7 +470,7 @@ class BaseFetcher(ABC):
             elapsed = time.time() - request_start
             error_type, error_reason = summarize_exception(e)
             logger.error(
-                f"[{self.name}] {stock_code} 获取失败: 范围={start_date} ~ {end_date}, "
+                f"[{self.name}] {stock_code} fetch failed: range={start_date} ~ {end_date}, "
                 f"error_type={error_type}, elapsed={elapsed:.2f}s, reason={error_reason}"
             )
             raise DataFetchError(f"[{self.name}] {stock_code}: {error_reason}") from e
@@ -544,7 +544,7 @@ class BaseFetcher(ABC):
         在请求之间加入不规则的等待时间
         """
         sleep_time = random.uniform(min_seconds, max_seconds)
-        logger.debug(f"随机休眠 {sleep_time:.2f} 秒...")
+        logger.debug(f"Random sleep {sleep_time:.2f} seconds...")
         time.sleep(sleep_time)
 
 
@@ -657,7 +657,7 @@ class DataFetcherManager:
             return bool(probe())
         except Exception as exc:
             logger.debug(
-                "[数据源可用性] %s.%s 检查失败(capability=%s): %s",
+                "[Data source availability] %s.%s check failed(capability=%s): %s",
                 fetcher.name,
                 probe_name,
                 capability or "default",
@@ -710,7 +710,7 @@ class DataFetcherManager:
 
         if skipped:
             logger.info(
-                "[数据源路由] %s 日线跳过不支持的数据源: %s",
+                "[Data source routing] %s daily data skipped unsupported data sources: %s",
                 market,
                 ", ".join(skipped),
             )
@@ -734,7 +734,7 @@ class DataFetcherManager:
 
         if skipped:
             logger.info(
-                "[数据源路由] %s 跳过暂不可用的数据源: %s",
+                "[Data source routing] %s skipped temporarily unavailable data sources: %s",
                 capability or "request",
                 ", ".join(skipped),
             )
@@ -773,7 +773,7 @@ class DataFetcherManager:
                     try:
                         current_fetcher.close()
                     except Exception as exc:
-                        logger.debug("[TickFlowFetcher] 关闭旧实例失败: %s", exc)
+                        logger.debug("[TickFlowFetcher] Failed to close old instance: %s", exc)
                 self._tickflow_fetcher = None
                 self._tickflow_api_key = None
                 return None
@@ -785,7 +785,7 @@ class DataFetcherManager:
                 try:
                     current_fetcher.close()
                 except Exception as exc:
-                    logger.debug("[TickFlowFetcher] 切换实例时关闭失败: %s", exc)
+                    logger.debug("[TickFlowFetcher] Failed to close instance during switch: %s", exc)
 
             try:
                 from .tickflow_fetcher import TickFlowFetcher
@@ -795,7 +795,7 @@ class DataFetcherManager:
                 self._tickflow_api_key = api_key
                 return fetcher
             except Exception as exc:
-                logger.warning("[TickFlowFetcher] 初始化失败: %s", exc)
+                logger.warning("[TickFlowFetcher] Initialization failed: %s", exc)
                 self._tickflow_fetcher = None
                 self._tickflow_api_key = None
                 return None
@@ -814,7 +814,7 @@ class DataFetcherManager:
             try:
                 current_fetcher.close()
             except Exception as exc:
-                logger.debug("[TickFlowFetcher] 关闭管理器资源失败: %s", exc)
+                logger.debug("[TickFlowFetcher] Failed to close manager resources: %s", exc)
 
     def __del__(self) -> None:
         try:
@@ -1083,26 +1083,26 @@ class DataFetcherManager:
         if tushare_token:
             optional_fetchers.append(TushareFetcher())  # 会根据 Token 配置自动调整优先级
         else:
-            logger.debug("[数据源初始化] 跳过未配置的 TushareFetcher")
+            logger.debug("[Data source initialization] Skipping unconfigured TushareFetcher")
 
         if LongbridgeFetcher.has_configured_credentials(config):
             optional_fetchers.append(LongbridgeFetcher())  # 长桥（美股/港股兜底，懒加载）
         else:
-            logger.debug("[数据源初始化] 跳过未配置的 LongbridgeFetcher")
+            logger.debug("[Data source initialization] Skipping unconfigured LongbridgeFetcher")
 
         finnhub_api_key = (getattr(config, "finnhub_api_key", None) or "").strip()
         if finnhub_api_key:
             from .finnhub_fetcher import FinnhubFetcher
             optional_fetchers.append(FinnhubFetcher())
         else:
-            logger.debug("[数据源初始化] 跳过未配置的 FinnhubFetcher")
+            logger.debug("[Data source initialization] Skipping unconfigured FinnhubFetcher")
 
         alphavantage_api_key = (getattr(config, "alphavantage_api_key", None) or "").strip()
         if alphavantage_api_key:
             from .alphavantage_fetcher import AlphaVantageFetcher
             optional_fetchers.append(AlphaVantageFetcher())
         else:
-            logger.debug("[数据源初始化] 跳过未配置的 AlphaVantageFetcher")
+            logger.debug("[Data source initialization] Skipping unconfigured AlphaVantageFetcher")
 
         # 初始化数据源列表
         self._ensure_concurrency_guards()
@@ -1122,7 +1122,7 @@ class DataFetcherManager:
 
         # 构建优先级说明
         priority_info = ", ".join([f"{f.name}(P{f.priority})" for f in self._get_fetchers_snapshot()])
-        logger.info(f"已初始化 {len(self._fetchers)} 个数据源（按优先级）: {priority_info}")
+        logger.info(f"Initialized {len(self._fetchers)} data sources by priority: {priority_info}")
     
     def add_fetcher(self, fetcher: BaseFetcher) -> None:
         """添加数据源并重新排序"""
@@ -1191,7 +1191,7 @@ class DataFetcherManager:
         if total_fetchers == 0:
             market_label = "美股指数" if is_us_index else "美股" if is_us else "港股" if is_hk else "A股"
             error_summary = f"{market_label} {stock_code} 获取失败:\n暂无可用数据源"
-            logger.error(f"[数据源终止] {stock_code} 获取失败: {error_summary}")
+            logger.error(f"[Data source terminated] {stock_code} fetch failed: no available data source")
             raise DataFetchError(error_summary)
 
         # 美股（含美股指数）使用专用路由；港股走下方通用数据源循环
@@ -1219,10 +1219,10 @@ class DataFetcherManager:
                         continue
                     attempt_start = time.time()
                     try:
-                        role = "首选" if src_name == source_order[0] else "兜底"
+                        role = "primary" if src_name == source_order[0] else "fallback"
                         logger.info(
-                            f"[数据源尝试 {attempt}/{total_fetchers}] [{fetcher.name}] "
-                            f"{market_label} {stock_code} {role}路由..."
+                            f"[Data source attempt {attempt}/{total_fetchers}] [{fetcher.name}] "
+                            f"{market_label} {stock_code} {role} route..."
                         )
                         df = self._call_fetcher_method(
                             fetcher,
@@ -1244,7 +1244,7 @@ class DataFetcherManager:
                             )
                             elapsed = time.time() - request_start
                             logger.info(
-                                f"[数据源完成] {stock_code} 使用 [{fetcher.name}] 获取成功: "
+                                f"[Data source complete] {stock_code} fetched successfully using [{fetcher.name}]: "
                                 f"rows={len(df)}, elapsed={elapsed:.2f}s"
                             )
                             return df, fetcher.name
@@ -1275,7 +1275,7 @@ class DataFetcherManager:
                             fallback_to=fallback_to,
                         )
                         logger.warning(
-                            f"[数据源失败 {attempt}/{total_fetchers}] [{fetcher.name}] {stock_code}: "
+                            f"[Data source failure {attempt}/{total_fetchers}] [{fetcher.name}] {stock_code}: "
                             f"error_type={error_type}, reason={error_reason}"
                         )
                         errors.append(error_msg)
@@ -1283,14 +1283,17 @@ class DataFetcherManager:
 
             error_summary = f"{market_label} {stock_code} 获取失败:\n" + "\n".join(errors)
             elapsed = time.time() - request_start
-            logger.error(f"[数据源终止] {stock_code} 获取失败: elapsed={elapsed:.2f}s\n{error_summary}")
+            logger.error(
+                f"[Data source terminated] {stock_code} fetch failed: "
+                f"elapsed={elapsed:.2f}s, errors={len(errors)}"
+            )
             raise DataFetchError(error_summary)
 
         for attempt, fetcher in enumerate(fetchers, start=1):
             attempt_start = time.time()
             fallback_to = fetchers[attempt].name if attempt < total_fetchers else None
             try:
-                logger.info(f"[数据源尝试 {attempt}/{total_fetchers}] [{fetcher.name}] 获取 {stock_code}...")
+                logger.info(f"[Data source attempt {attempt}/{total_fetchers}] [{fetcher.name}] Fetching {stock_code}...")
                 df = self._call_fetcher_method(
                     fetcher,
                     "get_daily_data",
@@ -1312,7 +1315,7 @@ class DataFetcherManager:
                     )
                     elapsed = time.time() - request_start
                     logger.info(
-                        f"[数据源完成] {stock_code} 使用 [{fetcher.name}] 获取成功: "
+                        f"[Data source complete] {stock_code} fetched successfully using [{fetcher.name}]: "
                         f"rows={len(df)}, elapsed={elapsed:.2f}s"
                     )
                     return df, fetcher.name
@@ -1344,20 +1347,23 @@ class DataFetcherManager:
                     fallback_to=fallback_to,
                 )
                 logger.warning(
-                    f"[数据源失败 {attempt}/{total_fetchers}] [{fetcher.name}] {stock_code}: "
+                    f"[Data source failure {attempt}/{total_fetchers}] [{fetcher.name}] {stock_code}: "
                     f"error_type={error_type}, reason={error_reason}"
                 )
                 errors.append(error_msg)
                 if attempt < total_fetchers:
                     next_fetcher = fetchers[attempt]
-                    logger.info(f"[数据源切换] {stock_code}: [{fetcher.name}] -> [{next_fetcher.name}]")
+                    logger.info(f"[Data source switch] {stock_code}: [{fetcher.name}] -> [{next_fetcher.name}]")
                 # 继续尝试下一个数据源
                 continue
         
         # 所有数据源都失败
         error_summary = f"所有数据源获取 {stock_code} 失败:\n" + "\n".join(errors)
         elapsed = time.time() - request_start
-        logger.error(f"[数据源终止] {stock_code} 获取失败: elapsed={elapsed:.2f}s\n{error_summary}")
+        logger.error(
+            f"[Data source terminated] {stock_code} fetch failed: "
+            f"elapsed={elapsed:.2f}s, errors={len(errors)}"
+        )
         raise DataFetchError(error_summary)
     
     @property
@@ -1393,12 +1399,12 @@ class DataFetcherManager:
 
         # Issue #455: PREFETCH_REALTIME_QUOTES=false 可禁用预取，避免全市场拉取
         if not getattr(config, "prefetch_realtime_quotes", True):
-            logger.debug("[预取] PREFETCH_REALTIME_QUOTES=false，跳过批量预取")
+            logger.debug("[Prefetch] PREFETCH_REALTIME_QUOTES=false, skipping batch prefetch")
             return 0
 
         # 如果实时行情被禁用，跳过预取
         if not config.enable_realtime_quote:
-            logger.debug("[预取] 实时行情功能已禁用，跳过预取")
+            logger.debug("[Prefetch] Realtime quote feature is disabled, skipping prefetch")
             return 0
         
         # 检查优先级中是否包含全量拉取数据源
@@ -1418,15 +1424,15 @@ class DataFetcherManager:
         
         # 如果没有全量数据源，或者全量数据源排在第 3 位之后，跳过预取
         if first_bulk_source_index is None or first_bulk_source_index >= 2:
-            logger.info(f"[预取] 当前优先级使用轻量级数据源(sina/tencent)，无需预取")
+            logger.info("[Prefetch] Current priority uses lightweight data sources (sina/tencent), prefetch is not needed")
             return 0
         
         # 如果股票数量少于 5 个，不进行批量预取（逐个查询更高效）
         if len(stock_codes) < 5:
-            logger.info(f"[预取] 股票数量 {len(stock_codes)} < 5，跳过批量预取")
+            logger.info(f"[Prefetch] Stock count {len(stock_codes)} < 5, skipping batch prefetch")
             return 0
         
-        logger.info(f"[预取] 开始批量预取实时行情，共 {len(stock_codes)} 只股票...")
+        logger.info(f"[Prefetch] Start batch prefetching realtime quotes for {len(stock_codes)} stocks...")
         
         # 尝试通过 efinance 或 akshare 预取
         # 只需要调用一次 get_realtime_quote，缓存机制会自动拉取全市场数据
@@ -1436,14 +1442,14 @@ class DataFetcherManager:
             quote = self.get_realtime_quote(first_code)
             
             if quote:
-                logger.info(f"[预取] 批量预取完成，缓存已填充")
+                logger.info("[Prefetch] Batch prefetch completed, cache populated")
                 return len(stock_codes)
             else:
-                logger.warning(f"[预取] 批量预取失败，将使用逐个查询模式")
+                logger.warning("[Prefetch] Batch prefetch failed, falling back to per-symbol query mode")
                 return 0
                 
         except Exception as e:
-            logger.error(f"[预取] 批量预取异常: {e}")
+            logger.error(f"[Prefetch] Batch prefetch exception: {e}")
             return 0
 
     @staticmethod
@@ -1550,7 +1556,7 @@ class DataFetcherManager:
 
         # 如果实时行情功能被禁用，直接返回 None
         if not config.enable_realtime_quote:
-            logger.debug(f"[实时行情] 功能已禁用，跳过 {stock_code}")
+            logger.debug(f"[Realtime quote] Feature disabled, skipping {stock_code}")
             return None
 
         # ----------------------------------------------------------
@@ -1568,13 +1574,13 @@ class DataFetcherManager:
             if is_us:
                 primary_src = "LongbridgeFetcher" if prefer_lb else "YfinanceFetcher"
                 secondary_src = "YfinanceFetcher" if prefer_lb else "LongbridgeFetcher"
-                market_label = "美股指数" if is_us_index else "美股"
+                market_label = "US index" if is_us_index else "US stock"
                 primary_kw: dict = {}
                 secondary_kw: dict = {}
             else:
                 primary_src = "LongbridgeFetcher" if prefer_lb else "AkshareFetcher"
                 secondary_src = "AkshareFetcher" if prefer_lb else "LongbridgeFetcher"
-                market_label = "港股"
+                market_label = "HK stock"
                 primary_kw = {"source": "hk"} if primary_src == "AkshareFetcher" else {}
                 secondary_kw = {"source": "hk"} if secondary_src == "AkshareFetcher" else {}
 
@@ -1582,7 +1588,7 @@ class DataFetcherManager:
             primary_quote = self._try_fetcher_quote(stock_code, primary_src, **primary_kw)
             fallback_from = primary_token if primary_quote is None else None
             if primary_quote is not None:
-                logger.info(f"[实时行情] {market_label} {stock_code} 成功获取 (来源: {primary_src})")
+                logger.info(f"[Realtime quote] {market_label} {stock_code} fetched successfully (source: {primary_src})")
             primary_quote = self._supplement_quote(
                 stock_code, primary_quote, secondary_src, **secondary_kw,
             )
@@ -1599,7 +1605,7 @@ class DataFetcherManager:
                     realtime_cache_ttl=getattr(config, "realtime_cache_ttl", None),
                 )
             if log_final_failure:
-                logger.info(f"[实时行情] {market_label} {stock_code} 无可用数据源")
+                logger.info(f"[Realtime quote] {market_label} {stock_code} has no available data source")
             return None
         
         # 获取配置的数据源优先级
@@ -1664,7 +1670,7 @@ class DataFetcherManager:
                         # First successful source becomes primary
                         primary_quote = quote
                         primary_fallback_from = failed_sources[0] if failed_sources else None
-                        logger.info(f"[实时行情] {stock_code} 成功获取 (来源: {source})")
+                        logger.info(f"[Realtime quote] {stock_code} fetched successfully (source: {source})")
                         # If all key supplementary fields are present, return early
                         if not self._quote_needs_supplement(primary_quote):
                             return self._enrich_realtime_quote(
@@ -1673,17 +1679,17 @@ class DataFetcherManager:
                                 realtime_cache_ttl=getattr(config, "realtime_cache_ttl", None),
                             )
                         # Otherwise, continue to try later sources for missing fields
-                        logger.debug(f"[实时行情] {stock_code} 部分字段缺失，尝试从后续数据源补充")
+                        logger.debug(f"[Realtime quote] {stock_code} has missing fields, trying later data sources for supplementation")
                         supplement_attempts = 0
                     else:
                         # Supplement missing fields from this source (limit attempts)
                         supplement_attempts += 1
                         if supplement_attempts > 1:
-                            logger.debug(f"[实时行情] {stock_code} 补充尝试已达上限，停止继续")
+                            logger.debug(f"[Realtime quote] {stock_code} supplementation attempt limit reached, stopping")
                             break
                         merged = self._merge_quote_fields(primary_quote, quote)
                         if merged:
-                            logger.info(f"[实时行情] {stock_code} 从 {source} 补充了缺失字段: {merged}")
+                            logger.info(f"[Realtime quote] {stock_code} filled missing fields from {source}: {merged}")
                         # Stop supplementing once all key fields are filled
                         if not self._quote_needs_supplement(primary_quote):
                             break
@@ -1703,7 +1709,7 @@ class DataFetcherManager:
                         failed_sources.append(source)
                     
             except Exception as e:
-                error_msg = f"[{source}] 失败: {str(e)}"
+                error_msg = f"[{source}] failed: {str(e)}"
                 error_type, error_reason = summarize_exception(e)
                 record_provider_run(
                     data_type="realtime_quote",
@@ -1715,7 +1721,7 @@ class DataFetcherManager:
                     error_message=error_reason,
                     fallback_to=fallback_to,
                 )
-                logger.info(f"[实时行情] {stock_code} {error_msg}，继续尝试下一个数据源")
+                logger.info(f"[Realtime quote] {stock_code} {error_msg}, trying next data source")
                 errors.append(error_msg)
                 if primary_quote is None:
                     failed_sources.append(source)
@@ -1732,9 +1738,9 @@ class DataFetcherManager:
         # 所有数据源都失败，返回 None（降级兜底）
         if log_final_failure:
             if errors:
-                logger.info(f"[实时行情] {stock_code} 所有数据源均失败: {'; '.join(errors)}")
+                logger.info(f"[Realtime quote] {stock_code} all data sources failed: {'; '.join(errors)}")
             else:
-                logger.info(f"[实时行情] {stock_code} 无可用数据源")
+                logger.info(f"[Realtime quote] {stock_code} has no available data source")
 
         return None
 
@@ -1827,7 +1833,7 @@ class DataFetcherManager:
                 error_type=error_type,
                 error_message=error_reason,
             )
-            logger.debug(f"[实时行情] {stock_code} {fetcher_name} 获取失败: {e}")
+            logger.debug(f"[Realtime quote] {stock_code} {fetcher_name} fetch failed: {e}")
         return None
 
     def _supplement_quote(self, stock_code: str, primary_quote, fetcher_name: str, **kw):
@@ -1844,14 +1850,14 @@ class DataFetcherManager:
                 if secondary is not None:
                     filled = self._merge_quote_fields(primary_quote, secondary)
                     if filled:
-                        logger.info(f"[实时行情] {stock_code} 从 {fetcher_name} 补充了: {filled}")
+                        logger.info(f"[Realtime quote] {stock_code} filled fields from {fetcher_name}: {filled}")
             except Exception as e:
-                logger.debug(f"[实时行情] {stock_code} {fetcher_name} 补充失败: {e}")
+                logger.debug(f"[Realtime quote] {stock_code} {fetcher_name} supplementation failed: {e}")
             return primary_quote
 
         q = self._try_fetcher_quote(stock_code, fetcher_name, **kw)
         if q is not None:
-            logger.info(f"[实时行情] {stock_code} 从 {fetcher_name} 获取成功 (独立数据源)")
+            logger.info(f"[Realtime quote] {stock_code} fetched successfully from {fetcher_name} (standalone source)")
         return q
 
     def _supplement_from_longbridge(self, stock_code: str, primary_quote):
@@ -1884,7 +1890,7 @@ class DataFetcherManager:
 
         # 如果筹码分布功能被禁用，直接返回 None
         if not config.enable_chip_distribution:
-            logger.debug(f"[筹码分布] 功能已禁用，跳过 {stock_code}")
+            logger.debug(f"[Chip distribution] Feature disabled, skipping {stock_code}")
             return None
 
         circuit_breaker = get_chip_circuit_breaker()
@@ -1901,29 +1907,29 @@ class DataFetcherManager:
 
             # 检查熔断器状态
             if not circuit_breaker.is_available(source_key):
-                logger.debug(f"[熔断] {fetcher_name} 筹码接口处于熔断状态，尝试下一个")
+                logger.debug(f"[Circuit breaker] {fetcher_name} chip endpoint is open, trying next source")
                 continue
 
             try:
                 chip = self._call_fetcher_method(fetcher, 'get_chip_distribution', stock_code)
                 if _is_meaningful_chip_distribution(chip):
                     circuit_breaker.record_success(source_key)
-                    logger.info(f"[筹码分布] {stock_code} 成功获取 (来源: {fetcher_name})")
+                    logger.info(f"[Chip distribution] {stock_code} fetched successfully (source: {fetcher_name})")
                     return chip
                 else:
                     if chip is not None:
                         logger.warning(
-                            "[筹码分布] %s 返回字段不完整或占位值，继续尝试下一个数据源",
+                            "[Chip distribution] %s returned incomplete fields or placeholder values, trying next data source",
                             fetcher_name,
                         )
                     # 空结果或占位结果：释放 HALF_OPEN 探测名额，避免卡死
                     circuit_breaker.record_inconclusive(source_key)
             except Exception as e:
-                logger.warning(f"[筹码分布] {fetcher_name} 获取 {stock_code} 失败: {e}")
+                logger.warning(f"[Chip distribution] {fetcher_name} failed to fetch {stock_code}: {e}")
                 circuit_breaker.record_failure(source_key, str(e))
                 continue
 
-        logger.warning(f"[筹码分布] {stock_code} 所有数据源均失败")
+        logger.warning(f"[Chip distribution] {stock_code} all data sources failed")
         return None
 
     def get_stock_name(self, stock_code: str, allow_realtime: bool = True) -> Optional[str]:
@@ -1968,7 +1974,7 @@ class DataFetcherManager:
             if quote and hasattr(quote, 'name') and is_meaningful_stock_name(getattr(quote, 'name', ''), stock_code):
                 name = quote.name
                 self._cache_stock_name(stock_code, name)
-                logger.info(f"[股票名称] 从实时行情获取: {stock_code} -> {name}")
+                logger.info(f"[Stock name] Fetched from realtime quote: {stock_code} -> {name}")
                 return name
 
         # 3. 依次尝试各个数据源
@@ -1986,14 +1992,14 @@ class DataFetcherManager:
                 name = self._call_fetcher_method(fetcher, 'get_stock_name', stock_code)
                 if is_meaningful_stock_name(name, stock_code):
                     self._cache_stock_name(stock_code, name)
-                    logger.info(f"[股票名称] 从 {fetcher.name} 获取: {stock_code} -> {name}")
+                    logger.info(f"[Stock name] Fetched from {fetcher.name}: {stock_code} -> {name}")
                     return name
             except Exception as e:
-                logger.debug(f"[股票名称] {fetcher.name} 获取失败: {e}")
+                logger.debug(f"[Stock name] {fetcher.name} fetch failed: {e}")
                 continue
 
         # 4. 所有数据源都失败
-        logger.warning(f"[股票名称] 所有数据源都无法获取 {stock_code} 的名称")
+        logger.warning(f"[Stock name] All data sources failed to fetch name for {stock_code}")
         return ""
 
     def get_belong_boards(self, stock_code: str) -> List[Dict[str, Any]]:
@@ -2012,10 +2018,10 @@ class DataFetcherManager:
                 raw_data = fetcher.get_belong_board(stock_code)
                 boards = self._normalize_belong_boards(raw_data)
                 if boards:
-                    logger.info(f"[{fetcher.name}] 获取所属板块成功: {stock_code}, count={len(boards)}")
+                    logger.info(f"[{fetcher.name}] Fetched belong boards successfully: {stock_code}, count={len(boards)}")
                     return boards
             except Exception as e:
-                logger.debug(f"[{fetcher.name}] 获取所属板块失败: {e}")
+                logger.debug(f"[{fetcher.name}] Failed to fetch belong boards: {e}")
                 continue
         return []
 
@@ -2095,9 +2101,9 @@ class DataFetcherManager:
                     if not missing_codes:
                         break
                     
-                    logger.info(f"[股票名称] 从 {fetcher.name} 批量获取完成，剩余 {len(missing_codes)} 个待查")
+                    logger.info(f"[Stock name] Batch fetch from {fetcher.name} completed, {len(missing_codes)} remaining")
             except Exception as e:
-                logger.debug(f"[股票名称] {fetcher.name} 批量获取失败: {e}")
+                logger.debug(f"[Stock name] {fetcher.name} batch fetch failed: {e}")
                 continue
         
         # 3. 逐个获取剩余的
@@ -2107,7 +2113,7 @@ class DataFetcherManager:
                 result[code] = name
                 missing_codes.discard(code)
         
-        logger.info(f"[股票名称] 批量获取完成，成功 {len(result)}/{len(stock_codes)}")
+        logger.info(f"[Stock name] Batch fetch completed, succeeded {len(result)}/{len(stock_codes)}")
         return result
 
     def get_main_indices(self, region: str = "cn") -> List[Dict[str, Any]]:
@@ -2118,19 +2124,19 @@ class DataFetcherManager:
                 try:
                     data = tickflow_fetcher.get_main_indices(region=region)
                     if data:
-                        logger.info("[TickFlowFetcher] 获取指数行情成功")
+                        logger.info("[TickFlowFetcher] Fetched index quotes successfully")
                         return data
                 except Exception as e:
-                    logger.warning(f"[TickFlowFetcher] 获取指数行情失败: {e}")
+                    logger.warning(f"[TickFlowFetcher] Failed to fetch index quotes: {e}")
 
         for fetcher in self._fetchers:
             try:
                 data = fetcher.get_main_indices(region=region)
                 if data:
-                    logger.info(f"[{fetcher.name}] 获取指数行情成功")
+                    logger.info(f"[{fetcher.name}] Fetched index quotes successfully")
                     return data
             except Exception as e:
-                logger.warning(f"[{fetcher.name}] 获取指数行情失败: {e}")
+                logger.warning(f"[{fetcher.name}] Failed to fetch index quotes: {e}")
                 continue
         return []
 
@@ -2141,19 +2147,19 @@ class DataFetcherManager:
             try:
                 data = tickflow_fetcher.get_market_stats()
                 if data:
-                    logger.info("[TickFlowFetcher] 获取市场统计成功")
+                    logger.info("[TickFlowFetcher] Fetched market stats successfully")
                     return data
             except Exception as e:
-                logger.warning(f"[TickFlowFetcher] 获取市场统计失败: {e}")
+                logger.warning(f"[TickFlowFetcher] Failed to fetch market stats: {e}")
 
         for fetcher in self._fetchers:
             try:
                 data = fetcher.get_market_stats()
                 if data:
-                    logger.info(f"[{fetcher.name}] 获取市场统计成功")
+                    logger.info(f"[{fetcher.name}] Fetched market stats successfully")
                     return data
             except Exception as e:
-                logger.warning(f"[{fetcher.name}] 获取市场统计失败: {e}")
+                logger.warning(f"[{fetcher.name}] Failed to fetch market stats: {e}")
                 continue
         return {}
 
@@ -3129,7 +3135,7 @@ class DataFetcherManager:
                                 "duration_ms": duration_ms,
                             }
                         )
-                        logger.info(f"[{fetcher.name}] 获取板块排行成功")
+                        logger.info(f"[{fetcher.name}] Fetched sector rankings successfully")
                         return data[0], data[1], source_chain, ""
 
                     last_error = f"{fetcher.name}返回空结果"
@@ -3153,7 +3159,7 @@ class DataFetcherManager:
                             "error": error_reason,
                         }
                     )
-                    logger.warning(f"[{fetcher.name}] 获取板块排行失败: {error_reason}")
+                    logger.warning(f"[{fetcher.name}] Failed to fetch sector rankings: {error_reason}")
 
             return [], [], source_chain, last_error
 
@@ -3163,7 +3169,7 @@ class DataFetcherManager:
         top, bottom, _, last_error = self._get_sector_rankings_with_meta(n)
         if top or bottom:
             return top, bottom
-        logger.warning(f"[板块排行] 所有数据源均失败，最终错误: {last_error}")
+        logger.warning(f"[Sector rankings] All data sources failed, final_error_present={bool(last_error)}")
         return [], []
 
     def get_concept_rankings(self, n: int = 5) -> Tuple[List[Dict], List[Dict]]:
@@ -3173,15 +3179,15 @@ class DataFetcherManager:
             try:
                 data = fetcher.get_concept_rankings(n)
                 if data and (data[0] or data[1]):
-                    logger.info(f"[{fetcher.name}] 获取概念排行成功")
+                    logger.info(f"[{fetcher.name}] Fetched concept rankings successfully")
                     return data[0] or [], data[1] or []
                 last_error = f"{fetcher.name}返回空结果"
             except Exception as e:
                 error_type, error_reason = summarize_exception(e)
                 last_error = f"{fetcher.name} ({error_type}) {error_reason}"
-                logger.warning(f"[{fetcher.name}] 获取概念排行失败: {error_reason}")
+                logger.warning(f"[{fetcher.name}] Failed to fetch concept rankings: {error_reason}")
         if last_error:
-            logger.warning(f"[概念排行] 所有数据源均失败，最终错误: {last_error}")
+            logger.warning(f"[Concept rankings] All data sources failed, final_error_present={bool(last_error)}")
         return [], []
 
     def get_hot_stocks(self, n: int = 10) -> List[Dict[str, Any]]:
@@ -3191,15 +3197,15 @@ class DataFetcherManager:
             try:
                 data = fetcher.get_hot_stocks(n)
                 if data:
-                    logger.info(f"[{fetcher.name}] 获取人气股成功")
+                    logger.info(f"[{fetcher.name}] Fetched hot stocks successfully")
                     return data[:n]
                 last_error = f"{fetcher.name}返回空结果"
             except Exception as e:
                 error_type, error_reason = summarize_exception(e)
                 last_error = f"{fetcher.name} ({error_type}) {error_reason}"
-                logger.warning(f"[{fetcher.name}] 获取人气股失败: {error_reason}")
+                logger.warning(f"[{fetcher.name}] Failed to fetch hot stocks: {error_reason}")
         if last_error:
-            logger.warning(f"[人气股] 所有数据源均失败，最终错误: {last_error}")
+            logger.warning(f"[Hot stocks] All data sources failed, final_error_present={bool(last_error)}")
         return []
 
     def get_limit_up_pool(
@@ -3213,13 +3219,13 @@ class DataFetcherManager:
             try:
                 data = fetcher.get_limit_up_pool(date=date, n=n)
                 if data:
-                    logger.info(f"[{fetcher.name}] 获取涨停池成功")
+                    logger.info(f"[{fetcher.name}] Fetched limit-up pool successfully")
                     return data[:n]
                 last_error = f"{fetcher.name}返回空结果"
             except Exception as e:
                 error_type, error_reason = summarize_exception(e)
                 last_error = f"{fetcher.name} ({error_type}) {error_reason}"
-                logger.warning(f"[{fetcher.name}] 获取涨停池失败: {error_reason}")
+                logger.warning(f"[{fetcher.name}] Failed to fetch limit-up pool: {error_reason}")
         if last_error:
-            logger.warning(f"[涨停池] 所有数据源均失败，最终错误: {last_error}")
+            logger.warning(f"[Limit-up pool] All data sources failed, final_error_present={bool(last_error)}")
         return []

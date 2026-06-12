@@ -1353,7 +1353,7 @@ class Config:
                 invalid_searxng_urls.append(u)
         if invalid_searxng_urls:
             logger.warning(
-                "SEARXNG_BASE_URLS 中存在无效 URL，已忽略: %s",
+                "SEARXNG_BASE_URLS contains invalid URLs; ignoring: %s",
                 ", ".join(invalid_searxng_urls[:3]),
             )
         searxng_public_instances_enabled = parse_env_bool(
@@ -2250,7 +2250,7 @@ class Config:
         if v in ('cn', 'us', 'hk', 'both'):
             return v
         logging.getLogger(__name__).warning(
-            f"MARKET_REVIEW_REGION 配置值 '{value}' 无效，已回退为默认值 'cn'（合法值：cn / hk / us / both）"
+            f"MARKET_REVIEW_REGION value '{value}' is invalid; falling back to default 'cn' (allowed values: cn / hk / us / both)"
         )
         return 'cn'
 
@@ -2262,7 +2262,7 @@ class Config:
         if v in ('green_up', 'red_up'):
             return v
         logging.getLogger(__name__).warning(
-            "MARKET_REVIEW_COLOR_SCHEME 配置值 '%s' 无效，已回退为默认值 'green_up'（合法值：green_up / red_up）",
+            "MARKET_REVIEW_COLOR_SCHEME value '%s' is invalid; falling back to default 'green_up' (allowed values: green_up / red_up)",
             value,
         )
         return 'green_up'
@@ -2409,7 +2409,7 @@ class Config:
         if not self.stock_list:
             issues.append(ConfigIssue(
                 severity="error",
-                message="未配置 STOCK_LIST。请设置至少一个股票代码，例如：600519,hk00700,AAPL。",
+                message="STOCK_LIST is not configured. Set at least one stock code, for example: 600519,hk00700,AAPL.",
                 field="STOCK_LIST",
             ))
         elif self.stock_email_groups:
@@ -2436,10 +2436,10 @@ class Config:
                 issues.append(ConfigIssue(
                     severity="warning",
                     message=(
-                        "检测到 STOCK_GROUP_N 中存在未包含在 STOCK_LIST 内的股票："
-                        f"{', '.join(missing_group_stocks[:6])}。"
-                        "STOCK_GROUP_N 仅用于邮件路由，不会扩大分析范围；"
-                        "请先将这些股票加入 STOCK_LIST。"
+                        "Detected stocks in STOCK_GROUP_N that are not included in STOCK_LIST: "
+                        f"{', '.join(missing_group_stocks[:6])}. "
+                        "STOCK_GROUP_N is only used for email routing and does not expand the analysis scope; "
+                        "add these stocks to STOCK_LIST first."
                     ),
                     field="STOCK_GROUP_N",
                 ))
@@ -2448,7 +2448,7 @@ class Config:
         if not self.tushare_token:
             issues.append(ConfigIssue(
                 severity="info",
-                message="未配置 Tushare Token，将使用其他数据源",
+                message="Tushare token is not configured; other data sources will be used.",
                 field="TUSHARE_TOKEN",
             ))
 
@@ -2462,8 +2462,8 @@ class Config:
                 issues.append(ConfigIssue(
                     severity="error",
                     message=(
-                        "已配置 LITELLM_CONFIG，但未解析出可用模型。"
-                        "请检查 YAML 中的 model_list、litellm_params 和环境变量引用。"
+                        "LITELLM_CONFIG is configured, but no available model was parsed. "
+                        "Check model_list, litellm_params, and environment variable references in the YAML."
                     ),
                     field="LITELLM_CONFIG",
                 ))
@@ -2471,9 +2471,9 @@ class Config:
                 issues.append(ConfigIssue(
                     severity="error",
                     message=(
-                        "已配置 LLM_CHANNELS，但未解析出可用模型渠道。"
-                        "请检查对应 LLM_<CHANNEL>_API_KEY(S)、"
-                        "LLM_<CHANNEL>_MODELS、LLM_<CHANNEL>_PROTOCOL 或 Base URL。"
+                        "LLM_CHANNELS is configured, but no available model channel was parsed. "
+                        "Check the corresponding LLM_<CHANNEL>_API_KEY(S), "
+                        "LLM_<CHANNEL>_MODELS, LLM_<CHANNEL>_PROTOCOL, or Base URL."
                     ),
                     field="LLM_CHANNELS",
                 ))
@@ -2481,10 +2481,10 @@ class Config:
                 issues.append(ConfigIssue(
                     severity="error",
                     message=(
-                        "未配置任何可用的 AI 模型接入。请至少配置 ANSPIRE_API_KEYS、"
-                        "AIHUBMIX_KEY、GEMINI_API_KEY、ANTHROPIC_API_KEY、"
-                        "OPENAI_API_KEY 或 DEEPSEEK_API_KEY 中的一个，或配置 "
-                        "LITELLM_CONFIG / LLM_CHANNELS 可用模型渠道。"
+                        "No available AI model access is configured. Configure at least one of "
+                        "ANSPIRE_API_KEYS, AIHUBMIX_KEY, GEMINI_API_KEY, ANTHROPIC_API_KEY, "
+                        "OPENAI_API_KEY, or DEEPSEEK_API_KEY, or configure an available model channel "
+                        "through LITELLM_CONFIG / LLM_CHANNELS."
                     ),
                     field="LITELLM_CONFIG",
                 ))
@@ -2492,8 +2492,8 @@ class Config:
             issues.append(ConfigIssue(
                 severity="info",
                 message=(
-                    "尚未明确指定主模型，系统将自动从可用 API Key 推断。"
-                    "建议尽早配置主模型（格式如 gemini/gemini-3.1-pro-preview）"
+                    "No primary model is explicitly configured. The system will infer one from available API keys. "
+                    "Configure the primary model soon, for example: gemini/gemini-3.1-pro-preview."
                 ),
                 field="LITELLM_MODEL",
             ))
@@ -2527,8 +2527,8 @@ class Config:
                 issues.append(ConfigIssue(
                     severity="error",
                     message=(
-                        "已配置的主模型未出现在当前渠道或高级模型路由配置中。"
-                        f" 当前可用模型：{', '.join(available_router_models[:6])}"
+                        "The configured primary model is not present in the current channel or advanced model routing configuration. "
+                        f"Available models: {', '.join(available_router_models[:6])}"
                     ),
                     field="LITELLM_MODEL",
                 ))
@@ -2542,8 +2542,8 @@ class Config:
                 issues.append(ConfigIssue(
                     severity="error",
                     message=(
-                        "已配置的 Agent 主模型未出现在当前渠道或高级模型路由配置中。"
-                        f" 当前可用模型：{', '.join(available_router_models[:6])}"
+                        "The configured Agent primary model is not present in the current channel or advanced model routing configuration. "
+                        f"Available models: {', '.join(available_router_models[:6])}"
                     ),
                     field="AGENT_LITELLM_MODEL",
                 ))
@@ -2557,7 +2557,7 @@ class Config:
                 issues.append(ConfigIssue(
                     severity="warning",
                     message=(
-                        "备选模型中包含未在当前渠道或高级模型路由配置中声明的模型："
+                        "Fallback models include models that are not declared in the current channel or advanced model routing configuration: "
                         f"{', '.join(invalid_fallbacks[:3])}"
                     ),
                     field="LITELLM_FALLBACK_MODELS",
@@ -2571,8 +2571,8 @@ class Config:
                 issues.append(ConfigIssue(
                     severity="warning",
                     message=(
-                        "VISION_MODEL 未出现在当前渠道声明中。"
-                        f" 当前可用模型：{', '.join(available_router_models[:6])}"
+                        "VISION_MODEL is not present in the current channel declarations. "
+                        f"Available models: {', '.join(available_router_models[:6])}"
                     ),
                     field="VISION_MODEL",
                 ))
@@ -2584,8 +2584,8 @@ class Config:
             issues.append(ConfigIssue(
                 severity="error",
                 message=(
-                    "已配置 Agent 主模型，但未找到可用的运行时来源"
-                    "（启用渠道或匹配的 API Key）。"
+                    "Agent primary model is configured, but no available runtime source was found "
+                    "(enabled channel or matching API key)."
                 ),
                 field="AGENT_LITELLM_MODEL",
             ))
@@ -2594,7 +2594,7 @@ class Config:
         if not self.has_search_capability_enabled():
             issues.append(ConfigIssue(
                 severity="info",
-                message="未配置搜索引擎能力 (Bocha/MiniMax/Tavily/Brave/SerpAPI/SearXNG)，新闻搜索功能将不可用",
+                message="Search engine capability is not configured (Bocha/MiniMax/Tavily/Brave/SerpAPI/SearXNG); news search will be unavailable.",
                 field="BOCHA_API_KEYS",
             ))
 
@@ -2624,7 +2624,7 @@ class Config:
         if not has_notification:
             issues.append(ConfigIssue(
                 severity="warning",
-                message="未配置通知渠道，将不发送推送通知",
+                message="No notification channel is configured; push notifications will not be sent.",
                 field="WECHAT_WEBHOOK_URL",
             ))
 
@@ -2633,7 +2633,7 @@ class Config:
         if has_telegram_token != has_telegram_chat_id:
             issues.append(ConfigIssue(
                 severity="error",
-                message="Telegram 通知配置不完整：TELEGRAM_BOT_TOKEN 和 TELEGRAM_CHAT_ID 必须同时配置。",
+                message="Telegram notification configuration is incomplete: TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be configured together.",
                 field="TELEGRAM_CHAT_ID" if has_telegram_token else "TELEGRAM_BOT_TOKEN",
             ))
 
@@ -2642,7 +2642,7 @@ class Config:
         if has_email_sender != has_email_password:
             issues.append(ConfigIssue(
                 severity="error",
-                message="邮件通知配置不完整：EMAIL_SENDER 和 EMAIL_PASSWORD 必须同时配置。",
+                message="Email notification configuration is incomplete: EMAIL_SENDER and EMAIL_PASSWORD must be configured together.",
                 field="EMAIL_PASSWORD" if has_email_sender else "EMAIL_SENDER",
             ))
 
@@ -2655,7 +2655,7 @@ class Config:
                 return
             issues.append(ConfigIssue(
                 severity="warning",
-                message=f"{field} 看起来不是有效 URL，请确认是否以 http:// 或 https:// 开头。",
+                message=f"{field} does not look like a valid URL; confirm it starts with http:// or https://.",
                 field=field,
             ))
 
@@ -2674,14 +2674,14 @@ class Config:
         if self.ntfy_url and not _has_ntfy_topic_endpoint(self.ntfy_url):
             issues.append(ConfigIssue(
                 severity="error",
-                message="NTFY_URL 必须包含 topic path，例如 https://ntfy.sh/my-topic",
+                message="NTFY_URL must include a topic path, for example https://ntfy.sh/my-topic",
                 field="NTFY_URL",
             ))
 
         if self.gotify_url and not _has_gotify_base_url(self.gotify_url):
             issues.append(ConfigIssue(
                 severity="error",
-                message="GOTIFY_URL 必须是 Gotify server base URL，不包含 /message，例如 https://gotify.example",
+                message="GOTIFY_URL must be the Gotify server base URL without /message, for example https://gotify.example",
                 field="GOTIFY_URL",
             ))
 
@@ -2692,7 +2692,7 @@ class Config:
         ):
             issues.append(ConfigIssue(
                 severity="warning",
-                message="已配置 GOTIFY_URL，但缺少 GOTIFY_TOKEN，Gotify 渠道不会启用",
+                message="GOTIFY_URL is configured, but GOTIFY_TOKEN is missing; the Gotify channel will not be enabled.",
                 field="GOTIFY_TOKEN",
             ))
 
@@ -2702,7 +2702,7 @@ class Config:
             except ValueError as exc:
                 issues.append(ConfigIssue(
                     severity="error",
-                    message=f"通知静默时段配置无效：{exc}",
+                    message=f"Notification quiet-hours configuration is invalid: {exc}",
                     field="NOTIFICATION_QUIET_HOURS",
                 ))
 
@@ -2712,7 +2712,7 @@ class Config:
             except ValueError as exc:
                 issues.append(ConfigIssue(
                     severity="error",
-                    message=f"通知时区配置无效：{exc}",
+                    message=f"Notification timezone configuration is invalid: {exc}",
                     field="NOTIFICATION_TIMEZONE",
                 ))
 
@@ -2720,7 +2720,7 @@ class Config:
             issues.append(ConfigIssue(
                 severity="error",
                 message=(
-                    "通知最低级别配置无效，允许值："
+                    "Notification minimum severity is invalid. Allowed values: "
                     f"{', '.join(NOTIFICATION_SEVERITIES)}"
                 ),
                 field="NOTIFICATION_MIN_SEVERITY",
@@ -2730,8 +2730,8 @@ class Config:
             issues.append(ConfigIssue(
                 severity="warning",
                 message=(
-                    "NOTIFICATION_DAILY_DIGEST_ENABLED 当前为预留配置；"
-                    "P4 不会发送每日摘要或持久化摘要内容。"
+                    "NOTIFICATION_DAILY_DIGEST_ENABLED is currently a reserved setting; "
+                    "P4 will not send daily digests or persist digest content."
                 ),
                 field="NOTIFICATION_DAILY_DIGEST_ENABLED",
             ))
@@ -2754,9 +2754,9 @@ class Config:
             issues.append(ConfigIssue(
                 severity="warning",
                 message=(
-                    "仅配置 FEISHU_APP_ID / FEISHU_APP_SECRET 不会开启飞书群 Webhook 推送；"
-                    "如需群消息通知，请配置 FEISHU_WEBHOOK_URL。若要使用应用机器人，请同时开启 "
-                    "FEISHU_STREAM_ENABLED 并完成应用发布与权限配置。"
+                    "Configuring only FEISHU_APP_ID / FEISHU_APP_SECRET does not enable Feishu group webhook pushes; "
+                    "configure FEISHU_WEBHOOK_URL for group message notifications. To use an app bot, also enable "
+                    "FEISHU_STREAM_ENABLED and complete app release and permission configuration."
                 ),
                 field="FEISHU_WEBHOOK_URL",
             ))
@@ -2766,8 +2766,8 @@ class Config:
             issues.append(ConfigIssue(
                 severity="info",
                 message=(
-                    "OPENAI_VISION_MODEL 已废弃，请改用 VISION_MODEL。"
-                    "当前值已自动迁移，建议更新配置文件以消除此提示。"
+                    "OPENAI_VISION_MODEL is deprecated; use VISION_MODEL instead. "
+                    "The current value was migrated automatically. Update the config file to remove this notice."
                 ),
                 field="OPENAI_VISION_MODEL",
             ))
@@ -2812,9 +2812,9 @@ class Config:
                 issues.append(ConfigIssue(
                     severity="warning",
                     message=(
-                        "VISION_MODEL 已配置，但未找到可用的 Vision API Key "
-                        f"（已检查：{', '.join(_checked)}）。"
-                        "图片股票代码提取功能将不可用，请配置对应的 API Key。"
+                        "VISION_MODEL is configured, but no available Vision API key was found "
+                        f"(checked: {', '.join(_checked)}). "
+                        "Image stock-code extraction will be unavailable until the corresponding API key is configured."
                     ),
                     field="VISION_MODEL",
                 ))
