@@ -136,6 +136,10 @@ def test_vnstock_realtime_maps_close_price_to_separate_realtime_price(monkeypatc
     assert quote["snapshot_price"] == 123.4
     assert quote["snapshot_time"] == "10:00:01"
     assert quote["snapshot_note"] == "KBS board snapshot; may differ from trade tape"
+    assert quote["reference_price"] == 120.0
+    assert quote["reference_price_source"] == "kbs_board"
+    assert quote["price_vs_reference"] == 3.4
+    assert quote["price_vs_reference_pct"] == 2.83
     assert quote["source"] == "vnstock_kbs"
     assert quote["error"] is None
     assert quote["error_detail"] is None

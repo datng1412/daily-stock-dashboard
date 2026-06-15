@@ -79,6 +79,18 @@ const makeItem = (ticker: string): VietnamWatchItem => ({
     distanceToLimitPct: 5,
     nearLimit: false,
   },
+  corporateAction: {
+    status: 'unavailable',
+    type: 'unknown',
+    exDate: null,
+    cashDividendPerShare: null,
+    previousClose: 99,
+    adjustedReferencePrice: null,
+    adjustmentSource: 'manual_unavailable',
+    priceVsAdjustedReference: null,
+    priceVsAdjustedReferencePct: null,
+    note: 'Corporate action data is unavailable; raw OHLCV close is unchanged.',
+  },
   foreign: { buy: 10, sell: 5, net: 5, signal: 'foreign_net_positive' },
   foreignNetUnit: 'shares',
   foreignBuyRawField: 'foreign_buy',
@@ -236,6 +248,9 @@ const makeRealtimeResponse = (
     isStale: rawStale,
     staleReason: rawStale ? 'age_gt_60s' : null,
     referencePrice: 100,
+    referencePriceSource: 'kbs_board',
+    priceVsReference: ticker === 'FPT' ? 1.5 : 0.5,
+    priceVsReferencePct: ticker === 'FPT' ? 1.5 : 0.5,
     openPrice: 100,
     highPrice: 102,
     lowPrice: 99,
@@ -364,6 +379,79 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(screen.getByText('KBS board snapshot; may differ from trade tape')).toBeInTheDocument();
     expect(screen.getAllByText(/OHLCV close 100/).length).toBeGreaterThan(0);
     expect(screen.getAllByText('101.5').length).toBeGreaterThan(0);
+  });
+
+  it('shows KBS reference price and unavailable corporate-action data without replacing OHLCV close', async () => {
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledWith(defaultTickers));
+
+    const detail = within(screen.getByText('Stock detail').closest('section') as HTMLElement);
+    const referencePriceLabel = detail.getAllByText('Reference price')[1];
+    expect(detail.getByRole('heading', { name: 'Reference price' })).toBeInTheDocument();
+    expect(within(referencePriceLabel.closest('div') as HTMLElement).getByText('100')).toBeInTheDocument();
+    expect(within(detail.getByText('Price vs reference').closest('div') as HTMLElement).getByText('+1.5 / +1.5%')).toBeInTheDocument();
+    expect(within(detail.getAllByText('Source')[0].closest('div') as HTMLElement).getByText('KBS board')).toBeInTheDocument();
+    expect(within(detail.getByText('Corporate action data').closest('div') as HTMLElement).getByText('unavailable')).toBeInTheDocument();
+    expect(detail.getByText('Corporate action data unavailable. Reference price is shown separately from raw OHLCV close.')).toBeInTheDocument();
+    expect(detail.getByText('Latest price / OHLCV close (VND)')).toBeInTheDocument();
+    expect(detail.getByText('100 / 100')).toBeInTheDocument();
+  });
+
+  it('shows confirmed cash-dividend adjusted reference separately from KBS reference and raw close', async () => {
+    const response = makeResponse(defaultTickers);
+    response.watchlist[0] = {
+      ...response.watchlist[0],
+      latestPrice: 26500,
+      ohlcvClose: 26500,
+      close: 26500,
+      previousClose: 27000,
+      corporateAction: {
+        status: 'detected',
+        type: 'cash_dividend',
+        exDate: '2026-06-12',
+        cashDividendPerShare: 1000,
+        previousClose: 27000,
+        adjustedReferencePrice: 26000,
+        adjustmentSource: 'provider_event',
+        priceVsAdjustedReference: 500,
+        priceVsAdjustedReferencePct: 1.92,
+        note: 'Cash dividend adjustment is shown separately from raw OHLCV close.',
+      },
+    };
+    mockedGetVietnamWatchlist.mockResolvedValue(response);
+    mockedGetVietnamRealtimeQuotes.mockImplementation(async (tickers) => ({
+      ...makeRealtimeResponse(tickers),
+      quotes: makeRealtimeResponse(tickers).quotes.map((quote) => ({
+        ...quote,
+        realtimePrice: quote.symbol === 'FPT' ? 26500 : quote.realtimePrice,
+        snapshotPrice: quote.symbol === 'FPT' ? 26500 : quote.snapshotPrice,
+        referencePrice: quote.symbol === 'FPT' ? 26000 : quote.referencePrice,
+        priceVsReference: quote.symbol === 'FPT' ? 500 : quote.priceVsReference,
+        priceVsReferencePct: quote.symbol === 'FPT' ? 1.92 : quote.priceVsReferencePct,
+      })),
+    }));
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+
+    const detail = within(screen.getByText('Stock detail').closest('section') as HTMLElement);
+    const referencePriceLabel = detail.getAllByText('Reference price')[1];
+    expect(detail.getByText('Latest price / OHLCV close (VND)')).toBeInTheDocument();
+    expect(detail.getByText('26,500 / 26,500')).toBeInTheDocument();
+    expect(within(referencePriceLabel.closest('div') as HTMLElement).getByText('26,000')).toBeInTheDocument();
+    expect(within(detail.getByText('Price vs reference').closest('div') as HTMLElement).getByText('+500 / +1.92%')).toBeInTheDocument();
+    expect(detail.getByText('Corporate action')).toBeInTheDocument();
+    expect(detail.getByText('cash dividend')).toBeInTheDocument();
+    expect(detail.getByText('Ex-date')).toBeInTheDocument();
+    expect(detail.getByText('2026-06-12')).toBeInTheDocument();
+    expect(detail.getByText('Cash dividend')).toBeInTheDocument();
+    expect(detail.getByText('1,000 VND/share')).toBeInTheDocument();
+    expect(detail.getByText('Adjusted reference')).toBeInTheDocument();
+    expect(within(detail.getByText('Adjusted reference').closest('div') as HTMLElement).getByText('26,000')).toBeInTheDocument();
+    expect(detail.getByText('Price vs adjusted reference')).toBeInTheDocument();
+    expect(within(detail.getByText('Price vs adjusted reference').closest('div') as HTMLElement).getByText('+500 / +1.92%')).toBeInTheDocument();
   });
 
   it('clarifies Mozyfin 1H and KBS volume labels while preserving numeric values', async () => {

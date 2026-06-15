@@ -42,6 +42,18 @@ const formatNumber = (value?: number | null, maximumFractionDigits = 0) => {
 
 const formatPrice = (value?: number | null) => formatNumber(value, 2);
 
+const formatSignedNumber = (value?: number | null, maximumFractionDigits = 2) => {
+  if (value === null || value === undefined || Number.isNaN(value)) return '-';
+  const formatted = formatNumber(Math.abs(value), maximumFractionDigits);
+  if (value > 0) return `+${formatted}`;
+  if (value < 0) return `-${formatted}`;
+  return formatted;
+};
+
+const formatReferenceDelta = (value?: number | null, percent?: number | null) => (
+  `${formatSignedNumber(value, 2)} / ${formatSignedNumber(percent, 2)}%`
+);
+
 const neutralFormulaText = (value: string) => (
   /recommend/i.test(value) ? 'Rule-based neutral condition labels only.' : value
 );
@@ -807,6 +819,22 @@ const StockDetailView: React.FC<{
   const foreignNet5dLatestAvailable = indicators.foreignNet5dLatestAvailable;
   const foreignNet20dLatestAvailable = indicators.foreignNet20dLatestAvailable;
   const foreignHistoryCount = indicators.foreignNetHistoryCount ?? 0;
+  const referencePrice = realtimeQuote?.referencePrice;
+  const rawReferencePriceSource = realtimeQuote?.referencePriceSource === 'kbs_board' ? 'KBS board' : realtimeQuote?.referencePriceSource;
+  const referencePriceSource = referencePrice != null ? rawReferencePriceSource ?? 'KBS board' : 'unavailable';
+  const kbsReferencePrice = realtimeQuote?.snapshotPrice ?? realtimeQuote?.realtimePrice;
+  const priceVsReference = realtimeQuote?.priceVsReference ?? (
+    kbsReferencePrice != null && referencePrice != null ? kbsReferencePrice - referencePrice : null
+  );
+  const priceVsReferencePct = realtimeQuote?.priceVsReferencePct ?? (
+    priceVsReference != null && referencePrice ? priceVsReference / referencePrice * 100 : null
+  );
+  const corporateAction = item.corporateAction;
+  const hasConfirmedCashDividend = (
+    corporateAction?.status === 'detected'
+    && corporateAction?.type === 'cash_dividend'
+    && corporateAction.adjustedReferencePrice != null
+  );
   return (
     <section className="rounded-lg border border-border/70 bg-card p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -916,6 +944,71 @@ const StockDetailView: React.FC<{
           </dd>
         </div>
       </dl>
+      <div className="mt-4 rounded-lg border border-border/60 bg-elevated/30 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-sm font-semibold text-foreground">Reference price</h3>
+          <Badge variant={referencePrice != null ? 'info' : 'default'}>{referencePriceSource}</Badge>
+        </div>
+        <dl className="mt-3 grid gap-3 text-sm md:grid-cols-4">
+          <div>
+            <dt className="text-xs text-secondary-text">Reference price</dt>
+            <dd className="mt-1 font-medium text-foreground">{formatPrice(referencePrice)}</dd>
+          </div>
+          <div>
+            <dt className="text-xs text-secondary-text">Price vs reference</dt>
+            <dd className={cn('mt-1 font-medium', signalTone(priceVsReference))}>
+              {formatReferenceDelta(priceVsReference, priceVsReferencePct)}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-xs text-secondary-text">Source</dt>
+            <dd className="mt-1 font-medium text-foreground">{referencePrice != null ? referencePriceSource : '-'}</dd>
+          </div>
+          <div>
+            <dt className="text-xs text-secondary-text">Corporate action data</dt>
+            <dd className="mt-1 font-medium text-foreground">
+              {corporateAction?.status === 'detected' ? 'detected' : 'unavailable'}
+            </dd>
+          </div>
+        </dl>
+        {hasConfirmedCashDividend ? (
+          <dl className="mt-3 grid gap-3 border-t border-border/50 pt-3 text-sm md:grid-cols-4">
+            <div>
+              <dt className="text-xs text-secondary-text">Corporate action</dt>
+              <dd className="mt-1 font-medium text-foreground">cash dividend</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-secondary-text">Ex-date</dt>
+              <dd className="mt-1 font-medium text-foreground">{corporateAction?.exDate ?? '-'}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-secondary-text">Cash dividend</dt>
+              <dd className="mt-1 font-medium text-foreground">{formatNumber(corporateAction?.cashDividendPerShare)} VND/share</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-secondary-text">Adjusted reference</dt>
+              <dd className="mt-1 font-medium text-foreground">{formatPrice(corporateAction?.adjustedReferencePrice)}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-secondary-text">Price vs adjusted reference</dt>
+              <dd className={cn('mt-1 font-medium', signalTone(corporateAction?.priceVsAdjustedReference))}>
+                {formatReferenceDelta(corporateAction?.priceVsAdjustedReference, corporateAction?.priceVsAdjustedReferencePct)}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs text-secondary-text">Adjustment source</dt>
+              <dd className="mt-1 font-medium text-foreground">{corporateAction?.adjustmentSource?.replaceAll('_', ' ') ?? '-'}</dd>
+            </div>
+          </dl>
+        ) : (
+          <p className="mt-3 text-xs text-secondary-text">
+            Corporate action data unavailable. Reference price is shown separately from raw OHLCV close.
+          </p>
+        )}
+        {corporateAction?.note ? (
+          <p className="mt-2 text-xs text-secondary-text">{corporateAction.note}</p>
+        ) : null}
+      </div>
       {item.foreignDateMatch === 'mismatched' && item.foreignNetDate && item.ohlcvDate ? (
         <p className="mt-3 text-xs text-secondary-text">
           Foreign data as of {item.foreignNetDate}; OHLCV date {item.ohlcvDate}.

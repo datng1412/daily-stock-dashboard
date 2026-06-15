@@ -145,6 +145,7 @@ class VietnamWatchItem(BaseModel):
     amount: Optional[float] = None
     liquidity: Dict[str, Any] = Field(default_factory=dict)
     price_limit: Dict[str, Any] = Field(default_factory=dict)
+    corporate_action: Dict[str, Any] = Field(default_factory=dict)
     foreign: Dict[str, Any] = Field(default_factory=dict)
     foreign_net_unit: Optional[str] = None
     foreign_buy_raw_field: Optional[str] = None
@@ -215,6 +216,9 @@ class VietnamRealtimeQuote(BaseModel):
     is_stale: Optional[bool] = None
     stale_reason: Optional[str] = None
     reference_price: Optional[float] = None
+    reference_price_source: Optional[str] = None
+    price_vs_reference: Optional[float] = None
+    price_vs_reference_pct: Optional[float] = None
     open_price: Optional[float] = None
     high_price: Optional[float] = None
     low_price: Optional[float] = None

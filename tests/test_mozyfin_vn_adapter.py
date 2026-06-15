@@ -23,6 +23,7 @@ from src.services.vietnam_market_service import (
     calculate_liquidity_score,
     calculate_price_limit_state,
     calculate_vietnam_indicators,
+    build_corporate_action_reference,
     derive_neutral_status_details,
     derive_intraday_details,
     clear_vietnam_cache,
@@ -336,11 +337,47 @@ def test_price_semantics_and_foreign_date_match(monkeypatch):
     assert item["final_close_status"] == "unknown"
     assert item["foreign_net_unit"] == "shares"
     assert item["foreign"]["net_unit"] == "shares"
+    assert item["corporate_action"]["status"] == "unavailable"
+    assert item["corporate_action"]["adjusted_reference_price"] is None
+    assert item["corporate_action"]["adjustment_source"] == "manual_unavailable"
     assert item["foreign_buy_raw_field"] == "buy_foreign_quantity"
     assert item["foreign_sell_raw_field"] == "sell_foreign_quantity"
     assert any("Final close status is unknown" in warning for warning in item["warnings"])
     assert any("daily candle whose final status is unknown" in warning for warning in item["warnings"])
     assert payload["cache_metadata"]["cache_miss_count"] == 4
+
+
+def test_corporate_action_reference_unavailable_does_not_change_raw_price():
+    corporate_action = build_corporate_action_reference(previous_close=27000, current_price=27000)
+
+    assert corporate_action["status"] == "unavailable"
+    assert corporate_action["previous_close"] == 27000
+    assert corporate_action["adjusted_reference_price"] is None
+    assert corporate_action["price_vs_adjusted_reference"] is None
+    assert corporate_action["adjustment_source"] == "manual_unavailable"
+
+
+def test_cash_dividend_reference_adjustment_is_separate_from_raw_close():
+    corporate_action = build_corporate_action_reference(
+        previous_close=27000,
+        current_price=26500,
+        event={
+            "type": "cash_dividend",
+            "ex_date": "2026-06-12",
+            "cash_dividend_per_share": 1000,
+            "adjustment_source": "provider_event",
+        },
+    )
+
+    assert corporate_action["status"] == "detected"
+    assert corporate_action["type"] == "cash_dividend"
+    assert corporate_action["ex_date"] == "2026-06-12"
+    assert corporate_action["cash_dividend_per_share"] == 1000
+    assert corporate_action["previous_close"] == 27000
+    assert corporate_action["adjusted_reference_price"] == 26000
+    assert corporate_action["price_vs_adjusted_reference"] == 500
+    assert corporate_action["price_vs_adjusted_reference_pct"] == pytest.approx(1.92)
+    assert corporate_action["adjustment_source"] == "provider_event"
 
 
 def test_quote_price_field_sets_latest_price_source_quote(monkeypatch):

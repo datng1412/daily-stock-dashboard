@@ -127,6 +127,8 @@ VN_DASHBOARD_UNITS = {
     "foreign_net_20d_latest_available": "row-specific",
     "intraday_1h_price": "VND",
     "intraday_1h_volume": "shares",
+    "corporate_action_cash_dividend": "VND/share",
+    "adjusted_reference_price": "VND",
 }
 logger = logging.getLogger(__name__)
 
@@ -398,6 +400,68 @@ def calculate_price_limit_state(df: pd.DataFrame, ticker: str) -> Dict[str, Any]
 
 def _round_optional(value: Optional[float], digits: int = 2) -> Optional[float]:
     return round(value, digits) if value is not None else None
+
+
+def build_corporate_action_reference(
+    *,
+    previous_close: Optional[float],
+    current_price: Optional[float],
+    event: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Build a separate corporate-action reference layer without changing raw OHLCV fields."""
+    base = {
+        "status": "unavailable",
+        "type": "unknown",
+        "ex_date": None,
+        "cash_dividend_per_share": None,
+        "previous_close": _round_optional(previous_close),
+        "adjusted_reference_price": None,
+        "adjustment_source": "manual_unavailable",
+        "price_vs_adjusted_reference": None,
+        "price_vs_adjusted_reference_pct": None,
+        "note": "Corporate action data is unavailable; raw OHLCV close is unchanged.",
+    }
+    if not event:
+        return base
+
+    event_type = str(event.get("type") or "unknown")
+    if event_type != "cash_dividend":
+        return {
+            **base,
+            "status": "detected",
+            "type": event_type,
+            "ex_date": _valid_date_string(event.get("ex_date")),
+            "adjustment_source": str(event.get("adjustment_source") or "provider_event"),
+            "note": "Corporate action is shown separately from raw OHLCV close.",
+        }
+
+    dividend = _safe_float(event.get("cash_dividend_per_share"))
+    if previous_close is None or dividend is None:
+        return {
+            **base,
+            "status": "detected",
+            "type": "cash_dividend",
+            "ex_date": _valid_date_string(event.get("ex_date")),
+            "cash_dividend_per_share": _round_optional(dividend),
+            "adjustment_source": str(event.get("adjustment_source") or "provider_event"),
+            "note": "Cash dividend event exists, but adjusted reference could not be calculated from available fields.",
+        }
+
+    adjusted_reference = previous_close - dividend
+    price_diff = current_price - adjusted_reference if current_price is not None else None
+    price_diff_pct = price_diff / adjusted_reference * 100 if price_diff is not None and adjusted_reference else None
+    return {
+        "status": "detected",
+        "type": "cash_dividend",
+        "ex_date": _valid_date_string(event.get("ex_date")),
+        "cash_dividend_per_share": _round_optional(dividend),
+        "previous_close": _round_optional(previous_close),
+        "adjusted_reference_price": _round_optional(adjusted_reference),
+        "adjustment_source": str(event.get("adjustment_source") or "provider_event"),
+        "price_vs_adjusted_reference": _round_optional(price_diff),
+        "price_vs_adjusted_reference_pct": _round_optional(price_diff_pct),
+        "note": "Cash dividend adjustment is shown separately from raw OHLCV close.",
+    }
 
 
 def _latest_rolling_value(series: pd.Series, window: int) -> Optional[float]:
@@ -1385,6 +1449,10 @@ class VietnamMarketService:
             latest_price_raw_field = "close" if close is not None else None
             latest_price_date = ohlcv_date
             price_source_warning = "Quote does not provide a reliable latest price field; latest price uses OHLCV close."
+        corporate_action = build_corporate_action_reference(
+            previous_close=prev_close,
+            current_price=latest_price,
+        )
         intraday_candles: List[Dict[str, Any]] = []
         if include_intraday and fetcher and hasattr(fetcher, "get_intraday_ohlcv"):
             try:
@@ -1506,6 +1574,7 @@ class VietnamMarketService:
             "final_close_status": final_close_status,
             "price_adjustment_status": price_adjustment_status,
             "adjusted_price_status": adjusted_price_status,
+            "corporate_action": corporate_action,
             "open": _safe_float(latest.get("open")),
             "high": _safe_float(latest.get("high")),
             "low": _safe_float(latest.get("low")),

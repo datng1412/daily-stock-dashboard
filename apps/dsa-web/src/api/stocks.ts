@@ -53,6 +53,18 @@ export type VietnamWatchItem = {
     distanceToLimitPct?: number | null;
     nearLimit?: boolean;
   };
+  corporateAction?: {
+    status?: 'none' | 'detected' | 'unavailable' | string | null;
+    type?: 'cash_dividend' | 'stock_dividend' | 'rights' | 'unknown' | string | null;
+    exDate?: string | null;
+    cashDividendPerShare?: number | null;
+    previousClose?: number | null;
+    adjustedReferencePrice?: number | null;
+    adjustmentSource?: 'kbs_reference' | 'provider_event' | 'manual_unavailable' | string | null;
+    priceVsAdjustedReference?: number | null;
+    priceVsAdjustedReferencePct?: number | null;
+    note?: string | null;
+  };
   foreign: { buy?: number | null; sell?: number | null; net?: number | null; signal?: string | null };
   foreignNetUnit?: string | null;
   foreignBuyRawField?: string | null;
@@ -185,6 +197,9 @@ export type VietnamRealtimeQuote = {
   isStale?: boolean | null;
   staleReason?: string | null;
   referencePrice?: number | null;
+  referencePriceSource?: string | null;
+  priceVsReference?: number | null;
+  priceVsReferencePct?: number | null;
   openPrice?: number | null;
   highPrice?: number | null;
   lowPrice?: number | null;

@@ -405,6 +405,17 @@ class VnstockRealtimeFetcher:
     def _map_quote(self, symbol: str, row: Dict[str, Any]) -> Dict[str, Any]:
         time_metadata = _parse_realtime_time(row.get("time"))
         snapshot_price = _safe_float(row.get("close_price"))
+        reference_price = _safe_float(row.get("reference_price"))
+        price_vs_reference = (
+            snapshot_price - reference_price
+            if snapshot_price is not None and reference_price is not None
+            else None
+        )
+        price_vs_reference_pct = (
+            price_vs_reference / reference_price * 100
+            if price_vs_reference is not None and reference_price
+            else None
+        )
         return {
             "symbol": symbol,
             "realtime_price": snapshot_price,
@@ -413,7 +424,10 @@ class VnstockRealtimeFetcher:
             "snapshot_time": time_metadata["realtime_time"],
             "snapshot_time_display": time_metadata["realtime_time_display"],
             "snapshot_note": SNAPSHOT_NOTE,
-            "reference_price": _safe_float(row.get("reference_price")),
+            "reference_price": reference_price,
+            "reference_price_source": "kbs_board" if reference_price is not None else None,
+            "price_vs_reference": round(price_vs_reference, 2) if price_vs_reference is not None else None,
+            "price_vs_reference_pct": round(price_vs_reference_pct, 2) if price_vs_reference_pct is not None else None,
             "open_price": _safe_float(row.get("open_price")),
             "high_price": _safe_float(row.get("high_price")),
             "low_price": _safe_float(row.get("low_price")),
@@ -457,6 +471,9 @@ class VnstockRealtimeFetcher:
             "is_stale": None,
             "stale_reason": "timestamp_unparseable",
             "reference_price": None,
+            "reference_price_source": None,
+            "price_vs_reference": None,
+            "price_vs_reference_pct": None,
             "open_price": None,
             "high_price": None,
             "low_price": None,
