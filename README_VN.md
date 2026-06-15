@@ -240,3 +240,5 @@ Interpretation:
 - Direct CLI data old and API data old: Mozyfin source is stale.
 - Direct CLI data fresh but API data old: backend process or cache issue.
 - API data fresh but UI data old: frontend/backend port or browser cache issue.
+
+Source: https://github.com/ZhuLinsen/daily_stock_analysis
