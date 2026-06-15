@@ -26,6 +26,7 @@ from api.v1.schemas.stocks import (
     KLineData,
     StockHistoryResponse,
     StockQuote,
+    VietnamChartResponse,
     VietnamCorporateActionsResponse,
     VietnamObservabilityResponse,
     VietnamRealtimeResponse,
@@ -454,6 +455,27 @@ def get_vietnam_watchlist(
         raise HTTPException(
             status_code=500,
             detail={"error": "vn_watchlist_failed", "message": str(e)},
+        )
+
+
+@router.get(
+    "/vn/chart",
+    response_model=VietnamChartResponse,
+    summary="Vietnam selected ticker daily chart",
+    description="Return selected-symbol daily OHLCV chart data from Mozyfin only.",
+)
+def get_vietnam_chart(
+    symbol: str = Query(..., description="VN ticker symbol, for example FPT or FPT.VN"),
+    range_label: str = Query("6M", alias="range", pattern="^(1M|3M|6M|1Y)$", description="Chart range"),
+) -> VietnamChartResponse:
+    try:
+        payload = VietnamMarketService().build_chart(symbol, range_label=range_label)
+        return VietnamChartResponse(**payload)
+    except Exception as e:
+        logger.error("Vietnam chart failed: %s", e, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={"error": "vn_chart_failed", "message": str(e)},
         )
 
 

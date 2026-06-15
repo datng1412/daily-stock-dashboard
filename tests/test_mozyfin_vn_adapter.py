@@ -9,7 +9,9 @@ from types import SimpleNamespace
 
 import pandas as pd
 import pytest
+from fastapi.testclient import TestClient
 
+from api.app import create_app
 from data_provider.base import DataFetcherManager
 from data_provider.base import DataFetchError
 from data_provider.mozyfin_fetcher import MozyfinFetcher
@@ -28,7 +30,9 @@ from src.services.vietnam_market_service import (
     derive_intraday_details,
     clear_vietnam_cache,
     derive_neutral_status_labels,
+    filter_chart_points_by_range,
     normalize_intraday_candles,
+    normalize_daily_chart_data,
     normalize_vietnam_tickers,
 )
 
@@ -117,6 +121,22 @@ def _sample_vn_rows():
         [
             {"date": f"2026-05-{day:02d}", "open": 10 + day, "high": 11 + day, "low": 9 + day, "close": 10 + day, "volume": 100 + day}
             for day in range(1, 22)
+        ]
+    )
+
+
+def _sample_vn_rows_count(count=60):
+    return pd.DataFrame(
+        [
+            {
+                "date": (pd.Timestamp("2026-01-01") + pd.Timedelta(days=index)).strftime("%Y-%m-%d"),
+                "open": 100 + index,
+                "high": 102 + index,
+                "low": 98 + index,
+                "close": 100 + index,
+                "volume": 1000 + index * 10,
+            }
+            for index in range(count)
         ]
     )
 
@@ -300,6 +320,161 @@ def test_vietnam_dashboard_formulas_and_warnings(monkeypatch):
     assert fpt["indicators"]["foreign_net_5d"] is not None
     assert fpt["indicators"]["foreign_net_20d"] is not None
     assert fpt["status_labels"]
+
+
+def test_daily_chart_data_order_and_indicator_gaps():
+    rows = _sample_vn_rows_count(60)
+
+    chart_data = normalize_daily_chart_data(rows)
+
+    assert len(chart_data) == 60
+    assert chart_data[0]["date"] == "2026-01-01"
+    assert chart_data[-1]["date"] == "2026-03-01"
+    assert chart_data[0]["ma20"] is None
+    assert chart_data[0]["ma50"] is None
+    assert chart_data[0]["rsi14"] is None
+    assert chart_data[19]["ma20"] is not None
+    assert chart_data[19]["bb_upper"] is not None
+    assert chart_data[19]["bb_mid"] == chart_data[19]["ma20"]
+    assert chart_data[49]["ma50"] is not None
+    assert chart_data[-1]["rsi14"] is not None
+    assert chart_data[-1]["volume_ma20"] is not None
+    assert chart_data[-1]["volume_ma50"] is not None
+
+
+def test_chart_endpoint_data_uses_daily_ohlcv_without_changing_latest_price(monkeypatch):
+    monkeypatch.delenv("MOZYFIN_FIXTURE_DIR", raising=False)
+    rows = _sample_vn_rows_count(60)
+    manager = _StubManager(
+        rows,
+        foreign={
+            "buy": 100,
+            "sell": 40,
+            "net": 60,
+            "date": "2026-03-01",
+            "latest_price": 999,
+            "price_raw_field": "match_price",
+            "price_date": "2026-03-01",
+        },
+    )
+    service = VietnamMarketService(manager=manager, config=VietnamDashboardConfig(history_days=90, news_limit=1))
+
+    item = service.build_watchlist(["FPT"], include_intraday=False)["watchlist"][0]
+    chart = service.build_chart("FPT", "1Y")
+
+    assert item["latest_price"] == 999
+    assert item["latest_price_source"] == "quote"
+    assert item["ohlcv_close"] == 159
+    assert "chart_data" not in item
+    assert chart["source"] == "Mozyfin"
+    assert chart["timeframe"] == "1d"
+    assert chart["points"][-1]["close"] == 159
+    assert chart["points"][-1]["ma20"] is not None
+    assert chart["points"][-1]["ma50"] is not None
+    assert chart["points"][-1]["bb_upper"] is not None
+    assert chart["points"][-1]["rsi14"] is not None
+    assert chart["points"][-1]["volume_ma20"] is not None
+    assert chart["points"][-1]["volume_ma50"] is not None
+
+
+def test_chart_range_filter_preserves_indicator_warmup():
+    rows = _sample_vn_rows_count(260)
+    all_points = normalize_daily_chart_data(rows)
+
+    filtered = filter_chart_points_by_range(all_points, "1M")
+
+    assert 20 < len(filtered) < len(all_points)
+    assert filtered[0]["date"] > all_points[0]["date"]
+    assert filtered[0]["ma20"] is not None
+    assert filtered[0]["ma50"] is not None
+    assert filtered[0]["rsi14"] is not None
+    assert filtered[0]["volume_ma20"] is not None
+    assert filtered[0]["volume_ma50"] is not None
+
+
+def test_build_chart_returns_more_than_100_ordered_points_for_one_year(monkeypatch):
+    monkeypatch.delenv("MOZYFIN_FIXTURE_DIR", raising=False)
+    rows = _sample_vn_rows_count(260)
+    service = VietnamMarketService(
+        manager=_StubManager(rows),
+        config=VietnamDashboardConfig(history_days=90, news_limit=1),
+    )
+
+    chart = service.build_chart("FPT", "1Y")
+
+    assert chart["symbol"] == "FPT"
+    assert chart["range"] == "1Y"
+    assert len(chart["points"]) > 100
+    assert [point["date"] for point in chart["points"]] == sorted(point["date"] for point in chart["points"])
+    assert chart["latest_date"] == chart["points"][-1]["date"]
+    assert chart["points"][0]["ma20"] is None
+    assert chart["points"][-1]["ma20"] is not None
+    assert chart["points"][-1]["ma50"] is not None
+    assert chart["points"][-1]["bb_upper"] is not None
+    assert chart["points"][-1]["rsi14"] is not None
+
+
+def test_vietnam_chart_api_returns_ordered_points(monkeypatch, tmp_path):
+    class StubVietnamMarketService:
+        def build_chart(self, symbol, range_label="6M"):
+            return {
+                "symbol": symbol,
+                "source": "Mozyfin",
+                "timeframe": "1d",
+                "range": range_label,
+                "latest_date": "2026-01-03",
+                "points": [
+                    {
+                        "date": "2026-01-02",
+                        "time": 1767312000,
+                        "open": 10,
+                        "high": 12,
+                        "low": 9,
+                        "close": 11,
+                        "volume": 1000,
+                        "volume_ma20": None,
+                        "volume_ma50": None,
+                        "ma20": None,
+                        "ma50": None,
+                        "rsi14": None,
+                        "bb_upper": None,
+                        "bb_mid": None,
+                        "bb_lower": None,
+                    },
+                    {
+                        "date": "2026-01-03",
+                        "time": 1767398400,
+                        "open": 11,
+                        "high": 13,
+                        "low": 10,
+                        "close": 12,
+                        "volume": 1200,
+                        "volume_ma20": 1100,
+                        "volume_ma50": None,
+                        "ma20": 11,
+                        "ma50": None,
+                        "rsi14": 55,
+                        "bb_upper": 13,
+                        "bb_mid": 11,
+                        "bb_lower": 9,
+                    },
+                ],
+            }
+
+    monkeypatch.setattr("api.v1.endpoints.stocks.VietnamMarketService", StubVietnamMarketService)
+    client = TestClient(create_app(static_dir=tmp_path / "static"))
+
+    response = client.get("/api/v1/stocks/vn/chart?symbol=ACB&range=6M")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["symbol"] == "ACB"
+    assert payload["source"] == "Mozyfin"
+    assert payload["timeframe"] == "1d"
+    assert payload["range"] == "6M"
+    assert [point["date"] for point in payload["points"]] == ["2026-01-02", "2026-01-03"]
+    assert payload["points"][1]["close"] == 12
+    assert payload["points"][1]["volume_ma20"] == 1100
 
 
 def test_price_semantics_and_foreign_date_match(monkeypatch):

@@ -108,6 +108,26 @@ class StockHistoryResponse(BaseModel):
     })
 
 
+class VietnamChartPoint(BaseModel):
+    """Daily OHLCV point for Vietnam inspect chart."""
+
+    date: Optional[str] = None
+    time: Optional[int] = None
+    open: Optional[float] = None
+    high: Optional[float] = None
+    low: Optional[float] = None
+    close: Optional[float] = None
+    volume: Optional[float] = None
+    volume_ma20: Optional[float] = None
+    volume_ma50: Optional[float] = None
+    ma20: Optional[float] = None
+    ma50: Optional[float] = None
+    rsi14: Optional[float] = None
+    bb_upper: Optional[float] = None
+    bb_mid: Optional[float] = None
+    bb_lower: Optional[float] = None
+
+
 class VietnamWatchItem(BaseModel):
     """Vietnam watchlist dashboard row."""
 
@@ -185,6 +205,17 @@ class VietnamWatchlistResponse(BaseModel):
     watchlist: List[VietnamWatchItem] = Field(default_factory=list)
     rule_metadata: Dict[str, Any] = Field(default_factory=dict)
     formulas: Dict[str, str] = Field(default_factory=dict)
+
+
+class VietnamChartResponse(BaseModel):
+    """Selected Vietnam symbol daily chart response."""
+
+    symbol: str
+    source: str = "Mozyfin"
+    timeframe: str = "1d"
+    range: str = "6M"
+    latest_date: Optional[str] = None
+    points: List[VietnamChartPoint] = Field(default_factory=list)
 
 
 class VietnamWatchlistHealthResponse(BaseModel):

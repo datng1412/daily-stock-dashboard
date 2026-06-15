@@ -33,6 +33,14 @@ from src.services.vietnam_observability import (
 
 LIQUIDITY_TARGET_AVG_VOLUME = 1_000_000
 FOREIGN_HISTORY_LIMIT = 20
+VN_CHART_HISTORY_DAYS = 400
+VN_CHART_POINT_LIMIT = 260
+VN_CHART_RANGES = {
+    "1M": 31,
+    "3M": 93,
+    "6M": 186,
+    "1Y": 366,
+}
 VN_TIMEZONE = ZoneInfo("Asia/Ho_Chi_Minh")
 VN_CACHE_TTL_SECONDS = {
     "ohlcv": 300,
@@ -507,6 +515,40 @@ def calculate_rsi14(close: pd.Series) -> Optional[float]:
         return 100.0 if avg_gain > 0 else 50.0
     rs = avg_gain / avg_loss
     return 100 - (100 / (1 + rs))
+
+
+def calculate_rsi14_series(close: pd.Series) -> pd.Series:
+    """Calculate RSI14 series using the same Wilder/RMA smoothing as calculate_rsi14."""
+    values = pd.to_numeric(close, errors="coerce")
+    rsi = pd.Series(index=values.index, dtype="float64")
+    valid = values.dropna()
+    if len(valid) < 15:
+        return rsi
+    delta = valid.diff().dropna()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = _safe_float(gain.iloc[:14].mean())
+    avg_loss = _safe_float(loss.iloc[:14].mean())
+    if avg_gain is None or avg_loss is None:
+        return rsi
+
+    first_index = valid.index[14]
+    if avg_loss == 0:
+        rsi.loc[first_index] = 100.0 if avg_gain > 0 else 50.0
+    else:
+        rs = avg_gain / avg_loss
+        rsi.loc[first_index] = 100 - (100 / (1 + rs))
+
+    for index in range(14, len(delta)):
+        avg_gain = (avg_gain * 13 + _safe_float(gain.iloc[index])) / 14
+        avg_loss = (avg_loss * 13 + _safe_float(loss.iloc[index])) / 14
+        output_index = valid.index[index + 1]
+        if avg_loss == 0:
+            rsi.loc[output_index] = 100.0 if avg_gain > 0 else 50.0
+        else:
+            rs = avg_gain / avg_loss
+            rsi.loc[output_index] = 100 - (100 / (1 + rs))
+    return rsi
 
 
 def _foreign_sum(df: pd.DataFrame, window: int) -> Optional[float]:
@@ -1066,10 +1108,108 @@ def calculate_vietnam_indicators(
     }
 
 
+def normalize_daily_chart_data(df: Optional[pd.DataFrame], limit: int = VN_CHART_POINT_LIMIT) -> List[Dict[str, Any]]:
+    """Normalize daily OHLCV rows and matching indicators for inspect charts."""
+    if df is None or df.empty:
+        return []
+
+    chart_df = df.sort_values("date").tail(limit).reset_index(drop=True).copy()
+    close = pd.to_numeric(chart_df.get("close"), errors="coerce")
+    volume = pd.to_numeric(chart_df.get("volume"), errors="coerce")
+    ma20 = close.rolling(20).mean()
+    ma50 = close.rolling(50).mean()
+    volume_ma20 = volume.rolling(20).mean()
+    volume_ma50 = volume.rolling(50).mean()
+    bb_std = close.rolling(20).std(ddof=0)
+    bb_upper = ma20 + (2 * bb_std)
+    bb_lower = ma20 - (2 * bb_std)
+    rsi14 = calculate_rsi14_series(close)
+
+    rows: List[Dict[str, Any]] = []
+    for index, raw in chart_df.iterrows():
+        rows.append(
+            {
+                "date": _valid_date_string(raw.get("date")),
+                "time": int(pd.Timestamp(raw.get("date")).timestamp()) if _valid_date_string(raw.get("date")) else None,
+                "open": _round_optional(_safe_float(raw.get("open"))),
+                "high": _round_optional(_safe_float(raw.get("high"))),
+                "low": _round_optional(_safe_float(raw.get("low"))),
+                "close": _round_optional(_safe_float(raw.get("close"))),
+                "volume": _round_optional(_safe_float(volume.iloc[index]), 0),
+                "volume_ma20": _round_optional(_safe_float(volume_ma20.iloc[index]), 0),
+                "volume_ma50": _round_optional(_safe_float(volume_ma50.iloc[index]), 0),
+                "ma20": _round_optional(_safe_float(ma20.iloc[index])),
+                "ma50": _round_optional(_safe_float(ma50.iloc[index])),
+                "rsi14": _round_optional(_safe_float(rsi14.iloc[index])),
+                "bb_upper": _round_optional(_safe_float(bb_upper.iloc[index])),
+                "bb_mid": _round_optional(_safe_float(ma20.iloc[index])),
+                "bb_lower": _round_optional(_safe_float(bb_lower.iloc[index])),
+            }
+        )
+    return rows
+
+
+def filter_chart_points_by_range(points: List[Dict[str, Any]], range_label: str) -> List[Dict[str, Any]]:
+    """Filter chart points after indicator warmup has been calculated."""
+    if not points:
+        return []
+    days = VN_CHART_RANGES.get(range_label.upper(), VN_CHART_RANGES["6M"])
+    dates = [
+        pd.to_datetime(point.get("date"), errors="coerce")
+        for point in points
+        if point.get("date")
+    ]
+    valid_dates = [date for date in dates if not pd.isna(date)]
+    if not valid_dates:
+        return points
+    latest_date = max(valid_dates)
+    cutoff = latest_date - pd.Timedelta(days=days)
+    filtered = [
+        point
+        for point in points
+        if point.get("date") and not pd.isna(pd.to_datetime(point.get("date"), errors="coerce"))
+        and pd.to_datetime(point.get("date"), errors="coerce") >= cutoff
+    ]
+    return filtered or points
+
+
 class VietnamMarketService:
     def __init__(self, manager: Optional[DataFetcherManager] = None, config: Optional[VietnamDashboardConfig] = None):
         self.manager = manager or DataFetcherManager()
         self.config = config or VietnamDashboardConfig()
+
+    def build_chart(self, symbol: str, range_label: str = "6M") -> Dict[str, Any]:
+        """Build selected-symbol daily OHLCV chart data from Mozyfin only."""
+        normalized_symbol = normalize_vn_symbol(symbol)
+        ticker = normalized_symbol.replace(".VN", "")
+        effective_range = range_label.upper()
+        if effective_range not in VN_CHART_RANGES:
+            effective_range = "6M"
+        ohlcv_key = _cache_key(
+            "ohlcv",
+            ticker,
+            timeframe="1d",
+            limit=VN_CHART_POINT_LIMIT,
+            days=VN_CHART_HISTORY_DAYS,
+        )
+        ohlcv_result = _read_cache(
+            ohlcv_key,
+            "ohlcv",
+            lambda: self.manager.get_daily_data(normalized_symbol, days=VN_CHART_HISTORY_DAYS),
+            force_refresh=False,
+        )
+        df, _source = ohlcv_result["value"]
+        all_points = normalize_daily_chart_data(df, VN_CHART_POINT_LIMIT)
+        points = filter_chart_points_by_range(all_points, effective_range)
+        latest_date = points[-1].get("date") if points else None
+        return {
+            "symbol": ticker,
+            "source": "Mozyfin",
+            "timeframe": "1d",
+            "range": effective_range,
+            "latest_date": latest_date,
+            "points": points,
+        }
 
     def build_watchlist(
         self,

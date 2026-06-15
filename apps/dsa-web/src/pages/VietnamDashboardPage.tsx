@@ -3,6 +3,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Activity, AlertTriangle, ArrowDown, ArrowDownRight, ArrowUp, ArrowUpRight, Banknote, DatabaseZap, Plus, RefreshCw, RotateCcw, ShieldAlert, X } from 'lucide-react';
 import {
   stocksApi,
+  type VietnamChartPoint,
+  type VietnamChartResponse,
   type VietnamCorporateActionEvent,
   type VietnamCorporateActionsResponse,
   type VietnamObservabilityResponse,
@@ -36,6 +38,13 @@ const KBS_QUOTE_REFRESH_INTERVALS = [10, 15, 30];
 const KBS_TRADE_REFRESH_INTERVALS = [5, 10, 15];
 const DEFAULT_WATCHLIST = normalizeVietnamWatchlist(DEFAULT_TICKERS) ?? DEFAULT_TICKERS;
 const DETAIL_NEWS_LIMIT = 8;
+const INSPECT_RANGES = [
+  { label: '1M', days: 31 },
+  { label: '3M', days: 93 },
+  { label: '6M', days: 186 },
+  { label: '1Y', days: 366 },
+] as const;
+type InspectRangeLabel = typeof INSPECT_RANGES[number]['label'];
 
 const formatNumber = (value?: number | null, maximumFractionDigits = 0) => {
   if (value === null || value === undefined || Number.isNaN(value)) return '-';
@@ -826,6 +835,349 @@ const IndicatorTable: React.FC<{
   </section>
 );
 
+const CHART_WIDTH = 960;
+const PRICE_TOP = 24;
+const PRICE_HEIGHT = 300;
+const VOLUME_TOP = 352;
+const VOLUME_HEIGHT = 110;
+const RSI_TOP = 498;
+const RSI_HEIGHT = 108;
+const AXIS_TOP = RSI_TOP + RSI_HEIGHT + 16;
+const AXIS_LABEL_Y = AXIS_TOP + 20;
+const CHART_HEIGHT = 652;
+const CHART_LEFT = 58;
+const CHART_RIGHT = 20;
+const PLOT_WIDTH = CHART_WIDTH - CHART_LEFT - CHART_RIGHT;
+
+const chartX = (index: number, count: number) => (
+  CHART_LEFT + (count <= 1 ? PLOT_WIDTH / 2 : (index / (count - 1)) * PLOT_WIDTH)
+);
+
+const numericChartValues = (points: VietnamChartPoint[], keys: Array<keyof VietnamChartPoint>) =>
+  points.flatMap((point) => keys.map((key) => point[key])).filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+
+const parseChartDate = (value?: string | null) => {
+  if (!value) return null;
+  const parsed = new Date(`${value}T00:00:00`);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const formatChartAxisLabel = (value: string, spanDays: number) => {
+  const parsed = parseChartDate(value);
+  if (!parsed) return value;
+  if (spanDays <= 45) {
+    return new Intl.DateTimeFormat('en-US', { month: '2-digit', day: '2-digit' }).format(parsed);
+  }
+  if (spanDays <= 120) {
+    return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(parsed);
+  }
+  return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, '0')}`;
+};
+
+const chartDateTicks = (points: VietnamChartPoint[]) => {
+  const datedPoints = points
+    .map((point, index) => ({ index, date: point.date, parsed: parseChartDate(point.date) }))
+    .filter((point): point is { index: number; date: string; parsed: Date } => Boolean(point.date && point.parsed));
+  if (datedPoints.length < 2) return [];
+
+  const firstDate = datedPoints[0].parsed;
+  const lastDate = datedPoints[datedPoints.length - 1].parsed;
+  const spanDays = Math.max(1, Math.round((lastDate.getTime() - firstDate.getTime()) / 86_400_000));
+  const desiredCount = datedPoints.length >= 80 ? 6 : datedPoints.length >= 40 ? 5 : Math.min(4, datedPoints.length);
+  const seenIndexes = new Set<number>();
+  const seenLabels = new Set<string>();
+
+  return Array.from({ length: desiredCount }, (_, tickIndex) => {
+    const sourceIndex = Math.round((tickIndex * (datedPoints.length - 1)) / Math.max(desiredCount - 1, 1));
+    return datedPoints[sourceIndex];
+  })
+    .filter((point) => {
+      if (seenIndexes.has(point.index)) return false;
+      seenIndexes.add(point.index);
+      return true;
+    })
+    .map((point) => ({ ...point, label: formatChartAxisLabel(point.date, spanDays) }))
+    .filter((point) => {
+      if (seenLabels.has(point.label)) return false;
+      seenLabels.add(point.label);
+      return true;
+    });
+};
+
+const chartScale = (min: number, max: number, top: number, height: number) => {
+  const padding = (max - min) * 0.08 || Math.max(Math.abs(max) * 0.08, 1);
+  const low = min - padding;
+  const high = max + padding;
+  return (value?: number | null) => {
+    if (value === null || value === undefined || !Number.isFinite(value)) return null;
+    return top + ((high - value) / (high - low || 1)) * height;
+  };
+};
+
+const chartPath = (
+  points: VietnamChartPoint[],
+  key: keyof VietnamChartPoint,
+  yScale: (value?: number | null) => number | null,
+) => {
+  let started = false;
+  return points.map((point, index) => {
+    const y = yScale(point[key] as number | null | undefined);
+    if (y === null) return null;
+    const command = started ? 'L' : 'M';
+    started = true;
+    return `${command} ${chartX(index, points.length).toFixed(1)} ${y.toFixed(1)}`;
+  })
+    .filter(Boolean)
+    .join(' ');
+};
+
+const BrokerInspectChartSvg: React.FC<{
+  points: VietnamChartPoint[];
+  showMA20: boolean;
+  showMA50: boolean;
+  showBollinger: boolean;
+}> = ({ points, showMA20, showMA50, showBollinger }) => {
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
+  const priceKeys: Array<keyof VietnamChartPoint> = ['high', 'low', 'open', 'close'];
+  if (showMA20) priceKeys.push('ma20');
+  if (showMA50) priceKeys.push('ma50');
+  if (showBollinger) priceKeys.push('bbUpper', 'bbMid', 'bbLower');
+  const priceValues = numericChartValues(points, priceKeys);
+  const volumeValues = numericChartValues(points, ['volume', 'volumeMa20', 'volumeMa50']);
+  if (!priceValues.length) {
+    return <p className="text-sm text-secondary-text">Chart data unavailable</p>;
+  }
+  const priceScale = chartScale(Math.min(...priceValues), Math.max(...priceValues), PRICE_TOP, PRICE_HEIGHT);
+  const volumeScale = chartScale(0, Math.max(...volumeValues, 1), VOLUME_TOP, VOLUME_HEIGHT);
+  const rsiScale = chartScale(0, 100, RSI_TOP, RSI_HEIGHT);
+  const candleWidth = Math.max(3, Math.min(11, PLOT_WIDTH / Math.max(points.length, 1) * 0.62));
+  const hoverPoint = hoverIndex === null ? null : points[hoverIndex];
+  const dateTicks = chartDateTicks(points);
+
+  const handleMove = (event: React.MouseEvent<SVGSVGElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const x = (event.clientX - rect.left) / rect.width * CHART_WIDTH;
+    const rawIndex = Math.round((x - CHART_LEFT) / (PLOT_WIDTH / Math.max(points.length - 1, 1)));
+    setHoverIndex(Math.max(0, Math.min(points.length - 1, rawIndex)));
+  };
+
+  return (
+    <div className="relative">
+      <svg
+        role="img"
+        aria-label="Candlestick price chart with volume and RSI panels"
+        data-testid="inspect-candlestick-chart"
+        viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
+        className="h-[540px] w-full rounded-lg border border-border/60 bg-[#07111d]"
+        onMouseMove={handleMove}
+        onMouseLeave={() => setHoverIndex(null)}
+      >
+        {[PRICE_TOP, PRICE_TOP + PRICE_HEIGHT, VOLUME_TOP, VOLUME_TOP + VOLUME_HEIGHT, RSI_TOP, RSI_TOP + RSI_HEIGHT].map((y) => (
+          <line key={`grid-${y}`} x1={CHART_LEFT} x2={CHART_WIDTH - CHART_RIGHT} y1={y} y2={y} stroke="rgba(148,163,184,0.18)" />
+        ))}
+        <text x={14} y={PRICE_TOP + 18} fill="#94a3b8" fontSize="12">Price</text>
+        <text x={14} y={VOLUME_TOP + 18} fill="#94a3b8" fontSize="12">Volume</text>
+        <text x={14} y={RSI_TOP + 18} fill="#94a3b8" fontSize="12">RSI14</text>
+        <line x1={CHART_LEFT} x2={CHART_WIDTH - CHART_RIGHT} y1={rsiScale(30) ?? 0} y2={rsiScale(30) ?? 0} stroke="#64748b" strokeDasharray="5 5" />
+        <line x1={CHART_LEFT} x2={CHART_WIDTH - CHART_RIGHT} y1={rsiScale(70) ?? 0} y2={rsiScale(70) ?? 0} stroke="#64748b" strokeDasharray="5 5" />
+        <text x={CHART_WIDTH - CHART_RIGHT - 24} y={(rsiScale(30) ?? 0) - 4} fill="#94a3b8" fontSize="11">30</text>
+        <text x={CHART_WIDTH - CHART_RIGHT - 24} y={(rsiScale(70) ?? 0) - 4} fill="#94a3b8" fontSize="11">70</text>
+
+        {points.map((point, index) => {
+          const x = chartX(index, points.length);
+          const openY = priceScale(point.open);
+          const closeY = priceScale(point.close);
+          const highY = priceScale(point.high);
+          const lowY = priceScale(point.low);
+          const volumeY = volumeScale(point.volume);
+          const color = point.close != null && point.open != null && point.close >= point.open ? '#22c55e' : '#ef4444';
+          const bodyTop = Math.min(openY ?? 0, closeY ?? 0);
+          const bodyHeight = Math.max(1.5, Math.abs((openY ?? 0) - (closeY ?? 0)));
+          return (
+            <g key={`${point.date}-${index}`}>
+              {highY !== null && lowY !== null ? <line x1={x} x2={x} y1={highY} y2={lowY} stroke={color} strokeWidth="1.3" /> : null}
+              {openY !== null && closeY !== null ? (
+                <rect x={x - candleWidth / 2} y={bodyTop} width={candleWidth} height={bodyHeight} fill={color} rx="1" />
+              ) : null}
+              {volumeY !== null ? (
+                <rect x={x - candleWidth / 2} y={volumeY} width={candleWidth} height={VOLUME_TOP + VOLUME_HEIGHT - volumeY} fill={color} opacity="0.35" />
+              ) : null}
+            </g>
+          );
+        })}
+
+        {showMA20 ? <path d={chartPath(points, 'ma20', priceScale)} fill="none" stroke="#a78bfa" strokeWidth="1.6" /> : null}
+        {showMA50 ? <path d={chartPath(points, 'ma50', priceScale)} fill="none" stroke="#f59e0b" strokeWidth="1.6" /> : null}
+        {showBollinger ? (
+          <>
+            <path d={chartPath(points, 'bbUpper', priceScale)} fill="none" stroke="#64748b" strokeWidth="1" />
+            <path d={chartPath(points, 'bbMid', priceScale)} fill="none" stroke="#94a3b8" strokeWidth="1" strokeDasharray="5 5" />
+            <path d={chartPath(points, 'bbLower', priceScale)} fill="none" stroke="#64748b" strokeWidth="1" />
+          </>
+        ) : null}
+        <path d={chartPath(points, 'volumeMa20', volumeScale)} fill="none" stroke="#38bdf8" strokeWidth="1.4" />
+        <path d={chartPath(points, 'volumeMa50', volumeScale)} fill="none" stroke="#f97316" strokeWidth="1.4" />
+        <path d={chartPath(points, 'rsi14', rsiScale)} fill="none" stroke="#22c55e" strokeWidth="1.8" />
+
+        {dateTicks.length ? (
+          <g aria-label="Chart date axis">
+            <line x1={CHART_LEFT} x2={CHART_WIDTH - CHART_RIGHT} y1={AXIS_TOP} y2={AXIS_TOP} stroke="rgba(148,163,184,0.22)" />
+            {dateTicks.map((tick) => {
+              const x = chartX(tick.index, points.length);
+              return (
+                <g key={`date-tick-${tick.index}`}>
+                  <line x1={x} x2={x} y1={AXIS_TOP} y2={AXIS_TOP + 5} stroke="rgba(148,163,184,0.45)" />
+                  <text
+                    data-testid="inspect-chart-date-label"
+                    x={x}
+                    y={AXIS_LABEL_Y}
+                    fill="#94a3b8"
+                    fontSize="11"
+                    textAnchor={tick.index === 0 ? 'start' : tick.index === points.length - 1 ? 'end' : 'middle'}
+                  >
+                    {tick.label}
+                  </text>
+                </g>
+              );
+            })}
+          </g>
+        ) : null}
+
+        {hoverIndex !== null ? (
+          <line x1={chartX(hoverIndex, points.length)} x2={chartX(hoverIndex, points.length)} y1={PRICE_TOP} y2={RSI_TOP + RSI_HEIGHT} stroke="rgba(226,232,240,0.45)" strokeDasharray="4 4" />
+        ) : null}
+      </svg>
+      {hoverPoint ? (
+        <div className="pointer-events-none absolute right-3 top-3 rounded-lg border border-border/70 bg-card/95 p-3 text-xs shadow-soft-card">
+          <p className="font-semibold text-foreground">{hoverPoint.date ?? '-'}</p>
+          <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-secondary-text">
+            <dt>Open</dt><dd className="text-right text-foreground">{formatPrice(hoverPoint.open)}</dd>
+            <dt>High</dt><dd className="text-right text-foreground">{formatPrice(hoverPoint.high)}</dd>
+            <dt>Low</dt><dd className="text-right text-foreground">{formatPrice(hoverPoint.low)}</dd>
+            <dt>Close</dt><dd className="text-right text-foreground">{formatPrice(hoverPoint.close)}</dd>
+            <dt>Volume</dt><dd className="text-right text-foreground">{formatNumber(hoverPoint.volume)}</dd>
+            <dt>MA20</dt><dd className="text-right text-foreground">{formatPrice(hoverPoint.ma20)}</dd>
+            <dt>MA50</dt><dd className="text-right text-foreground">{formatPrice(hoverPoint.ma50)}</dd>
+            <dt>Volume MA20</dt><dd className="text-right text-foreground">{formatNumber(hoverPoint.volumeMa20)}</dd>
+            <dt>Volume MA50</dt><dd className="text-right text-foreground">{formatNumber(hoverPoint.volumeMa50)}</dd>
+            <dt>RSI14</dt><dd className="text-right text-foreground">{formatNumber(hoverPoint.rsi14, 2)}</dd>
+            {showBollinger ? (
+              <>
+                <dt>Bollinger upper</dt><dd className="text-right text-foreground">{formatPrice(hoverPoint.bbUpper)}</dd>
+                <dt>Bollinger mid</dt><dd className="text-right text-foreground">{formatPrice(hoverPoint.bbMid)}</dd>
+                <dt>Bollinger lower</dt><dd className="text-right text-foreground">{formatPrice(hoverPoint.bbLower)}</dd>
+              </>
+            ) : null}
+          </dl>
+        </div>
+      ) : null}
+    </div>
+  );
+};
+
+const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
+  const [rangeLabel, setRangeLabel] = useState<InspectRangeLabel>('6M');
+  const [showMA20, setShowMA20] = useState(true);
+  const [showMA50, setShowMA50] = useState(true);
+  const [showBollinger, setShowBollinger] = useState(false);
+  const [chart, setChart] = useState<VietnamChartResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const requestIdRef = useRef(0);
+  const points = chart?.points ?? [];
+
+  useEffect(() => {
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
+    setLoading(true);
+    setError(null);
+    stocksApi.getVietnamChart(item.ticker, rangeLabel)
+      .then((response) => {
+        if (requestId !== requestIdRef.current) return;
+        setChart(response);
+      })
+      .catch((err) => {
+        if (requestId !== requestIdRef.current) return;
+        setChart(null);
+        setError(err instanceof Error ? err.message : 'Chart data unavailable');
+      })
+      .finally(() => {
+        if (requestId === requestIdRef.current) setLoading(false);
+      });
+  }, [item.ticker, rangeLabel]);
+
+  return (
+    <div className="mt-4 rounded-lg border border-border/60 bg-elevated/30 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold text-foreground">Inspect chart</h3>
+          <p className="mt-1 text-xs text-secondary-text">Daily OHLCV from Mozyfin. KBS snapshot remains separate.</p>
+        </div>
+        <div className="flex flex-wrap gap-1">
+          {INSPECT_RANGES.map((range) => (
+            <button
+              key={range.label}
+              type="button"
+              onClick={() => setRangeLabel(range.label)}
+              className={cn(
+                'h-8 rounded-md border px-3 text-xs font-medium transition-colors',
+                rangeLabel === range.label
+                  ? 'border-cyan bg-cyan/10 text-cyan'
+                  : 'border-border/70 bg-card/60 text-secondary-text hover:bg-hover hover:text-foreground',
+              )}
+              aria-pressed={rangeLabel === range.label}
+            >
+              {range.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        <label className="inline-flex h-8 items-center gap-2 rounded-md border border-border/70 bg-card/60 px-3 text-xs text-secondary-text">
+          <input type="checkbox" checked={showMA20} onChange={(event) => setShowMA20(event.target.checked)} />
+          MA20
+        </label>
+        <label className="inline-flex h-8 items-center gap-2 rounded-md border border-border/70 bg-card/60 px-3 text-xs text-secondary-text">
+          <input type="checkbox" checked={showMA50} onChange={(event) => setShowMA50(event.target.checked)} />
+          MA50
+        </label>
+        <label className="inline-flex h-8 items-center gap-2 rounded-md border border-border/70 bg-card/60 px-3 text-xs text-secondary-text">
+          <input type="checkbox" checked={showBollinger} onChange={(event) => setShowBollinger(event.target.checked)} />
+          Bollinger
+        </label>
+      </div>
+
+      {loading ? (
+        <p className="mt-4 text-sm text-secondary-text">Loading chart data...</p>
+      ) : points.length ? (
+        <div className="mt-4 space-y-3">
+          <div className="flex flex-wrap gap-2 text-xs text-secondary-text">
+            <span data-testid="inspect-legend-candles">Candlesticks</span>
+            {showMA20 ? <span data-testid="inspect-legend-ma20">MA20</span> : null}
+            {showMA50 ? <span data-testid="inspect-legend-ma50">MA50</span> : null}
+            {showBollinger ? <span data-testid="inspect-legend-bollinger">Bollinger upper/mid/lower</span> : null}
+            <span>Volume MA20</span>
+            <span>Volume MA50</span>
+            <span>RSI14</span>
+          </div>
+          <BrokerInspectChartSvg points={points} showMA20={showMA20} showMA50={showMA50} showBollinger={showBollinger} />
+          <p className="text-xs text-secondary-text">RSI14 numeric guides: 30 and 70.</p>
+        </div>
+      ) : (
+        <p className="mt-4 text-sm text-secondary-text">Chart data unavailable</p>
+      )}
+      {error ? <p className="mt-2 text-xs text-secondary-text">Chart endpoint unavailable: {error}</p> : null}
+
+      <div className="mt-3 space-y-1 text-xs text-secondary-text">
+        <p>Daily OHLCV source: Mozyfin</p>
+        <p>KBS snapshot is separate and not used as daily close.</p>
+        {chart?.latestDate ? <p>Latest chart date: {chart.latestDate}</p> : null}
+      </div>
+    </div>
+  );
+};
+
 const CorporateActionEventRow: React.FC<{ event: VietnamCorporateActionEvent }> = ({ event }) => (
   <div className="rounded-lg border border-border/50 bg-card/50 p-3 text-sm">
     <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1050,6 +1402,7 @@ const StockDetailView: React.FC<{
           </dd>
         </div>
       </dl>
+      <InspectChartCard item={item} />
       <div className="mt-4 rounded-lg border border-border/60 bg-elevated/30 p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-sm font-semibold text-foreground">Reference price</h3>

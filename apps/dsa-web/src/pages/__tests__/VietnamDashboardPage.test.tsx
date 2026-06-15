@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   stocksApi,
+  type VietnamChartResponse,
   type VietnamCorporateActionsResponse,
   type VietnamObservabilityResponse,
   type VietnamRealtimeResponse,
@@ -21,6 +22,7 @@ vi.mock('../../api/stocks', () => ({
     getVietnamRealtimeTrades: vi.fn(),
     getVietnamCorporateActions: vi.fn(),
     getVietnamObservability: vi.fn(),
+    getVietnamChart: vi.fn(),
   },
 }));
 
@@ -38,6 +40,36 @@ const makeMarketPhase = (phase = 'Continuous afternoon', code = 'continuous_afte
   isContinuous: code.includes('continuous'),
   holidayAware: false,
   nextLabel: isAuction ? 'Post-close' : 'ATC closing auction',
+});
+
+const makeChartData = () => Array.from({ length: 70 }, (_, index) => {
+  const date = new Date(Date.UTC(2026, 3, 1 + index)).toISOString().slice(0, 10);
+  const close = 100 + index;
+  return {
+    date,
+    open: close - 1,
+    high: close + 2,
+    low: close - 2,
+    close,
+    volume: 1000 + index * 10,
+    volumeMa20: index >= 19 ? 1100 + index * 5 : null,
+    volumeMa50: index >= 49 ? 1250 + index * 5 : null,
+    ma20: index >= 19 ? close - 2 : null,
+    ma50: index >= 49 ? close - 5 : null,
+    rsi14: index >= 14 ? 50 + (index % 10) : null,
+    bbUpper: index >= 19 ? close + 10 : null,
+    bbMid: index >= 19 ? close - 2 : null,
+    bbLower: index >= 19 ? close - 14 : null,
+  };
+});
+
+const makeChartResponse = (symbol = 'FPT', range = '6M', points = makeChartData()): VietnamChartResponse => ({
+  symbol,
+  source: 'Mozyfin',
+  timeframe: '1d',
+  range,
+  latestDate: points[points.length - 1]?.date ?? null,
+  points,
 });
 
 const makeItem = (ticker: string): VietnamWatchItem => ({
@@ -184,6 +216,7 @@ const mockedGetVietnamRealtimeQuotes = vi.mocked(stocksApi.getVietnamRealtimeQuo
 const mockedGetVietnamRealtimeTrades = vi.mocked(stocksApi.getVietnamRealtimeTrades);
 const mockedGetVietnamCorporateActions = vi.mocked(stocksApi.getVietnamCorporateActions);
 const mockedGetVietnamObservability = vi.mocked(stocksApi.getVietnamObservability);
+const mockedGetVietnamChart = vi.mocked(stocksApi.getVietnamChart);
 
 const makeObservabilityResponse = (overrides: Partial<VietnamObservabilityResponse> = {}): VietnamObservabilityResponse => ({
   market: 'VN',
@@ -341,6 +374,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     mockedGetVietnamRealtimeTrades.mockReset();
     mockedGetVietnamCorporateActions.mockReset();
     mockedGetVietnamObservability.mockReset();
+    mockedGetVietnamChart.mockReset();
     mockedGetVietnamMarketPhase.mockReset();
     mockedGetVietnamMarketPhase.mockReturnValue(makeMarketPhase());
     mockedGetVietnamWatchlist.mockImplementation(async (tickers) => makeResponse(tickers?.length ? tickers : defaultTickers));
@@ -348,6 +382,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     mockedGetVietnamRealtimeTrades.mockImplementation(async (symbol) => makeTradesResponse(symbol));
     mockedGetVietnamCorporateActions.mockImplementation(async (tickers) => makeCorporateActionsResponse(tickers));
     mockedGetVietnamObservability.mockImplementation(async () => makeObservabilityResponse());
+    mockedGetVietnamChart.mockImplementation(async (symbol, range = '6M') => makeChartResponse(symbol, range));
   });
 
   afterEach(() => {
@@ -520,6 +555,102 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(detail.getByRole('heading', { name: 'Corporate actions' })).toBeInTheDocument();
     expect(detail.getByText('Recent and upcoming events')).toBeInTheDocument();
     expect(detail.getByText('No recent or upcoming corporate actions found.')).toBeInTheDocument();
+  });
+
+  it('renders the inspect chart with range controls, overlays, volume, and RSI', async () => {
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+    await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('FPT', '6M'));
+
+    const detail = within(screen.getByText('Stock detail').closest('section') as HTMLElement);
+    const chartHeading = detail.getByRole('heading', { name: 'Inspect chart' });
+    const chartCard = within(chartHeading.closest('div')?.parentElement?.parentElement as HTMLElement);
+
+    expect(chartCard.getByText('Daily OHLCV from Mozyfin. KBS snapshot remains separate.')).toBeInTheDocument();
+    expect(chartCard.getByRole('button', { name: '1M' })).toBeInTheDocument();
+    expect(chartCard.getByRole('button', { name: '3M' })).toBeInTheDocument();
+    expect(chartCard.getByRole('button', { name: '6M' })).toHaveAttribute('aria-pressed', 'true');
+    expect(chartCard.getByRole('button', { name: '1Y' })).toBeInTheDocument();
+    expect(chartCard.getByLabelText('MA20')).toBeChecked();
+    expect(chartCard.getByLabelText('MA50')).toBeChecked();
+    expect(chartCard.getByLabelText('Bollinger')).not.toBeChecked();
+    expect(chartCard.getByTestId('inspect-candlestick-chart')).toBeInTheDocument();
+    expect(chartCard.getAllByTestId('inspect-chart-date-label').length).toBeGreaterThanOrEqual(4);
+    expect(chartCard.getByText('Apr 1')).toBeInTheDocument();
+    expect(chartCard.getByText('Jun 9')).toBeInTheDocument();
+    expect(chartCard.getByTestId('inspect-legend-candles')).toHaveTextContent('Candlesticks');
+    expect(chartCard.getByTestId('inspect-legend-ma20')).toBeInTheDocument();
+    expect(chartCard.getByTestId('inspect-legend-ma50')).toBeInTheDocument();
+    expect(chartCard.queryByTestId('inspect-legend-bollinger')).not.toBeInTheDocument();
+    expect(chartCard.getByText('Volume MA20')).toBeInTheDocument();
+    expect(chartCard.getByText('Volume MA50')).toBeInTheDocument();
+    expect(chartCard.getAllByText('RSI14').length).toBeGreaterThan(0);
+    expect(chartCard.getByText('RSI14 numeric guides: 30 and 70.')).toBeInTheDocument();
+    expect(chartCard.getByText('Daily OHLCV source: Mozyfin')).toBeInTheDocument();
+    expect(chartCard.getByText('KBS snapshot is separate and not used as daily close.')).toBeInTheDocument();
+    expect(chartCard.queryByText(/buy|sell|hold|recommendation/i)).not.toBeInTheDocument();
+  });
+
+  it('shows Bollinger overlay only after enabling the chart toggle', async () => {
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+    await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('FPT', '6M'));
+
+    const detail = within(screen.getByText('Stock detail').closest('section') as HTMLElement);
+    const chartHeading = detail.getByRole('heading', { name: 'Inspect chart' });
+    const chartCard = within(chartHeading.closest('div')?.parentElement?.parentElement as HTMLElement);
+
+    expect(chartCard.queryByTestId('inspect-legend-bollinger')).not.toBeInTheDocument();
+    fireEvent.click(chartCard.getByLabelText('Bollinger'));
+    expect(chartCard.getByTestId('inspect-legend-bollinger')).toHaveTextContent('Bollinger upper/mid/lower');
+  });
+
+  it('requests the selected chart range when a range control changes', async () => {
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('FPT', '6M'));
+
+    const detail = within(screen.getByText('Stock detail').closest('section') as HTMLElement);
+    const chartHeading = detail.getByRole('heading', { name: 'Inspect chart' });
+    const chartCard = within(chartHeading.closest('div')?.parentElement?.parentElement as HTMLElement);
+
+    fireEvent.click(chartCard.getByRole('button', { name: '1Y' }));
+
+    await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('FPT', '1Y'));
+    expect(chartCard.getByRole('button', { name: '1Y' })).toHaveAttribute('aria-pressed', 'true');
+    expect(chartCard.getAllByTestId('inspect-chart-date-label').length).toBeGreaterThanOrEqual(4);
+    expect(chartCard.getByText('Apr 1')).toBeInTheDocument();
+    expect(chartCard.getByText('Jun 9')).toBeInTheDocument();
+    expect(chartCard.queryByText(/buy|sell|hold|recommendation/i)).not.toBeInTheDocument();
+  });
+
+  it('renders chart data unavailable when selected ticker has no chart points', async () => {
+    mockedGetVietnamChart.mockResolvedValue(makeChartResponse('FPT', '6M', []));
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('FPT', '6M'));
+
+    const detail = within(screen.getByText('Stock detail').closest('section') as HTMLElement);
+    const chartHeading = detail.getByRole('heading', { name: 'Inspect chart' });
+    const chartCard = within(chartHeading.closest('div')?.parentElement?.parentElement as HTMLElement);
+    expect(chartCard.getByText('Chart data unavailable')).toBeInTheDocument();
+    expect(chartCard.queryAllByTestId('inspect-chart-date-label')).toHaveLength(0);
+  });
+
+  it('keeps the watchlist rendered when the chart endpoint fails', async () => {
+    mockedGetVietnamChart.mockRejectedValue(new Error('chart failed'));
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('FPT', '6M'));
+
+    expect(screen.getByRole('heading', { name: 'Indicator table' })).toBeInTheDocument();
+    const detail = within(screen.getByText('Stock detail').closest('section') as HTMLElement);
+    expect(detail.getByText('Chart data unavailable')).toBeInTheDocument();
+    expect(detail.getByText('Chart endpoint unavailable: chart failed')).toBeInTheDocument();
   });
 
   it('clarifies Mozyfin 1H and KBS volume labels while preserving numeric values', async () => {

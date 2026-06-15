@@ -256,6 +256,33 @@ export type VietnamRealtimeTradesResponse = {
   cache: Record<string, unknown>;
 };
 
+export type VietnamChartPoint = {
+  date?: string | null;
+  time?: number | null;
+  open?: number | null;
+  high?: number | null;
+  low?: number | null;
+  close?: number | null;
+  volume?: number | null;
+  volumeMa20?: number | null;
+  volumeMa50?: number | null;
+  ma20?: number | null;
+  ma50?: number | null;
+  rsi14?: number | null;
+  bbUpper?: number | null;
+  bbMid?: number | null;
+  bbLower?: number | null;
+};
+
+export type VietnamChartResponse = {
+  symbol: string;
+  source: string;
+  timeframe: string;
+  range: '1M' | '3M' | '6M' | '1Y' | string;
+  latestDate?: string | null;
+  points: VietnamChartPoint[];
+};
+
 export type VietnamCorporateActionEvent = {
   ticker: string;
   eventType: 'cash_dividend' | 'stock_dividend' | 'bonus_share' | 'rights_issue' | 'split' | 'meeting' | 'unknown' | string;
@@ -380,6 +407,15 @@ export const stocksApi = {
     });
     const { toCamelCase } = await import('./utils');
     return toCamelCase<VietnamWatchlistHealthResponse>(response.data);
+  },
+
+  async getVietnamChart(symbol: string, range = '6M'): Promise<VietnamChartResponse> {
+    const response = await apiClient.get('/api/v1/stocks/vn/chart', {
+      params: { symbol, range },
+      timeout: 120000,
+    });
+    const { toCamelCase } = await import('./utils');
+    return toCamelCase<VietnamChartResponse>(response.data);
   },
 
   async getVietnamRealtimeQuotes(tickers: string[]): Promise<VietnamRealtimeResponse> {
