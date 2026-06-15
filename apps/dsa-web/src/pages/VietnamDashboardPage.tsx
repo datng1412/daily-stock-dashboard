@@ -848,10 +848,55 @@ const CHART_HEIGHT = 652;
 const CHART_LEFT = 58;
 const CHART_RIGHT = 20;
 const PLOT_WIDTH = CHART_WIDTH - CHART_LEFT - CHART_RIGHT;
+const MIN_VISIBLE_CANDLES = 20;
+
+type ChartVisibleWindow = {
+  start: number;
+  end: number;
+};
 
 const chartX = (index: number, count: number) => (
   CHART_LEFT + (count <= 1 ? PLOT_WIDTH / 2 : (index / (count - 1)) * PLOT_WIDTH)
 );
+
+const minimumVisibleCandles = (total: number) => Math.min(MIN_VISIBLE_CANDLES, Math.max(total, 0));
+
+const clampChartWindow = (window: ChartVisibleWindow, total: number): ChartVisibleWindow => {
+  if (total <= 0) return { start: 0, end: 0 };
+  const minimumSize = minimumVisibleCandles(total);
+  const requestedSize = window.end - window.start;
+  const size = Math.min(total, Math.max(minimumSize, requestedSize || total));
+  const start = Math.max(0, Math.min(total - size, window.start));
+  return { start, end: start + size };
+};
+
+const fullChartWindow = (total: number): ChartVisibleWindow => ({ start: 0, end: Math.max(0, total) });
+
+const chartWindowAroundCenter = (window: ChartVisibleWindow, total: number, size: number): ChartVisibleWindow => {
+  if (total <= 0) return fullChartWindow(total);
+  const currentSize = Math.max(1, window.end - window.start);
+  const center = window.start + (currentSize - 1) / 2;
+  const start = Math.round(center - (size - 1) / 2);
+  return clampChartWindow({ start, end: start + size }, total);
+};
+
+const zoomChartWindow = (window: ChartVisibleWindow, total: number, direction: 'in' | 'out'): ChartVisibleWindow => {
+  const currentSize = window.end - window.start;
+  if (total <= 0 || currentSize <= 0) return fullChartWindow(total);
+  const minimumSize = minimumVisibleCandles(total);
+  const targetSize = direction === 'in'
+    ? Math.max(minimumSize, Math.round(currentSize * 0.68))
+    : Math.min(total, Math.round(currentSize / 0.68));
+  return chartWindowAroundCenter(window, total, targetSize);
+};
+
+const panChartWindow = (window: ChartVisibleWindow, total: number, direction: 'left' | 'right'): ChartVisibleWindow => {
+  const size = window.end - window.start;
+  if (total <= 0 || size <= 0) return fullChartWindow(total);
+  const step = Math.max(1, Math.round(size * 0.2));
+  const nextStart = direction === 'left' ? window.start - step : window.start + step;
+  return clampChartWindow({ start: nextStart, end: nextStart + size }, total);
+};
 
 const numericChartValues = (points: VietnamChartPoint[], keys: Array<keyof VietnamChartPoint>) =>
   points.flatMap((point) => keys.map((key) => point[key])).filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
@@ -938,6 +983,11 @@ const BrokerInspectChartSvg: React.FC<{
   showBollinger: boolean;
 }> = ({ points, showMA20, showMA50, showBollinger }) => {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
+  const firstPointDate = points[0]?.date;
+  const lastPointDate = points[points.length - 1]?.date;
+  useEffect(() => {
+    setHoverIndex(null);
+  }, [points.length, firstPointDate, lastPointDate]);
   const priceKeys: Array<keyof VietnamChartPoint> = ['high', 'low', 'open', 'close'];
   if (showMA20) priceKeys.push('ma20');
   if (showMA50) priceKeys.push('ma50');
@@ -1081,10 +1131,26 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
   const [showMA50, setShowMA50] = useState(true);
   const [showBollinger, setShowBollinger] = useState(false);
   const [chart, setChart] = useState<VietnamChartResponse | null>(null);
+  const [visibleWindow, setVisibleWindow] = useState<ChartVisibleWindow>(fullChartWindow(0));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const requestIdRef = useRef(0);
   const points = chart?.points ?? [];
+  const clampedVisibleWindow = clampChartWindow(visibleWindow, points.length);
+  const visiblePoints = useMemo(
+    () => points.slice(clampedVisibleWindow.start, clampedVisibleWindow.end),
+    [points, clampedVisibleWindow.start, clampedVisibleWindow.end],
+  );
+  const visibleCount = visiblePoints.length;
+  const canZoomIn = points.length > minimumVisibleCandles(points.length) && visibleCount > minimumVisibleCandles(points.length);
+  const canZoomOut = visibleCount < points.length;
+  const canPanLeft = clampedVisibleWindow.start > 0;
+  const canPanRight = clampedVisibleWindow.end < points.length;
+  const isZoomed = visibleCount > 0 && visibleCount < points.length;
+
+  const updateVisibleWindow = (updater: (window: ChartVisibleWindow) => ChartVisibleWindow) => {
+    setVisibleWindow((current) => clampChartWindow(updater(clampChartWindow(current, points.length)), points.length));
+  };
 
   useEffect(() => {
     const requestId = requestIdRef.current + 1;
@@ -1095,10 +1161,12 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
       .then((response) => {
         if (requestId !== requestIdRef.current) return;
         setChart(response);
+        setVisibleWindow(fullChartWindow(response.points.length));
       })
       .catch((err) => {
         if (requestId !== requestIdRef.current) return;
         setChart(null);
+        setVisibleWindow(fullChartWindow(0));
         setError(err instanceof Error ? err.message : 'Chart data unavailable');
       })
       .finally(() => {
@@ -1152,6 +1220,76 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
         <p className="mt-4 text-sm text-secondary-text">Loading chart data...</p>
       ) : points.length ? (
         <div className="mt-4 space-y-3">
+          <div className="flex flex-wrap items-center gap-1">
+            <button
+              type="button"
+              onClick={() => updateVisibleWindow((window) => zoomChartWindow(window, points.length, 'in'))}
+              disabled={!canZoomIn}
+              aria-label="Zoom in chart"
+              title="Zoom in chart"
+              className={cn(
+                'h-8 rounded-md border px-3 text-xs font-medium transition-colors',
+                canZoomIn ? 'border-border/70 bg-card/60 text-secondary-text hover:bg-hover hover:text-foreground' : 'cursor-not-allowed border-border/40 bg-card/30 text-secondary-text/50',
+              )}
+            >
+              +
+            </button>
+            <button
+              type="button"
+              onClick={() => updateVisibleWindow((window) => zoomChartWindow(window, points.length, 'out'))}
+              disabled={!canZoomOut}
+              aria-label="Zoom out chart"
+              title="Zoom out chart"
+              className={cn(
+                'h-8 rounded-md border px-3 text-xs font-medium transition-colors',
+                canZoomOut ? 'border-border/70 bg-card/60 text-secondary-text hover:bg-hover hover:text-foreground' : 'cursor-not-allowed border-border/40 bg-card/30 text-secondary-text/50',
+              )}
+            >
+              -
+            </button>
+            <button
+              type="button"
+              onClick={() => updateVisibleWindow((window) => panChartWindow(window, points.length, 'left'))}
+              disabled={!canPanLeft}
+              aria-label="Pan left"
+              title="Pan left"
+              className={cn(
+                'h-8 rounded-md border px-3 text-xs font-medium transition-colors',
+                canPanLeft ? 'border-border/70 bg-card/60 text-secondary-text hover:bg-hover hover:text-foreground' : 'cursor-not-allowed border-border/40 bg-card/30 text-secondary-text/50',
+              )}
+            >
+              {'←'}
+            </button>
+            <button
+              type="button"
+              onClick={() => updateVisibleWindow((window) => panChartWindow(window, points.length, 'right'))}
+              disabled={!canPanRight}
+              aria-label="Pan right"
+              title="Pan right"
+              className={cn(
+                'h-8 rounded-md border px-3 text-xs font-medium transition-colors',
+                canPanRight ? 'border-border/70 bg-card/60 text-secondary-text hover:bg-hover hover:text-foreground' : 'cursor-not-allowed border-border/40 bg-card/30 text-secondary-text/50',
+              )}
+            >
+              {'→'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setVisibleWindow(fullChartWindow(points.length))}
+              disabled={!isZoomed}
+              aria-label="Reset chart zoom"
+              title="Reset chart zoom"
+              className={cn(
+                'h-8 rounded-md border px-3 text-xs font-medium transition-colors',
+                isZoomed ? 'border-border/70 bg-card/60 text-secondary-text hover:bg-hover hover:text-foreground' : 'cursor-not-allowed border-border/40 bg-card/30 text-secondary-text/50',
+              )}
+            >
+              Reset
+            </button>
+            <span className="ml-2 text-xs text-secondary-text" data-testid="inspect-chart-visible-count">
+              Showing {visibleCount} of {points.length}
+            </span>
+          </div>
           <div className="flex flex-wrap gap-2 text-xs text-secondary-text">
             <span data-testid="inspect-legend-candles">Candlesticks</span>
             {showMA20 ? <span data-testid="inspect-legend-ma20">MA20</span> : null}
@@ -1161,7 +1299,7 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
             <span>Volume MA50</span>
             <span>RSI14</span>
           </div>
-          <BrokerInspectChartSvg points={points} showMA20={showMA20} showMA50={showMA50} showBollinger={showBollinger} />
+          <BrokerInspectChartSvg points={visiblePoints} showMA20={showMA20} showMA50={showMA50} showBollinger={showBollinger} />
           <p className="text-xs text-secondary-text">RSI14 numeric guides: 30 and 70.</p>
         </div>
       ) : (

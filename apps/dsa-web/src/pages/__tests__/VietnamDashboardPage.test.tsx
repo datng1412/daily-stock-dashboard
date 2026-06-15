@@ -364,6 +364,17 @@ const dataStatusPanel = () => {
   return within(panel);
 };
 
+const inspectChartCard = () => {
+  const detail = within(screen.getByText('Stock detail').closest('section') as HTMLElement);
+  const chartHeading = detail.getByRole('heading', { name: 'Inspect chart' });
+  const chartCard = chartHeading.closest('div')?.parentElement?.parentElement;
+  if (!chartCard) throw new Error('Inspect chart card not found');
+  return within(chartCard as HTMLElement);
+};
+
+const inspectDateLabels = (chartCard: ReturnType<typeof within>) =>
+  chartCard.queryAllByTestId('inspect-chart-date-label').map((label: HTMLElement) => label.textContent ?? '');
+
 describe('VietnamDashboardPage watchlist loading', () => {
   beforeEach(() => {
     vi.useRealTimers();
@@ -575,6 +586,12 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(chartCard.getByLabelText('MA20')).toBeChecked();
     expect(chartCard.getByLabelText('MA50')).toBeChecked();
     expect(chartCard.getByLabelText('Bollinger')).not.toBeChecked();
+    expect(chartCard.getByRole('button', { name: 'Zoom in chart' })).toBeInTheDocument();
+    expect(chartCard.getByRole('button', { name: 'Zoom out chart' })).toBeDisabled();
+    expect(chartCard.getByRole('button', { name: 'Pan left' })).toBeDisabled();
+    expect(chartCard.getByRole('button', { name: 'Pan right' })).toBeDisabled();
+    expect(chartCard.getByRole('button', { name: 'Reset chart zoom' })).toBeDisabled();
+    expect(chartCard.getByTestId('inspect-chart-visible-count')).toHaveTextContent('Showing 70 of 70');
     expect(chartCard.getByTestId('inspect-candlestick-chart')).toBeInTheDocument();
     expect(chartCard.getAllByTestId('inspect-chart-date-label').length).toBeGreaterThanOrEqual(4);
     expect(chartCard.getByText('Apr 1')).toBeInTheDocument();
@@ -590,6 +607,70 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(chartCard.getByText('Daily OHLCV source: Mozyfin')).toBeInTheDocument();
     expect(chartCard.getByText('KBS snapshot is separate and not used as daily close.')).toBeInTheDocument();
     expect(chartCard.queryByText(/buy|sell|hold|recommendation/i)).not.toBeInTheDocument();
+  });
+
+  it('zooms the inspect chart visible candle window in and out', async () => {
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('FPT', '6M'));
+
+    const chartCard = inspectChartCard();
+    const initialLabels = inspectDateLabels(chartCard);
+    expect(chartCard.getByTestId('inspect-chart-visible-count')).toHaveTextContent('Showing 70 of 70');
+
+    fireEvent.click(chartCard.getByRole('button', { name: 'Zoom in chart' }));
+
+    expect(chartCard.getByTestId('inspect-chart-visible-count')).toHaveTextContent('Showing 48 of 70');
+    expect(inspectDateLabels(chartCard)).not.toEqual(initialLabels);
+    expect(chartCard.queryByText('Apr 1')).not.toBeInTheDocument();
+    expect(chartCard.queryByText('Jun 9')).not.toBeInTheDocument();
+    expect(chartCard.getByRole('button', { name: 'Zoom out chart' })).toBeEnabled();
+
+    fireEvent.click(chartCard.getByRole('button', { name: 'Zoom out chart' }));
+
+    expect(chartCard.getByTestId('inspect-chart-visible-count')).toHaveTextContent('Showing 70 of 70');
+    expect(inspectDateLabels(chartCard)).toEqual(initialLabels);
+  });
+
+  it('pans the inspect chart visible window left and right', async () => {
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('FPT', '6M'));
+
+    const chartCard = inspectChartCard();
+    fireEvent.click(chartCard.getByRole('button', { name: 'Zoom in chart' }));
+    const zoomedLabels = inspectDateLabels(chartCard);
+
+    expect(chartCard.getByRole('button', { name: 'Pan left' })).toBeEnabled();
+    expect(chartCard.getByRole('button', { name: 'Pan right' })).toBeEnabled();
+
+    fireEvent.click(chartCard.getByRole('button', { name: 'Pan left' }));
+
+    const leftLabels = inspectDateLabels(chartCard);
+    expect(leftLabels).not.toEqual(zoomedLabels);
+    expect(chartCard.getByTestId('inspect-chart-visible-count')).toHaveTextContent('Showing 48 of 70');
+
+    fireEvent.click(chartCard.getByRole('button', { name: 'Pan right' }));
+
+    expect(inspectDateLabels(chartCard)).not.toEqual(leftLabels);
+    expect(chartCard.getByTestId('inspect-chart-visible-count')).toHaveTextContent('Showing 48 of 70');
+  });
+
+  it('resets the inspect chart visible window to the selected range', async () => {
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('FPT', '6M'));
+
+    const chartCard = inspectChartCard();
+    fireEvent.click(chartCard.getByRole('button', { name: 'Zoom in chart' }));
+    expect(chartCard.getByTestId('inspect-chart-visible-count')).toHaveTextContent('Showing 48 of 70');
+
+    fireEvent.click(chartCard.getByRole('button', { name: 'Reset chart zoom' }));
+
+    expect(chartCard.getByTestId('inspect-chart-visible-count')).toHaveTextContent('Showing 70 of 70');
+    expect(chartCard.getByText('Apr 1')).toBeInTheDocument();
+    expect(chartCard.getByText('Jun 9')).toBeInTheDocument();
+    expect(chartCard.getByRole('button', { name: 'Reset chart zoom' })).toBeDisabled();
   });
 
   it('shows Bollinger overlay only after enabling the chart toggle', async () => {
@@ -626,6 +707,28 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(chartCard.queryByText(/buy|sell|hold|recommendation/i)).not.toBeInTheDocument();
   });
 
+  it('resets chart zoom when switching the selected range', async () => {
+    mockedGetVietnamChart.mockImplementation(async (symbol, range = '6M') => {
+      const points = range === '1M' ? makeChartData().slice(40) : makeChartData();
+      return makeChartResponse(symbol, range, points);
+    });
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('FPT', '6M'));
+
+    const chartCard = inspectChartCard();
+    fireEvent.click(chartCard.getByRole('button', { name: 'Zoom in chart' }));
+    expect(chartCard.getByTestId('inspect-chart-visible-count')).toHaveTextContent('Showing 48 of 70');
+
+    fireEvent.click(chartCard.getByRole('button', { name: '1M' }));
+
+    await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('FPT', '1M'));
+    await waitFor(() => expect(chartCard.getByTestId('inspect-chart-visible-count')).toHaveTextContent('Showing 30 of 30'));
+    expect(chartCard.getByRole('button', { name: 'Reset chart zoom' })).toBeDisabled();
+    expect(chartCard.getByRole('button', { name: '1M' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
   it('renders chart data unavailable when selected ticker has no chart points', async () => {
     mockedGetVietnamChart.mockResolvedValue(makeChartResponse('FPT', '6M', []));
 
@@ -637,6 +740,11 @@ describe('VietnamDashboardPage watchlist loading', () => {
     const chartHeading = detail.getByRole('heading', { name: 'Inspect chart' });
     const chartCard = within(chartHeading.closest('div')?.parentElement?.parentElement as HTMLElement);
     expect(chartCard.getByText('Chart data unavailable')).toBeInTheDocument();
+    expect(chartCard.queryByRole('button', { name: 'Zoom in chart' })).not.toBeInTheDocument();
+    expect(chartCard.queryByRole('button', { name: 'Zoom out chart' })).not.toBeInTheDocument();
+    expect(chartCard.queryByRole('button', { name: 'Pan left' })).not.toBeInTheDocument();
+    expect(chartCard.queryByRole('button', { name: 'Pan right' })).not.toBeInTheDocument();
+    expect(chartCard.queryByRole('button', { name: 'Reset chart zoom' })).not.toBeInTheDocument();
     expect(chartCard.queryAllByTestId('inspect-chart-date-label')).toHaveLength(0);
   });
 
