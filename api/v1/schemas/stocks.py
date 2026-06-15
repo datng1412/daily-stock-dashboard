@@ -201,6 +201,38 @@ class VietnamWatchlistHealthResponse(BaseModel):
     cache_metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
+class VietnamCorporateActionEvent(BaseModel):
+    """Vietnam corporate-action calendar/history event."""
+
+    ticker: str
+    event_type: str = "unknown"
+    status: str = "past"
+    ex_date: Optional[str] = None
+    record_date: Optional[str] = None
+    payment_date: Optional[str] = None
+    cash_dividend_per_share: Optional[float] = None
+    stock_dividend_ratio: Optional[str] = None
+    rights_ratio: Optional[str] = None
+    description: Optional[str] = None
+    source: Optional[str] = None
+    source_url: Optional[str] = None
+    last_checked_at: Optional[str] = None
+
+
+class VietnamCorporateActionsResponse(BaseModel):
+    """Vietnam corporate-action calendar/history response."""
+
+    market: str = "VN"
+    status: str = "unavailable"
+    source: Optional[str] = None
+    last_checked_at: Optional[str] = None
+    requested_tickers: List[str] = Field(default_factory=list)
+    months_back: int = 6
+    items: List[VietnamCorporateActionEvent] = Field(default_factory=list)
+    error: Optional[str] = None
+    error_detail: Optional[str] = None
+
+
 class VietnamRealtimeQuote(BaseModel):
     """Vietnam optional realtime/snapshot quote row."""
 

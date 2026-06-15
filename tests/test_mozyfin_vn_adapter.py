@@ -357,6 +357,22 @@ def test_corporate_action_reference_unavailable_does_not_change_raw_price():
     assert corporate_action["adjustment_source"] == "manual_unavailable"
 
 
+def test_vietnam_corporate_actions_unavailable_without_verified_provider(monkeypatch):
+    monkeypatch.delenv("MOZYFIN_FIXTURE_DIR", raising=False)
+    service = VietnamMarketService(manager=_StubManager(_sample_vn_rows()), config=VietnamDashboardConfig(history_days=30, news_limit=1))
+
+    payload = service.build_corporate_actions(["FPT", "ACB"], months_back=6)
+
+    assert payload["market"] == "VN"
+    assert payload["status"] == "unavailable"
+    assert payload["requested_tickers"] == ["FPT", "ACB"]
+    assert payload["months_back"] == 6
+    assert payload["items"] == []
+    assert payload["source"] is None
+    assert payload["error"] == "Corporate action calendar unavailable."
+    assert "not inferred from KBS reference price" in payload["error_detail"]
+
+
 def test_cash_dividend_reference_adjustment_is_separate_from_raw_close():
     corporate_action = build_corporate_action_reference(
         previous_close=27000,

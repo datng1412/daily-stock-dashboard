@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   stocksApi,
+  type VietnamCorporateActionsResponse,
   type VietnamObservabilityResponse,
   type VietnamRealtimeResponse,
   type VietnamRealtimeTradesResponse,
@@ -18,6 +19,7 @@ vi.mock('../../api/stocks', () => ({
     getVietnamWatchlist: vi.fn(),
     getVietnamRealtimeQuotes: vi.fn(),
     getVietnamRealtimeTrades: vi.fn(),
+    getVietnamCorporateActions: vi.fn(),
     getVietnamObservability: vi.fn(),
   },
 }));
@@ -180,6 +182,7 @@ const makeResponse = (tickers: string[], options: { fixtureMode?: boolean } = {}
 const mockedGetVietnamWatchlist = vi.mocked(stocksApi.getVietnamWatchlist);
 const mockedGetVietnamRealtimeQuotes = vi.mocked(stocksApi.getVietnamRealtimeQuotes);
 const mockedGetVietnamRealtimeTrades = vi.mocked(stocksApi.getVietnamRealtimeTrades);
+const mockedGetVietnamCorporateActions = vi.mocked(stocksApi.getVietnamCorporateActions);
 const mockedGetVietnamObservability = vi.mocked(stocksApi.getVietnamObservability);
 
 const makeObservabilityResponse = (overrides: Partial<VietnamObservabilityResponse> = {}): VietnamObservabilityResponse => ({
@@ -298,6 +301,22 @@ const makeTradesResponse = (symbol: string): VietnamRealtimeTradesResponse => ({
   cache: { cacheStatus: 'miss' },
 });
 
+const makeCorporateActionsResponse = (
+  tickers: string[],
+  overrides: Partial<VietnamCorporateActionsResponse> = {},
+): VietnamCorporateActionsResponse => ({
+  market: 'VN',
+  status: 'unavailable',
+  source: null,
+  lastCheckedAt: '2026-06-11T10:00:00+07:00',
+  requestedTickers: tickers,
+  monthsBack: 6,
+  items: [],
+  error: 'Corporate action history/calendar unavailable.',
+  errorDetail: 'No verified Vietnam corporate-action event provider is configured.',
+  ...overrides,
+});
+
 const clickTickerRow = (ticker: string) => {
   const indicatorTable = screen.getByRole('heading', { name: 'Indicator table' }).closest('section');
   if (!indicatorTable) throw new Error('Indicator table section not found');
@@ -320,12 +339,14 @@ describe('VietnamDashboardPage watchlist loading', () => {
     mockedGetVietnamWatchlist.mockReset();
     mockedGetVietnamRealtimeQuotes.mockReset();
     mockedGetVietnamRealtimeTrades.mockReset();
+    mockedGetVietnamCorporateActions.mockReset();
     mockedGetVietnamObservability.mockReset();
     mockedGetVietnamMarketPhase.mockReset();
     mockedGetVietnamMarketPhase.mockReturnValue(makeMarketPhase());
     mockedGetVietnamWatchlist.mockImplementation(async (tickers) => makeResponse(tickers?.length ? tickers : defaultTickers));
     mockedGetVietnamRealtimeQuotes.mockImplementation(async (tickers) => makeRealtimeResponse(tickers));
     mockedGetVietnamRealtimeTrades.mockImplementation(async (symbol) => makeTradesResponse(symbol));
+    mockedGetVietnamCorporateActions.mockImplementation(async (tickers) => makeCorporateActionsResponse(tickers));
     mockedGetVietnamObservability.mockImplementation(async () => makeObservabilityResponse());
   });
 
@@ -381,10 +402,11 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(screen.getAllByText('101.5').length).toBeGreaterThan(0);
   });
 
-  it('shows KBS reference price and unavailable corporate-action data without replacing OHLCV close', async () => {
+  it('shows KBS reference price separately and corporate-action calendar unavailable state', async () => {
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledWith(defaultTickers));
+    await waitFor(() => expect(mockedGetVietnamCorporateActions).toHaveBeenCalledWith(['FPT'], 6));
 
     const detail = within(screen.getByText('Stock detail').closest('section') as HTMLElement);
     const referencePriceLabel = detail.getAllByText('Reference price')[1];
@@ -392,13 +414,17 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(within(referencePriceLabel.closest('div') as HTMLElement).getByText('100')).toBeInTheDocument();
     expect(within(detail.getByText('Price vs reference').closest('div') as HTMLElement).getByText('+1.5 / +1.5%')).toBeInTheDocument();
     expect(within(detail.getAllByText('Source')[0].closest('div') as HTMLElement).getByText('KBS board')).toBeInTheDocument();
-    expect(within(detail.getByText('Corporate action data').closest('div') as HTMLElement).getByText('unavailable')).toBeInTheDocument();
-    expect(detail.getByText('Corporate action data unavailable. Reference price is shown separately from raw OHLCV close.')).toBeInTheDocument();
+    expect(detail.getByText('KBS board reference only')).toBeInTheDocument();
+    expect(detail.getByText('Reference price is not labeled dividend-adjusted unless the Corporate actions card has a confirmed event.')).toBeInTheDocument();
+    expect(detail.getByRole('heading', { name: 'Corporate actions' })).toBeInTheDocument();
+    expect(detail.getByText('Recent and upcoming events')).toBeInTheDocument();
+    expect(detail.getByText('Corporate action history/calendar unavailable.')).toBeInTheDocument();
+    expect(detail.getByText('No verified Vietnam corporate-action event provider is configured.')).toBeInTheDocument();
     expect(detail.getByText('Latest price / OHLCV close (VND)')).toBeInTheDocument();
     expect(detail.getByText('100 / 100')).toBeInTheDocument();
   });
 
-  it('shows confirmed cash-dividend adjusted reference separately from KBS reference and raw close', async () => {
+  it('shows explicit upcoming and recent corporate-action events without replacing raw close', async () => {
     const response = makeResponse(defaultTickers);
     response.watchlist[0] = {
       ...response.watchlist[0],
@@ -406,20 +432,41 @@ describe('VietnamDashboardPage watchlist loading', () => {
       ohlcvClose: 26500,
       close: 26500,
       previousClose: 27000,
-      corporateAction: {
-        status: 'detected',
-        type: 'cash_dividend',
-        exDate: '2026-06-12',
-        cashDividendPerShare: 1000,
-        previousClose: 27000,
-        adjustedReferencePrice: 26000,
-        adjustmentSource: 'provider_event',
-        priceVsAdjustedReference: 500,
-        priceVsAdjustedReferencePct: 1.92,
-        note: 'Cash dividend adjustment is shown separately from raw OHLCV close.',
-      },
     };
     mockedGetVietnamWatchlist.mockResolvedValue(response);
+    mockedGetVietnamCorporateActions.mockImplementation(async (tickers) => makeCorporateActionsResponse(tickers, {
+      status: 'ok',
+      source: 'provider_name',
+      error: null,
+      errorDetail: null,
+      items: [
+        {
+          ticker: 'FPT',
+          eventType: 'cash_dividend',
+          status: 'upcoming',
+          exDate: '2026-06-12',
+          recordDate: '2026-06-13',
+          paymentDate: '2026-06-30',
+          cashDividendPerShare: 1000,
+          description: 'Cash dividend 1,000 VND/share',
+          source: 'provider_name',
+          sourceUrl: null,
+          lastCheckedAt: '2026-06-11T10:00:00+07:00',
+        },
+        {
+          ticker: 'FPT',
+          eventType: 'meeting',
+          status: 'recent',
+          exDate: null,
+          recordDate: '2026-05-20',
+          paymentDate: null,
+          description: 'Annual general meeting',
+          source: 'provider_name',
+          sourceUrl: null,
+          lastCheckedAt: '2026-06-11T10:00:00+07:00',
+        },
+      ],
+    }));
     mockedGetVietnamRealtimeQuotes.mockImplementation(async (tickers) => ({
       ...makeRealtimeResponse(tickers),
       quotes: makeRealtimeResponse(tickers).quotes.map((quote) => ({
@@ -435,6 +482,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+    await waitFor(() => expect(mockedGetVietnamCorporateActions).toHaveBeenCalledWith(['FPT'], 6));
 
     const detail = within(screen.getByText('Stock detail').closest('section') as HTMLElement);
     const referencePriceLabel = detail.getAllByText('Reference price')[1];
@@ -442,22 +490,47 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(detail.getByText('26,500 / 26,500')).toBeInTheDocument();
     expect(within(referencePriceLabel.closest('div') as HTMLElement).getByText('26,000')).toBeInTheDocument();
     expect(within(detail.getByText('Price vs reference').closest('div') as HTMLElement).getByText('+500 / +1.92%')).toBeInTheDocument();
-    expect(detail.getByText('Corporate action')).toBeInTheDocument();
+    expect(detail.getByRole('heading', { name: 'Corporate actions' })).toBeInTheDocument();
+    expect(detail.getByText('Recent and upcoming events')).toBeInTheDocument();
+    expect(detail.getByText('Upcoming')).toBeInTheDocument();
+    expect(detail.getByText('Recent, last 6 months')).toBeInTheDocument();
     expect(detail.getByText('cash dividend')).toBeInTheDocument();
-    expect(detail.getByText('Ex-date')).toBeInTheDocument();
-    expect(detail.getByText('2026-06-12')).toBeInTheDocument();
+    expect(detail.getAllByText('2026-06-12').length).toBeGreaterThan(0);
     expect(detail.getByText('Cash dividend')).toBeInTheDocument();
     expect(detail.getByText('1,000 VND/share')).toBeInTheDocument();
-    expect(detail.getByText('Adjusted reference')).toBeInTheDocument();
-    expect(within(detail.getByText('Adjusted reference').closest('div') as HTMLElement).getByText('26,000')).toBeInTheDocument();
-    expect(detail.getByText('Price vs adjusted reference')).toBeInTheDocument();
-    expect(within(detail.getByText('Price vs adjusted reference').closest('div') as HTMLElement).getByText('+500 / +1.92%')).toBeInTheDocument();
+    expect(detail.getByText('meeting')).toBeInTheDocument();
+    expect(detail.getByText('Annual general meeting')).toBeInTheDocument();
+    expect(detail.getAllByText(/Source: provider_name/).length).toBeGreaterThan(0);
+  });
+
+  it('shows the OK-empty corporate-action state without inferring events', async () => {
+    mockedGetVietnamCorporateActions.mockImplementation(async (tickers) => makeCorporateActionsResponse(tickers, {
+      status: 'ok',
+      source: 'provider_name',
+      error: null,
+      errorDetail: null,
+      items: [],
+    }));
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamCorporateActions).toHaveBeenCalledWith(['FPT'], 6));
+
+    const detail = within(screen.getByText('Stock detail').closest('section') as HTMLElement);
+    expect(detail.getByRole('heading', { name: 'Corporate actions' })).toBeInTheDocument();
+    expect(detail.getByText('Recent and upcoming events')).toBeInTheDocument();
+    expect(detail.getByText('No recent or upcoming corporate actions found.')).toBeInTheDocument();
   });
 
   it('clarifies Mozyfin 1H and KBS volume labels while preserving numeric values', async () => {
     const response = makeResponse(defaultTickers);
     response.watchlist[0] = {
       ...response.watchlist[0],
+      indicators: {
+        ...response.watchlist[0].indicators,
+        avgVolume20D: 4800000,
+      },
+      liquidity: { ...response.watchlist[0].liquidity, avgVolume20D: 4800000 },
       intradayCandles: [
         {
           dateTime: '2026-06-11T10:00:00+07:00',
@@ -494,7 +567,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
       ...makeRealtimeResponse(tickers),
       quotes: makeRealtimeResponse(tickers).quotes.map((quote) => ({
         ...quote,
-        volumeAccumulated: quote.symbol === 'FPT' ? 3456789 : quote.volumeAccumulated,
+        volumeAccumulated: quote.symbol === 'FPT' ? 3456000 : quote.volumeAccumulated,
       })),
     }));
 
@@ -504,17 +577,152 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     expect(screen.getByText('Latest 1H candle volume')).toBeInTheDocument();
     expect(screen.getByText('Mozyfin session 1H volume')).toBeInTheDocument();
+    expect(screen.getAllByText('Session volume / 20D avg daily volume').length).toBeGreaterThan(0);
     expect(screen.queryByText('Loaded 1H candles total volume (all loaded)')).not.toBeInTheDocument();
+    expect(screen.queryByText('Volume ratio')).not.toBeInTheDocument();
+    expect(screen.queryByText('Vol ratio')).not.toBeInTheDocument();
     expect(screen.getByText('KBS session accumulated volume')).toBeInTheDocument();
     expect(screen.getByText('Mozyfin session 1H volume is calculated from filtered 1H candles; KBS session volume comes from the realtime board and may differ.')).toBeInTheDocument();
     expect(screen.getAllByText('1,234,567').length).toBeGreaterThanOrEqual(2);
-    expect(screen.getByText('3,456,789')).toBeInTheDocument();
+    expect(screen.getByText('3,456,000')).toBeInTheDocument();
+    expect(screen.getAllByText('0.72x').length).toBeGreaterThan(0);
     expect(screen.getByText('103 / 99')).toBeInTheDocument();
     expect(screen.getByText('4%')).toBeInTheDocument();
     const sessionCandlesLabel = screen.getByText('Session 1H candles');
     expect(within(sessionCandlesLabel.closest('div') as HTMLElement).getByText('5')).toBeInTheDocument();
     expect(screen.queryByText('Not enough session candles')).not.toBeInTheDocument();
-    expect(screen.getByText('1.75')).toBeInTheDocument();
+    expect(screen.getByText('Latest 1H volume vs avg 1H')).toBeInTheDocument();
+    expect(screen.getByText('1.75x')).toBeInTheDocument();
+  });
+
+  it('falls back to Mozyfin session 1H volume when KBS accumulated volume is stale', async () => {
+    const response = makeResponse(defaultTickers);
+    response.watchlist[0] = {
+      ...response.watchlist[0],
+      indicators: {
+        ...response.watchlist[0].indicators,
+        avgVolume20D: 4800000,
+      },
+      liquidity: { ...response.watchlist[0].liquidity, avgVolume20D: 4800000 },
+      intradayPulse: {
+        latest1hClose: 102,
+        latest1hOpen: 100,
+        latest1hHigh: 103,
+        latest1hLow: 99,
+        latest1hVolume: 1234567,
+        latest1hChange: 2,
+        latest1hChangePercent: 2,
+        sessionHighFrom1H: 103,
+        sessionLowFrom1H: 99,
+        sessionRangePctFrom1H: 4,
+        sessionVolumeFrom1H: 2400000,
+        sessionCandlesCount: 5,
+        cumulative1hVolume: 2400000,
+        loadedCandlesTotalVolume: 2400000,
+        direction: 'up',
+        rangePercent: 4,
+        volumeVsAvg1h: null,
+      },
+    };
+    mockedGetVietnamWatchlist.mockResolvedValue(response);
+    mockedGetVietnamRealtimeQuotes.mockImplementation(async (tickers) => ({
+      ...makeRealtimeResponse(tickers, { stale: true }),
+      quotes: makeRealtimeResponse(tickers, { stale: true }).quotes.map((quote) => ({
+        ...quote,
+        volumeAccumulated: quote.symbol === 'FPT' ? 3456000 : quote.volumeAccumulated,
+      })),
+    }));
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+
+    expect(screen.getAllByText('Session volume / 20D avg daily volume').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('0.5x').length).toBeGreaterThan(0);
+    expect(screen.queryByText('0.72x')).not.toBeInTheDocument();
+  });
+
+  it('shows volume ratio missing states when daily average or session volume is unavailable', async () => {
+    const response = makeResponse(defaultTickers);
+    response.watchlist[0] = {
+      ...response.watchlist[0],
+      indicators: {
+        ...response.watchlist[0].indicators,
+        avgVolume20D: null,
+      },
+      liquidity: { ...response.watchlist[0].liquidity, avgVolume20D: null },
+      intradayPulse: {
+        latest1hClose: 102,
+        latest1hOpen: 100,
+        latest1hHigh: 103,
+        latest1hLow: 99,
+        latest1hVolume: 1234567,
+        latest1hChange: 2,
+        latest1hChangePercent: 2,
+        sessionHighFrom1H: 103,
+        sessionLowFrom1H: 99,
+        sessionRangePctFrom1H: 4,
+        sessionVolumeFrom1H: 2400000,
+        sessionCandlesCount: 5,
+        cumulative1hVolume: 2400000,
+        loadedCandlesTotalVolume: 2400000,
+        direction: 'up',
+        rangePercent: 4,
+        volumeVsAvg1h: null,
+      },
+    };
+    mockedGetVietnamWatchlist.mockResolvedValue(response);
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+
+    expect(screen.getAllByText('20D avg unavailable').length).toBeGreaterThan(0);
+  });
+
+  it('shows a session volume missing state when neither KBS nor Mozyfin session volume is available', async () => {
+    const response = makeResponse(defaultTickers);
+    response.watchlist[0] = {
+      ...response.watchlist[0],
+      indicators: {
+        ...response.watchlist[0].indicators,
+        avgVolume20D: 4800000,
+      },
+      liquidity: { ...response.watchlist[0].liquidity, avgVolume20D: 4800000 },
+      intradayPulse: {
+        latest1hClose: 102,
+        latest1hOpen: 100,
+        latest1hHigh: 103,
+        latest1hLow: 99,
+        latest1hVolume: 1234567,
+        latest1hChange: 2,
+        latest1hChangePercent: 2,
+        sessionHighFrom1H: 103,
+        sessionLowFrom1H: 99,
+        sessionRangePctFrom1H: 4,
+        sessionVolumeFrom1H: null,
+        sessionCandlesCount: 5,
+        cumulative1hVolume: 2400000,
+        loadedCandlesTotalVolume: 2400000,
+        direction: 'up',
+        rangePercent: 4,
+        volumeVsAvg1h: null,
+      },
+    };
+    mockedGetVietnamWatchlist.mockResolvedValue(response);
+    mockedGetVietnamRealtimeQuotes.mockImplementation(async (tickers) => ({
+      ...makeRealtimeResponse(tickers, { unavailable: true }),
+      quotes: makeRealtimeResponse(tickers, { unavailable: true }).quotes.map((quote) => ({
+        ...quote,
+        volumeAccumulated: null,
+      })),
+    }));
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+
+    expect(screen.getAllByText('Session volume unavailable').length).toBeGreaterThan(0);
   });
 
   it('shows explanatory intraday empty states instead of bare placeholders', async () => {
@@ -562,13 +770,8 @@ describe('VietnamDashboardPage watchlist loading', () => {
       'Session volume requires current-session intraday candles.',
     );
 
-    const volumeVsAvgLabel = screen.getByText('Volume vs avg 1H');
-    const volumeVsAvgCard = volumeVsAvgLabel.closest('div');
-    expect(within(volumeVsAvgCard as HTMLElement).getByText('Avg unavailable')).toHaveAttribute(
-      'title',
-      'Volume vs average requires enough historical 1H candles.',
-    );
-    expect(within(volumeVsAvgCard as HTMLElement).queryByText('-')).not.toBeInTheDocument();
+    expect(screen.queryByText('Latest 1H volume vs avg 1H')).not.toBeInTheDocument();
+    expect(screen.queryByText('Avg unavailable')).not.toBeInTheDocument();
   });
 
   it('shows unavailable session values when session candles exist but metrics are missing', async () => {

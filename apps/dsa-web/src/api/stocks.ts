@@ -256,6 +256,34 @@ export type VietnamRealtimeTradesResponse = {
   cache: Record<string, unknown>;
 };
 
+export type VietnamCorporateActionEvent = {
+  ticker: string;
+  eventType: 'cash_dividend' | 'stock_dividend' | 'bonus_share' | 'rights_issue' | 'split' | 'meeting' | 'unknown' | string;
+  status: 'upcoming' | 'recent' | 'past' | string;
+  exDate?: string | null;
+  recordDate?: string | null;
+  paymentDate?: string | null;
+  cashDividendPerShare?: number | null;
+  stockDividendRatio?: string | null;
+  rightsRatio?: string | null;
+  description?: string | null;
+  source?: string | null;
+  sourceUrl?: string | null;
+  lastCheckedAt?: string | null;
+};
+
+export type VietnamCorporateActionsResponse = {
+  market: 'VN';
+  status: 'ok' | 'unavailable' | 'error' | string;
+  source?: string | null;
+  lastCheckedAt?: string | null;
+  requestedTickers: string[];
+  monthsBack: number;
+  items: VietnamCorporateActionEvent[];
+  error?: string | null;
+  errorDetail?: string | null;
+};
+
 export type VietnamObservabilityResponse = {
   market: 'VN';
   status: 'ok' | 'error';
@@ -370,6 +398,18 @@ export const stocksApi = {
     });
     const { toCamelCase } = await import('./utils');
     return toCamelCase<VietnamRealtimeTradesResponse>(response.data);
+  },
+
+  async getVietnamCorporateActions(tickers: string[], monthsBack = 6): Promise<VietnamCorporateActionsResponse> {
+    const response = await apiClient.get('/api/v1/stocks/vn/corporate-actions', {
+      params: {
+        ...(tickers.length ? { tickers: tickers.join(',') } : {}),
+        months_back: monthsBack,
+      },
+      timeout: 30000,
+    });
+    const { toCamelCase } = await import('./utils');
+    return toCamelCase<VietnamCorporateActionsResponse>(response.data);
   },
 
   async getVietnamObservability(): Promise<VietnamObservabilityResponse> {

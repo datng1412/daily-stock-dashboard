@@ -1194,6 +1194,25 @@ class VietnamMarketService:
         health["cache_metadata"] = self._build_cache_metadata(rows)
         return health
 
+    def build_corporate_actions(self, tickers: Optional[Iterable[str]] = None, months_back: int = 6) -> Dict[str, Any]:
+        """Return VN corporate-action calendar/history shape when an explicit event source is unavailable."""
+        symbols = normalize_vietnam_tickers(tickers)
+        safe_months_back = max(1, min(int(months_back or 6), 24))
+        return {
+            "market": "VN",
+            "status": "unavailable",
+            "source": None,
+            "last_checked_at": datetime.now(timezone.utc).isoformat(),
+            "requested_tickers": symbols,
+            "months_back": safe_months_back,
+            "items": [],
+            "error": "Corporate action calendar unavailable.",
+            "error_detail": (
+                "No verified Vietnam corporate-action event provider is configured. "
+                "Events are not inferred from KBS reference price, price gaps, adjusted reference, or OHLCV changes."
+            ),
+        }
+
     def _build_cache_metadata(self, rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         hit_count = 0
         miss_count = 0

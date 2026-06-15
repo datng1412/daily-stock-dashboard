@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [修复] Clarify Vietnam dashboard session volume ratio semantics, hide unavailable 1H average-volume comparisons, and show corporate actions as recent/upcoming states without inferring events.
 - [改进] Add lightweight in-memory Vietnam dashboard fetch observability for Mozyfin/KBS counters and compact Data status display.
 - [修复] Harden Vietnam KBS refresh loops and provider error paths so overlapping refreshes, stale trade responses, cancellations, and diagnostic counter failures do not break the dashboard.
 - [改进] Add phase-aware Vietnam KBS snapshot display state so closed/post-close/weekend snapshots are shown as last available while raw stale age and reasons remain visible.

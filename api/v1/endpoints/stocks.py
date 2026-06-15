@@ -26,6 +26,7 @@ from api.v1.schemas.stocks import (
     KLineData,
     StockHistoryResponse,
     StockQuote,
+    VietnamCorporateActionsResponse,
     VietnamObservabilityResponse,
     VietnamRealtimeResponse,
     VietnamRealtimeTradesResponse,
@@ -464,6 +465,28 @@ def get_vietnam_watchlist(
 )
 def get_vietnam_observability() -> VietnamObservabilityResponse:
     return VietnamObservabilityResponse(**vietnam_observability_snapshot())
+
+
+@router.get(
+    "/vn/corporate-actions",
+    response_model=VietnamCorporateActionsResponse,
+    summary="Vietnam corporate-action calendar/history",
+    description="Return explicitly sourced Vietnam corporate-action events when a verified provider is configured.",
+)
+def get_vietnam_corporate_actions(
+    tickers: Optional[str] = Query(None, description="Comma-separated VN tickers. Defaults to FPT,VPB,MSB,SCS,ACV,ACB"),
+    months_back: int = Query(6, ge=1, le=24, description="Recent historical window in months"),
+) -> VietnamCorporateActionsResponse:
+    try:
+        symbols = [item.strip().upper() for item in tickers.split(",") if item.strip()] if tickers else None
+        payload = VietnamMarketService().build_corporate_actions(symbols, months_back=months_back)
+        return VietnamCorporateActionsResponse(**payload)
+    except Exception as e:
+        logger.error("Vietnam corporate actions failed: %s", e, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={"error": "vn_corporate_actions_failed", "message": str(e)},
+        )
 
 
 @router.get(

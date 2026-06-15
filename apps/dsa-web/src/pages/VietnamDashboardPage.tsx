@@ -3,6 +3,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Activity, AlertTriangle, ArrowDown, ArrowDownRight, ArrowUp, ArrowUpRight, Banknote, DatabaseZap, Plus, RefreshCw, RotateCcw, ShieldAlert, X } from 'lucide-react';
 import {
   stocksApi,
+  type VietnamCorporateActionEvent,
+  type VietnamCorporateActionsResponse,
   type VietnamObservabilityResponse,
   type VietnamRealtimeQuote,
   type VietnamRealtimeTrade,
@@ -42,6 +44,11 @@ const formatNumber = (value?: number | null, maximumFractionDigits = 0) => {
 
 const formatPrice = (value?: number | null) => formatNumber(value, 2);
 
+const formatRatio = (value?: number | null) => {
+  if (value === null || value === undefined || Number.isNaN(value)) return '-';
+  return `${formatNumber(value, 2)}x`;
+};
+
 const formatSignedNumber = (value?: number | null, maximumFractionDigits = 2) => {
   if (value === null || value === undefined || Number.isNaN(value)) return '-';
   const formatted = formatNumber(Math.abs(value), maximumFractionDigits);
@@ -57,6 +64,11 @@ const formatReferenceDelta = (value?: number | null, percent?: number | null) =>
 const neutralFormulaText = (value: string) => (
   /recommend/i.test(value) ? 'Rule-based neutral condition labels only.' : value
 );
+
+const formulaDisplayLabel = (key: string) => {
+  if (key === 'volume_ratio') return 'Daily volume / 20D avg daily volume';
+  return key.replaceAll('_', ' ');
+};
 
 const formatCountdown = (seconds?: number | null) => {
   if (seconds === null || seconds === undefined) return '-';
@@ -176,6 +188,26 @@ const kbsSnapshotState = (quote?: VietnamRealtimeQuote | null, marketPhaseCode?:
     snapshotTimeDisplay: quote?.snapshotTimeDisplay ?? quote?.realtimeTimeDisplay ?? quote?.snapshotTime ?? quote?.realtimeTime,
   });
 
+const usableKbsSessionVolume = (quote?: VietnamRealtimeQuote | null, state?: KbsSnapshotDisplayResult) => {
+  if (quote?.volumeAccumulated === null || quote?.volumeAccumulated === undefined) return null;
+  if (quote.status === 'error' || quote.status === 'unavailable') return null;
+  if (quote.isStale === true || state?.severity === 'error' || state?.severity === 'warning') return null;
+  return quote.volumeAccumulated;
+};
+
+const sessionVolumeToAvgDailyVolume = (
+  item: VietnamWatchItem,
+  realtimeQuote?: VietnamRealtimeQuote | null,
+  state?: KbsSnapshotDisplayResult,
+) => {
+  const avgVolume20D = item.indicators.avgVolume20D ?? item.liquidity?.avgVolume20D;
+  const sessionVolume = usableKbsSessionVolume(realtimeQuote, state) ?? item.intradayPulse?.sessionVolumeFrom1H ?? null;
+  if (avgVolume20D === null || avgVolume20D === undefined) return '20D avg unavailable';
+  if (sessionVolume === null || sessionVolume === undefined) return 'Session volume unavailable';
+  if (avgVolume20D <= 0) return '20D avg unavailable';
+  return formatRatio(sessionVolume / avgVolume20D);
+};
+
 const rawKbsFreshnessText = (quote?: VietnamRealtimeQuote | null) => (
   `raw age ${quote?.ageSeconds ?? '-'}s | raw stale ${quote?.isStale === null || quote?.isStale === undefined ? '-' : String(quote.isStale)} | reason ${quote?.staleReason ?? '-'}`
 );
@@ -243,6 +275,7 @@ const WatchCard: React.FC<{ item: VietnamWatchItem; realtimeQuote?: VietnamRealt
   const freshness = cacheFreshness(item);
   const lastFetched = latestFetchedValue(item);
   const kbsState = kbsSnapshotState(realtimeQuote, marketPhase.code);
+  const sessionVolumeRatioText = sessionVolumeToAvgDailyVolume(item, realtimeQuote, kbsState);
 
   return (
     <article className="rounded-lg border border-border/70 bg-card p-4 shadow-soft-card">
@@ -302,8 +335,8 @@ const WatchCard: React.FC<{ item: VietnamWatchItem; realtimeQuote?: VietnamRealt
           <p className="font-semibold text-foreground">{formatNumber(item.indicators.rsi14Wilder ?? item.indicators.rsi14, 2)}</p>
         </div>
         <div>
-          <p className="text-xs text-secondary-text">Volume ratio</p>
-          <p className="font-semibold text-foreground">{formatNumber(item.indicators.volumeRatio, 2)}</p>
+          <p className="text-xs text-secondary-text">Session volume / 20D avg daily volume</p>
+          <p className="font-semibold text-foreground">{sessionVolumeRatioText}</p>
         </div>
         <div>
           <p className="text-xs text-secondary-text">Cache</p>
@@ -725,7 +758,7 @@ const IndicatorTable: React.FC<{
             <th className="px-3 py-2">Final close</th>
             <th className="px-3 py-2 text-right">MA20</th>
             <th className="px-3 py-2 text-right">RSI14 Wilder/RMA</th>
-            <th className="px-3 py-2 text-right">Vol ratio</th>
+            <th className="px-3 py-2 text-right">Session vol / 20D avg</th>
             <th className="px-3 py-2">Warnings</th>
             <th className="px-3 py-2">Cache</th>
           </tr>
@@ -734,6 +767,7 @@ const IndicatorTable: React.FC<{
           {items.map((item) => {
             const quote = realtimeQuotes[item.ticker];
             const kbsState = kbsSnapshotState(quote, marketPhase.code);
+            const sessionVolumeRatioText = sessionVolumeToAvgDailyVolume(item, quote, kbsState);
             return (
               <tr
                 key={item.ticker}
@@ -775,7 +809,7 @@ const IndicatorTable: React.FC<{
                 </td>
                 <td className="px-3 py-3 text-right">{formatPrice(item.indicators.ma20)}</td>
                 <td className="px-3 py-3 text-right">{formatNumber(item.indicators.rsi14Wilder ?? item.indicators.rsi14, 2)}</td>
-                <td className="px-3 py-3 text-right">{formatNumber(item.indicators.volumeRatio, 2)}</td>
+                <td className="px-3 py-3 text-right">{sessionVolumeRatioText}</td>
                 <td className="px-3 py-3">
                   <Badge variant={importantWarnings(item).length ? 'warning' : 'success'}>{importantWarnings(item).length}</Badge>
                 </td>
@@ -792,15 +826,84 @@ const IndicatorTable: React.FC<{
   </section>
 );
 
+const CorporateActionEventRow: React.FC<{ event: VietnamCorporateActionEvent }> = ({ event }) => (
+  <div className="rounded-lg border border-border/50 bg-card/50 p-3 text-sm">
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge variant={event.status === 'upcoming' ? 'info' : 'default'}>{event.status}</Badge>
+        <span className="font-medium text-foreground">{event.eventType.replaceAll('_', ' ')}</span>
+      </div>
+      <span className="text-xs text-secondary-text">{event.exDate ?? event.recordDate ?? event.paymentDate ?? '-'}</span>
+    </div>
+    <dl className="mt-2 grid gap-2 text-xs text-secondary-text md:grid-cols-3">
+      <div>
+        <dt>Ex-date</dt>
+        <dd className="font-medium text-foreground">{event.exDate ?? '-'}</dd>
+      </div>
+      <div>
+        <dt>Record date</dt>
+        <dd className="font-medium text-foreground">{event.recordDate ?? '-'}</dd>
+      </div>
+      <div>
+        <dt>Payment date</dt>
+        <dd className="font-medium text-foreground">{event.paymentDate ?? '-'}</dd>
+      </div>
+      {event.cashDividendPerShare != null ? (
+        <div>
+          <dt>Cash dividend</dt>
+          <dd className="font-medium text-foreground">{formatNumber(event.cashDividendPerShare)} VND/share</dd>
+        </div>
+      ) : null}
+      {event.stockDividendRatio ? (
+        <div>
+          <dt>Stock dividend ratio</dt>
+          <dd className="font-medium text-foreground">{event.stockDividendRatio}</dd>
+        </div>
+      ) : null}
+      {event.rightsRatio ? (
+        <div>
+          <dt>Rights ratio</dt>
+          <dd className="font-medium text-foreground">{event.rightsRatio}</dd>
+        </div>
+      ) : null}
+    </dl>
+    {event.description ? <p className="mt-2 text-xs text-secondary-text">{event.description}</p> : null}
+    {event.source || event.lastCheckedAt ? (
+      <p className="mt-2 text-xs text-secondary-text">
+        Source: {event.source ?? '-'} | last checked {formatVietnamTime(event.lastCheckedAt)}
+      </p>
+    ) : null}
+    {event.sourceUrl ? (
+      <a href={event.sourceUrl} target="_blank" rel="noreferrer" className="mt-2 inline-block text-xs text-cyan hover:underline">
+        Source link
+      </a>
+    ) : null}
+  </div>
+);
+
 const StockDetailView: React.FC<{
   item?: VietnamWatchItem | null;
   fixtureMode?: boolean;
   realtimeQuote?: VietnamRealtimeQuote | null;
   realtimeTrades?: VietnamRealtimeTrade[];
+  corporateActions?: VietnamCorporateActionsResponse | null;
+  corporateActionsLoading?: boolean;
+  corporateActionsError?: string | null;
   tradesLoading?: boolean;
   tradesError?: string | null;
   marketPhase: VietnamMarketPhase;
-}> = ({ item, fixtureMode = false, realtimeQuote, realtimeTrades = [], tradesLoading = false, tradesError, marketPhase }) => {
+}> = ({
+  item,
+  fixtureMode = false,
+  realtimeQuote,
+  realtimeTrades = [],
+  corporateActions = null,
+  corporateActionsLoading = false,
+  corporateActionsError,
+  tradesLoading = false,
+  tradesError,
+  marketPhase,
+}) => {
   if (!item) return null;
   const indicators = item.indicators;
   const latestIntradayCandle = item.intradayCandles?.at(-1);
@@ -815,6 +918,7 @@ const StockDetailView: React.FC<{
   const missingSessionMetricText = hasSessionCandles ? 'Session value unavailable' : 'Not enough session candles';
   const hasVolumeVsAvg1h = item.intradayPulse?.volumeVsAvg1h != null;
   const avgVolume20D = indicators.avgVolume20D ?? item.liquidity?.avgVolume20D;
+  const sessionVolumeRatioText = sessionVolumeToAvgDailyVolume(item, realtimeQuote, kbsState);
   const finalCloseLabel = finalCloseDisplayLabel(item.finalCloseStatus);
   const foreignNet5dLatestAvailable = indicators.foreignNet5dLatestAvailable;
   const foreignNet20dLatestAvailable = indicators.foreignNet20dLatestAvailable;
@@ -829,12 +933,10 @@ const StockDetailView: React.FC<{
   const priceVsReferencePct = realtimeQuote?.priceVsReferencePct ?? (
     priceVsReference != null && referencePrice ? priceVsReference / referencePrice * 100 : null
   );
-  const corporateAction = item.corporateAction;
-  const hasConfirmedCashDividend = (
-    corporateAction?.status === 'detected'
-    && corporateAction?.type === 'cash_dividend'
-    && corporateAction.adjustedReferencePrice != null
-  );
+  const corporateActionEvents = (corporateActions?.items ?? []).filter((event) => event.ticker === item.ticker);
+  const upcomingCorporateActions = corporateActionEvents.filter((event) => event.status === 'upcoming');
+  const recentCorporateActions = corporateActionEvents.filter((event) => event.status === 'recent' || event.status === 'past');
+  const displayCorporateActions = [...upcomingCorporateActions, ...recentCorporateActions];
   return (
     <section className="rounded-lg border border-border/70 bg-card p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -880,6 +982,10 @@ const StockDetailView: React.FC<{
         <div className="rounded-lg bg-elevated/50 p-3">
           <dt className="text-xs text-secondary-text">20D average volume (shares)</dt>
           <dd className="mt-1 font-medium text-foreground">{formatNumber(avgVolume20D)}</dd>
+        </div>
+        <div className="rounded-lg bg-elevated/50 p-3">
+          <dt className="text-xs text-secondary-text">Session volume / 20D avg daily volume</dt>
+          <dd className="mt-1 font-medium text-foreground">{sessionVolumeRatioText}</dd>
         </div>
         <div className="rounded-lg bg-elevated/50 p-3">
           <dt className="text-xs text-secondary-text">Distance to 20D high</dt>
@@ -965,48 +1071,57 @@ const StockDetailView: React.FC<{
             <dd className="mt-1 font-medium text-foreground">{referencePrice != null ? referencePriceSource : '-'}</dd>
           </div>
           <div>
-            <dt className="text-xs text-secondary-text">Corporate action data</dt>
-            <dd className="mt-1 font-medium text-foreground">
-              {corporateAction?.status === 'detected' ? 'detected' : 'unavailable'}
-            </dd>
+            <dt className="text-xs text-secondary-text">Reference note</dt>
+            <dd className="mt-1 font-medium text-foreground">KBS board reference only</dd>
           </div>
         </dl>
-        {hasConfirmedCashDividend ? (
-          <dl className="mt-3 grid gap-3 border-t border-border/50 pt-3 text-sm md:grid-cols-4">
+        <p className="mt-3 text-xs text-secondary-text">
+          Reference price is not labeled dividend-adjusted unless the Corporate actions card has a confirmed event.
+        </p>
+      </div>
+      <div className="mt-4 rounded-lg border border-border/60 bg-elevated/30 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-semibold text-foreground">Corporate actions</h3>
+            <p className="mt-1 text-xs text-secondary-text">Recent and upcoming events</p>
+          </div>
+          <Badge variant={corporateActions?.status === 'ok' ? 'info' : 'default'}>
+            {corporateActionsLoading ? 'loading' : corporateActions?.status ?? 'unavailable'}
+          </Badge>
+        </div>
+        {corporateActionsLoading ? (
+          <p className="mt-3 text-sm text-secondary-text">Checking corporate action calendar...</p>
+        ) : corporateActionsError || corporateActions?.status === 'unavailable' ? (
+          <p className="mt-3 text-sm text-secondary-text">Corporate action history/calendar unavailable.</p>
+        ) : displayCorporateActions.length ? (
+          <div className="mt-3 grid gap-4">
             <div>
-              <dt className="text-xs text-secondary-text">Corporate action</dt>
-              <dd className="mt-1 font-medium text-foreground">cash dividend</dd>
+              <h4 className="text-xs font-semibold uppercase text-secondary-text">Upcoming</h4>
+              <div className="mt-2 grid gap-2">
+                {upcomingCorporateActions.length ? upcomingCorporateActions.map((event, index) => (
+                  <CorporateActionEventRow key={`${event.ticker}-${event.eventType}-${event.exDate ?? event.recordDate ?? index}`} event={event} />
+                )) : <p className="text-xs text-secondary-text">No upcoming events.</p>}
+              </div>
             </div>
             <div>
-              <dt className="text-xs text-secondary-text">Ex-date</dt>
-              <dd className="mt-1 font-medium text-foreground">{corporateAction?.exDate ?? '-'}</dd>
+              <h4 className="text-xs font-semibold uppercase text-secondary-text">Recent, last {corporateActions?.monthsBack ?? 6} months</h4>
+              <div className="mt-2 grid gap-2">
+                {recentCorporateActions.length ? recentCorporateActions.map((event, index) => (
+                  <CorporateActionEventRow key={`${event.ticker}-${event.eventType}-${event.exDate ?? event.recordDate ?? index}`} event={event} />
+                )) : <p className="text-xs text-secondary-text">No recent events.</p>}
+              </div>
             </div>
-            <div>
-              <dt className="text-xs text-secondary-text">Cash dividend</dt>
-              <dd className="mt-1 font-medium text-foreground">{formatNumber(corporateAction?.cashDividendPerShare)} VND/share</dd>
-            </div>
-            <div>
-              <dt className="text-xs text-secondary-text">Adjusted reference</dt>
-              <dd className="mt-1 font-medium text-foreground">{formatPrice(corporateAction?.adjustedReferencePrice)}</dd>
-            </div>
-            <div>
-              <dt className="text-xs text-secondary-text">Price vs adjusted reference</dt>
-              <dd className={cn('mt-1 font-medium', signalTone(corporateAction?.priceVsAdjustedReference))}>
-                {formatReferenceDelta(corporateAction?.priceVsAdjustedReference, corporateAction?.priceVsAdjustedReferencePct)}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-xs text-secondary-text">Adjustment source</dt>
-              <dd className="mt-1 font-medium text-foreground">{corporateAction?.adjustmentSource?.replaceAll('_', ' ') ?? '-'}</dd>
-            </div>
-          </dl>
+          </div>
         ) : (
-          <p className="mt-3 text-xs text-secondary-text">
-            Corporate action data unavailable. Reference price is shown separately from raw OHLCV close.
-          </p>
+          <p className="mt-3 text-sm text-secondary-text">No recent or upcoming corporate actions found.</p>
         )}
-        {corporateAction?.note ? (
-          <p className="mt-2 text-xs text-secondary-text">{corporateAction.note}</p>
+        {corporateActions?.source || corporateActions?.lastCheckedAt ? (
+          <p className="mt-3 text-xs text-secondary-text">
+            Source: {corporateActions.source ?? '-'} | last checked {formatVietnamTime(corporateActions.lastCheckedAt)}
+          </p>
+        ) : null}
+        {corporateActions?.errorDetail ? (
+          <p className="mt-2 text-xs text-secondary-text">{corporateActions.errorDetail}</p>
         ) : null}
       </div>
       {item.foreignDateMatch === 'mismatched' && item.foreignNetDate && item.ohlcvDate ? (
@@ -1084,15 +1199,14 @@ const StockDetailView: React.FC<{
               {hasSessionVolumeFrom1H ? formatNumber(item.intradayPulse?.sessionVolumeFrom1H) : missingSessionMetricText}
             </dd>
           </div>
-          <div className="rounded-lg bg-card/60 p-3">
-            <dt className="text-xs text-secondary-text">Volume vs avg 1H</dt>
-            <dd
-              className="mt-1 font-medium text-foreground"
-              title={hasVolumeVsAvg1h ? undefined : 'Volume vs average requires enough historical 1H candles.'}
-            >
-              {hasVolumeVsAvg1h ? formatNumber(item.intradayPulse?.volumeVsAvg1h, 2) : 'Avg unavailable'}
-            </dd>
-          </div>
+          {hasVolumeVsAvg1h ? (
+            <div className="rounded-lg bg-card/60 p-3">
+              <dt className="text-xs text-secondary-text">Latest 1H volume vs avg 1H</dt>
+              <dd className="mt-1 font-medium text-foreground">
+                {formatRatio(item.intradayPulse?.volumeVsAvg1h)}
+              </dd>
+            </div>
+          ) : null}
           <div className="rounded-lg bg-card/60 p-3">
             <dt className="text-xs text-secondary-text">Candles loaded</dt>
             <dd className="mt-1 font-medium text-foreground">{formatNumber(item.intradayCandles?.length ?? 0)}</dd>
@@ -1313,6 +1427,9 @@ const VietnamDashboardPage: React.FC = () => {
   const [realtimeTrades, setRealtimeTrades] = useState<VietnamRealtimeTrade[]>([]);
   const [tradesLoading, setTradesLoading] = useState(false);
   const [tradesError, setTradesError] = useState<string | null>(null);
+  const [corporateActions, setCorporateActions] = useState<VietnamCorporateActionsResponse | null>(null);
+  const [corporateActionsLoading, setCorporateActionsLoading] = useState(false);
+  const [corporateActionsError, setCorporateActionsError] = useState<string | null>(null);
   const [lastKbsQuoteRefreshAt, setLastKbsQuoteRefreshAt] = useState<string | null>(null);
   const [lastKbsTradeRefreshAt, setLastKbsTradeRefreshAt] = useState<string | null>(null);
   const [lastKbsErrorAt, setLastKbsErrorAt] = useState<string | null>(null);
@@ -1354,6 +1471,7 @@ const VietnamDashboardPage: React.FC = () => {
   const requestIdRef = useRef(0);
   const realtimeRequestIdRef = useRef(0);
   const tradesRequestIdRef = useRef(0);
+  const corporateActionsRequestIdRef = useRef(0);
   const nextRefreshAtRef = useRef(0);
   const kbsQuoteNextRefreshAtRef = useRef(0);
   const kbsTradeNextRefreshAtRef = useRef(0);
@@ -1451,6 +1569,33 @@ const VietnamDashboardPage: React.FC = () => {
       }
     }
   }, [loadObservability]);
+
+  const loadCorporateActions = useCallback(async (symbol: string | null) => {
+    if (!symbol) {
+      setCorporateActions(null);
+      setCorporateActionsError(null);
+      return;
+    }
+    const requestId = corporateActionsRequestIdRef.current + 1;
+    corporateActionsRequestIdRef.current = requestId;
+    setCorporateActionsLoading(true);
+    setCorporateActionsError(null);
+    try {
+      const response = await stocksApi.getVietnamCorporateActions([symbol], 6);
+      if (requestId !== corporateActionsRequestIdRef.current) return;
+      if (symbol !== selectedTickerRef.current) return;
+      setCorporateActions(response);
+      setCorporateActionsError(response.status === 'error' ? response.error ?? 'Corporate action history/calendar unavailable.' : null);
+    } catch (err) {
+      if (requestId !== corporateActionsRequestIdRef.current) return;
+      setCorporateActions(null);
+      setCorporateActionsError(err instanceof Error ? err.message : 'Corporate action history/calendar unavailable.');
+    } finally {
+      if (requestId === corporateActionsRequestIdRef.current) {
+        setCorporateActionsLoading(false);
+      }
+    }
+  }, []);
 
   const refreshKbsQuotes = useCallback(async (tickersOverride?: string[]) => {
     const targetTickers = tickersOverride ?? logicalWatchlistRef.current;
@@ -1610,6 +1755,10 @@ const VietnamDashboardPage: React.FC = () => {
   useEffect(() => {
     void refreshKbsTrades(selectedTicker);
   }, [refreshKbsTrades, selectedTicker]);
+
+  useEffect(() => {
+    void loadCorporateActions(selectedTicker);
+  }, [loadCorporateActions, selectedTicker]);
 
   useEffect(() => {
     const onVisibilityChange = () => {
@@ -2149,6 +2298,9 @@ const VietnamDashboardPage: React.FC = () => {
             fixtureMode={data?.fixtureMode}
             realtimeQuote={selectedItem ? realtimeQuotes[selectedItem.ticker] : null}
             realtimeTrades={realtimeTrades}
+            corporateActions={corporateActions}
+            corporateActionsLoading={corporateActionsLoading}
+            corporateActionsError={corporateActionsError}
             tradesLoading={tradesLoading}
             tradesError={tradesError}
             marketPhase={marketPhase}
@@ -2174,7 +2326,7 @@ const VietnamDashboardPage: React.FC = () => {
           <dl className="mt-3 grid gap-2 text-sm md:grid-cols-2">
             {Object.entries(data.formulas).map(([key, formula]) => (
               <div key={key} className="rounded-lg bg-elevated/50 p-3">
-                <dt className="font-medium text-foreground">{key.replaceAll('_', ' ')}</dt>
+              <dt className="font-medium text-foreground">{formulaDisplayLabel(key)}</dt>
                 <dd className="mt-1 text-secondary-text">{neutralFormulaText(formula)}</dd>
               </div>
             ))}

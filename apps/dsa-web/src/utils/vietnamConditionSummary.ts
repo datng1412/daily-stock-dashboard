@@ -55,7 +55,8 @@ const buildLabelsBullet = (item: VietnamWatchItem) => {
 
 const buildTechnicalBullet = (item: VietnamWatchItem) => {
   const rsi = formatNumber(item.indicators.rsi14Wilder ?? item.indicators.rsi14, 2);
-  const volumeRatio = formatNumber(item.indicators.volumeRatio, 2);
+  const dailyVolume = formatNumber(item.volume, 0);
+  const avgVolume20D = formatNumber(item.indicators.avgVolume20D ?? item.liquidity?.avgVolume20D, 0);
   const ma20 = formatNumber(item.indicators.ma20, 2);
   const ma50 = formatNumber(item.indicators.ma50, 2);
   const pulseChange = formatNumber(item.intradayPulse?.latest1hChangePercent, 2);
@@ -64,7 +65,7 @@ const buildTechnicalBullet = (item: VietnamWatchItem) => {
 
   const dailyParts = [
     rsi ? `RSI14 ${rsi}` : null,
-    volumeRatio ? `volume ratio ${volumeRatio}` : null,
+    dailyVolume && avgVolume20D ? `daily volume ${dailyVolume} vs 20D avg ${avgVolume20D}` : null,
     ma20 && ma50 ? `MA20/MA50 ${ma20}/${ma50}` : null,
   ].filter(Boolean);
   const intradayParts = [
