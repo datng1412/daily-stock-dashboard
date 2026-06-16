@@ -3,6 +3,29 @@ const EMPTY_TIME = '—';
 
 export type MozyTimestampInput = string | number | Date | null | undefined;
 
+const parseDatePartsAsVietnamTime = (
+  year: number,
+  month: number,
+  day: number,
+  hour = 0,
+  minute = 0,
+  second = 0,
+): Date | null => {
+  if (month < 1 || month > 12 || day < 1 || day > 31 || hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 59) {
+    return null;
+  }
+  const calendarDate = new Date(Date.UTC(year, month - 1, day));
+  if (
+    calendarDate.getUTCFullYear() !== year
+    || calendarDate.getUTCMonth() !== month - 1
+    || calendarDate.getUTCDate() !== day
+  ) {
+    return null;
+  }
+  const date = new Date(Date.UTC(year, month - 1, day, hour - 7, minute, second));
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
 export const parseMozyTimestamp = (input: MozyTimestampInput): Date | null => {
   if (input === null || input === undefined || input === '') return null;
   if (input instanceof Date) {
@@ -18,7 +41,34 @@ export const parseMozyTimestamp = (input: MozyTimestampInput): Date | null => {
     return Number.isNaN(date.getTime()) ? null : date;
   }
 
-  const date = new Date(input);
+  const text = String(input).trim();
+  const isoLikeLocal = text.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?$/);
+  if (isoLikeLocal) {
+    const [, year, month, day, hour = '0', minute = '0', second = '0'] = isoLikeLocal;
+    return parseDatePartsAsVietnamTime(
+      Number(year),
+      Number(month),
+      Number(day),
+      Number(hour),
+      Number(minute),
+      Number(second),
+    );
+  }
+
+  const vietnamDate = text.match(/^(\d{2})\/(\d{2})\/(\d{4})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?$/);
+  if (vietnamDate) {
+    const [, day, month, year, hour = '0', minute = '0', second = '0'] = vietnamDate;
+    return parseDatePartsAsVietnamTime(
+      Number(year),
+      Number(month),
+      Number(day),
+      Number(hour),
+      Number(minute),
+      Number(second),
+    );
+  }
+
+  const date = new Date(text);
   return Number.isNaN(date.getTime()) ? null : date;
 };
 

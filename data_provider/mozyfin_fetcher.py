@@ -539,11 +539,25 @@ class MozyfinFetcher(BaseFetcher):
             return []
         news = []
         for row in rows[:limit]:
+            published_at = _normalize_datetime_value(
+                _first_value(
+                    row,
+                    "published_at",
+                    "published_date",
+                    "published_time",
+                    "published",
+                    "created_at",
+                    "created_time",
+                    "date",
+                    "time",
+                    "timestamp",
+                )
+            )
             news.append(
                 {
                     "title": _first_value(row, "title", "headline") or "",
                     "url": _first_value(row, "url", "link") or "",
-                    "published_at": _first_value(row, "published_at", "date", "time") or "",
+                    "published_at": published_at or "",
                     "source": _first_value(row, "source", "publisher") or "Mozyfin",
                     "summary": _first_value(row, "summary", "snippet", "description") or "",
                 }

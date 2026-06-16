@@ -45,4 +45,16 @@ describe('Vietnam time helpers', () => {
     expect(formatRelativeTime('not-a-date', now)).toBe('Time unavailable');
     expect(formatRelativeTime(null, now)).toBe('Time unavailable');
   });
+
+  it('parses supported news timestamp formats for relative labels', () => {
+    const now = '2026-06-16T12:00:00+07:00';
+
+    expect(formatRelativeTime('2026-06-16T11:45:00+07:00', now)).toBe('15 minutes ago');
+    expect(formatRelativeTime(1781585100, now)).toBe('15 minutes ago');
+    expect(formatRelativeTime(1781585100000, now)).toBe('15 minutes ago');
+    expect(formatRelativeTime('2026-06-16 11:45:00', now)).toBe('15 minutes ago');
+    expect(formatRelativeTime('16/06/2026 11:45', now)).toBe('15 minutes ago');
+    expect(formatRelativeTime('16/06/2026', now)).toBe('12 hours ago');
+    expect(formatRelativeTime('32/06/2026 11:45', now)).toBe('Time unavailable');
+  });
 });

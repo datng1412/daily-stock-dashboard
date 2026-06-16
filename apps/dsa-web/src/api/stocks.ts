@@ -102,7 +102,19 @@ export type VietnamWatchItem = {
   validation: { valid?: boolean; tradingDate?: string | null; missingFields?: string[]; errors?: string[] };
   trend: { signalScore?: number; buySignal?: string; trendStatus?: string; volumeRatio5d?: number };
   warnings: string[];
-  news: Array<{ title?: string; url?: string; source?: string; publishedAt?: string; summary?: string }>;
+  news: Array<{
+    title?: string;
+    url?: string;
+    source?: string;
+    publishedAt?: string | number | null;
+    publishedDate?: string | number | null;
+    publishedTime?: string | number | null;
+    createdAt?: string | number | null;
+    date?: string | number | null;
+    time?: string | number | null;
+    timestamp?: string | number | null;
+    summary?: string;
+  }>;
   intradayTimeframe?: string | null;
   intradaySource?: string | null;
   intradayIsRealtimeQuote?: boolean;

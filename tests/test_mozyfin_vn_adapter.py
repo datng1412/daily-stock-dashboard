@@ -1377,6 +1377,38 @@ def test_fixture_mode_missing_file_does_not_fall_through(tmp_path):
         raise AssertionError("Expected fixture-mode missing file error")
 
 
+def test_mozyfin_news_maps_published_date_to_published_at(monkeypatch):
+    monkeypatch.delenv("MOZYFIN_FIXTURE_DIR", raising=False)
+    fetcher = MozyfinFetcher()
+
+    def fake_run_csv_command(command, entity, *args):
+        assert command == "news"
+        assert entity == "FPT.VN"
+        return [
+            {
+                "title": "FPT cloud revenue update",
+                "url": "https://example.com/fpt",
+                "published_date": "2026-06-15T04:09:28.132457Z",
+                "source": "VNEconomy",
+                "summary": "FPT update",
+            }
+        ]
+
+    monkeypatch.setattr(fetcher, "_run_csv_command", fake_run_csv_command)
+
+    news = fetcher.get_news("FPT", limit=1)
+
+    assert news == [
+        {
+            "title": "FPT cloud revenue update",
+            "url": "https://example.com/fpt",
+            "published_at": "2026-06-15T04:09:28.132457+00:00",
+            "source": "VNEconomy",
+            "summary": "FPT update",
+        }
+    ]
+
+
 def test_mozyfin_cli_error_suppresses_bundled_node_dump(monkeypatch):
     monkeypatch.delenv("MOZYFIN_FIXTURE_DIR", raising=False)
     monkeypatch.setenv("MOZYFIN_COMMAND", "mozyfin-cli")

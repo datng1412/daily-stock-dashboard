@@ -457,7 +457,8 @@ describe('VietnamDashboardPage watchlist loading', () => {
           title: 'FPT reports cloud revenue growth',
           url: 'https://example.com/fpt-cloud',
           source: 'CafeF',
-          publishedAt: new Date(Date.now() - 125 * 60 * 1000).toISOString(),
+          publishedAt: '',
+          publishedDate: new Date(Date.now() - 125 * 60 * 1000).toISOString(),
           summary: 'Cloud revenue increased in the latest update.',
         },
       ],
@@ -468,6 +469,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     expect((await screen.findAllByText('FPT reports cloud revenue growth')).length).toBeGreaterThan(0);
     expect(screen.getByText('CafeF · 2 hours ago')).toBeInTheDocument();
+    expect(screen.queryByText('Time unavailable')).not.toBeInTheDocument();
   });
 
   it('shows KBS reference price separately and corporate-action calendar unavailable state', async () => {

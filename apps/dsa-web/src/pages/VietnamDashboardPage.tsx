@@ -77,6 +77,24 @@ const formatReferenceDelta = (value?: number | null, percent?: number | null) =>
   `${formatSignedNumber(value, 2)} / ${formatSignedNumber(percent, 2)}%`
 );
 
+type VietnamNewsItem = VietnamWatchItem['news'][number];
+
+const firstNewsTimestamp = (...values: Array<string | number | null | undefined>) => (
+  values.find((value) => value !== null && value !== undefined && String(value).trim() !== '')
+);
+
+const newsTimestamp = (news: VietnamNewsItem) => (
+  firstNewsTimestamp(
+    news.publishedAt,
+    news.publishedDate,
+    news.publishedTime,
+    news.createdAt,
+    news.date,
+    news.time,
+    news.timestamp,
+  )
+);
+
 const neutralFormulaText = (value: string) => (
   /recommend/i.test(value) ? 'Rule-based neutral condition labels only.' : value
 );
@@ -451,7 +469,8 @@ const WatchCard: React.FC<{ item: VietnamWatchItem; realtimeQuote?: VietnamRealt
         <div className="mt-3 border-t border-border/60 pt-3">
           <p className="mb-2 text-xs font-medium text-secondary-text">Latest news</p>
           {item.news.slice(0, 2).map((news, index) => {
-            const absoluteTime = parseMozyTimestamp(news.publishedAt) ? formatAbsoluteDateTime(news.publishedAt) : undefined;
+            const timestamp = newsTimestamp(news);
+            const absoluteTime = parseMozyTimestamp(timestamp) ? formatAbsoluteDateTime(timestamp) : undefined;
             return (
               <div key={`${news.title}-${news.url ?? index}`} className="min-w-0">
                 <a
@@ -463,7 +482,7 @@ const WatchCard: React.FC<{ item: VietnamWatchItem; realtimeQuote?: VietnamRealt
                   {news.title || 'Untitled news'}
                 </a>
                 <div className="truncate text-xs text-secondary-text" title={absoluteTime}>
-                  {[news.source, formatRelativeTime(news.publishedAt)].filter(Boolean).join(' · ')}
+                  {[news.source, formatRelativeTime(timestamp)].filter(Boolean).join(' · ')}
                 </div>
               </div>
             );
@@ -1842,7 +1861,8 @@ const StockDetailView: React.FC<{
             {item.news.slice(0, DETAIL_NEWS_LIMIT).map((news, index) => {
               const summaryHasArtifacts = hasEncodingArtifacts(news.summary);
               const titleHasArtifacts = hasEncodingArtifacts(news.title);
-              const absoluteTime = parseMozyTimestamp(news.publishedAt) ? formatAbsoluteDateTime(news.publishedAt) : undefined;
+              const timestamp = newsTimestamp(news);
+              const absoluteTime = parseMozyTimestamp(timestamp) ? formatAbsoluteDateTime(timestamp) : undefined;
               return (
                 <article key={`${item.ticker}-detail-news-${news.url ?? news.title ?? index}`} className="rounded-lg border border-border/50 bg-card/50 p-3">
                   <a
@@ -1856,7 +1876,7 @@ const StockDetailView: React.FC<{
                   <div className="mt-1 flex flex-wrap gap-2 text-xs text-secondary-text" title={absoluteTime}>
                     {news.source ? <span>{news.source}</span> : null}
                     {news.source ? <span aria-hidden="true">·</span> : null}
-                    <span>{formatRelativeTime(news.publishedAt)}</span>
+                    <span>{formatRelativeTime(timestamp)}</span>
                   </div>
                   {news.summary && !summaryHasArtifacts ? (
                     <p className="mt-2 line-clamp-2 text-sm text-secondary-text">{news.summary}</p>
