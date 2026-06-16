@@ -509,6 +509,33 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         ],
         "warning_codes": [],
     },
+    "DATA_CACHE_DIR": {
+        "title": "Data Cache Directory",
+        "description": "Directory for writable runtime cache files such as the remote stock autocomplete index.",
+        "category": "data_source",
+        "data_type": "string",
+        "ui_control": "text",
+        "is_sensitive": False,
+        "is_required": False,
+        "is_editable": True,
+        "default_value": "./data/cache",
+        "options": [],
+        "validation": {},
+        "display_order": 17,
+        "help_key": "settings.data_source.data_cache_dir",
+        "examples": [
+            "DATA_CACHE_DIR=./data/cache",
+            "DATA_CACHE_DIR=/app/data/cache",
+            "DATA_CACHE_DIR=/tmp/dsa-cache",
+        ],
+        "docs": [
+            {
+                "label": "Vietnam Dashboard Runbook",
+                "href": "https://github.com/ZhuLinsen/daily_stock_analysis/blob/main/docs/RUNBOOK_VN.md#local-docker",
+            },
+        ],
+        "warning_codes": [],
+    },
     "ALPHASIFT_ENABLED": {
         "title": "AlphaSift Screening",
         "description": "Enable the optional AlphaSift stock screening tab. Disabled by default.",

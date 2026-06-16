@@ -134,7 +134,7 @@ Create a new Render Web Service using the repository and Docker runtime.
 Recommended settings:
 
 - Environment: Docker
-- Dockerfile path: `Dockerfile`
+- Dockerfile path: `docker/Dockerfile`
 - Docker context: repository root
 - Health check path: `/api/v1/stocks/vn/watchlist/health`
 
@@ -145,6 +145,7 @@ MOZYFIN_API_KEY=<set in Render secret env>
 PYTHONUTF8=1
 MARKET=VN
 STOCK_LIST=FPT,VPB,MSB,SCS,ACV,ACB
+DATA_CACHE_DIR=/tmp/dsa-cache
 ```
 
 Optional environment variable:
@@ -154,6 +155,8 @@ PORT=8000
 ```
 
 Render normally injects `PORT` automatically. Do not set `MOZYFIN_FIXTURE_DIR` on Render.
+
+Use `DATA_CACHE_DIR=/tmp/dsa-cache` for an ephemeral Render cache when no persistent disk is mounted. If a persistent disk is mounted at `/app/data`, use `DATA_CACHE_DIR=/app/data/cache`; the Docker entrypoint creates and repairs that directory before the app drops to the non-root runtime user when the platform permits the entrypoint to start as root.
 
 No vnstock-specific environment variables are required for the KBS snapshot/trades endpoints. The KBS layer is optional and does not write to Mozyfin daily OHLCV, quote/foreign, intraday, overview, or detail caches.
 

@@ -22,7 +22,8 @@ DEFAULT_STOCK_INDEX_REMOTE_URL = (
     "https://raw.githubusercontent.com/ZhuLinsen/daily_stock_analysis/"
     "main/apps/dsa-web/public/stocks.index.json"
 )
-DEFAULT_STOCK_INDEX_CACHE_PATH = REPO_ROOT / "data" / "cache" / "stocks.index.json"
+DEFAULT_DATA_CACHE_DIR = REPO_ROOT / "data" / "cache"
+DEFAULT_STOCK_INDEX_CACHE_PATH = DEFAULT_DATA_CACHE_DIR / "stocks.index.json"
 DEFAULT_STOCK_INDEX_REMOTE_TTL_HOURS = 48
 DEFAULT_STOCK_INDEX_REMOTE_TIMEOUT_SECONDS = 10
 DEFAULT_STOCK_INDEX_REMOTE_MAX_FAILURES = 3
@@ -62,12 +63,23 @@ def settings_from_config(config: Any) -> RemoteStockIndexSettings:
         url=DEFAULT_STOCK_INDEX_REMOTE_URL,
         ttl_hours=DEFAULT_STOCK_INDEX_REMOTE_TTL_HOURS,
         timeout_seconds=DEFAULT_STOCK_INDEX_REMOTE_TIMEOUT_SECONDS,
+        cache_path=get_remote_stock_index_cache_path(getattr(config, "data_cache_dir", None)),
     )
 
 
-def get_remote_stock_index_cache_path() -> Path:
+def _resolve_data_cache_dir(value: Optional[str] = None) -> Path:
+    raw_value = value or os.getenv("DATA_CACHE_DIR")
+    if raw_value and raw_value.strip():
+        cache_dir = Path(raw_value.strip()).expanduser()
+        if not cache_dir.is_absolute():
+            cache_dir = REPO_ROOT / cache_dir
+        return cache_dir
+    return DEFAULT_DATA_CACHE_DIR
+
+
+def get_remote_stock_index_cache_path(data_cache_dir: Optional[str] = None) -> Path:
     """Return the canonical on-disk cache path for remote stock index data."""
-    return DEFAULT_STOCK_INDEX_CACHE_PATH
+    return _resolve_data_cache_dir(data_cache_dir) / "stocks.index.json"
 
 
 def is_remote_stock_index_cache_fresh(

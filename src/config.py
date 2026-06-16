@@ -632,6 +632,7 @@ class Config:
     longbridge_access_token: Optional[str] = None
     longbridge_oauth_client_id: Optional[str] = None
     stock_index_remote_update_enabled: bool = True
+    data_cache_dir: Optional[str] = None
 
     # === AlphaSift optional stock screening integration ===
     alphasift_enabled: bool = False
@@ -1440,6 +1441,7 @@ class Config:
                 os.getenv('STOCK_INDEX_REMOTE_UPDATE_ENABLED'),
                 default=True,
             ),
+            data_cache_dir=os.getenv('DATA_CACHE_DIR') or None,
             litellm_model=litellm_model,
             litellm_fallback_models=litellm_fallback_models,
             llm_temperature=resolve_unified_llm_temperature(litellm_model),

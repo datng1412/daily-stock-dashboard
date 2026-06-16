@@ -156,6 +156,14 @@ const settingsHelpEnUS: SettingsHelpMap = {
     impact: ['Affects stock-name freshness for Web autocomplete and backend stock-name resolution.'],
     notes: ['When remote download fails, the app keeps using an existing cache or the bundled index.'],
   },
+  'settings.data_source.data_cache_dir': {
+    title: 'Data Cache Directory',
+    summary: 'Sets the writable directory for runtime cache files such as the remote stock autocomplete index.',
+    usage: 'Use ./data/cache for local runs, /app/data/cache for Docker with a writable data volume, or /tmp/dsa-cache for ephemeral Render cache.',
+    valueNotes: ['Relative paths resolve from the application repository root.', 'The directory must be writable by the runtime user.'],
+    impact: ['Affects where the stock-index remote cache is written and read. It does not change market-data source semantics.'],
+    notes: ['If the directory is not writable, remote refresh logs a warning and the app falls back to existing cache or bundled index data.'],
+  },
   'settings.data_source.ALPHASIFT_ENABLED': {
     title: 'AlphaSift Screening',
     summary: 'Controls the optional third-party AlphaSift stock screening page.',

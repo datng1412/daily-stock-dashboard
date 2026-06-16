@@ -1,6 +1,6 @@
 # Vietnam Dashboard Runbook
 
-Last updated: 2026-06-06
+Last updated: 2026-06-16
 
 ## Goal
 
@@ -68,6 +68,74 @@ Expected:
 source: Mozyfin fixture
 fixture_mode: True
 ```
+
+## Local Docker
+
+Build from the repository root with the Dockerfile under `docker/`:
+
+```powershell
+docker build -f docker/Dockerfile -t vietnam-dashboard:local .
+```
+
+Run live mode without printing secrets:
+
+```powershell
+docker run --rm -p 8000:8000 `
+  --env PYTHONUTF8=1 `
+  --env MARKET=VN `
+  --env STOCK_LIST=FPT,VPB,MSB,SCS,ACV,ACB `
+  --env DATA_CACHE_DIR=/app/data/cache `
+  --env MOZYFIN_API_KEY `
+  -v "${PWD}\data:/app/data" `
+  -v "${PWD}\logs:/app/logs" `
+  -v "${PWD}\reports:/app/reports" `
+  vietnam-dashboard:local
+```
+
+Run deterministic fixture mode only for local checks:
+
+```powershell
+docker run --rm -p 8000:8000 `
+  --env PYTHONUTF8=1 `
+  --env MARKET=VN `
+  --env STOCK_LIST=FPT,VPB,MSB,SCS,ACV,ACB `
+  --env DATA_CACHE_DIR=/app/data/cache `
+  --env MOZYFIN_FIXTURE_DIR=/app/tests/fixtures/mozyfin `
+  -v "${PWD}\data:/app/data" `
+  -v "${PWD}\logs:/app/logs" `
+  -v "${PWD}\reports:/app/reports" `
+  -v "${PWD}\tests\fixtures\mozyfin:/app/tests/fixtures/mozyfin:ro" `
+  vietnam-dashboard:local
+```
+
+The image creates `/app/data/cache` during build and the entrypoint repairs write permissions for `/app/data`, `/app/data/cache`, `/app/logs`, and `/app/reports` before dropping to the non-root `dsa` user. If a host bind mount is read-only or cannot be repaired by the entrypoint, set `DATA_CACHE_DIR` to another writable path such as `/tmp/dsa-cache` for ephemeral cache.
+
+## Render Deployment
+
+Use a Docker Web Service. There is no fixture mode on Render; do not set `MOZYFIN_FIXTURE_DIR`.
+
+Recommended settings:
+
+- Dockerfile path: `docker/Dockerfile`
+- Docker context: repository root
+- Health check path: `/api/v1/stocks/vn/watchlist/health`
+
+Required environment variables:
+
+```text
+MOZYFIN_API_KEY=<set in Render secret env>
+PYTHONUTF8=1
+MARKET=VN
+STOCK_LIST=FPT,VPB,MSB,SCS,ACV,ACB
+```
+
+Cache setting:
+
+```text
+DATA_CACHE_DIR=/tmp/dsa-cache
+```
+
+Use `/tmp/dsa-cache` when the Render service does not have a persistent disk. If a persistent disk is mounted at `/app/data`, set `DATA_CACHE_DIR=/app/data/cache`; the Docker entrypoint creates and repairs that directory before starting the app when it is allowed to run as root. The cache only stores the remote stock autocomplete index and does not change Mozyfin daily OHLCV, 1H intraday pulse, quote, foreign, or KBS snapshot semantics.
 
 ## Stop Old Backend Processes
 

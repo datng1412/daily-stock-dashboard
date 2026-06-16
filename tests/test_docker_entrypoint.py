@@ -1,8 +1,10 @@
 import os
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
+import pytest
 import yaml
 
 
@@ -10,6 +12,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_docker_entrypoint_has_valid_shell_syntax() -> None:
+    if shutil.which("sh") is None:
+        pytest.skip("sh is not available on this host")
+
     subprocess.run(
         ["sh", "-n", str(REPO_ROOT / "docker" / "entrypoint.sh")],
         check=True,
@@ -20,22 +25,23 @@ def test_dockerfile_uses_entrypoint_to_drop_privileges() -> None:
     dockerfile = (REPO_ROOT / "docker" / "Dockerfile").read_text(encoding="utf-8")
 
     assert "gosu" in dockerfile
-    assert 'ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]' in dockerfile
+    assert 'ENTRYPOINT ["/entrypoint.sh"]' in dockerfile
     assert "USER dsa" not in dockerfile
 
 
-def test_dockerfile_bundles_default_alphasift_adapter() -> None:
+def test_dockerfile_bundles_mozyfin_cli_for_vietnam_dashboard() -> None:
     dockerfile = (REPO_ROOT / "docker" / "Dockerfile").read_text(encoding="utf-8")
 
-    assert "git \\" in dockerfile
-    assert "DEFAULT_ALPHASIFT_INSTALL_SPEC" in dockerfile
-    assert "python -m pip install --no-cache-dir \"$ALPHASIFT_INSTALL_SPEC\"" in dockerfile
-    assert "import alphasift.dsa_adapter" in dockerfile
+    assert "FROM node:20-bookworm-slim AS mozyfin-cli-builder" in dockerfile
+    assert "npm install -g mozyfin-cli" in dockerfile
+    assert "/usr/local/bin/mozyfin-cli" in dockerfile
 
 
 def test_docker_entrypoint_repairs_ownership_and_user_permissions() -> None:
     entrypoint = (REPO_ROOT / "docker" / "entrypoint.sh").read_text(encoding="utf-8")
 
+    assert "DATA_CACHE_DIR" in entrypoint
+    assert "/app/data/cache" in entrypoint
     assert "directory_needs_repair" in entrypoint
     assert "has_unwritable_mount_path" in entrypoint
     assert "can_write_dir_as_app_user" in entrypoint
@@ -51,12 +57,14 @@ def test_docker_entrypoint_repairs_ownership_and_user_permissions() -> None:
 def test_docker_compose_injects_env_without_single_file_env_mount() -> None:
     compose_text = (REPO_ROOT / "docker" / "docker-compose.yml").read_text(encoding="utf-8")
     compose = yaml.safe_load(compose_text)
-    common = compose["x-common"]
+    service = compose["services"]["vietnam-dashboard"]
 
-    assert "../.env" in common["env_file"]
-    assert "../.env:/app/.env" not in common["volumes"]
-    assert not any(str(volume).startswith("../.env:") for volume in common["volumes"])
-    assert "../longbridge_tokens:/home/dsa/.longbridge" in common["volumes"]
+    assert service["build"]["context"] == ".."
+    assert service["build"]["dockerfile"] == "docker/Dockerfile"
+    assert service["environment"]["DATA_CACHE_DIR"] == "/app/data/cache"
+    assert "../.env:/app/.env" not in service["volumes"]
+    assert not any(str(volume).startswith("../.env:") for volume in service["volumes"])
+    assert "../data:/app/data" in service["volumes"]
 
 
 def test_docker_guides_do_not_recommend_single_file_env_bind_mount() -> None:
@@ -141,6 +149,9 @@ def _run_entrypoint_with_fake_tools(
     gosu_write_exit: int,
     chown_exit: int,
 ) -> subprocess.CompletedProcess[str]:
+    if shutil.which("sh") is None:
+        pytest.skip("sh is not available on this host")
+
     env = os.environ.copy()
     env["PATH"] = f"{fakebin}:{env['PATH']}"
     env["FAKE_LOG_DIR"] = str(log_dir)
@@ -175,6 +186,7 @@ def test_docker_entrypoint_repairs_nested_mount_ownership(tmp_path: Path) -> Non
     chown_log = (log_dir / "chown.log").read_text(encoding="utf-8")
     chmod_log = (log_dir / "chmod.log").read_text(encoding="utf-8")
     assert "/app/data" in chown_log
+    assert "/app/data/cache" in chown_log
     assert "/app/logs" in chown_log
     assert "/app/reports" in chown_log
     assert "/app/data" in chmod_log

@@ -5,7 +5,8 @@ APP_USER="dsa"
 APP_GROUP="dsa"
 APP_UID="1000"
 APP_GID="1000"
-WRITABLE_DIRS="/app/data /app/logs /app/reports /home/dsa/.longbridge"
+DATA_CACHE_DIR="${DATA_CACHE_DIR:-/app/data/cache}"
+WRITABLE_DIRS="/app/data $DATA_CACHE_DIR /app/logs /app/reports /home/dsa/.longbridge"
 DATABASE_FILE="${DATABASE_PATH:-/app/data/stock_analysis.db}"
 
 warn() {
@@ -88,5 +89,15 @@ if [ "$(id -u)" = "0" ]; then
     export HOME
     exec gosu "$APP_USER:$APP_GROUP" "$@"
 fi
+
+for dir in $WRITABLE_DIRS; do
+    if ! mkdir -p "$dir" 2>/dev/null; then
+        warn "WARN: unable to create $dir as $(id -un); application writes may fail for this path."
+        continue
+    fi
+    if [ ! -w "$dir" ]; then
+        warn "WARN: $dir is not writable by $(id -un); check container user, mounted volume, or DATA_CACHE_DIR settings."
+    fi
+done
 
 exec "$@"

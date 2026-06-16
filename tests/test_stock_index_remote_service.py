@@ -202,6 +202,7 @@ def test_settings_from_config_uses_internal_remote_url_only() -> None:
     config = SimpleNamespace(
         stock_index_remote_update_enabled=False,
         stock_index_remote_url="https://example.invalid/override.json",
+        data_cache_dir=None,
     )
 
     settings = service.settings_from_config(config)
@@ -210,6 +211,28 @@ def test_settings_from_config_uses_internal_remote_url_only() -> None:
     assert settings.url == service.DEFAULT_STOCK_INDEX_REMOTE_URL
     assert settings.ttl_hours == service.DEFAULT_STOCK_INDEX_REMOTE_TTL_HOURS
     assert settings.timeout_seconds == service.DEFAULT_STOCK_INDEX_REMOTE_TIMEOUT_SECONDS
+
+
+def test_remote_stock_index_cache_path_uses_data_cache_dir_env(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cache_dir = tmp_path / "stock-index-cache"
+    monkeypatch.setenv("DATA_CACHE_DIR", str(cache_dir))
+
+    assert service.get_remote_stock_index_cache_path() == cache_dir / "stocks.index.json"
+
+
+def test_settings_from_config_uses_configured_data_cache_dir(tmp_path: Path) -> None:
+    cache_dir = tmp_path / "cache"
+    config = SimpleNamespace(
+        stock_index_remote_update_enabled=True,
+        data_cache_dir=str(cache_dir),
+    )
+
+    settings = service.settings_from_config(config)
+
+    assert settings.cache_path == cache_dir / "stocks.index.json"
 
 
 @pytest.mark.parametrize(
