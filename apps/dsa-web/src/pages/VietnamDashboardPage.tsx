@@ -166,14 +166,6 @@ const intradayVariant = (label?: string | null) => {
   return 'default';
 };
 
-const cacheVariant = (status?: string | null) => {
-  if (status === 'hit') return 'success';
-  if (status === 'miss' || status === 'refresh') return 'info';
-  if (status === 'stale') return 'warning';
-  if (status === 'error') return 'danger';
-  return 'default';
-};
-
 const cacheLabel = (status?: string | null) => status ?? 'missing';
 
 const rawDateLabel = (value?: string | number | null) => (value === null || value === undefined || value === '' ? '—' : String(value));
@@ -245,6 +237,18 @@ const sessionVolumeToAvgDailyVolume = (
 const rawKbsFreshnessText = (quote?: VietnamRealtimeQuote | null) => (
   `raw age ${quote?.ageSeconds ?? '-'}s | raw stale ${quote?.isStale === null || quote?.isStale === undefined ? '-' : String(quote.isStale)} | reason ${quote?.staleReason ?? '-'}`
 );
+
+const companyDisplayName = (item?: VietnamWatchItem | null) => {
+  if (!item) return '-';
+  const name = item.companyName ?? item.name ?? item.entity;
+  if (!name || name === item.ticker) return 'Company unavailable';
+  return name;
+};
+
+const latestNewsAge = (item?: VietnamWatchItem | null) => {
+  const timestamp = item?.news?.map(newsTimestamp).find(Boolean);
+  return timestamp ? formatRelativeTime(timestamp) : 'Unavailable';
+};
 
 const kbsErrorMessage = (error?: string | null) => {
   if (!error) return null;
@@ -493,119 +497,6 @@ const WatchCard: React.FC<{ item: VietnamWatchItem; realtimeQuote?: VietnamRealt
   );
 };
 
-const CacheMetadataPanel: React.FC<{
-  data: VietnamWatchlistResponse;
-  items: VietnamWatchItem[];
-}> = ({ data, items }) => {
-  const metadata = data.cacheMetadata;
-  const fetchedTimes = items.flatMap((item) => [
-    item.cacheLastFetchedAt?.ohlcv,
-    item.cacheLastFetchedAt?.quote,
-    item.cacheLastFetchedAt?.intradayOhlcv,
-    item.cacheLastFetchedAt?.news,
-  ]).filter((value): value is string => Boolean(value));
-  const refreshTimes = items.flatMap((item) => [
-    item.cacheNextRefreshAt?.ohlcv,
-    item.cacheNextRefreshAt?.quote,
-    item.cacheNextRefreshAt?.intradayOhlcv,
-    item.cacheNextRefreshAt?.news,
-  ]).filter((value): value is string => Boolean(value));
-  const latestFetched = fetchedTimes.sort()[fetchedTimes.length - 1];
-  const nextRefresh = refreshTimes.sort()[0];
-
-  return (
-    <section className="rounded-lg border border-border/70 bg-card p-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <DatabaseZap className="h-5 w-5 text-cyan" />
-          <h2 className="text-base font-semibold text-foreground">Cache status</h2>
-        </div>
-        <Badge variant={data.fixtureMode ? 'warning' : 'success'}>
-          {data.fixtureMode ? 'Mozyfin fixture' : 'Mozyfin live'}
-        </Badge>
-      </div>
-      <dl className="mt-4 grid gap-3 text-sm md:grid-cols-5">
-        <div className="rounded-lg bg-elevated/50 p-3">
-          <dt className="text-xs text-secondary-text">Cache hits</dt>
-          <dd className="mt-1 font-medium text-foreground">{formatNumber(metadata.cacheHitCount)}</dd>
-        </div>
-        <div className="rounded-lg bg-elevated/50 p-3">
-          <dt className="text-xs text-secondary-text">Cache misses</dt>
-          <dd className="mt-1 font-medium text-foreground">{formatNumber(metadata.cacheMissCount)}</dd>
-        </div>
-        <div className="rounded-lg bg-elevated/50 p-3">
-          <dt className="text-xs text-secondary-text">Stale used</dt>
-          <dd className="mt-1 font-medium text-foreground">{formatNumber(metadata.staleCacheUsedCount)}</dd>
-        </div>
-        <div className="rounded-lg bg-elevated/50 p-3">
-          <dt className="text-xs text-secondary-text">Last fetched</dt>
-          <dd className="mt-1 font-medium text-foreground">{formatVietnamTime(latestFetched)}</dd>
-          <dd className="mt-1 text-xs text-secondary-text">{formatRelativeAge(latestFetched)}</dd>
-        </div>
-        <div className="rounded-lg bg-elevated/50 p-3">
-          <dt className="text-xs text-secondary-text">Next refresh</dt>
-          <dd className="mt-1 font-medium text-foreground">{formatVietnamTime(nextRefresh)}</dd>
-        </div>
-      </dl>
-      <div className="mt-3 flex flex-wrap gap-2 text-xs">
-        <Badge variant="default">OHLCV TTL {formatNumber(metadata.cacheTtlSeconds.ohlcv)}s</Badge>
-        <Badge variant="default">Quote TTL {formatNumber(metadata.cacheTtlSeconds.quote)}s</Badge>
-        <Badge variant="default">Intraday 1H TTL {formatNumber(metadata.cacheTtlSeconds.intradayOhlcv)}s</Badge>
-        <Badge variant="default">News TTL {formatNumber(metadata.cacheTtlSeconds.news)}s</Badge>
-      </div>
-      <details className="mt-4 rounded-lg border border-border/60 bg-elevated/30 p-3">
-        <summary className="cursor-pointer text-sm font-medium text-foreground">Advanced cache internals</summary>
-        <div className="mt-4 overflow-x-auto">
-          <table className="w-full min-w-[860px] text-left text-sm">
-            <thead className="border-b border-border/70 text-xs uppercase text-secondary-text">
-              <tr>
-                <th className="py-2 pr-3">Ticker</th>
-                <th className="px-3 py-2">OHLCV</th>
-                <th className="px-3 py-2">Quote</th>
-                <th className="px-3 py-2">Intraday 1H</th>
-                <th className="px-3 py-2">News</th>
-                <th className="px-3 py-2">Last fetched</th>
-                <th className="px-3 py-2">Next refresh</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((item) => (
-                <tr key={`cache-${item.ticker}`} className="border-b border-border/40 text-secondary-text">
-                  <td className="py-3 pr-3 font-semibold text-foreground">{item.ticker}</td>
-                  <td className="px-3 py-3">
-                    <Badge variant={cacheVariant(item.cacheStatus.ohlcvCache)}>{cacheLabel(item.cacheStatus.ohlcvCache)}</Badge>
-                  </td>
-                  <td className="px-3 py-3">
-                    <Badge variant={cacheVariant(item.cacheStatus.quoteCache)}>{cacheLabel(item.cacheStatus.quoteCache)}</Badge>
-                  </td>
-                  <td className="px-3 py-3">
-                    <Badge variant={cacheVariant(item.cacheStatus.intradayCache)}>{cacheLabel(item.cacheStatus.intradayCache)}</Badge>
-                  </td>
-                  <td className="px-3 py-3">
-                    <Badge variant={cacheVariant(item.cacheStatus.newsCache)}>{cacheLabel(item.cacheStatus.newsCache)}</Badge>
-                  </td>
-                  <td className="px-3 py-3">
-                    <span className="block">OHLCV {formatVietnamTime(item.cacheLastFetchedAt?.ohlcv)} ({formatRelativeAge(item.cacheLastFetchedAt?.ohlcv)})</span>
-                    <span className="block">Quote {formatVietnamTime(item.cacheLastFetchedAt?.quote)} ({formatRelativeAge(item.cacheLastFetchedAt?.quote)})</span>
-                    <span className="block">1H {formatVietnamTime(item.cacheLastFetchedAt?.intradayOhlcv)} ({formatRelativeAge(item.cacheLastFetchedAt?.intradayOhlcv)})</span>
-                    <span className="block">News {formatVietnamTime(item.cacheLastFetchedAt?.news)} ({formatRelativeAge(item.cacheLastFetchedAt?.news)})</span>
-                  </td>
-                  <td className="px-3 py-3">
-                    <span className="block">OHLCV {formatVietnamTime(item.cacheNextRefreshAt?.ohlcv)}</span>
-                    <span className="block">Quote {formatVietnamTime(item.cacheNextRefreshAt?.quote)}</span>
-                    <span className="block">1H {formatVietnamTime(item.cacheNextRefreshAt?.intradayOhlcv)}</span>
-                    <span className="block">News {formatVietnamTime(item.cacheNextRefreshAt?.news)}</span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </details>
-    </section>
-  );
-};
-
 const DataStatusPanel: React.FC<{
   data?: VietnamWatchlistResponse | null;
   selectedItem?: VietnamWatchItem | null;
@@ -651,77 +542,36 @@ const DataStatusPanel: React.FC<{
         `news ${cacheLabel(selectedItem.cacheStatus.newsCache)}`,
       ].join(' | ')
     : '-';
+  const hasDataQualityIssues = Boolean(
+    Object.keys(data?.dataQuality.missingFields ?? {}).length || Object.keys(data?.dataQuality.errors ?? {}).length,
+  );
+  const dataStatusLabel = !data
+    ? 'Unavailable'
+    : realtimeError || tradesError || hasDataQualityIssues || status.label !== 'ok'
+      ? 'Partial'
+      : 'OK';
+  const dataStatusVariant = dataStatusLabel === 'OK' ? 'success' : dataStatusLabel === 'Partial' ? 'warning' : 'danger';
+  const metadata = data?.cacheMetadata;
 
   return (
     <section className="rounded-lg border border-border/70 bg-card p-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <DatabaseZap className="h-5 w-5 text-cyan" />
-          <h2 className="text-base font-semibold text-foreground">Data status</h2>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <DatabaseZap className="h-5 w-5 text-cyan" />
+            <h2 className="text-base font-semibold text-foreground">Data status</h2>
+            <Badge variant={dataStatusVariant}>Data status: {dataStatusLabel}</Badge>
+          </div>
+          <p className="mt-1 text-xs text-secondary-text">
+            {marketPhase.phase} | {data?.dataQuality.source ?? 'Mozyfin pending'} | selected {selectedItem?.ticker ?? '-'}
+          </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Badge variant={data?.fixtureMode ? 'warning' : data ? 'success' : 'default'}>
             {data?.dataQuality.source ?? 'Mozyfin pending'}
           </Badge>
           <Badge variant={kbsStateVariant(selectedKbsState)}>{selectedKbsState.label}</Badge>
-        </div>
-      </div>
-      <dl className="mt-4 grid gap-3 text-sm md:grid-cols-3 xl:grid-cols-7">
-        <div className="rounded-lg bg-elevated/50 p-3">
-          <dt className="text-xs text-secondary-text">VN market phase</dt>
-          <dd className="mt-1 font-medium text-foreground">{marketPhase.phase}</dd>
-          <dd className="mt-1 text-xs text-secondary-text">
-            {marketPhase.holidayAware ? 'Holiday calendar enabled' : 'holidayAware=false'}
-          </dd>
-        </div>
-        <div className="rounded-lg bg-elevated/50 p-3">
-          <dt className="text-xs text-secondary-text">Mozyfin mode</dt>
-          <dd className="mt-1 font-medium text-foreground">{data ? `fixture_mode ${String(data.fixtureMode)}` : '-'}</dd>
-          <dd className="mt-1 text-xs text-secondary-text">{data?.dataQuality.source ?? '-'}</dd>
-        </div>
-        <div className="rounded-lg bg-elevated/50 p-3">
-          <dt className="text-xs text-secondary-text">Overview refresh</dt>
-          <dd className="mt-1 font-medium text-foreground">{formatVietnamTime(data?.dataQuality.lastRefreshTime)}</dd>
-          <dd className="mt-1 text-xs text-secondary-text">{formatRelativeAge(data?.dataQuality.lastRefreshTime)}</dd>
-        </div>
-        <div className="rounded-lg bg-elevated/50 p-3">
-          <dt className="text-xs text-secondary-text">Selected detail</dt>
-          <dd className="mt-1 font-medium text-foreground">{selectedItem?.ticker ?? '-'}</dd>
-          <dd className="mt-1 text-xs text-secondary-text">{formatVietnamTime(selectedLastFetched)}</dd>
-        </div>
-        <div className="rounded-lg bg-elevated/50 p-3">
-          <dt className="text-xs text-secondary-text">KBS quotes</dt>
-          <dd className="mt-1 font-medium text-foreground">{formatVietnamTime(lastKbsQuoteRefreshAt)}</dd>
-          <dd className="mt-1 text-xs text-secondary-text">
-            raw stale {status.staleCount} | unavailable {status.unavailableCount}
-          </dd>
-        </div>
-        <div className="rounded-lg bg-elevated/50 p-3">
-          <dt className="text-xs text-secondary-text">KBS trades</dt>
-          <dd className="mt-1 font-medium text-foreground">{formatVietnamTime(lastKbsTradeRefreshAt)}</dd>
-          <dd className="mt-1 text-xs text-secondary-text">latest {latestTrade?.time ?? '-'}</dd>
-        </div>
-        <div className="rounded-lg bg-elevated/50 p-3">
-          <dt className="text-xs text-secondary-text">KBS auto-refresh</dt>
-          <dd className="mt-1 font-medium text-foreground">{kbsAutoRefreshEnabled ? 'on' : 'off'}</dd>
-          <dd className="mt-1 text-xs text-secondary-text">quotes {kbsQuoteRefreshInterval}s | trades {kbsTradeRefreshInterval}s</dd>
-          <dd className="mt-1 text-xs text-secondary-text">{lastKbsErrorAt ? `last error ${formatVietnamTime(lastKbsErrorAt)}` : 'last error -'}</dd>
-        </div>
-      </dl>
-      <div className="mt-3 grid gap-2 text-xs text-secondary-text md:grid-cols-3">
-        <div className="rounded-lg border border-border/60 bg-elevated/30 p-3">
-          <span className="font-medium text-foreground">Selected symbol</span> {selectedItem?.ticker ?? '-'} | daily close date {selectedItem?.latestPriceDate ?? selectedItem?.priceDate ?? '-'}
-        </div>
-        <div className="rounded-lg border border-border/60 bg-elevated/30 p-3">
-          <span className="font-medium text-foreground">KBS snapshot time</span> {selectedQuote?.realtimeTimeDisplay ?? selectedQuote?.realtimeTime ?? '-'}
-          <div className="mt-1">
-            <Badge variant={kbsStateVariant(selectedKbsState)}>{selectedKbsState.label}</Badge>
-          </div>
-          <div className="mt-1">{selectedKbsState.reason}</div>
-          <div className="mt-1">{rawKbsFreshnessText(selectedQuote)}</div>
-        </div>
-        <div className="rounded-lg border border-border/60 bg-elevated/30 p-3">
-          <span className="font-medium text-foreground">Cache status</span> {selectedCacheStatus}
+          <Badge variant="default">{marketPhase.holidayAware ? 'Holiday calendar enabled' : 'holidayAware=false'}</Badge>
         </div>
       </div>
       {data?.fixtureMode ? (
@@ -739,25 +589,213 @@ const DataStatusPanel: React.FC<{
           KBS issue: {kbsErrorMessage(realtimeError ?? tradesError) ?? 'KBS unavailable'}
         </div>
       ) : null}
-      <div className="mt-3 grid gap-2 rounded-lg border border-border/60 bg-elevated/30 p-3 text-xs text-secondary-text md:grid-cols-3 xl:grid-cols-6">
-        <div>
-          <span className="font-medium text-foreground">Mozyfin req</span> {observability?.mozyfin.watchlistRequestsTotal ?? '-'}
+      <details className="mt-3 rounded-lg border border-border/60 bg-elevated/30 p-3 text-xs text-secondary-text">
+        <summary className="cursor-pointer font-medium text-foreground">Show diagnostics</summary>
+        <dl className="mt-4 grid gap-3 text-sm md:grid-cols-3 xl:grid-cols-7">
+          <div className="rounded-lg bg-card/60 p-3">
+            <dt className="text-xs text-secondary-text">VN market phase</dt>
+            <dd className="mt-1 font-medium text-foreground">{marketPhase.phase}</dd>
+            <dd className="mt-1 text-xs text-secondary-text">
+              {marketPhase.holidayAware ? 'Holiday calendar enabled' : 'holidayAware=false'}
+            </dd>
+          </div>
+          <div className="rounded-lg bg-card/60 p-3">
+            <dt className="text-xs text-secondary-text">Mozyfin mode</dt>
+            <dd className="mt-1 font-medium text-foreground">{data ? `fixture_mode ${String(data.fixtureMode)}` : '-'}</dd>
+            <dd className="mt-1 text-xs text-secondary-text">{data?.dataQuality.source ?? '-'}</dd>
+          </div>
+          <div className="rounded-lg bg-card/60 p-3">
+            <dt className="text-xs text-secondary-text">Overview refresh</dt>
+            <dd className="mt-1 font-medium text-foreground">{formatVietnamTime(data?.dataQuality.lastRefreshTime)}</dd>
+            <dd className="mt-1 text-xs text-secondary-text">{formatRelativeAge(data?.dataQuality.lastRefreshTime)}</dd>
+          </div>
+          <div className="rounded-lg bg-card/60 p-3">
+            <dt className="text-xs text-secondary-text">Selected detail</dt>
+            <dd className="mt-1 font-medium text-foreground">{selectedItem?.ticker ?? '-'}</dd>
+            <dd className="mt-1 text-xs text-secondary-text">{formatVietnamTime(selectedLastFetched)}</dd>
+          </div>
+          <div className="rounded-lg bg-card/60 p-3">
+            <dt className="text-xs text-secondary-text">KBS quotes</dt>
+            <dd className="mt-1 font-medium text-foreground">{formatVietnamTime(lastKbsQuoteRefreshAt)}</dd>
+            <dd className="mt-1 text-xs text-secondary-text">
+              raw stale {status.staleCount} | unavailable {status.unavailableCount}
+            </dd>
+          </div>
+          <div className="rounded-lg bg-card/60 p-3">
+            <dt className="text-xs text-secondary-text">KBS trades</dt>
+            <dd className="mt-1 font-medium text-foreground">{formatVietnamTime(lastKbsTradeRefreshAt)}</dd>
+            <dd className="mt-1 text-xs text-secondary-text">latest {latestTrade?.time ?? '-'}</dd>
+          </div>
+          <div className="rounded-lg bg-card/60 p-3">
+            <dt className="text-xs text-secondary-text">KBS auto-refresh</dt>
+            <dd className="mt-1 font-medium text-foreground">{kbsAutoRefreshEnabled ? 'on' : 'off'}</dd>
+            <dd className="mt-1 text-xs text-secondary-text">quotes {kbsQuoteRefreshInterval}s | trades {kbsTradeRefreshInterval}s</dd>
+            <dd className="mt-1 text-xs text-secondary-text">{lastKbsErrorAt ? `last error ${formatVietnamTime(lastKbsErrorAt)}` : 'last error -'}</dd>
+          </div>
+        </dl>
+        <div className="mt-3 grid gap-2 md:grid-cols-3">
+          <div className="rounded-lg border border-border/60 bg-card/50 p-3">
+            <span className="font-medium text-foreground">Selected symbol</span> {selectedItem?.ticker ?? '-'} | daily close date {selectedItem?.latestPriceDate ?? selectedItem?.priceDate ?? '-'}
+          </div>
+          <div className="rounded-lg border border-border/60 bg-card/50 p-3">
+            <span className="font-medium text-foreground">KBS snapshot time</span> {selectedQuote?.realtimeTimeDisplay ?? selectedQuote?.realtimeTime ?? '-'}
+            <div className="mt-1">
+              <Badge variant={kbsStateVariant(selectedKbsState)}>{selectedKbsState.label}</Badge>
+            </div>
+            <div className="mt-1">{selectedKbsState.reason}</div>
+            <div className="mt-1">{rawKbsFreshnessText(selectedQuote)}</div>
+          </div>
+          <div className="rounded-lg border border-border/60 bg-card/50 p-3">
+            <span className="font-medium text-foreground">Cache status</span> {selectedCacheStatus}
+          </div>
         </div>
-        <div>
-          <span className="font-medium text-foreground">Cache hit/miss</span> {observability ? `${observability.mozyfin.watchlistCacheHitsTotal}/${observability.mozyfin.watchlistCacheMissesTotal}` : '-'}
+        <div className="mt-3 grid gap-2 rounded-lg border border-border/60 bg-card/50 p-3 md:grid-cols-3 xl:grid-cols-6">
+          <div>
+            <span className="font-medium text-foreground">Mozyfin req</span> {observability?.mozyfin.watchlistRequestsTotal ?? '-'}
+          </div>
+          <div>
+            <span className="font-medium text-foreground">Cache hit/miss</span> {observability ? `${observability.mozyfin.watchlistCacheHitsTotal}/${observability.mozyfin.watchlistCacheMissesTotal}` : '-'}
+          </div>
+          <div>
+            <span className="font-medium text-foreground">Single-flight waits</span> {observability?.mozyfin.singleflightWaitsTotal ?? '-'}
+          </div>
+          <div>
+            <span className="font-medium text-foreground">KBS quote unavailable</span> {observability ? `${observability.kbs.quoteUnavailableTotal}/${observability.kbs.quoteRequestsTotal}` : '-'}
+          </div>
+          <div>
+            <span className="font-medium text-foreground">KBS trade unavailable</span> {observability ? `${observability.kbs.tradeUnavailableTotal}/${observability.kbs.tradeRequestsTotal}` : '-'}
+          </div>
+          <div className="truncate">
+            <span className="font-medium text-foreground">Last KBS error</span> {observability?.kbs.lastError ?? '-'}
+          </div>
         </div>
-        <div>
-          <span className="font-medium text-foreground">Single-flight waits</span> {observability?.mozyfin.singleflightWaitsTotal ?? '-'}
+        {data ? (
+          <div className="mt-3 grid gap-3">
+            <div className="rounded-lg border border-border/60 bg-card/50 p-3">
+              <p className="font-medium text-foreground">Provider diagnostics</p>
+              <dl className="mt-2 grid gap-2 md:grid-cols-5">
+                <div>
+                  <dt>Data source</dt>
+                  <dd className="font-medium text-foreground">{data.dataQuality.source}</dd>
+                </div>
+                <div>
+                  <dt>Trading date</dt>
+                  <dd className="font-medium text-foreground">{data.dataQuality.lastTradingDate ?? '-'}</dd>
+                </div>
+                <div>
+                  <dt>Rows loaded</dt>
+                  <dd className="font-medium text-foreground">{formatNumber(data.watchlist.reduce((total, item) => total + (item.rowsLoaded ?? 0), 0))}</dd>
+                </div>
+                <div>
+                  <dt>Fixture active</dt>
+                  <dd className="font-medium text-foreground">{data.dataQuality.fixtureMode ? 'Yes' : 'No'}</dd>
+                </div>
+                <div>
+                  <dt>Last refresh</dt>
+                  <dd className="font-medium text-foreground">{formatVietnamTime(data.dataQuality.lastRefreshTime)}</dd>
+                </div>
+              </dl>
+              <p className="mt-3">
+                Units: latest price and OHLCV fields are VND, volume is shares, and foreign net is labeled shares only when Mozyfin quote quantity fields are used. KBS snapshot is separate and does not replace daily close.
+              </p>
+            </div>
+            {Object.keys(data.dataQuality.missingFields).length || Object.keys(data.dataQuality.errors).length ? (
+              <div className="grid gap-2">
+                {Object.entries(data.dataQuality.missingFields).map(([ticker, fields]) => (
+                  <div key={`missing-${ticker}`} className="rounded-lg border border-warning/20 bg-warning/10 p-2 text-warning">
+                    {ticker}: missing {fields.join(', ')}
+                  </div>
+                ))}
+                {Object.entries(data.dataQuality.errors).map(([ticker, errors]) => (
+                  <div key={`error-${ticker}`} className="rounded-lg border border-danger/20 bg-danger/10 p-2 text-danger">
+                    {ticker}: {errors.join('; ')}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+        {metadata ? (
+          <div className="mt-3 rounded-lg border border-border/60 bg-card/50 p-3">
+            <p className="font-medium text-foreground">Cache diagnostics</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <Badge variant="default">hits {formatNumber(metadata.cacheHitCount)}</Badge>
+              <Badge variant="default">misses {formatNumber(metadata.cacheMissCount)}</Badge>
+              <Badge variant={metadata.staleCacheUsedCount ? 'warning' : 'default'}>stale used {formatNumber(metadata.staleCacheUsedCount)}</Badge>
+              <Badge variant="default">OHLCV TTL {formatNumber(metadata.cacheTtlSeconds.ohlcv)}s</Badge>
+              <Badge variant="default">Quote TTL {formatNumber(metadata.cacheTtlSeconds.quote)}s</Badge>
+              <Badge variant="default">Intraday 1H TTL {formatNumber(metadata.cacheTtlSeconds.intradayOhlcv)}s</Badge>
+              <Badge variant="default">News TTL {formatNumber(metadata.cacheTtlSeconds.news)}s</Badge>
+            </div>
+          </div>
+        ) : null}
+      </details>
+    </section>
+  );
+};
+
+const SelectedTickerHeader: React.FC<{
+  item?: VietnamWatchItem | null;
+  realtimeQuote?: VietnamRealtimeQuote | null;
+  marketPhase: VietnamMarketPhase;
+}> = ({ item, realtimeQuote, marketPhase }) => {
+  if (!item) return null;
+  const kbsState = kbsSnapshotState(realtimeQuote, marketPhase.code);
+  const avgVolume20D = item.indicators.avgVolume20D ?? item.liquidity?.avgVolume20D;
+  const sessionVolume = usableKbsSessionVolume(realtimeQuote, kbsState) ?? item.intradayPulse?.sessionVolumeFrom1H ?? null;
+  const kbsPrice = realtimeQuote?.snapshotPrice ?? realtimeQuote?.realtimePrice;
+  const priceVsReference = realtimeQuote?.priceVsReference ?? (
+    kbsPrice != null && realtimeQuote?.referencePrice != null ? kbsPrice - realtimeQuote.referencePrice : null
+  );
+  const priceVsReferencePct = realtimeQuote?.priceVsReferencePct ?? (
+    priceVsReference != null && realtimeQuote?.referencePrice ? priceVsReference / realtimeQuote.referencePrice * 100 : null
+  );
+
+  return (
+    <section className="rounded-lg border border-cyan/25 bg-card p-4 shadow-soft-card">
+      <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+        <div className="min-w-0">
+          <p className="label-uppercase text-cyan">Selected ticker</p>
+          <div className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <h2 className="text-2xl font-semibold text-foreground">{item.ticker}</h2>
+            <p className="min-w-0 text-sm text-secondary-text">{companyDisplayName(item)}</p>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Badge variant="info">Mozyfin daily</Badge>
+            <Badge variant={kbsStateVariant(kbsState)}>KBS realtime</Badge>
+            <Badge variant={priceSourceVariant(item.latestPriceSource)}>Daily source {(item.latestPriceSource ?? 'unknown').toUpperCase()}</Badge>
+          </div>
         </div>
-        <div>
-          <span className="font-medium text-foreground">KBS quote unavailable</span> {observability ? `${observability.kbs.quoteUnavailableTotal}/${observability.kbs.quoteRequestsTotal}` : '-'}
-        </div>
-        <div>
-          <span className="font-medium text-foreground">KBS trade unavailable</span> {observability ? `${observability.kbs.tradeUnavailableTotal}/${observability.kbs.tradeRequestsTotal}` : '-'}
-        </div>
-        <div className="truncate">
-          <span className="font-medium text-foreground">Last KBS error</span> {observability?.kbs.lastError ?? '-'}
-        </div>
+        <dl className="grid flex-1 gap-2 text-sm sm:grid-cols-2 xl:max-w-4xl xl:grid-cols-6">
+          <div className="rounded-lg bg-elevated/50 p-3">
+            <dt className="text-xs text-secondary-text">Daily close</dt>
+            <dd className="mt-1 font-semibold text-foreground">{formatPrice(item.latestPrice ?? item.close)}</dd>
+            <dd className="mt-1 text-xs text-secondary-text">{item.latestPriceDate ?? item.priceDate ?? '-'}</dd>
+          </div>
+          <div className="rounded-lg bg-elevated/50 p-3">
+            <dt className="text-xs text-secondary-text">KBS snapshot</dt>
+            <dd className="mt-1 font-semibold text-foreground">{formatPrice(kbsPrice)}</dd>
+            <dd className="mt-1 text-xs text-secondary-text">{kbsState.label}</dd>
+          </div>
+          <div className="rounded-lg bg-elevated/50 p-3">
+            <dt className="text-xs text-secondary-text">Vs reference</dt>
+            <dd className={cn('mt-1 font-semibold', signalTone(priceVsReference))}>
+              {formatReferenceDelta(priceVsReference, priceVsReferencePct)}
+            </dd>
+          </div>
+          <div className="rounded-lg bg-elevated/50 p-3">
+            <dt className="text-xs text-secondary-text">Session volume</dt>
+            <dd className="mt-1 font-semibold text-foreground">{formatNumber(sessionVolume)}</dd>
+          </div>
+          <div className="rounded-lg bg-elevated/50 p-3">
+            <dt className="text-xs text-secondary-text">20D avg volume</dt>
+            <dd className="mt-1 font-semibold text-foreground">{formatNumber(avgVolume20D)}</dd>
+          </div>
+          <div className="rounded-lg bg-elevated/50 p-3">
+            <dt className="text-xs text-secondary-text">Latest news</dt>
+            <dd className="mt-1 font-semibold text-foreground">{latestNewsAge(item)}</dd>
+          </div>
+        </dl>
       </div>
     </section>
   );
@@ -2432,11 +2470,6 @@ const VietnamDashboardPage: React.FC = () => {
     return { count: rows.length, up, avgLiquidity, foreignNet };
   }, [data]);
 
-  const rowsLoaded = useMemo(
-    () => (data?.watchlist ?? []).reduce((sum, item) => sum + (item.rowsLoaded ?? 0), 0),
-    [data],
-  );
-
   const selectedItem = useMemo(
     () => (data?.watchlist ?? []).find((item) => item.ticker === selectedTicker) ?? data?.watchlist?.[0] ?? null,
     [data, selectedTicker],
@@ -2744,76 +2777,14 @@ const VietnamDashboardPage: React.FC = () => {
         <div className="rounded-lg border border-danger/30 bg-danger/10 p-4 text-sm text-danger">{error}</div>
       ) : null}
 
-      {data ? (
-        <section className="rounded-lg border border-border/70 bg-card p-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <DatabaseZap className="h-5 w-5 text-cyan" />
-              <h2 className="text-base font-semibold text-foreground">Data quality</h2>
-            </div>
-            <Badge variant={data.fixtureMode ? 'warning' : 'success'}>
-              {data.fixtureMode ? 'Fixture mode' : 'Live mode'}
-            </Badge>
-          </div>
-          <dl className="mt-4 grid gap-3 text-sm md:grid-cols-5">
-            <div className="rounded-lg bg-elevated/50 p-3">
-              <dt className="text-xs text-secondary-text">Data source</dt>
-              <dd className="mt-1 font-medium text-foreground">{data.dataQuality.source}</dd>
-            </div>
-            <div className="rounded-lg bg-elevated/50 p-3">
-              <dt className="text-xs text-secondary-text">Trading date</dt>
-              <dd className="mt-1 font-medium text-foreground">{data.dataQuality.lastTradingDate ?? '-'}</dd>
-            </div>
-            <div className="rounded-lg bg-elevated/50 p-3">
-              <dt className="text-xs text-secondary-text">Rows loaded</dt>
-              <dd className="mt-1 font-medium text-foreground">{formatNumber(rowsLoaded)}</dd>
-            </div>
-            <div className="rounded-lg bg-elevated/50 p-3">
-              <dt className="text-xs text-secondary-text">Fixture active</dt>
-              <dd className="mt-1 font-medium text-foreground">{data.dataQuality.fixtureMode ? 'Yes' : 'No'}</dd>
-            </div>
-            <div className="rounded-lg bg-elevated/50 p-3">
-              <dt className="text-xs text-secondary-text">Last refresh</dt>
-              <dd className="mt-1 font-medium text-foreground">{formatVietnamTime(data.dataQuality.lastRefreshTime)}</dd>
-              <dd className="mt-1 text-xs text-secondary-text">{formatRelativeAge(data.dataQuality.lastRefreshTime)}</dd>
-            </div>
-          </dl>
-          <div className="mt-3 rounded-lg border border-border/60 bg-elevated/30 p-3 text-xs text-secondary-text">
-            Units: latest price and OHLCV fields are VND, volume is shares, and foreign net is labeled shares only when Mozyfin quote quantity fields are used. KBS snapshot is separate and does not replace daily close.
-          </div>
-          {Object.keys(data.dataQuality.missingFields).length || Object.keys(data.dataQuality.errors).length ? (
-            <div className="mt-3 space-y-2">
-              {Object.entries(data.dataQuality.missingFields).map(([ticker, fields]) => (
-                <div key={`missing-${ticker}`} className="rounded-lg border border-warning/20 bg-warning/10 p-2 text-xs text-warning">
-                  {ticker}: missing {fields.join(', ')}
-                </div>
-              ))}
-              {Object.entries(data.dataQuality.errors).map(([ticker, errors]) => (
-                <div key={`error-${ticker}`} className="rounded-lg border border-danger/20 bg-danger/10 p-2 text-xs text-danger">
-                  {ticker}: {errors.join('; ')}
-                </div>
-              ))}
-            </div>
-          ) : null}
-        </section>
-      ) : null}
-
-      {data ? (
-        <CacheMetadataPanel data={data} items={data.watchlist ?? []} />
-      ) : null}
-
       {loading && !data ? (
         <Loading label="Loading Vietnam watchlist..." />
       ) : (
         <>
-          <IndicatorTable
-            items={data?.watchlist ?? []}
-            realtimeQuotes={realtimeQuotes}
-            realtimeLoading={realtimeLoading}
-            realtimeError={realtimeError}
-            selectedTicker={selectedItem?.ticker}
+          <SelectedTickerHeader
+            item={selectedItem}
+            realtimeQuote={selectedItem ? realtimeQuotes[selectedItem.ticker] : null}
             marketPhase={marketPhase}
-            onSelect={setSelectedTicker}
           />
           <StockDetailView
             item={selectedItem}
@@ -2826,6 +2797,15 @@ const VietnamDashboardPage: React.FC = () => {
             tradesLoading={tradesLoading}
             tradesError={tradesError}
             marketPhase={marketPhase}
+          />
+          <IndicatorTable
+            items={data?.watchlist ?? []}
+            realtimeQuotes={realtimeQuotes}
+            realtimeLoading={realtimeLoading}
+            realtimeError={realtimeError}
+            selectedTicker={selectedItem?.ticker}
+            marketPhase={marketPhase}
+            onSelect={setSelectedTicker}
           />
           <section className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
             {(data?.watchlist ?? []).map((item) => (

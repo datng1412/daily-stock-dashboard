@@ -74,6 +74,7 @@ const makeChartResponse = (symbol = 'FPT', range = '6M', points = makeChartData(
 
 const makeItem = (ticker: string): VietnamWatchItem => ({
   ticker,
+  name: `${ticker} Listed Company`,
   entity: `${ticker}.VN`,
   exchange: 'HOSE',
   marketIndex: 'VNINDEX.VN',
@@ -364,6 +365,18 @@ const dataStatusPanel = () => {
   return within(panel);
 };
 
+const dataStatusDiagnostics = () => {
+  const details = screen.getByText('Show diagnostics').closest('details');
+  if (!details) throw new Error('Data status diagnostics not found');
+  return details;
+};
+
+const selectedTickerHeader = () => {
+  const header = screen.getByText('Selected ticker').closest('section');
+  if (!header) throw new Error('Selected ticker header not found');
+  return within(header);
+};
+
 const inspectChartCard = () => {
   const detail = within(screen.getByText('Stock detail').closest('section') as HTMLElement);
   const chartHeading = detail.getByRole('heading', { name: 'Inspect chart' });
@@ -446,6 +459,24 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(screen.getByText('KBS board snapshot; may differ from trade tape')).toBeInTheDocument();
     expect(screen.getAllByText(/OHLCV close 100/).length).toBeGreaterThan(0);
     expect(screen.getAllByText('101.5').length).toBeGreaterThan(0);
+  });
+
+  it('renders a compact selected ticker header with distinct source labels', async () => {
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledWith(defaultTickers));
+
+    const header = selectedTickerHeader();
+    expect(header.getByRole('heading', { name: 'FPT' })).toBeInTheDocument();
+    expect(header.getByText('FPT Listed Company')).toBeInTheDocument();
+    expect(header.getByText('Daily close')).toBeInTheDocument();
+    expect(header.getByText('KBS snapshot')).toBeInTheDocument();
+    expect(header.getByText('Vs reference')).toBeInTheDocument();
+    expect(header.getByText('Session volume')).toBeInTheDocument();
+    expect(header.getByText('20D avg volume')).toBeInTheDocument();
+    expect(header.getByText('Latest news')).toBeInTheDocument();
+    expect(header.getByText('Mozyfin daily')).toBeInTheDocument();
+    expect(header.getByText('KBS realtime')).toBeInTheDocument();
   });
 
   it('renders news source with relative time', async () => {
@@ -847,7 +878,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(screen.getByText('KBS session accumulated volume')).toBeInTheDocument();
     expect(screen.getByText('Mozyfin session 1H volume is calculated from filtered 1H candles; KBS session volume comes from the realtime board and may differ.')).toBeInTheDocument();
     expect(screen.getAllByText('1,234,567').length).toBeGreaterThanOrEqual(2);
-    expect(screen.getByText('3,456,000')).toBeInTheDocument();
+    expect(screen.getAllByText('3,456,000').length).toBeGreaterThan(0);
     expect(screen.getAllByText('0.72x').length).toBeGreaterThan(0);
     expect(screen.getByText('103 / 99')).toBeInTheDocument();
     expect(screen.getByText('4%')).toBeInTheDocument();
@@ -1090,7 +1121,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
 
     expect(screen.getAllByText('20D average volume (shares)').length).toBeGreaterThan(0);
-    expect(screen.getByText('1,234,567')).toBeInTheDocument();
+    expect(screen.getAllByText('1,234,567').length).toBeGreaterThan(0);
   });
 
   it('falls back to liquidity 20D average volume when indicator value is missing', async () => {
@@ -1109,7 +1140,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
 
-    expect(screen.getByText('7,654,321')).toBeInTheDocument();
+    expect(screen.getAllByText('7,654,321').length).toBeGreaterThan(0);
   });
 
   it('displays final close as not confirmed instead of unknown', async () => {
@@ -1185,10 +1216,14 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     const panel = dataStatusPanel();
     expect(panel.getByText('Data status')).toBeInTheDocument();
-    expect(panel.getByText('VN market phase')).toBeInTheDocument();
+    expect(panel.getByText('Data status: OK')).toBeInTheDocument();
     expect(panel.getByText('Continuous afternoon')).toBeInTheDocument();
-    expect(panel.getByText('holidayAware=false')).toBeInTheDocument();
+    expect(panel.getAllByText('holidayAware=false').length).toBeGreaterThan(0);
     expect(panel.getAllByText('Mozyfin live').length).toBeGreaterThan(0);
+    expect(dataStatusDiagnostics()).not.toHaveAttribute('open');
+    fireEvent.click(panel.getByText('Show diagnostics'));
+    expect(dataStatusDiagnostics()).toHaveAttribute('open');
+    expect(panel.getByText('VN market phase')).toBeInTheDocument();
     expect(panel.getByText('fixture_mode false')).toBeInTheDocument();
     expect(panel.getByText('Overview refresh')).toBeInTheDocument();
     expect(panel.getByText('Selected detail')).toBeInTheDocument();
@@ -1217,6 +1252,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     await waitFor(() => expect(mockedGetVietnamObservability).toHaveBeenCalled());
 
     const panel = dataStatusPanel();
+    fireEvent.click(panel.getByText('Show diagnostics'));
     expect(panel.getByText('Mozyfin req')).toBeInTheDocument();
     expect(panel.getAllByText('3').length).toBeGreaterThan(0);
     expect(panel.getByText('Cache hit/miss')).toBeInTheDocument();
@@ -1266,6 +1302,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     const panel = dataStatusPanel();
     expect(panel.getAllByText('Mozyfin fixture').length).toBeGreaterThan(0);
+    fireEvent.click(panel.getByText('Show diagnostics'));
     expect(panel.getByText('fixture_mode true')).toBeInTheDocument();
     expect(panel.getByText('Fixture mode is active; Mozyfin rows are sample data.')).toBeInTheDocument();
   });
@@ -1277,6 +1314,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     const panel = dataStatusPanel();
     expect(panel.getAllByText('KBS snapshot live').length).toBeGreaterThan(0);
+    fireEvent.click(panel.getByText('Show diagnostics'));
     expect(panel.getByText('raw stale 0 | unavailable 0')).toBeInTheDocument();
   });
 
@@ -1325,8 +1363,10 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     expect(screen.getAllByText('KBS snapshot stale during trading').length).toBeGreaterThan(0);
     expect(screen.getAllByText('2026-06-11T10:15:00+07:00').length).toBeGreaterThan(0);
-    expect(dataStatusPanel().getByText(`raw stale ${defaultTickers.length} | unavailable 0`)).toBeInTheDocument();
-    expect(dataStatusPanel().getByText('raw age 600s | raw stale true | reason age_gt_60s')).toBeInTheDocument();
+    const panel = dataStatusPanel();
+    fireEvent.click(panel.getByText('Show diagnostics'));
+    expect(panel.getByText(`raw stale ${defaultTickers.length} | unavailable 0`)).toBeInTheDocument();
+    expect(panel.getByText('raw age 600s | raw stale true | reason age_gt_60s')).toBeInTheDocument();
     expect(screen.getAllByText('raw age 600s | raw stale true | reason age_gt_60s')).toHaveLength(1);
   });
 
@@ -1341,8 +1381,10 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(screen.getAllByText('Last available KBS snapshot').length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Market closed; snapshot may stop updating/).length).toBeGreaterThan(0);
     expect(screen.queryByText('KBS snapshot stale during trading')).not.toBeInTheDocument();
-    expect(dataStatusPanel().getByText(`raw stale ${defaultTickers.length} | unavailable 0`)).toBeInTheDocument();
-    expect(dataStatusPanel().getByText('raw age 1200s | raw stale true | reason age_gt_60s')).toBeInTheDocument();
+    const panel = dataStatusPanel();
+    fireEvent.click(panel.getByText('Show diagnostics'));
+    expect(panel.getByText(`raw stale ${defaultTickers.length} | unavailable 0`)).toBeInTheDocument();
+    expect(panel.getByText('raw age 1200s | raw stale true | reason age_gt_60s')).toBeInTheDocument();
     expect(screen.getAllByText('raw age 1200s | raw stale true | reason age_gt_60s')).toHaveLength(1);
   });
 
@@ -1355,6 +1397,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     const panel = dataStatusPanel();
     expect(panel.getAllByText('KBS snapshot unavailable').length).toBeGreaterThan(0);
+    fireEvent.click(panel.getByText('Show diagnostics'));
     expect(panel.getByText(`raw stale 0 | unavailable ${defaultTickers.length}`)).toBeInTheDocument();
   });
 

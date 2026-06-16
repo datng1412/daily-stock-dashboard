@@ -14,6 +14,8 @@ export type ExtractFromImageResponse = {
 
 export type VietnamWatchItem = {
   ticker: string;
+  name?: string | null;
+  companyName?: string | null;
   entity?: string | null;
   exchange?: string | null;
   marketIndex?: string | null;

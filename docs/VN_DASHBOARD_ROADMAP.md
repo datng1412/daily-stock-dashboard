@@ -99,6 +99,14 @@ Current weak points:
 
 ### 1. Improve dashboard visual hierarchy and reduce clutter
 
+Status: partial in first roadmap batch.
+
+Implemented so far:
+
+* Added a compact Data status summary near the top.
+* Moved selected ticker context and inspect chart ahead of secondary comparison cards.
+* Moved provider/cache/debug details behind collapsed diagnostics.
+
 Goal:
 
 Make the dashboard easier to scan before adding more data features.
@@ -119,6 +127,14 @@ Rules:
 * Use spacing and typography to separate primary, secondary, and debug content.
 
 ### 2. Improve selected ticker header
+
+Status: partial in first roadmap batch.
+
+Implemented so far:
+
+* Added a compact selected ticker header.
+* Shows symbol/company label, Daily close, KBS snapshot, Vs reference, Session volume, 20D avg volume, Latest news, and Mozyfin/KBS source badges.
+* Keeps Mozyfin daily and KBS realtime labels visually separate.
 
 Goal:
 
@@ -154,6 +170,13 @@ Design rules:
 * Do not add trading instruction wording.
 
 ### 3. Collapse debug and observability sections by default
+
+Status: partial in first roadmap batch.
+
+Implemented so far:
+
+* Data status defaults to OK/Partial/Unavailable.
+* Provider diagnostics, cache diagnostics, raw freshness, request times, counters, and KBS details are available under Show diagnostics.
 
 Goal:
 

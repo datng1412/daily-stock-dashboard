@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [improvement] First round of hierarchy improvements for the Vietnam market dashboard: enhanced the selected ticker header, separated Mozyfin daily data from KBS snapshot data, and collapsed data diagnostics by default.
 - [Improvement] Add frontend-only zoom, pan, and reset controls to the Vietnam inspect chart while preserving Mozyfin/KBS data semantics.
 - [Improvement] Add an inspect-only Vietnam daily OHLCV chart with close, volume, RSI14, MA20/MA50, and optional Bollinger overlays while keeping KBS snapshot separate.
 - [Fix] Clarify Vietnam dashboard session volume ratio semantics, hide unavailable 1H average-volume comparisons, and show corporate actions as recent/upcoming states without inferring events.
