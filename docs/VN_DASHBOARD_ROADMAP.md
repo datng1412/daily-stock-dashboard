@@ -250,6 +250,7 @@ Implemented:
 * Same range, MA20/MA50/Bollinger, zoom, pan, and reset controls.
 * Close button and Escape key support.
 * Daily OHLCV and KBS snapshot separation remains visible in expanded mode.
+* Compact and expanded modes share the same chart control components to keep behavior aligned.
 
 Goal:
 

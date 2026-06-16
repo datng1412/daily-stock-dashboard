@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 - [fix] Ensure Docker and Render Vietnam dashboard deployments create and use a writable stock-index cache directory.
+- [chore] Share Vietnam inspect chart range, overlay, zoom, pan, reset, and expand controls between compact and expanded chart modes.
 - [improvement] Add expanded Vietnam inspect chart mode with shared range, overlay, zoom, pan, reset, and close controls while preserving Mozyfin daily and KBS snapshot separation.
 - [improvement] First round of hierarchy improvements for the Vietnam market dashboard: enhanced the selected ticker header, separated Mozyfin daily data from KBS snapshot data, and collapsed data diagnostics by default.
 - [improvement] Add frontend-only zoom, pan, and reset controls to the Vietnam inspect chart while preserving Mozyfin/KBS data semantics.

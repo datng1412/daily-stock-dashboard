@@ -1191,6 +1191,170 @@ const BrokerInspectChartSvg: React.FC<{
   );
 };
 
+const ChartRangeControls: React.FC<{
+  rangeLabel: InspectRangeLabel;
+  onRangeChange: (range: InspectRangeLabel) => void;
+}> = ({ rangeLabel, onRangeChange }) => (
+  <div className="flex flex-wrap gap-1">
+    {INSPECT_RANGES.map((range) => (
+      <button
+        key={range.label}
+        type="button"
+        onClick={() => onRangeChange(range.label)}
+        className={cn(
+          'h-8 rounded-md border px-3 text-xs font-medium transition-colors',
+          rangeLabel === range.label
+            ? 'border-cyan bg-cyan/10 text-cyan'
+            : 'border-border/70 bg-card/60 text-secondary-text hover:bg-hover hover:text-foreground',
+        )}
+        aria-pressed={rangeLabel === range.label}
+      >
+        {range.label}
+      </button>
+    ))}
+  </div>
+);
+
+const ChartOverlayControls: React.FC<{
+  showMA20: boolean;
+  showMA50: boolean;
+  showBollinger: boolean;
+  onShowMA20Change: (value: boolean) => void;
+  onShowMA50Change: (value: boolean) => void;
+  onShowBollingerChange: (value: boolean) => void;
+}> = ({
+  showMA20,
+  showMA50,
+  showBollinger,
+  onShowMA20Change,
+  onShowMA50Change,
+  onShowBollingerChange,
+}) => (
+  <div className="flex flex-wrap gap-2">
+    <label className="inline-flex h-8 items-center gap-2 rounded-md border border-border/70 bg-card/60 px-3 text-xs text-secondary-text">
+      <input type="checkbox" checked={showMA20} onChange={(event) => onShowMA20Change(event.target.checked)} />
+      MA20
+    </label>
+    <label className="inline-flex h-8 items-center gap-2 rounded-md border border-border/70 bg-card/60 px-3 text-xs text-secondary-text">
+      <input type="checkbox" checked={showMA50} onChange={(event) => onShowMA50Change(event.target.checked)} />
+      MA50
+    </label>
+    <label className="inline-flex h-8 items-center gap-2 rounded-md border border-border/70 bg-card/60 px-3 text-xs text-secondary-text">
+      <input type="checkbox" checked={showBollinger} onChange={(event) => onShowBollingerChange(event.target.checked)} />
+      Bollinger
+    </label>
+  </div>
+);
+
+const ChartWindowControls: React.FC<{
+  pointsLength: number;
+  visibleCount: number;
+  canZoomIn: boolean;
+  canZoomOut: boolean;
+  canPanLeft: boolean;
+  canPanRight: boolean;
+  isZoomed: boolean;
+  visibleCountTestId: string;
+  onZoomIn: () => void;
+  onZoomOut: () => void;
+  onPanLeft: () => void;
+  onPanRight: () => void;
+  onReset: () => void;
+  onExpand?: () => void;
+}> = ({
+  pointsLength,
+  visibleCount,
+  canZoomIn,
+  canZoomOut,
+  canPanLeft,
+  canPanRight,
+  isZoomed,
+  visibleCountTestId,
+  onZoomIn,
+  onZoomOut,
+  onPanLeft,
+  onPanRight,
+  onReset,
+  onExpand,
+}) => (
+  <div className="flex flex-wrap items-center gap-1">
+    <button
+      type="button"
+      onClick={onZoomIn}
+      disabled={!canZoomIn}
+      aria-label="Zoom in chart"
+      className={cn(
+        'h-8 rounded-md border px-3 text-xs font-medium transition-colors',
+        canZoomIn ? 'border-border/70 bg-card/60 text-secondary-text hover:bg-hover hover:text-foreground' : 'cursor-not-allowed border-border/40 bg-card/30 text-secondary-text/50',
+      )}
+    >
+      +
+    </button>
+    <button
+      type="button"
+      onClick={onZoomOut}
+      disabled={!canZoomOut}
+      aria-label="Zoom out chart"
+      className={cn(
+        'h-8 rounded-md border px-3 text-xs font-medium transition-colors',
+        canZoomOut ? 'border-border/70 bg-card/60 text-secondary-text hover:bg-hover hover:text-foreground' : 'cursor-not-allowed border-border/40 bg-card/30 text-secondary-text/50',
+      )}
+    >
+      -
+    </button>
+    <button
+      type="button"
+      onClick={onPanLeft}
+      disabled={!canPanLeft}
+      aria-label="Pan left"
+      className={cn(
+        'h-8 rounded-md border px-3 text-xs font-medium transition-colors',
+        canPanLeft ? 'border-border/70 bg-card/60 text-secondary-text hover:bg-hover hover:text-foreground' : 'cursor-not-allowed border-border/40 bg-card/30 text-secondary-text/50',
+      )}
+    >
+      Left
+    </button>
+    <button
+      type="button"
+      onClick={onPanRight}
+      disabled={!canPanRight}
+      aria-label="Pan right"
+      className={cn(
+        'h-8 rounded-md border px-3 text-xs font-medium transition-colors',
+        canPanRight ? 'border-border/70 bg-card/60 text-secondary-text hover:bg-hover hover:text-foreground' : 'cursor-not-allowed border-border/40 bg-card/30 text-secondary-text/50',
+      )}
+    >
+      Right
+    </button>
+    <button
+      type="button"
+      onClick={onReset}
+      disabled={!isZoomed}
+      aria-label="Reset chart zoom"
+      className={cn(
+        'h-8 rounded-md border px-3 text-xs font-medium transition-colors',
+        isZoomed ? 'border-border/70 bg-card/60 text-secondary-text hover:bg-hover hover:text-foreground' : 'cursor-not-allowed border-border/40 bg-card/30 text-secondary-text/50',
+      )}
+    >
+      Reset
+    </button>
+    {onExpand ? (
+      <button
+        type="button"
+        onClick={onExpand}
+        aria-label="Expand chart"
+        className="inline-flex h-8 items-center gap-2 rounded-md border border-border/70 bg-card/60 px-3 text-xs font-medium text-secondary-text transition-colors hover:bg-hover hover:text-foreground"
+      >
+        <Maximize2 className="h-3.5 w-3.5" aria-hidden="true" />
+        Expand
+      </button>
+    ) : null}
+    <span className="ml-2 text-xs text-secondary-text" data-testid={visibleCountTestId}>
+      Showing {visibleCount} of {pointsLength}
+    </span>
+  </div>
+);
+
 const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
   const [rangeLabel, setRangeLabel] = useState<InspectRangeLabel>('6M');
   const [showMA20, setShowMA20] = useState(true);
@@ -1258,119 +1422,40 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
           <h3 className="text-sm font-semibold text-foreground">Inspect chart</h3>
           <p className="mt-1 text-xs text-secondary-text">Daily OHLCV from Mozyfin. KBS snapshot remains separate.</p>
         </div>
-        <div className="flex flex-wrap gap-1">
-          {INSPECT_RANGES.map((range) => (
-            <button
-              key={range.label}
-              type="button"
-              onClick={() => setRangeLabel(range.label)}
-              className={cn(
-                'h-8 rounded-md border px-3 text-xs font-medium transition-colors',
-                rangeLabel === range.label
-                  ? 'border-cyan bg-cyan/10 text-cyan'
-                  : 'border-border/70 bg-card/60 text-secondary-text hover:bg-hover hover:text-foreground',
-              )}
-              aria-pressed={rangeLabel === range.label}
-            >
-              {range.label}
-            </button>
-          ))}
-        </div>
+        <ChartRangeControls rangeLabel={rangeLabel} onRangeChange={setRangeLabel} />
       </div>
 
-      <div className="mt-3 flex flex-wrap gap-2">
-        <label className="inline-flex h-8 items-center gap-2 rounded-md border border-border/70 bg-card/60 px-3 text-xs text-secondary-text">
-          <input type="checkbox" checked={showMA20} onChange={(event) => setShowMA20(event.target.checked)} />
-          MA20
-        </label>
-        <label className="inline-flex h-8 items-center gap-2 rounded-md border border-border/70 bg-card/60 px-3 text-xs text-secondary-text">
-          <input type="checkbox" checked={showMA50} onChange={(event) => setShowMA50(event.target.checked)} />
-          MA50
-        </label>
-        <label className="inline-flex h-8 items-center gap-2 rounded-md border border-border/70 bg-card/60 px-3 text-xs text-secondary-text">
-          <input type="checkbox" checked={showBollinger} onChange={(event) => setShowBollinger(event.target.checked)} />
-          Bollinger
-        </label>
+      <div className="mt-3">
+        <ChartOverlayControls
+          showMA20={showMA20}
+          showMA50={showMA50}
+          showBollinger={showBollinger}
+          onShowMA20Change={setShowMA20}
+          onShowMA50Change={setShowMA50}
+          onShowBollingerChange={setShowBollinger}
+        />
       </div>
 
       {loading ? (
         <p className="mt-4 text-sm text-secondary-text">Loading chart data...</p>
       ) : points.length ? (
         <div className="mt-4 space-y-3">
-          <div className="flex flex-wrap items-center gap-1">
-            <button
-              type="button"
-              onClick={() => updateVisibleWindow((window) => zoomChartWindow(window, points.length, 'in'))}
-              disabled={!canZoomIn}
-              aria-label="Zoom in chart"
-              className={cn(
-                'h-8 rounded-md border px-3 text-xs font-medium transition-colors',
-                canZoomIn ? 'border-border/70 bg-card/60 text-secondary-text hover:bg-hover hover:text-foreground' : 'cursor-not-allowed border-border/40 bg-card/30 text-secondary-text/50',
-              )}
-            >
-              +
-            </button>
-            <button
-              type="button"
-              onClick={() => updateVisibleWindow((window) => zoomChartWindow(window, points.length, 'out'))}
-              disabled={!canZoomOut}
-              aria-label="Zoom out chart"
-              className={cn(
-                'h-8 rounded-md border px-3 text-xs font-medium transition-colors',
-                canZoomOut ? 'border-border/70 bg-card/60 text-secondary-text hover:bg-hover hover:text-foreground' : 'cursor-not-allowed border-border/40 bg-card/30 text-secondary-text/50',
-              )}
-            >
-              -
-            </button>
-            <button
-              type="button"
-              onClick={() => updateVisibleWindow((window) => panChartWindow(window, points.length, 'left'))}
-              disabled={!canPanLeft}
-              aria-label="Pan left"
-              className={cn(
-                'h-8 rounded-md border px-3 text-xs font-medium transition-colors',
-                canPanLeft ? 'border-border/70 bg-card/60 text-secondary-text hover:bg-hover hover:text-foreground' : 'cursor-not-allowed border-border/40 bg-card/30 text-secondary-text/50',
-              )}
-            >
-              {'←'}
-            </button>
-            <button
-              type="button"
-              onClick={() => updateVisibleWindow((window) => panChartWindow(window, points.length, 'right'))}
-              disabled={!canPanRight}
-              aria-label="Pan right"
-              className={cn(
-                'h-8 rounded-md border px-3 text-xs font-medium transition-colors',
-                canPanRight ? 'border-border/70 bg-card/60 text-secondary-text hover:bg-hover hover:text-foreground' : 'cursor-not-allowed border-border/40 bg-card/30 text-secondary-text/50',
-              )}
-            >
-              {'→'}
-            </button>
-            <button
-              type="button"
-              onClick={() => setVisibleWindow(fullChartWindow(points.length))}
-              disabled={!isZoomed}
-              aria-label="Reset chart zoom"
-              className={cn(
-                'h-8 rounded-md border px-3 text-xs font-medium transition-colors',
-                isZoomed ? 'border-border/70 bg-card/60 text-secondary-text hover:bg-hover hover:text-foreground' : 'cursor-not-allowed border-border/40 bg-card/30 text-secondary-text/50',
-              )}
-            >
-              Reset
-            </button>
-            <button
-              type="button"
-              onClick={() => setIsExpanded(true)}
-              aria-label="Expand chart"
-              className="inline-flex h-8 items-center gap-2 rounded-md border border-border/70 bg-card/60 px-3 text-xs font-medium text-secondary-text transition-colors hover:bg-hover hover:text-foreground"
-            >
-              <Maximize2 className="h-3.5 w-3.5" aria-hidden="true" />
-              Expand
-            </button>
-            <span className="ml-2 text-xs text-secondary-text" data-testid="inspect-chart-visible-count">
-              Showing {visibleCount} of {points.length}
-            </span>
-          </div>
+          <ChartWindowControls
+            pointsLength={points.length}
+            visibleCount={visibleCount}
+            canZoomIn={canZoomIn}
+            canZoomOut={canZoomOut}
+            canPanLeft={canPanLeft}
+            canPanRight={canPanRight}
+            isZoomed={isZoomed}
+            visibleCountTestId="inspect-chart-visible-count"
+            onZoomIn={() => updateVisibleWindow((window) => zoomChartWindow(window, points.length, 'in'))}
+            onZoomOut={() => updateVisibleWindow((window) => zoomChartWindow(window, points.length, 'out'))}
+            onPanLeft={() => updateVisibleWindow((window) => panChartWindow(window, points.length, 'left'))}
+            onPanRight={() => updateVisibleWindow((window) => panChartWindow(window, points.length, 'right'))}
+            onReset={() => setVisibleWindow(fullChartWindow(points.length))}
+            onExpand={() => setIsExpanded(true)}
+          />
           <div className="flex flex-wrap gap-2 text-xs text-secondary-text">
             <span data-testid="inspect-legend-candles">Candlesticks</span>
             {showMA20 ? <span data-testid="inspect-legend-ma20">MA20</span> : null}
@@ -1416,104 +1501,37 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
               </button>
             </div>
 
-            <div className="mt-3 flex flex-wrap gap-1">
-              {INSPECT_RANGES.map((range) => (
-                <button
-                  key={`expanded-${range.label}`}
-                  type="button"
-                  onClick={() => setRangeLabel(range.label)}
-                  className={cn(
-                    'h-8 rounded-md border px-3 text-xs font-medium transition-colors',
-                    rangeLabel === range.label
-                      ? 'border-cyan bg-cyan/10 text-cyan'
-                      : 'border-border/70 bg-card/60 text-secondary-text hover:bg-hover hover:text-foreground',
-                  )}
-                  aria-pressed={rangeLabel === range.label}
-                >
-                  {range.label}
-                </button>
-              ))}
+            <div className="mt-3">
+              <ChartRangeControls rangeLabel={rangeLabel} onRangeChange={setRangeLabel} />
             </div>
 
-            <div className="mt-3 flex flex-wrap gap-2">
-              <label className="inline-flex h-8 items-center gap-2 rounded-md border border-border/70 bg-card/60 px-3 text-xs text-secondary-text">
-                <input type="checkbox" checked={showMA20} onChange={(event) => setShowMA20(event.target.checked)} />
-                MA20
-              </label>
-              <label className="inline-flex h-8 items-center gap-2 rounded-md border border-border/70 bg-card/60 px-3 text-xs text-secondary-text">
-                <input type="checkbox" checked={showMA50} onChange={(event) => setShowMA50(event.target.checked)} />
-                MA50
-              </label>
-              <label className="inline-flex h-8 items-center gap-2 rounded-md border border-border/70 bg-card/60 px-3 text-xs text-secondary-text">
-                <input type="checkbox" checked={showBollinger} onChange={(event) => setShowBollinger(event.target.checked)} />
-                Bollinger
-              </label>
+            <div className="mt-3">
+              <ChartOverlayControls
+                showMA20={showMA20}
+                showMA50={showMA50}
+                showBollinger={showBollinger}
+                onShowMA20Change={setShowMA20}
+                onShowMA50Change={setShowMA50}
+                onShowBollingerChange={setShowBollinger}
+              />
             </div>
 
-            <div className="mt-4 flex flex-wrap items-center gap-1">
-              <button
-                type="button"
-                onClick={() => updateVisibleWindow((window) => zoomChartWindow(window, points.length, 'in'))}
-                disabled={!canZoomIn}
-                aria-label="Zoom in chart"
-                className={cn(
-                  'h-8 rounded-md border px-3 text-xs font-medium transition-colors',
-                  canZoomIn ? 'border-border/70 bg-card/60 text-secondary-text hover:bg-hover hover:text-foreground' : 'cursor-not-allowed border-border/40 bg-card/30 text-secondary-text/50',
-                )}
-              >
-                +
-              </button>
-              <button
-                type="button"
-                onClick={() => updateVisibleWindow((window) => zoomChartWindow(window, points.length, 'out'))}
-                disabled={!canZoomOut}
-                aria-label="Zoom out chart"
-                className={cn(
-                  'h-8 rounded-md border px-3 text-xs font-medium transition-colors',
-                  canZoomOut ? 'border-border/70 bg-card/60 text-secondary-text hover:bg-hover hover:text-foreground' : 'cursor-not-allowed border-border/40 bg-card/30 text-secondary-text/50',
-                )}
-              >
-                -
-              </button>
-              <button
-                type="button"
-                onClick={() => updateVisibleWindow((window) => panChartWindow(window, points.length, 'left'))}
-                disabled={!canPanLeft}
-                aria-label="Pan left"
-                className={cn(
-                  'h-8 rounded-md border px-3 text-xs font-medium transition-colors',
-                  canPanLeft ? 'border-border/70 bg-card/60 text-secondary-text hover:bg-hover hover:text-foreground' : 'cursor-not-allowed border-border/40 bg-card/30 text-secondary-text/50',
-                )}
-              >
-                Left
-              </button>
-              <button
-                type="button"
-                onClick={() => updateVisibleWindow((window) => panChartWindow(window, points.length, 'right'))}
-                disabled={!canPanRight}
-                aria-label="Pan right"
-                className={cn(
-                  'h-8 rounded-md border px-3 text-xs font-medium transition-colors',
-                  canPanRight ? 'border-border/70 bg-card/60 text-secondary-text hover:bg-hover hover:text-foreground' : 'cursor-not-allowed border-border/40 bg-card/30 text-secondary-text/50',
-                )}
-              >
-                Right
-              </button>
-              <button
-                type="button"
-                onClick={() => setVisibleWindow(fullChartWindow(points.length))}
-                disabled={!isZoomed}
-                aria-label="Reset chart zoom"
-                className={cn(
-                  'h-8 rounded-md border px-3 text-xs font-medium transition-colors',
-                  isZoomed ? 'border-border/70 bg-card/60 text-secondary-text hover:bg-hover hover:text-foreground' : 'cursor-not-allowed border-border/40 bg-card/30 text-secondary-text/50',
-                )}
-              >
-                Reset
-              </button>
-              <span className="ml-2 text-xs text-secondary-text" data-testid="inspect-chart-expanded-visible-count">
-                Showing {visibleCount} of {points.length}
-              </span>
+            <div className="mt-4">
+              <ChartWindowControls
+                pointsLength={points.length}
+                visibleCount={visibleCount}
+                canZoomIn={canZoomIn}
+                canZoomOut={canZoomOut}
+                canPanLeft={canPanLeft}
+                canPanRight={canPanRight}
+                isZoomed={isZoomed}
+                visibleCountTestId="inspect-chart-expanded-visible-count"
+                onZoomIn={() => updateVisibleWindow((window) => zoomChartWindow(window, points.length, 'in'))}
+                onZoomOut={() => updateVisibleWindow((window) => zoomChartWindow(window, points.length, 'out'))}
+                onPanLeft={() => updateVisibleWindow((window) => panChartWindow(window, points.length, 'left'))}
+                onPanRight={() => updateVisibleWindow((window) => panChartWindow(window, points.length, 'right'))}
+                onReset={() => setVisibleWindow(fullChartWindow(points.length))}
+              />
             </div>
 
             <div className="mt-3 flex flex-wrap gap-2 text-xs text-secondary-text">

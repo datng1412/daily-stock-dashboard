@@ -646,6 +646,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(chartCard.getByRole('button', { name: 'Pan left' })).toBeDisabled();
     expect(chartCard.getByRole('button', { name: 'Pan right' })).toBeDisabled();
     expect(chartCard.getByRole('button', { name: 'Reset chart zoom' })).toBeDisabled();
+    expect(chartCard.getByRole('button', { name: 'Expand chart' })).toBeInTheDocument();
     expect(chartCard.getByTestId('inspect-chart-visible-count')).toHaveTextContent('Showing 70 of 70');
     expect(chartCard.getByTestId('inspect-candlestick-chart')).toBeInTheDocument();
     expect(chartCard.getAllByTestId('inspect-chart-date-label').length).toBeGreaterThanOrEqual(4);
@@ -743,6 +744,9 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(dialog.getByLabelText('MA20')).toBeChecked();
     expect(dialog.getByLabelText('MA50')).toBeChecked();
     expect(dialog.getByLabelText('Bollinger')).not.toBeChecked();
+    expect(dialog.getByRole('button', { name: 'Zoom in chart' })).toBeInTheDocument();
+    expect(dialog.getByRole('button', { name: 'Pan left' })).toBeDisabled();
+    expect(dialog.getByRole('button', { name: 'Reset chart zoom' })).toBeDisabled();
     expect(dialog.getByTestId('inspect-chart-expanded-visible-count')).toHaveTextContent('Showing 70 of 70');
     expect(dialog.getByTestId('inspect-candlestick-chart')).toBeInTheDocument();
 
