@@ -56,19 +56,19 @@ describe('StockScreeningPage', () => {
         available: false,
         installSpecIsDefault: true,
       });
-    enableAlphaSift.mockRejectedValueOnce(new Error('安装 AlphaSift 失败'));
+    enableAlphaSift.mockRejectedValueOnce(new Error('Failed to install AlphaSift'));
 
     render(<StockScreeningPage />);
 
-    expect(await screen.findByText('选股未开启')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /运行选股/ })).toBeDisabled();
+    expect(await screen.findByText('Screening disabled')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Run screening/ })).toBeDisabled();
 
-    fireEvent.click(screen.getByRole('button', { name: '开启 AlphaSift' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Enable AlphaSift' }));
 
     await waitFor(() => expect(getAlphaSiftStatus).toHaveBeenCalledTimes(2));
-    expect(screen.getByText('选股已开启')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /运行选股/ })).not.toBeDisabled();
-    expect(screen.getByText('安装 AlphaSift 失败')).toBeInTheDocument();
+    expect(screen.getByText('Screening enabled')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Run screening/ })).not.toBeDisabled();
+    expect(screen.getByText('Failed to install AlphaSift')).toBeInTheDocument();
   });
 
   it('shows input strategy when strategy is not in preset list', async () => {
@@ -85,27 +85,27 @@ describe('StockScreeningPage', () => {
 
     render(<StockScreeningPage />);
 
-    expect(await screen.findByText('选股已开启')).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('策略参数'), {
+    expect(await screen.findByText('Screening enabled')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Strategy parameter'), {
       target: { value: 'custom_strategy_alpha' },
     });
 
     expect(screen.getByDisplayValue('custom_strategy_alpha')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /运行选股/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Run screening/ }));
     await waitFor(() => expect(screenStocks).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(screen.getByText(/自定义策略 \(custom_strategy_alpha\)/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/CustomStrategy \(custom_strategy_alpha\)/)).toBeInTheDocument());
   });
 
   it('uses supported AlphaSift strategy ids and cn market', async () => {
     getStrategies.mockResolvedValueOnce({
       enabled: true,
       strategies: [
-        { id: 'balanced_alpha', name: '平衡选股', description: 'desc', category: '框架' },
-        { id: 'capital_heat', name: '资金热度', description: 'desc', category: '动量' },
-        { id: 'dual_low', name: '双低', description: 'desc', category: '价值' },
-        { id: 'oversold_reversal', name: '超跌', description: 'desc', category: '反转' },
-        { id: 'shrink_pullback', name: '缩量回踩', description: 'desc', category: '趋势' },
+        { id: 'balanced_alpha', name: 'Balanced screening', description: 'desc', category: 'Framework' },
+        { id: 'capital_heat', name: 'Capital heat', description: 'desc', category: 'Momentum' },
+        { id: 'dual_low', name: 'Dual-low', description: 'desc', category: 'Value' },
+        { id: 'oversold_reversal', name: 'Oversold', description: 'desc', category: 'Reversal' },
+        { id: 'shrink_pullback', name: 'Low-volume pullback', description: 'desc', category: 'Trend' },
       ],
       strategyCount: 5,
     });
@@ -122,22 +122,22 @@ describe('StockScreeningPage', () => {
 
     render(<StockScreeningPage />);
 
-    expect(await screen.findByText('选股已开启')).toBeInTheDocument();
+    expect(await screen.findByText('Screening enabled')).toBeInTheDocument();
 
-    const marketSelect = screen.getByLabelText('市场') as HTMLSelectElement;
+    const marketSelect = screen.getByLabelText('Market') as HTMLSelectElement;
     expect(Array.from(marketSelect.options).map((option) => option.value)).toEqual(['cn']);
 
     [
-      ['平衡选股', 'balanced_alpha'],
-      ['资金热度', 'capital_heat'],
-      ['超跌', 'oversold_reversal'],
-      ['缩量回踩', 'shrink_pullback'],
+      ['Balanced screening', 'balanced_alpha'],
+      ['Capital heat', 'capital_heat'],
+      ['Oversold', 'oversold_reversal'],
+      ['Low-volume pullback', 'shrink_pullback'],
     ].forEach(([label, id]) => {
       fireEvent.click(screen.getByRole('button', { name: new RegExp(label) }));
       expect(screen.getByDisplayValue(id)).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: /运行选股/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Run screening/ }));
     await waitFor(() => expect(screenStocks).toHaveBeenCalledTimes(1));
     expect(screenStocks).toHaveBeenCalledWith({
       market: 'cn',
@@ -150,8 +150,8 @@ describe('StockScreeningPage', () => {
     getStrategies.mockResolvedValueOnce({
       enabled: true,
       strategies: [
-        { id: 'dual_low', name: '双低选股', description: 'desc', category: '价值' },
-        { id: 'capital_heat', name: '资金热度', description: 'desc', category: '动量' },
+        { id: 'dual_low', name: 'Dual-low screening', description: 'desc', category: 'Value' },
+        { id: 'capital_heat', name: 'Capital heat', description: 'desc', category: 'Momentum' },
       ],
       strategyCount: 2,
     });
@@ -166,7 +166,7 @@ describe('StockScreeningPage', () => {
         {
           rank: 1,
           code: '000001',
-          name: '旧策略股票',
+          name: 'Old strategy stock',
           score: 88.5,
           reason: 'old result',
           raw: {},
@@ -177,16 +177,16 @@ describe('StockScreeningPage', () => {
 
     render(<StockScreeningPage />);
 
-    expect(await screen.findByText('选股已开启')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /运行选股/ }));
+    expect(await screen.findByText('Screening enabled')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Run screening/ }));
 
-    expect(await screen.findByText('旧策略股票')).toBeInTheDocument();
-    expect(screen.getByText('选股完成')).toBeInTheDocument();
+    expect(await screen.findByText('Old strategy stock')).toBeInTheDocument();
+    expect(screen.getByText('Screening completed')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /资金热度/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Capital heat/ }));
 
-    expect(screen.queryByText('旧策略股票')).not.toBeInTheDocument();
-    expect(screen.getByText('等待运行')).toBeInTheDocument();
-    expect(screen.getByText('当前策略：资金热度 · A 股')).toBeInTheDocument();
+    expect(screen.queryByText('Old strategy stock')).not.toBeInTheDocument();
+    expect(screen.getByText('Waiting to run')).toBeInTheDocument();
+    expect(screen.getByText('Current strategy: Capital heat · A-shares')).toBeInTheDocument();
   });
 });

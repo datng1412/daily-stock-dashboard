@@ -11,7 +11,7 @@ import { getReportText, normalizeReportLanguage } from '../../utils/reportLangua
 interface ReportSummaryProps {
   data: AnalysisResult | AnalysisReport;
   isHistory?: boolean;
-  /** 自选相关 */
+  /** Watchlist related */
   watchlist?: {
     isInWatchlist: (code: string) => boolean;
     onToggle: (code: string) => void;
@@ -21,17 +21,17 @@ interface ReportSummaryProps {
 }
 
 /**
- * 完整报告展示组件
- * 按主体内容优先、透明度信息后置的顺序展示报告。
+ * Full report display component
+ * Display reports with primary content first and transparency information later.
  */
 export const ReportSummary: React.FC<ReportSummaryProps> = ({
   data,
   isHistory = false,
   watchlist,
 }) => {
-  // 兼容 AnalysisResult 和 AnalysisReport 两种数据格式
+  // Compatible with both AnalysisResult and AnalysisReport data formats
   const report: AnalysisReport = 'report' in data ? data.report : data;
-  // 使用 report id，因为 queryId 在批量分析时可能重复，且历史报告详情接口需要 recordId 来获取关联资讯和详情数据
+  // Use report id because queryId can repeat in batch analysis, and the history detail API needs recordId for related news and details.
   const recordId = report.meta.id;
   const diagnosticSummary = 'diagnosticSummary' in data ? data.diagnosticSummary : undefined;
 
@@ -45,7 +45,7 @@ export const ReportSummary: React.FC<ReportSummaryProps> = ({
 
   return (
     <div className="space-y-5 pb-8 animate-fade-in">
-      {/* 概览区（首屏） */}
+      {/* Overview section (first screen) */}
       <ReportOverview
         meta={meta}
         summary={summary}
@@ -54,29 +54,29 @@ export const ReportSummary: React.FC<ReportSummaryProps> = ({
         watchlist={watchlist}
       />
 
-      {/* 策略点位区 */}
+      {/* Strategy levels section */}
       <ReportStrategy strategy={strategy} language={reportLanguage} />
 
-      {/* 资讯区 */}
+      {/* News section */}
       <ReportNews recordId={recordId} limit={8} language={reportLanguage} />
 
-      {/* 输入数据块低敏摘要 */}
+      {/* Low-sensitivity input data summary */}
       <AnalysisContextSummary
         overview={details?.analysisContextPackOverview}
         language={reportLanguage}
       />
 
-      {/* 运行诊断摘要 */}
+      {/* Diagnostics summary */}
       <ReportDiagnostics
         recordId={recordId}
         summary={diagnosticSummary}
         language={reportLanguage}
       />
 
-      {/* 透明度与追溯区 */}
+      {/* Transparency and traceability section */}
       <ReportDetails details={details} recordId={recordId} language={reportLanguage} />
 
-      {/* 分析模型标记（Issue #528）— 报告末尾 */}
+      {/* Analysis model marker (Issue #528) - report footer */}
       {shouldShowModel && (
         <p className="px-1 text-xs text-muted-text">
           {text.analysisModel}: {modelUsed}

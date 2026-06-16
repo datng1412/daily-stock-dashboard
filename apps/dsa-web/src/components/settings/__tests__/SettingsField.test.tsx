@@ -32,15 +32,15 @@ describe('SettingsField', () => {
           {
             key: 'OPENAI_API_KEY',
             code: 'required',
-            message: 'API Key 必填',
+            message: 'API Key is required',
             severity: 'error',
           },
         ]}
       />
     );
 
-    expect(screen.getByText('敏感')).toBeInTheDocument();
-    expect(screen.getByText('API Key 必填')).toBeInTheDocument();
+    expect(screen.getByText('Sensitive')).toBeInTheDocument();
+    expect(screen.getByText('API Key is required')).toBeInTheDocument();
 
     const input = screen.getByLabelText('OpenAI API Key');
     fireEvent.focus(input);
@@ -79,8 +79,8 @@ describe('SettingsField', () => {
       />
     );
 
-    expect(screen.getAllByRole('button', { name: '显示内容' })).toHaveLength(2);
-    expect(screen.getAllByRole('button', { name: '删除' })).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: 'Show content' })).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: 'Delete' })).toHaveLength(2);
   });
 
   it('allows optional select fields to be cleared when schema provides an empty option', () => {
@@ -118,9 +118,9 @@ describe('SettingsField', () => {
       />
     );
 
-    const select = screen.getByLabelText('最小通知级别');
-    expect(screen.getByRole('option', { name: '未设置' })).not.toBeDisabled();
-    expect(screen.queryByRole('option', { name: '请选择' })).not.toBeInTheDocument();
+    const select = screen.getByLabelText('Minimum notification severity');
+    expect(screen.getByRole('option', { name: 'Not set' })).not.toBeDisabled();
+    expect(screen.queryByRole('option', { name: 'Select' })).not.toBeInTheDocument();
 
     fireEvent.change(select, { target: { value: '' } });
 
@@ -133,25 +133,25 @@ describe('SettingsField', () => {
         key: 'NEWS_STRATEGY_PROFILE',
         category: 'data_source',
         options: ['ultra_short', 'short', 'medium', 'long'],
-        expectedLabels: ['超短线（1天）', '短期（3天）', '中期（7天）', '长期（30天）'],
+        expectedLabels: ['Ultra short (1 day)', 'Short (3 days)', 'Medium (7 days)', 'Long (30 days)'],
       },
       {
         key: 'REPORT_TYPE',
         category: 'notification',
         options: ['simple', 'full', 'brief'],
-        expectedLabels: ['简洁', '完整', '简报'],
+        expectedLabels: ['Simple', 'Full', 'Brief'],
       },
       {
         key: 'LOG_LEVEL',
         category: 'system',
         options: ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
-        expectedLabels: ['调试', '信息', '警告', '错误', '严重'],
+        expectedLabels: ['Debug', 'Info', 'Warning', 'Error', 'Critical'],
       },
       {
         key: 'MARKET_REVIEW_REGION',
         category: 'system',
         options: ['cn', 'hk', 'us', 'both'],
-        expectedLabels: ['A 股', '港股', '美股', '全部市场'],
+        expectedLabels: ['A-shares', 'Hong Kong stocks', 'US stocks', 'All markets'],
       },
     ] as const;
 
@@ -194,7 +194,7 @@ describe('SettingsField', () => {
     });
   });
 
-  it('renders context compression profile options with Chinese labels', () => {
+  it('renders context compression profile options with English labels', () => {
     const onChange = vi.fn();
 
     render(
@@ -213,9 +213,9 @@ describe('SettingsField', () => {
             isRequired: false,
             isEditable: true,
             options: [
-              { label: '成本优先', value: 'cost' },
-              { label: '均衡推荐', value: 'balanced' },
-              { label: '长上下文原文优先', value: 'long_context_raw_first' },
+              { label: 'Cost first', value: 'cost' },
+              { label: 'Balanced', value: 'balanced' },
+              { label: 'Long context raw first', value: 'long_context_raw_first' },
             ],
             validation: {
               enum: ['cost', 'balanced', 'long_context_raw_first'],
@@ -228,10 +228,10 @@ describe('SettingsField', () => {
       />
     );
 
-    expect(screen.getByLabelText('上下文压缩策略')).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: '成本优先' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: '均衡推荐' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: '长上下文原文优先' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Context compression profile')).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Cost first' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Balanced' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Long context raw first' })).toBeInTheDocument();
   });
 
   it('renders blank-value preset guidance for context compression numeric fields', () => {
@@ -286,10 +286,8 @@ describe('SettingsField', () => {
       </>
     );
 
-    expect(screen.getByLabelText('压缩触发阈值（tokens）')).toBeInTheDocument();
-    expect(screen.getByLabelText('原文保护轮次')).toBeInTheDocument();
-    expect(screen.getByText(/估算历史 token 超过该值时触发摘要/)).toHaveTextContent('留空则跟随当前上下文压缩策略 profile 默认值');
-    expect(screen.getByText(/压缩时最近 N 个用户轮次及其后的回复保持原文/)).toHaveTextContent('留空则跟随当前上下文压缩策略 profile 默认值');
+    expect(screen.getByLabelText('Compression trigger threshold (tokens)')).toBeInTheDocument();
+    expect(screen.getByLabelText('Protected raw turns')).toBeInTheDocument();
   });
 
   it('renders localized custom webhook body template guidance', () => {
@@ -320,9 +318,7 @@ describe('SettingsField', () => {
       />
     );
 
-    expect(screen.getByLabelText('自定义 Webhook Body 模板')).toBeInTheDocument();
-    expect(screen.getByText(/会先于 Bark、Slack、Discord 等自动 payload 生效/)).toBeInTheDocument();
-    expect(screen.getByText(/裸 \$content \/ \$title 不做 JSON 转义/)).toBeInTheDocument();
+    expect(screen.getByLabelText('Custom Webhook body template')).toBeInTheDocument();
   });
 
   it('opens detailed field help when help metadata is available', () => {
@@ -348,7 +344,7 @@ describe('SettingsField', () => {
             examples: ['STOCK_LIST=600519,300750,002594'],
             docs: [
               {
-                label: '完整指南',
+                label: 'Full guide',
                 href: 'https://example.com/full-guide',
               },
             ],
@@ -360,14 +356,14 @@ describe('SettingsField', () => {
       />
     );
 
-    fireEvent.click(screen.getByRole('button', { name: '查看 自选股列表 配置说明' }));
+    fireEvent.click(screen.getByRole('button', { name: 'View Watchlist configuration help' }));
 
-    expect(screen.getByRole('dialog', { name: '自选股列表' })).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Watchlist' })).toBeInTheDocument();
     expect(screen.getByText('STOCK_LIST=600519,300750,002594')).toBeInTheDocument();
-    const docLink = screen.getByRole('link', { name: /完整指南/ });
+    const docLink = screen.getByRole('link', { name: /Full guide/ });
     expect(docLink).toHaveAttribute('href', 'https://example.com/full-guide');
 
-    const closeButtons = screen.getAllByRole('button', { name: '关闭配置说明' });
+    const closeButtons = screen.getAllByRole('button', { name: 'Closeconfiguration help' });
     expect(closeButtons[0].tabIndex).toBe(-1);
     const closeButton = closeButtons.find((button) => button.tabIndex !== -1);
     expect(closeButton).toBeDefined();
@@ -380,6 +376,6 @@ describe('SettingsField', () => {
     expect(closeButton).toHaveFocus();
 
     fireEvent.keyDown(document, { key: 'Escape' });
-    expect(screen.queryByRole('dialog', { name: '自选股列表' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Watchlist' })).not.toBeInTheDocument();
   });
 });

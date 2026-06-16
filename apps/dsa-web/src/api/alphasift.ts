@@ -140,7 +140,7 @@ export const alphasiftApi = {
     try {
       const status = await alphasiftApi.getStatus();
       if (!status.available) {
-        throw new Error('AlphaSift 适配层当前不可用。桌面发布包应已内置 AlphaSift；源码部署请先在后端 Python 环境安装 AlphaSift 后再开启选股。');
+        throw new Error('The AlphaSift adapter is currently unavailable. Desktop builds should include AlphaSift; source deployments must install AlphaSift in the backend Python environment before enabling Screening.');
       }
     } catch (error) {
       try {

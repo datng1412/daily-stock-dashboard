@@ -313,7 +313,7 @@ export function parseApiError(error: unknown): ParsedApiError {
 
   const hasStockCodeField = includesAny(matchText, ['stock_code', 'stock_codes']);
   // Keep the legacy Chinese backend text as a matcher so older API responses still map to the English UI error.
-  const hasMissingParamText = includesAny(matchText, ['必须提供 stock_code 或 stock_codes', 'missing', 'required']);
+  const hasMissingParamText = includesAny(matchText, ['stock_code or stock_codes is required', 'missing', 'required']);
   if (hasStockCodeField && hasMissingParamText) {
     return createParsedApiError({
       title: 'Required parameters are missing',

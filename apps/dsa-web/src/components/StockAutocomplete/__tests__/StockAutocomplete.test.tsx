@@ -82,7 +82,7 @@ const hkSuggestion = {
 const bseSuggestion = {
   canonicalCode: "920493.BJ",
   displayCode: "920493",
-  nameZh: "示例北交所股票",
+  nameZh: "Sample Beijing Stock Exchange stock",
   market: "BSE" as const,
   matchType: "exact" as const,
   matchField: "code" as const,
@@ -130,7 +130,7 @@ describe('StockAutocomplete', () => {
       />
     );
 
-    const input = screen.getByPlaceholderText(/输入股票代码或名称/);
+    const input = screen.getByPlaceholderText(/Enter stock code or name/);
     expect(input).toBeInTheDocument();
   });
 
@@ -140,11 +140,11 @@ describe('StockAutocomplete', () => {
         value=""
         onChange={mockOnChange}
         onSubmit={mockOnSubmit}
-        placeholder="请输入代码"
+        placeholder="Enter code"
       />
     );
 
-    const input = screen.getByPlaceholderText(/请输入代码/);
+    const input = screen.getByPlaceholderText(/Enter code/);
     expect(input).toBeInTheDocument();
   });
 
@@ -236,7 +236,7 @@ describe('StockAutocomplete', () => {
         />
       );
 
-      const input = screen.getByPlaceholderText(/输入股票代码或名称/);
+      const input = screen.getByPlaceholderText(/Enter stock code or name/);
       expect(input).toHaveAttribute('data-autocomplete-mode', 'fallback');
     });
 
@@ -267,7 +267,7 @@ describe('StockAutocomplete', () => {
         />
       );
 
-      const input = screen.getByPlaceholderText(/输入股票代码或名称/);
+      const input = screen.getByPlaceholderText(/Enter stock code or name/);
       expect(input).toHaveAttribute('data-autocomplete-mode', 'fallback');
     });
 
@@ -458,7 +458,7 @@ describe('StockAutocomplete', () => {
       fireEvent.keyDown(input, { key: 'Enter' });
 
       expect(mockOnChange).toHaveBeenCalledWith('920493');
-      expect(mockOnSubmit).toHaveBeenCalledWith('920493.BJ', '示例北交所股票', 'autocomplete');
+      expect(mockOnSubmit).toHaveBeenCalledWith('920493.BJ', 'Sample Beijing Stock Exchange stock', 'autocomplete');
     });
   });
 
@@ -489,7 +489,7 @@ describe('StockAutocomplete', () => {
           {
             canonicalCode: 'TEST.OTC',
             displayCode: 'TEST',
-            nameZh: '测试市场',
+            nameZh: 'Test market',
             market: 'OTC' as never,
             matchType: 'exact' as const,
             matchField: 'code' as const,

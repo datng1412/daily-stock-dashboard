@@ -60,15 +60,15 @@ describe('agentChatStore.startStream', () => {
   it('appends the user message and final assistant message from the SSE stream', async () => {
     vi.mocked(agentApi.chatStream).mockResolvedValue(
       createStreamResponse([
-        'data: {"type":"thinking","step":1,"message":"分析中"}',
-        'data: {"type":"tool_done","tool":"quote","display_name":"行情","success":true,"duration":0.3}',
-        'data: {"type":"done","success":true,"content":"最终分析结果"}',
+        'data: {"type":"thinking","step":1,"message":"Analyzing"}',
+        'data: {"type":"tool_done","tool":"quote","display_name":"Quote","success":true,"duration":0.3}',
+        'data: {"type":"done","success":true,"content":"Final analysis result"}',
       ]),
     );
 
     await useAgentChatStore
       .getState()
-      .startStream({ message: '分析茅台', session_id: 'session-test' }, { skillName: '趋势技能' });
+      .startStream({ message: 'Analyze Moutai', session_id: 'session-test' }, { skillName: 'Trend skill' });
 
     const state = useAgentChatStore.getState();
     expect(state.loading).toBe(false);
@@ -76,13 +76,13 @@ describe('agentChatStore.startStream', () => {
     expect(state.messages).toHaveLength(2);
     expect(state.messages[0]).toMatchObject({
       role: 'user',
-      content: '分析茅台',
-      skillName: '趋势技能',
+      content: 'Analyze Moutai',
+      skillName: 'Trend skill',
     });
     expect(state.messages[1]).toMatchObject({
       role: 'assistant',
-      content: '最终分析结果',
-      skillName: '趋势技能',
+      content: 'Final analysis result',
+      skillName: 'Trend skill',
     });
     expect(state.messages[1].thinkingSteps).toHaveLength(2);
     expect(state.progressSteps).toEqual([]);
@@ -91,7 +91,7 @@ describe('agentChatStore.startStream', () => {
   it('preserves multiple selected skills on streamed user and assistant messages', async () => {
     vi.mocked(agentApi.chatStream).mockResolvedValue(
       createStreamResponse([
-        'data: {"type":"done","success":true,"content":"多策略分析结果"}',
+        'data: {"type":"done","success":true,"content":"Multi-strategy analysis result"}',
       ]),
     );
 
@@ -99,12 +99,12 @@ describe('agentChatStore.startStream', () => {
       .getState()
       .startStream(
         {
-          message: '分析茅台',
+          message: 'Analyze Moutai',
           session_id: 'session-test',
           skills: ['bull_trend', 'ma_golden_cross'],
         },
         {
-          skillNames: ['趋势分析', '均线金叉'],
+          skillNames: ['Trend analysis', 'MA golden cross'],
         },
       );
 
@@ -114,16 +114,16 @@ describe('agentChatStore.startStream', () => {
       role: 'user',
       skills: ['bull_trend', 'ma_golden_cross'],
       skill: 'bull_trend',
-      skillNames: ['趋势分析', '均线金叉'],
-      skillName: '趋势分析、均线金叉',
+      skillNames: ['Trend analysis', 'MA golden cross'],
+      skillName: 'Trend analysis, MA golden cross',
     });
     expect(state.messages[1]).toMatchObject({
       role: 'assistant',
-      content: '多策略分析结果',
+      content: 'Multi-strategy analysis result',
       skills: ['bull_trend', 'ma_golden_cross'],
       skill: 'bull_trend',
-      skillNames: ['趋势分析', '均线金叉'],
-      skillName: '趋势分析、均线金叉',
+      skillNames: ['Trend analysis', 'MA golden cross'],
+      skillName: 'Trend analysis, MA golden cross',
     });
   });
 
@@ -136,14 +136,14 @@ describe('agentChatStore.startStream', () => {
 
     await useAgentChatStore
       .getState()
-      .startStream({ message: '分析茅台', session_id: 'session-test' }, { skillName: '趋势技能' });
+      .startStream({ message: 'Analyze Moutai', session_id: 'session-test' }, { skillName: 'Trend skill' });
 
     const state = useAgentChatStore.getState();
     expect(state.loading).toBe(false);
     expect(state.messages).toHaveLength(1);
     expect(state.chatError).toMatchObject({
-      title: '系统没有配置可用的 LLM 模型',
-      message: '请先在系统设置中配置主模型、可用渠道或相关 API Key 后再重试。',
+      title: 'No available LLM model is configured',
+      message: 'Configure the primary model, available channels, or related API keys in system settings before trying again.',
       category: 'llm_not_configured',
       rawMessage: 'Agent LLM: no effective primary model configured',
     });
@@ -158,14 +158,14 @@ describe('agentChatStore.startStream', () => {
 
     await useAgentChatStore
       .getState()
-      .startStream({ message: '分析茅台', session_id: 'session-test' }, { skillName: '趋势技能' });
+      .startStream({ message: 'Analyze Moutai', session_id: 'session-test' }, { skillName: 'Trend skill' });
 
     const state = useAgentChatStore.getState();
     expect(state.loading).toBe(false);
     expect(state.messages).toHaveLength(1);
     expect(state.chatError).toMatchObject({
-      title: '连接上游服务超时',
-      message: '服务端访问外部依赖时超时，请稍后重试，或检查当前网络与代理设置。',
+      title: 'Connection to upstream service timed out',
+      message: 'The server timed out while accessing an external dependency. Try again later, or check the current network and proxy settings.',
       category: 'upstream_timeout',
       rawMessage: 'connect timeout while calling upstream provider',
     });
@@ -180,16 +180,16 @@ describe('agentChatStore.startStream', () => {
 
     await useAgentChatStore
       .getState()
-      .startStream({ message: '分析茅台', session_id: 'session-test' }, { skillName: '趋势技能' });
+      .startStream({ message: 'Analyze Moutai', session_id: 'session-test' }, { skillName: 'Trend skill' });
 
     const state = useAgentChatStore.getState();
     expect(state.loading).toBe(false);
     expect(state.messages).toHaveLength(1);
     expect(state.chatError).toMatchObject({
-      title: '请求失败',
-      message: '分析出错',
+      title: 'Request failed',
+      message: 'Analysis failed',
       category: 'unknown',
-      rawMessage: '分析出错',
+      rawMessage: 'Analysis failed',
     });
   });
 });
@@ -199,17 +199,17 @@ describe('agentChatStore.switchSession', () => {
   it('clears transient loading state when switching sessions during a stream', async () => {
     const ac = new AbortController();
     vi.mocked(agentApi.getChatSessionMessages).mockResolvedValue([
-      { id: 'msg-2', role: 'assistant', content: '历史回复', created_at: null },
+      { id: 'msg-2', role: 'assistant', content: 'Historical reply', created_at: null },
     ]);
     useAgentChatStore.setState({
       loading: true,
-      progressSteps: [{ type: 'thinking', message: '正在制定分析路径...' }],
+      progressSteps: [{ type: 'thinking', message: 'Planning the analysis path...' }],
       abortController: ac,
       chatError: {
-        title: '请求失败',
-        message: '旧错误',
+        title: 'Request failed',
+        message: 'Previous error',
         category: 'unknown',
-        rawMessage: '旧错误',
+        rawMessage: 'Previous error',
       },
     });
 
@@ -223,7 +223,7 @@ describe('agentChatStore.switchSession', () => {
     expect(state.abortController).toBeNull();
     expect(state.chatError).toBeNull();
     expect(state.messages).toEqual([
-      { id: 'msg-2', role: 'assistant', content: '历史回复' },
+      { id: 'msg-2', role: 'assistant', content: 'Historical reply' },
     ]);
   });
 
@@ -243,16 +243,16 @@ describe('agentChatStore.switchSession', () => {
     const switchToA = useAgentChatStore.getState().switchSession('session-a');
     const switchToB = useAgentChatStore.getState().switchSession('session-b');
 
-    sessionB.resolve([{ id: 'msg-b', role: 'assistant', content: 'B 回复', created_at: null }]);
+    sessionB.resolve([{ id: 'msg-b', role: 'assistant', content: 'B reply', created_at: null }]);
     await switchToB;
 
-    sessionA.resolve([{ id: 'msg-a', role: 'assistant', content: 'A 回复', created_at: null }]);
+    sessionA.resolve([{ id: 'msg-a', role: 'assistant', content: 'A reply', created_at: null }]);
     await switchToA;
 
     const state = useAgentChatStore.getState();
     expect(state.sessionId).toBe('session-b');
     expect(state.messages).toEqual([
-      { id: 'msg-b', role: 'assistant', content: 'B 回复' },
+      { id: 'msg-b', role: 'assistant', content: 'B reply' },
     ]);
   });
 });

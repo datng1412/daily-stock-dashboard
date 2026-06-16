@@ -722,7 +722,7 @@ const DataStatusPanel: React.FC<{
         <div>
           <span className="font-medium text-foreground">KBS trade unavailable</span> {observability ? `${observability.kbs.tradeUnavailableTotal}/${observability.kbs.tradeRequestsTotal}` : '-'}
         </div>
-        <div className="truncate" title={observability?.kbs.lastError ?? undefined}>
+        <div className="truncate">
           <span className="font-medium text-foreground">Last KBS error</span> {observability?.kbs.lastError ?? '-'}
         </div>
       </div>
@@ -1226,7 +1226,6 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
               onClick={() => updateVisibleWindow((window) => zoomChartWindow(window, points.length, 'in'))}
               disabled={!canZoomIn}
               aria-label="Zoom in chart"
-              title="Zoom in chart"
               className={cn(
                 'h-8 rounded-md border px-3 text-xs font-medium transition-colors',
                 canZoomIn ? 'border-border/70 bg-card/60 text-secondary-text hover:bg-hover hover:text-foreground' : 'cursor-not-allowed border-border/40 bg-card/30 text-secondary-text/50',
@@ -1239,7 +1238,6 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
               onClick={() => updateVisibleWindow((window) => zoomChartWindow(window, points.length, 'out'))}
               disabled={!canZoomOut}
               aria-label="Zoom out chart"
-              title="Zoom out chart"
               className={cn(
                 'h-8 rounded-md border px-3 text-xs font-medium transition-colors',
                 canZoomOut ? 'border-border/70 bg-card/60 text-secondary-text hover:bg-hover hover:text-foreground' : 'cursor-not-allowed border-border/40 bg-card/30 text-secondary-text/50',
@@ -1252,7 +1250,6 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
               onClick={() => updateVisibleWindow((window) => panChartWindow(window, points.length, 'left'))}
               disabled={!canPanLeft}
               aria-label="Pan left"
-              title="Pan left"
               className={cn(
                 'h-8 rounded-md border px-3 text-xs font-medium transition-colors',
                 canPanLeft ? 'border-border/70 bg-card/60 text-secondary-text hover:bg-hover hover:text-foreground' : 'cursor-not-allowed border-border/40 bg-card/30 text-secondary-text/50',
@@ -1265,7 +1262,6 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
               onClick={() => updateVisibleWindow((window) => panChartWindow(window, points.length, 'right'))}
               disabled={!canPanRight}
               aria-label="Pan right"
-              title="Pan right"
               className={cn(
                 'h-8 rounded-md border px-3 text-xs font-medium transition-colors',
                 canPanRight ? 'border-border/70 bg-card/60 text-secondary-text hover:bg-hover hover:text-foreground' : 'cursor-not-allowed border-border/40 bg-card/30 text-secondary-text/50',
@@ -1278,7 +1274,6 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
               onClick={() => setVisibleWindow(fullChartWindow(points.length))}
               disabled={!isZoomed}
               aria-label="Reset chart zoom"
-              title="Reset chart zoom"
               className={cn(
                 'h-8 rounded-md border px-3 text-xs font-medium transition-colors',
                 isZoomed ? 'border-border/70 bg-card/60 text-secondary-text hover:bg-hover hover:text-foreground' : 'cursor-not-allowed border-border/40 bg-card/30 text-secondary-text/50',
@@ -1663,10 +1658,7 @@ const StockDetailView: React.FC<{
           </div>
           <div className="rounded-lg bg-card/60 p-3">
             <dt className="text-xs text-secondary-text">Session high / low from 1H</dt>
-            <dd
-              className="mt-1 font-medium text-foreground"
-              title={hasSessionHighLowFrom1H ? 'Based on filtered current-session 1H candles only.' : hasSessionCandles ? 'Session high/low could not be calculated from the available session candles.' : 'Session high/low requires current-session intraday candles.'}
-            >
+            <dd className="mt-1 font-medium text-foreground">
               {hasSessionHighLowFrom1H
                 ? `${formatPrice(item.intradayPulse?.sessionHighFrom1H)} / ${formatPrice(item.intradayPulse?.sessionLowFrom1H)}`
                 : missingSessionMetricText}
@@ -1674,19 +1666,13 @@ const StockDetailView: React.FC<{
           </div>
           <div className="rounded-lg bg-card/60 p-3">
             <dt className="text-xs text-secondary-text">Session range from 1H</dt>
-            <dd
-              className="mt-1 font-medium text-foreground"
-              title={hasSessionRangeFrom1H ? 'Based on filtered current-session 1H candles only.' : hasSessionCandles ? 'Session range could not be calculated from the available session candles.' : 'Session range requires current-session intraday candles.'}
-            >
+            <dd className="mt-1 font-medium text-foreground">
               {hasSessionRangeFrom1H ? `${formatNumber(item.intradayPulse?.sessionRangePctFrom1H, 2)}%` : missingSessionMetricText}
             </dd>
           </div>
           <div className="rounded-lg bg-card/60 p-3">
             <dt className="text-xs text-secondary-text">Mozyfin session 1H volume</dt>
-            <dd
-              className="mt-1 font-medium text-foreground"
-              title={hasSessionVolumeFrom1H ? 'Sum of filtered current-session Mozyfin 1H candle volumes.' : hasSessionCandles ? 'Session volume could not be calculated from the available session candles.' : 'Session volume requires current-session intraday candles.'}
-            >
+            <dd className="mt-1 font-medium text-foreground">
               {hasSessionVolumeFrom1H ? formatNumber(item.intradayPulse?.sessionVolumeFrom1H) : missingSessionMetricText}
             </dd>
           </div>

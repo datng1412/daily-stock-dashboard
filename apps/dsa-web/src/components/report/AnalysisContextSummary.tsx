@@ -37,12 +37,12 @@ const QUALITY_STYLE = {
 
 const BLOCK_LABELS: Record<ReportLanguage, Record<string, string>> = {
   zh: {
-    quote: '行情',
-    daily_bars: '日线',
-    technical: '技术',
-    news: '新闻',
-    fundamentals: '基本面',
-    chip: '筹码',
+    quote: 'Quote',
+    daily_bars: 'Daily bars',
+    technical: 'Technical',
+    news: 'News',
+    fundamentals: 'Fundamentals',
+    chip: 'Chip',
   },
   en: {
     quote: 'quote',
@@ -56,31 +56,31 @@ const BLOCK_LABELS: Record<ReportLanguage, Record<string, string>> = {
 
 const TEXT = {
   zh: {
-    eyebrow: '数据上下文',
-    title: '输入数据块',
-    counts: '状态计数',
-    source: '来源',
-    warnings: '告警',
-    missingReasons: '缺失原因',
-    qualityScore: '质量分',
-    limitations: '数据限制',
-    newsResultCount: '新闻结果数',
-    triggerSource: '触发来源',
+    eyebrow: 'Data context',
+    title: 'Input data blocks',
+    counts: 'Status count',
+    source: 'Source',
+    warnings: 'Alerts',
+    missingReasons: 'MissingReason',
+    qualityScore: 'Quality score',
+    limitations: 'Data limitations',
+    newsResultCount: 'News result count',
+    triggerSource: 'Trigger source',
     qualityLevel: {
-      good: '良好',
-      usable: '可用',
-      limited: '受限',
-      poor: '较差',
+      good: 'Good',
+      usable: 'Usable',
+      limited: 'Limited',
+      poor: 'Poor',
     },
     status: {
-      available: '可用',
-      missing: '缺失',
-      not_supported: '不支持',
-      fallback: '降级',
-      stale: '过期',
-      estimated: '估算',
-      partial: '部分可用',
-      fetch_failed: '抓取失败',
+      available: 'Usable',
+      missing: 'Missing',
+      not_supported: 'Not supported',
+      fallback: 'Degraded',
+      stale: 'Stale',
+      estimated: 'Estimated',
+      partial: 'Partially usable',
+      fetch_failed: 'Fetch failed',
     },
   },
   en: {
@@ -155,7 +155,7 @@ const formatLimitation = (
 
   const label = BLOCK_LABELS[language][key] || key;
   const statusLabel = (text.status as Record<string, string>)[status] || status;
-  return language === 'zh' ? `${label}：${statusLabel}` : `${label}: ${statusLabel}`;
+  return language === 'zh' ? `${label}: ${statusLabel}` : `${label}: ${statusLabel}`;
 };
 
 export const AnalysisContextSummary: React.FC<AnalysisContextSummaryProps> = ({

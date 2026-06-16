@@ -17,21 +17,21 @@ interface HistoryListItemProps {
 const getOperationBadgeLabel = (advice?: string) => {
   const normalized = advice?.trim();
   if (!normalized) {
-    return '情绪';
+    return 'Sentiment';
   }
-  if (normalized.includes('减仓')) {
-    return '减仓';
+  if (normalized.includes('Reduce exposure')) {
+    return 'Reduce exposure';
   }
-  if (normalized.includes('卖')) {
-    return '卖出';
+  if (normalized.includes('\u5356')) {
+    return 'Exit signal';
   }
-  if (normalized.includes('观望') || normalized.includes('等待')) {
-    return '观望';
+  if (normalized.includes('Observe') || normalized.includes('\u7b49\u5f85')) {
+    return 'Observe';
   }
-  if (normalized.includes('买') || normalized.includes('布局')) {
-    return '买入';
+  if (normalized.includes('\u4e70') || normalized.includes('\u5e03\u5c40')) {
+    return 'Positive signal';
   }
-  return normalized.split(/[，。；、\s]/)[0] || '建议';
+  return normalized.split(/[, \u3002\uff1b\u3001\s]/)[0] || 'Signal';
 };
 
 export const HistoryListItem: React.FC<HistoryListItemProps> = ({

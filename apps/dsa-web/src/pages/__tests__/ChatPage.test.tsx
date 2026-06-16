@@ -56,7 +56,7 @@ const mockStoreState = {
   sessions: [
     {
       session_id: 'session-1',
-      title: '请简要分析 600519',
+      title: 'Briefly analyze 600519',
       message_count: 2,
       created_at: '2026-03-15T09:00:00Z',
       last_active: '2026-03-15T09:05:00Z',
@@ -154,7 +154,7 @@ beforeEach(() => {
   mockStoreState.sessions = [
     {
       session_id: 'session-1',
-      title: '请简要分析 600519',
+      title: 'Briefly analyze 600519',
       message_count: 2,
       created_at: '2026-03-15T09:00:00Z',
       last_active: '2026-03-15T09:05:00Z',
@@ -162,7 +162,7 @@ beforeEach(() => {
   ];
   mockGetSkills.mockResolvedValue({
     skills: [
-      { id: 'bull_trend', name: '趋势分析', description: '测试技能' },
+      { id: 'bull_trend', name: 'Trend analysis', description: 'Test skill' },
     ],
     default_skill_id: 'bull_trend',
   });
@@ -216,7 +216,7 @@ describe('ChatPage', () => {
       </MemoryRouter>
     );
 
-    const compressionToggle = await screen.findByRole('checkbox', { name: /上下文压缩/ });
+    const compressionToggle = await screen.findByRole('checkbox', { name: /Context compression/ });
 
     await waitFor(() => {
       expect(compressionToggle).not.toBeDisabled();
@@ -241,7 +241,7 @@ describe('ChatPage', () => {
     });
 
     expect(compressionToggle).toBeChecked();
-    expect(screen.getByText('已启用')).toBeInTheDocument();
+    expect(screen.getByText('Enabled')).toBeInTheDocument();
   });
 
   it('rolls back the context compression switch when saving fails', async () => {
@@ -259,8 +259,8 @@ describe('ChatPage', () => {
     });
     mockUpdateSystemConfig.mockRejectedValue(
       createParsedApiError({
-        title: '保存失败',
-        message: '配置服务不可用',
+        title: 'Save failed',
+        message: 'Configuration service unavailable',
         category: 'unknown',
       }),
     );
@@ -271,7 +271,7 @@ describe('ChatPage', () => {
       </MemoryRouter>
     );
 
-    const compressionToggle = await screen.findByRole('checkbox', { name: /上下文压缩/ });
+    const compressionToggle = await screen.findByRole('checkbox', { name: /Context compression/ });
 
     await waitFor(() => {
       expect(compressionToggle).toBeChecked();
@@ -291,7 +291,7 @@ describe('ChatPage', () => {
       }));
       expect(compressionToggle).toBeChecked();
     });
-    expect(screen.getByText('配置服务不可用')).toBeInTheDocument();
+    expect(screen.getByText('Configuration service unavailable')).toBeInTheDocument();
   });
 
   it('switches session when clicking anywhere on the session card', async () => {
@@ -302,7 +302,7 @@ describe('ChatPage', () => {
     );
 
     const sessionCard = await screen.findByRole('button', {
-      name: /切换到对话 请简要分析 600519/,
+      name: /Switch to conversation Briefly analyze 600519/,
     });
 
     fireEvent.click(sessionCard);
@@ -318,13 +318,13 @@ describe('ChatPage', () => {
     );
 
     const deleteButton = await screen.findByRole('button', {
-      name: /删除对话 请简要分析 600519/,
+      name: /Delete conversation Briefly analyze 600519/,
     });
 
     fireEvent.click(deleteButton);
 
     expect(mockSwitchSession).not.toHaveBeenCalled();
-    expect(await screen.findByText('删除后，该对话将不可恢复，确认删除吗？')).toBeInTheDocument();
+    expect(await screen.findByText('After deletion, this conversation cannot be restored. Delete it?')).toBeInTheDocument();
   });
 
   it('hides header actions when there are no messages', async () => {
@@ -334,16 +334,16 @@ describe('ChatPage', () => {
       </MemoryRouter>
     );
 
-    expect(await screen.findByRole('heading', { name: '问股' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '导出会话' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '发送到已配置的通知机器人/邮箱' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '历史对话' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Ask Stocks' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Export conversation' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Send to configured notification bot/email' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Conversation history' })).toBeInTheDocument();
   });
 
   it('exports the current session from the header action', async () => {
     mockStoreState.messages = [
-      { id: 'user-1', role: 'user', content: '请分析 600519' },
-      { id: 'assistant-1', role: 'assistant', content: '趋势偏强', skillName: '趋势分析' },
+      { id: 'user-1', role: 'user', content: 'Analyze 600519' },
+      { id: 'assistant-1', role: 'assistant', content: 'Trend is firm', skillName: 'Trend analysis' },
     ];
 
     render(
@@ -352,7 +352,7 @@ describe('ChatPage', () => {
       </MemoryRouter>
     );
 
-    fireEvent.click(await screen.findByRole('button', { name: '导出会话为 Markdown 文件' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Export conversation as a Markdown file' }));
 
     expect(mockDownloadSession).toHaveBeenCalledWith(mockStoreState.messages);
     expect(mockFormatSessionAsMarkdown).not.toHaveBeenCalled();
@@ -360,7 +360,7 @@ describe('ChatPage', () => {
 
   it('renders assistant skill labels with shared badge semantics', async () => {
     mockStoreState.messages = [
-      { id: 'assistant-1', role: 'assistant', content: '趋势偏强', skillName: '趋势分析' },
+      { id: 'assistant-1', role: 'assistant', content: 'Trend is firm', skillName: 'Trend analysis' },
     ];
 
     render(
@@ -369,9 +369,9 @@ describe('ChatPage', () => {
       </MemoryRouter>
     );
 
-    const skillBadge = await screen.findByLabelText('技能 趋势分析');
+    const skillBadge = await screen.findByLabelText('Skill Trend analysis');
     expect(skillBadge).toBeInTheDocument();
-    expect(skillBadge).toHaveTextContent('趋势分析');
+    expect(skillBadge).toHaveTextContent('Trend analysis');
   });
 
   it('renders assistant multi-skill labels with shared badge semantics', async () => {
@@ -379,9 +379,9 @@ describe('ChatPage', () => {
       {
         id: 'assistant-1',
         role: 'assistant',
-        content: '趋势偏强',
+        content: 'Trend is firm',
         skills: ['bull_trend', 'ma_golden_cross'],
-        skillNames: ['趋势分析', '均线金叉'],
+        skillNames: ['Trend analysis', 'MA golden cross'],
       },
     ];
 
@@ -391,9 +391,9 @@ describe('ChatPage', () => {
       </MemoryRouter>
     );
 
-    const skillBadge = await screen.findByLabelText('技能 趋势分析、均线金叉');
+    const skillBadge = await screen.findByLabelText('Skill Trend analysis, MA golden cross');
     expect(skillBadge).toBeInTheDocument();
-    expect(skillBadge).toHaveTextContent('趋势分析、均线金叉');
+    expect(skillBadge).toHaveTextContent('Trend analysis, MA golden cross');
   });
 
   it('selects the default skill after loading skills', async () => {
@@ -403,15 +403,15 @@ describe('ChatPage', () => {
       </MemoryRouter>
     );
 
-    expect(await screen.findByRole('checkbox', { name: '趋势分析' })).toBeChecked();
-    expect(screen.getByRole('checkbox', { name: '通用分析' })).not.toBeChecked();
+    expect(await screen.findByRole('checkbox', { name: 'Trend analysis' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'GeneralAnalyze' })).not.toBeChecked();
   });
 
   it('sends multiple selected skills in order', async () => {
     mockGetSkills.mockResolvedValue({
       skills: [
-        { id: 'bull_trend', name: '趋势分析', description: '默认趋势' },
-        { id: 'ma_golden_cross', name: '均线金叉', description: '均线交叉' },
+        { id: 'bull_trend', name: 'Trend analysis', description: 'Default trend' },
+        { id: 'ma_golden_cross', name: 'MA golden cross', description: 'Moving average crossover' },
       ],
       default_skill_id: 'bull_trend',
     });
@@ -422,21 +422,21 @@ describe('ChatPage', () => {
       </MemoryRouter>
     );
 
-    fireEvent.click(await screen.findByRole('checkbox', { name: '均线金叉' }));
-    fireEvent.change(screen.getByPlaceholderText(/分析 600519/), {
-      target: { value: '分析 600519' },
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'MA golden cross' }));
+    fireEvent.change(screen.getByPlaceholderText(/Analyze 600519/), {
+      target: { value: 'Analyze 600519' },
     });
-    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
     await waitFor(() => {
       expect(mockStartStream).toHaveBeenCalledWith(
         expect.objectContaining({
-          message: '分析 600519',
+          message: 'Analyze 600519',
           skills: ['bull_trend', 'ma_golden_cross'],
         }),
         expect.objectContaining({
-          skillNames: ['趋势分析', '均线金叉'],
-          skillName: '趋势分析、均线金叉',
+          skillNames: ['Trend analysis', 'MA golden cross'],
+          skillName: 'Trend analysis, MA golden cross',
         }),
       );
     });
@@ -449,33 +449,33 @@ describe('ChatPage', () => {
       </MemoryRouter>
     );
 
-    fireEvent.click(await screen.findByRole('checkbox', { name: '趋势分析' }));
-    expect(screen.getByRole('checkbox', { name: '通用分析' })).toBeChecked();
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Trend analysis' }));
+    expect(screen.getByRole('checkbox', { name: 'GeneralAnalyze' })).toBeChecked();
 
-    fireEvent.change(screen.getByPlaceholderText(/分析 600519/), {
-      target: { value: '分析 AAPL' },
+    fireEvent.change(screen.getByPlaceholderText(/Analyze 600519/), {
+      target: { value: 'Analyze AAPL' },
     });
-    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
     await waitFor(() => {
       expect(mockStartStream).toHaveBeenCalled();
     });
     const lastCall = mockStartStream.mock.calls[mockStartStream.mock.calls.length - 1];
-    expect(lastCall[0]).toEqual(expect.objectContaining({ message: '分析 AAPL' }));
+    expect(lastCall[0]).toEqual(expect.objectContaining({ message: 'Analyze AAPL' }));
     expect(lastCall[0]).not.toHaveProperty('skills');
     expect(lastCall[1]).toEqual(expect.objectContaining({
-      skillNames: ['通用'],
-      skillName: '通用',
+      skillNames: ['General'],
+      skillName: 'General',
     }));
   });
 
   it('caps concrete skill selection at three and re-enables choices after unselecting', async () => {
     mockGetSkills.mockResolvedValue({
       skills: [
-        { id: 'bull_trend', name: '趋势分析', description: '默认趋势' },
-        { id: 'ma_golden_cross', name: '均线金叉', description: '均线交叉' },
-        { id: 'chan_theory', name: '缠论', description: '结构分析' },
-        { id: 'wave_theory', name: '波浪理论', description: '波浪分析' },
+        { id: 'bull_trend', name: 'Trend analysis', description: 'Default trend' },
+        { id: 'ma_golden_cross', name: 'MA golden cross', description: 'Moving average crossover' },
+        { id: 'chan_theory', name: 'Chan theory', description: 'Structure analysis' },
+        { id: 'wave_theory', name: 'Wave theory', description: 'Wave analysis' },
       ],
       default_skill_id: 'bull_trend',
     });
@@ -486,22 +486,22 @@ describe('ChatPage', () => {
       </MemoryRouter>
     );
 
-    fireEvent.click(await screen.findByRole('checkbox', { name: '均线金叉' }));
-    fireEvent.click(screen.getByRole('checkbox', { name: '缠论' }));
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'MA golden cross' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Chan theory' }));
 
-    const wave = screen.getByRole('checkbox', { name: '波浪理论' });
+    const wave = screen.getByRole('checkbox', { name: 'Wave theory' });
     expect(wave).toBeDisabled();
 
-    fireEvent.click(screen.getByRole('checkbox', { name: '均线金叉' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'MA golden cross' }));
     expect(wave).not.toBeDisabled();
   });
 
   it('quick questions override the current multi-skill selection', async () => {
     mockGetSkills.mockResolvedValue({
       skills: [
-        { id: 'bull_trend', name: '趋势分析', description: '默认趋势' },
-        { id: 'ma_golden_cross', name: '均线金叉', description: '均线交叉' },
-        { id: 'chan_theory', name: '缠论', description: '结构分析' },
+        { id: 'bull_trend', name: 'Trend analysis', description: 'Default trend' },
+        { id: 'ma_golden_cross', name: 'MA golden cross', description: 'Moving average crossover' },
+        { id: 'chan_theory', name: 'Chan theory', description: 'Structure analysis' },
       ],
       default_skill_id: 'bull_trend',
     });
@@ -512,18 +512,18 @@ describe('ChatPage', () => {
       </MemoryRouter>
     );
 
-    fireEvent.click(await screen.findByRole('checkbox', { name: '均线金叉' }));
-    fireEvent.click(screen.getByRole('button', { name: '用缠论分析茅台' }));
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'MA golden cross' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Analyze Moutai with Chan theory' }));
 
     await waitFor(() => {
       expect(mockStartStream).toHaveBeenCalledWith(
         expect.objectContaining({
-          message: '用缠论分析茅台',
+          message: 'Analyze Moutai with Chan theory',
           skills: ['chan_theory'],
         }),
         expect.objectContaining({
-          skillNames: ['缠论'],
-          skillName: '缠论',
+          skillNames: ['Chan theory'],
+          skillName: 'Chan theory',
         }),
       );
     });
@@ -531,7 +531,7 @@ describe('ChatPage', () => {
 
   it('keeps assistant message actions directly activatable in the DOM', async () => {
     mockStoreState.messages = [
-      { id: 'assistant-1', role: 'assistant', content: '趋势偏强', skillName: '趋势分析' },
+      { id: 'assistant-1', role: 'assistant', content: 'Trend is firm', skillName: 'Trend analysis' },
     ];
 
     render(
@@ -540,7 +540,7 @@ describe('ChatPage', () => {
       </MemoryRouter>
     );
 
-    const exportButton = await screen.findByRole('button', { name: '导出此条消息为 Markdown' });
+    const exportButton = await screen.findByRole('button', { name: 'Export this message as Markdown' });
     const actionGroup = exportButton.parentElement;
 
     expect(actionGroup).toHaveClass('chat-message-actions');
@@ -549,8 +549,8 @@ describe('ChatPage', () => {
 
   it('sends exported markdown to notification channel and shows success feedback', async () => {
     mockStoreState.messages = [
-      { id: 'user-1', role: 'user', content: '请分析 600519' },
-      { id: 'assistant-1', role: 'assistant', content: '趋势偏强', skillName: '趋势分析' },
+      { id: 'user-1', role: 'user', content: 'Analyze 600519' },
+      { id: 'assistant-1', role: 'assistant', content: 'Trend is firm', skillName: 'Trend analysis' },
     ];
     mockFormatSessionAsMarkdown.mockReturnValue('# exported markdown');
 
@@ -560,25 +560,25 @@ describe('ChatPage', () => {
       </MemoryRouter>
     );
 
-    fireEvent.click(await screen.findByRole('button', { name: '发送到已配置的通知机器人/邮箱' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Send to configured notification bot/email' }));
 
     await waitFor(() => {
       expect(mockFormatSessionAsMarkdown).toHaveBeenCalledWith(mockStoreState.messages);
       expect(mockSendChat).toHaveBeenCalledWith('# exported markdown');
     });
 
-    expect(await screen.findByText('已发送到通知渠道')).toBeInTheDocument();
+    expect(await screen.findByText('Sent to notification channels')).toBeInTheDocument();
   });
 
   it('shows parsed error feedback when notification delivery fails', async () => {
     mockStoreState.messages = [
-      { id: 'user-1', role: 'user', content: '请分析 AAPL' },
-      { id: 'assistant-1', role: 'assistant', content: '短线震荡', skillName: '趋势分析' },
+      { id: 'user-1', role: 'user', content: 'Analyze AAPL' },
+      { id: 'assistant-1', role: 'assistant', content: 'Short-term range', skillName: 'Trend analysis' },
     ];
     mockSendChat.mockRejectedValue(
       createParsedApiError({
-        title: '发送失败',
-        message: '通知渠道不可用',
+        title: 'SendFailed',
+        message: 'Notification channel unavailable',
         category: 'unknown',
       }),
     );
@@ -589,15 +589,15 @@ describe('ChatPage', () => {
       </MemoryRouter>
     );
 
-    fireEvent.click(await screen.findByRole('button', { name: '发送到已配置的通知机器人/邮箱' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Send to configured notification bot/email' }));
 
-    expect(await screen.findByText('通知渠道不可用')).toBeInTheDocument();
+    expect(await screen.findByText('Notification channel unavailable')).toBeInTheDocument();
   });
 
   it('prevents duplicate notification sends while the request is in flight', async () => {
     mockStoreState.messages = [
-      { id: 'user-1', role: 'user', content: '请分析 TSLA' },
-      { id: 'assistant-1', role: 'assistant', content: '波动较大', skillName: '趋势分析' },
+      { id: 'user-1', role: 'user', content: 'Analyze TSLA' },
+      { id: 'assistant-1', role: 'assistant', content: 'High volatility', skillName: 'Trend analysis' },
     ];
     const deferred = createDeferred<{ success: boolean }>();
     mockSendChat.mockImplementation(() => deferred.promise);
@@ -608,7 +608,7 @@ describe('ChatPage', () => {
       </MemoryRouter>
     );
 
-    const sendButton = await screen.findByRole('button', { name: '发送到已配置的通知机器人/邮箱' });
+    const sendButton = await screen.findByRole('button', { name: 'Send to configured notification bot/email' });
     fireEvent.click(sendButton);
 
     await waitFor(() => {
@@ -632,30 +632,30 @@ describe('ChatPage', () => {
     vi.mocked(historyApi.getDetail).mockImplementation(() => deferred.promise);
 
     render(
-      <MemoryRouter initialEntries={['/chat?stock=600519&name=%E8%B4%B5%E5%B7%9E%E8%8C%85%E5%8F%B0&recordId=1']}>
+      <MemoryRouter initialEntries={['/chat?stock=600519&name=Kweichow%20Moutai&recordId=1']}>
         <ChatPage />
       </MemoryRouter>
     );
 
-    expect(await screen.findByDisplayValue('请深入分析 贵州茅台(600519)')).toBeInTheDocument();
+    expect(await screen.findByDisplayValue('Analyze Kweichow Moutai(600519)')).toBeInTheDocument();
 
-    const sendButton = screen.getByRole('button', { name: /发送|处理中\.\.\./ });
+    const sendButton = screen.getByRole('button', { name: /Send|Processing\.\.\./ });
     expect(sendButton).not.toBeDisabled();
-    expect(screen.getByText('正在加载历史分析上下文；现在可直接发送追问。')).toBeInTheDocument();
+    expect(screen.getByText('Historical analysis context is loading. You can send a follow-up now.')).toBeInTheDocument();
 
     fireEvent.click(sendButton);
 
     await waitFor(() => {
       expect(mockStartStream).toHaveBeenCalledWith(
         expect.objectContaining({
-          message: '请深入分析 贵州茅台(600519)',
+          message: 'Analyze Kweichow Moutai(600519)',
           context: {
             stock_code: '600519',
-            stock_name: '贵州茅台',
+            stock_name: 'Kweichow Moutai',
           },
         }),
         expect.objectContaining({
-          skillName: '趋势分析',
+          skillName: 'Trend analysis',
         }),
       );
     });
@@ -665,16 +665,16 @@ describe('ChatPage', () => {
         id: 1,
         queryId: 'q-1',
         stockCode: '600519',
-        stockName: '贵州茅台',
+        stockName: 'Kweichow Moutai',
         reportType: 'detailed',
         createdAt: '2026-03-18T08:00:00Z',
         currentPrice: 1523.6,
         changePct: 1.8,
       },
       summary: {
-        analysisSummary: '趋势延续',
-        operationAdvice: '继续观察',
-        trendPrediction: '高位震荡',
+        analysisSummary: 'Trend continuation',
+        operationAdvice: 'Continue observing',
+        trendPrediction: 'High-level range',
         sentimentScore: 78,
       },
       strategy: {
@@ -683,22 +683,22 @@ describe('ChatPage', () => {
     });
 
     await waitFor(() => {
-      expect(screen.queryByText('正在加载历史分析上下文；现在可直接发送追问。')).not.toBeInTheDocument();
+      expect(screen.queryByText('Historical analysis context is loading. You can send a follow-up now.')).not.toBeInTheDocument();
     });
 
-    fireEvent.change(screen.getByPlaceholderText(/分析 600519/), {
-      target: { value: '继续分析成交量' },
+    fireEvent.change(screen.getByPlaceholderText(/Analyze 600519/), {
+      target: { value: 'Continue analyzing volume' },
     });
-    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
     await waitFor(() => {
       expect(mockStartStream).toHaveBeenLastCalledWith(
         expect.objectContaining({
-          message: '继续分析成交量',
+          message: 'Continue analyzing volume',
           context: undefined,
         }),
         expect.objectContaining({
-          skillName: '趋势分析',
+          skillName: 'Trend analysis',
         }),
       );
     });
@@ -710,16 +710,16 @@ describe('ChatPage', () => {
         id: 1,
         queryId: 'q-1',
         stockCode: '600519',
-        stockName: '贵州茅台',
+        stockName: 'Kweichow Moutai',
         reportType: 'detailed',
         createdAt: '2026-03-18T08:00:00Z',
         currentPrice: 1523.6,
         changePct: 1.8,
       },
       summary: {
-        analysisSummary: '趋势延续',
-        operationAdvice: '继续观察',
-        trendPrediction: '高位震荡',
+        analysisSummary: 'Trend continuation',
+        operationAdvice: 'Continue observing',
+        trendPrediction: 'High-level range',
         sentimentScore: 78,
       },
       strategy: {
@@ -728,26 +728,26 @@ describe('ChatPage', () => {
     });
 
     render(
-      <MemoryRouter initialEntries={['/chat?stock=600519&name=%E8%B4%B5%E5%B7%9E%E8%8C%85%E5%8F%B0&recordId=1']}>
+      <MemoryRouter initialEntries={['/chat?stock=600519&name=Kweichow%20Moutai&recordId=1']}>
         <ChatPage />
       </MemoryRouter>
     );
 
-    expect(await screen.findByDisplayValue('请深入分析 贵州茅台(600519)')).toBeInTheDocument();
+    expect(await screen.findByDisplayValue('Analyze Kweichow Moutai(600519)')).toBeInTheDocument();
 
     await waitFor(() => {
-      expect(screen.queryByText('正在加载历史分析上下文；现在可直接发送追问。')).not.toBeInTheDocument();
+      expect(screen.queryByText('Historical analysis context is loading. You can send a follow-up now.')).not.toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
     await waitFor(() => {
       expect(mockStartStream).toHaveBeenCalledWith(
         expect.objectContaining({
-          message: '请深入分析 贵州茅台(600519)',
+          message: 'Analyze Kweichow Moutai(600519)',
           context: expect.objectContaining({
             stock_code: '600519',
-            stock_name: '贵州茅台',
+            stock_name: 'Kweichow Moutai',
             previous_price: 1523.6,
             previous_change_pct: 1.8,
             previous_strategy: expect.objectContaining({
@@ -756,7 +756,7 @@ describe('ChatPage', () => {
           }),
         }),
         expect.objectContaining({
-          skillName: '趋势分析',
+          skillName: 'Trend analysis',
         }),
       );
     });
@@ -769,21 +769,21 @@ describe('ChatPage', () => {
       </MemoryRouter>
     );
 
-    expect(await screen.findByDisplayValue('请深入分析 AAPL')).toBeInTheDocument();
+    expect(await screen.findByDisplayValue('Analyze AAPL')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
     await waitFor(() => {
       expect(mockStartStream).toHaveBeenCalledWith(
         expect.objectContaining({
-          message: '请深入分析 AAPL',
+          message: 'Analyze AAPL',
           context: {
             stock_code: 'AAPL',
             stock_name: null,
           },
         }),
         expect.objectContaining({
-          skillName: '趋势分析',
+          skillName: 'Trend analysis',
         }),
       );
     });
@@ -797,8 +797,8 @@ describe('ChatPage', () => {
       </MemoryRouter>
     );
 
-    expect(await screen.findByRole('heading', { name: '问股' })).toBeInTheDocument();
-    expect(screen.getByPlaceholderText(/分析 600519/)).toHaveValue('');
+    expect(await screen.findByRole('heading', { name: 'Ask Stocks' })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/Analyze 600519/)).toHaveValue('');
     expect(historyApi.getDetail).not.toHaveBeenCalled();
   });
 
@@ -813,34 +813,34 @@ describe('ChatPage', () => {
     const router = createMemoryRouter(
       [{ path: '/chat', element: <ChatPage /> }],
       {
-        initialEntries: ['/chat?stock=600519&name=%E8%B4%B5%E5%B7%9E%E8%8C%85%E5%8F%B0&recordId=1'],
+        initialEntries: ['/chat?stock=600519&name=Kweichow%20Moutai&recordId=1'],
       },
     );
 
     render(<RouterProvider router={router} />);
 
-    expect(await screen.findByDisplayValue('请深入分析 贵州茅台(600519)')).toBeInTheDocument();
-    expect(screen.getByText('正在加载历史分析上下文；现在可直接发送追问。')).toBeInTheDocument();
+    expect(await screen.findByDisplayValue('Analyze Kweichow Moutai(600519)')).toBeInTheDocument();
+    expect(screen.getByText('Historical analysis context is loading. You can send a follow-up now.')).toBeInTheDocument();
 
     await router.navigate('/chat?stock=AAPL&name=Apple&recordId=2');
 
-    expect(await screen.findByDisplayValue('请深入分析 Apple(AAPL)')).toBeInTheDocument();
+    expect(await screen.findByDisplayValue('Analyze Apple(AAPL)')).toBeInTheDocument();
 
     firstDeferred.resolve({
       meta: {
         id: 1,
         queryId: 'q-1',
         stockCode: '600519',
-        stockName: '贵州茅台',
+        stockName: 'Kweichow Moutai',
         reportType: 'detailed',
         createdAt: '2026-03-18T08:00:00Z',
         currentPrice: 1523.6,
         changePct: 1.8,
       },
       summary: {
-        analysisSummary: '趋势延续',
-        operationAdvice: '继续观察',
-        trendPrediction: '高位震荡',
+        analysisSummary: 'Trend continuation',
+        operationAdvice: 'Continue observing',
+        trendPrediction: 'High-level range',
         sentimentScore: 78,
       },
       strategy: {
@@ -860,9 +860,9 @@ describe('ChatPage', () => {
         changePct: 2.4,
       },
       summary: {
-        analysisSummary: '趋势走强',
-        operationAdvice: '继续持有',
-        trendPrediction: '短线偏强',
+        analysisSummary: 'Trend strengthening',
+        operationAdvice: 'Continue observing',
+        trendPrediction: 'Short-term firm',
         sentimentScore: 81,
       },
       strategy: {
@@ -871,15 +871,15 @@ describe('ChatPage', () => {
     });
 
     await waitFor(() => {
-      expect(screen.queryByText('正在加载历史分析上下文；现在可直接发送追问。')).not.toBeInTheDocument();
+      expect(screen.queryByText('Historical analysis context is loading. You can send a follow-up now.')).not.toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
     await waitFor(() => {
       expect(mockStartStream).toHaveBeenCalledWith(
         expect.objectContaining({
-          message: '请深入分析 Apple(AAPL)',
+          message: 'Analyze Apple(AAPL)',
           context: expect.objectContaining({
             stock_code: 'AAPL',
             stock_name: 'Apple',
@@ -891,7 +891,7 @@ describe('ChatPage', () => {
           }),
         }),
         expect.objectContaining({
-          skillName: '趋势分析',
+          skillName: 'Trend analysis',
         }),
       );
     });
@@ -899,8 +899,8 @@ describe('ChatPage', () => {
 
   it('shows a jump-to-latest action when new content arrives while the user is away from bottom', async () => {
     mockStoreState.messages = [
-      { id: 'user-1', role: 'user', content: '请分析 600519' },
-      { id: 'assistant-1', role: 'assistant', content: '趋势偏强', skillName: '趋势分析' },
+      { id: 'user-1', role: 'user', content: 'Analyze 600519' },
+      { id: 'assistant-1', role: 'assistant', content: 'Trend is firm', skillName: 'Trend analysis' },
     ];
 
     const { rerender } = render(
@@ -918,7 +918,7 @@ describe('ChatPage', () => {
 
     mockStoreState.messages = [
       ...mockStoreState.messages,
-      { id: 'assistant-2', role: 'assistant', content: '新的补充分析', skillName: '趋势分析' },
+      { id: 'assistant-2', role: 'assistant', content: 'New supplemental analysis', skillName: 'Trend analysis' },
     ];
 
     rerender(
@@ -927,7 +927,7 @@ describe('ChatPage', () => {
       </MemoryRouter>
     );
 
-    const jumpButton = await screen.findByRole('button', { name: '查看最新消息' });
+    const jumpButton = await screen.findByRole('button', { name: 'View latest message' });
     expect(jumpButton).toBeInTheDocument();
 
     fireEvent.click(jumpButton);
@@ -938,12 +938,12 @@ describe('ChatPage', () => {
 
 describe('extractStockCodeFromMessage', () => {
   it('returns 6-digit A-share code', () => {
-    expect(extractStockCodeFromMessage('分析 600519 趋势')).toBe('600519');
+    expect(extractStockCodeFromMessage('Analyze 600519 trend')).toBe('600519');
     expect(extractStockCodeFromMessage('002460')).toBe('002460');
   });
 
   it('returns HK prefixed code (normalized)', () => {
-    expect(extractStockCodeFromMessage('分析 hk00700')).toBe('HK00700');
+    expect(extractStockCodeFromMessage('Analyze hk00700')).toBe('HK00700');
   });
 
   it('returns .HK suffix code (normalized to canonical)', () => {
@@ -952,31 +952,31 @@ describe('extractStockCodeFromMessage', () => {
   });
 
   it('returns code with .SH/.SZ suffix (normalized)', () => {
-    expect(extractStockCodeFromMessage('看 600519.SH')).toBe('600519');
+    expect(extractStockCodeFromMessage('View 600519.SH')).toBe('600519');
     expect(extractStockCodeFromMessage('000001.SZ')).toBe('000001');
   });
 
   it('returns US ticker like AAPL', () => {
-    expect(extractStockCodeFromMessage('分析 AAPL 走势')).toBe('AAPL');
+    expect(extractStockCodeFromMessage('Analyze AAPL trend')).toBe('AAPL');
     expect(extractStockCodeFromMessage('TSLA')).toBe('TSLA');
   });
 
   it('does NOT return exchange prefixes as tickers', () => {
-    expect(extractStockCodeFromMessage('分析 SH 走势')).toBeNull();
-    expect(extractStockCodeFromMessage('看看 BJ')).toBeNull();
+    expect(extractStockCodeFromMessage('Analyze SH trend')).toBeNull();
+    expect(extractStockCodeFromMessage('Check BJ')).toBeNull();
     expect(extractStockCodeFromMessage('HK')).toBeNull();
-    expect(extractStockCodeFromMessage('买入 SZ')).toBeNull();
-    expect(extractStockCodeFromMessage('US 市场')).toBeNull();
+    expect(extractStockCodeFromMessage('Purchase SZ')).toBeNull();
+    expect(extractStockCodeFromMessage('US Market')).toBeNull();
     expect(extractStockCodeFromMessage('SS')).toBeNull();
   });
 
   it('returns null for messages without stock codes', () => {
-    expect(extractStockCodeFromMessage('茅台现在适合买入吗')).toBeNull();
-    expect(extractStockCodeFromMessage('大盘走势如何')).toBeNull();
+    expect(extractStockCodeFromMessage('Is Moutai suitable now?')).toBeNull();
+    expect(extractStockCodeFromMessage('How is the market trend?')).toBeNull();
   });
 
   it('matches prefixed code like SH600519 (normalized)', () => {
-    expect(extractStockCodeFromMessage('分析 SH600519')).toBe('600519');
+    expect(extractStockCodeFromMessage('Analyze SH600519')).toBe('600519');
   });
 
   it('returns SZ-prefixed code when standalone (normalized)', () => {
@@ -985,7 +985,7 @@ describe('extractStockCodeFromMessage', () => {
 });
 
 describe('watchlist button with code variants', () => {
-  it('shows "从自选删除" when canonical code is in watchlist and user inputs variant', async () => {
+  it('shows "Remove from watchlist" when canonical code is in watchlist and user inputs variant', async () => {
     mockGetWatchlist.mockResolvedValue(['600519', 'HK01810']);
 
     render(
@@ -994,14 +994,14 @@ describe('watchlist button with code variants', () => {
       </MemoryRouter>,
     );
 
-    const textarea = await screen.findByPlaceholderText(/例如/);
-    fireEvent.change(textarea, { target: { value: '分析 600519.SH' } });
+    const textarea = await screen.findByPlaceholderText(/Example/);
+    fireEvent.change(textarea, { target: { value: 'Analyze 600519.SH' } });
     fireEvent.keyDown(textarea, { key: 'Enter' });
 
-    expect(await screen.findByText('从自选删除')).toBeInTheDocument();
+    expect(await screen.findByText('Remove from watchlist')).toBeInTheDocument();
   });
 
-  it('shows "从自选删除" for HK variant codes', async () => {
+  it('shows "Remove from watchlist" for HK variant codes', async () => {
     mockGetWatchlist.mockResolvedValue(['HK01810']);
 
     render(
@@ -1010,10 +1010,10 @@ describe('watchlist button with code variants', () => {
       </MemoryRouter>,
     );
 
-    const textarea = await screen.findByPlaceholderText(/例如/);
-    fireEvent.change(textarea, { target: { value: '分析 1810.HK' } });
+    const textarea = await screen.findByPlaceholderText(/Example/);
+    fireEvent.change(textarea, { target: { value: 'Analyze 1810.HK' } });
     fireEvent.keyDown(textarea, { key: 'Enter' });
 
-    expect(await screen.findByText('从自选删除')).toBeInTheDocument();
+    expect(await screen.findByText('Remove from watchlist')).toBeInTheDocument();
   });
 });

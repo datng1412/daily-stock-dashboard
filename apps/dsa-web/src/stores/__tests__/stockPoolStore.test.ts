@@ -30,7 +30,7 @@ const historyItem = {
   stockCode: '600519',
   stockName: '贵州茅台',
   sentimentScore: 82,
-  operationAdvice: '买入',
+  operationAdvice: 'Positive signal',
   createdAt: '2026-03-18T08:00:00Z',
 };
 
@@ -44,9 +44,9 @@ const historyReport = {
     createdAt: '2026-03-18T08:00:00Z',
   },
   summary: {
-    analysisSummary: '趋势维持强势',
-    operationAdvice: '继续观察买点',
-    trendPrediction: '短线震荡偏强',
+    analysisSummary: 'Trend remains strong',
+    operationAdvice: 'Continue monitoring signal quality',
+    trendPrediction: 'Short-term range remains firm',
     sentimentScore: 78,
   },
 };
@@ -58,7 +58,7 @@ const marketReviewHistoryReport = {
     id: 10,
     queryId: 'q-10',
     stockCode: '',
-    stockName: '大盘复盘',
+    stockName: 'Market review',
     reportType: 'market_review' as const,
   },
 };
@@ -362,7 +362,7 @@ describe('stockPoolStore', () => {
 
   it('surfaces duplicate task errors without replacing the dashboard error state', async () => {
     vi.mocked(analysisApi.analyzeAsync).mockRejectedValue(
-      new DuplicateTaskError('600519', 'task-1', '股票 600519 正在分析中'),
+      new DuplicateTaskError('600519', 'task-1', 'Stock 600519 is already being analyzed'),
     );
 
     useStockPoolStore.getState().setQuery('600519');
@@ -380,7 +380,7 @@ describe('stockPoolStore', () => {
     await useStockPoolStore.getState().submitAnalysis();
 
     const state = useStockPoolStore.getState();
-    expect(state.inputError).toBe('请输入有效的股票代码或股票名称');
+    expect(state.inputError).toBe('Enter a valid stock code or stock name');
     expect(state.isAnalyzing).toBe(false);
     expect(analysisApi.analyzeAsync).not.toHaveBeenCalled();
   });
@@ -570,7 +570,7 @@ describe('stockPoolStore', () => {
       progress: 100,
       reportType: 'detailed',
       createdAt: '2026-03-18T08:00:00Z',
-      error: '分析失败',
+      error: 'Analysis failed',
     });
 
     const state = useStockPoolStore.getState();
@@ -623,7 +623,7 @@ describe('stockPoolStore', () => {
 
   it('upserts pending and processing tasks from the backend snapshot', async () => {
     const existingTask = createTask({ taskId: 'task-existing', progress: 30 });
-    const updatedTask = createTask({ taskId: 'task-existing', progress: 80, message: 'LLM 正在生成分析结果' });
+    const updatedTask = createTask({ taskId: 'task-existing', progress: 80, message: 'LLM is generating the analysis result' });
     const newTask = createTask({
       taskId: 'task-new',
       stockCode: '000001',

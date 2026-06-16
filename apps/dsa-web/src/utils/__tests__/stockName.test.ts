@@ -32,8 +32,8 @@ describe('truncateStockName', () => {
     test('truncates to 8 chars with trailing dot', () => {
       // 贵州茅台股票有限公司: 10 Chinese chars -> slice(0,8) + dot = 8 ch + dot
       expect(truncateStockName('贵州茅台股票有限公司')).toBe('贵州茅台股票有限.');
-      // 中华人民共和国ABCD: mixed, 11 chars > 10 → truncate to '中华人民共和国ABC.'
-      expect(truncateStockName('中华人民共和国ABCD')).toBe('中华人民共和国ABC.');
+      // Medium华人民共和国ABCD: mixed, 11 chars > 10 → truncate to 'Medium华人民共和国ABC.'
+      expect(truncateStockName('Medium华人民共和国ABCD')).toBe('Medium华人民共和国ABC.');
     });
   });
 

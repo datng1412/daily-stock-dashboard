@@ -17,8 +17,8 @@ interface StockBarProps {
 }
 
 /**
- * 个股栏组件：以股票维度展示历史分析记录，每只股票只显示一条，
- * 大盘复盘置顶，其余按最新分析时间排列。支持全选、批量删除。
+ * Stock bar component: displays historical analysis records by stock, one row per stock,
+ * with market review pinned first and others sorted by latest analysis time. Supports select-all and batch delete.
  */
 export const StockBar: React.FC<StockBarProps> = ({
   items,
@@ -80,7 +80,7 @@ export const StockBar: React.FC<StockBarProps> = ({
         <div className="mb-4 space-y-3">
           <DashboardPanelHeader
             className="mb-1"
-            title="个股栏"
+            title="Stock bar"
             titleClassName="text-sm font-medium"
             leading={(
               <svg className="h-4 w-4 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -91,10 +91,10 @@ export const StockBar: React.FC<StockBarProps> = ({
             actions={
               selectedCount > 0 ? (
                 <Badge variant="info" size="sm" className="animate-in fade-in zoom-in duration-200">
-                  已选 {selectedCount}
+                  Selected {selectedCount}
                 </Badge>
               ) : items.length > 0 ? (
-                <span className="text-[11px] text-muted-text">{items.length}只</span>
+                <span className="text-[11px] text-muted-text">{items.length} items</span>
               ) : undefined
             }
           />
@@ -112,10 +112,10 @@ export const StockBar: React.FC<StockBarProps> = ({
                   checked={allVisibleSelected}
                   onChange={toggleSelectAll}
                   disabled={isDeleting}
-                  aria-label="全选当前个股"
+                  aria-label="Select current stocks"
                   className="h-3.5 w-3.5 cursor-pointer bg-transparent accent-primary focus:ring-primary/30 disabled:opacity-50"
                 />
-                <span className="text-[11px] text-muted-text select-none">全选当前</span>
+                <span className="text-[11px] text-muted-text select-none">Select current</span>
               </label>
               <Button
                 variant="danger-subtle"
@@ -125,7 +125,7 @@ export const StockBar: React.FC<StockBarProps> = ({
                 isLoading={isDeleting}
                 className="disabled:!border-transparent disabled:!bg-transparent"
               >
-                {isDeleting ? '删除中' : '删除'}
+                {isDeleting ? 'Deleting' : 'Delete'}
               </Button>
             </div>
           )}
@@ -135,12 +135,12 @@ export const StockBar: React.FC<StockBarProps> = ({
           <DashboardStateBlock
             loading
             compact
-            title="加载个股中..."
+            title="Loading stocks..."
           />
         ) : items.length === 0 ? (
           <DashboardStateBlock
-            title="暂无个股记录"
-            description="完成首次分析后，这里将按股票展示最新分析结果。"
+            title="No stock records"
+            description="After the first analysis, this area shows latest analysis results by stock."
             icon={(
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />

@@ -212,7 +212,7 @@ describe('PortfolioPage FX refresh', () => {
       errorCount: 0,
     });
     listImportBrokers.mockResolvedValue({
-      brokers: [{ broker: 'huatai', aliases: [], displayName: '华泰' }],
+      brokers: [{ broker: 'huatai', aliases: [], displayName: 'Huatai' }],
     });
     listTrades.mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 20 });
     listCashLedger.mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 20 });
@@ -241,8 +241,8 @@ describe('PortfolioPage FX refresh', () => {
 
     await waitForInitialLoad();
 
-    expect(await screen.findByText('过期')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '刷新汇率' })).toBeInTheDocument();
+    expect(await screen.findByText('Stale')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Refresh FX' })).toBeInTheDocument();
   });
 
   it('refreshes FX for a single selected account and only reloads snapshot/risk', async () => {
@@ -266,16 +266,16 @@ describe('PortfolioPage FX refresh', () => {
     const riskCallsBeforeRefresh = getRisk.mock.calls.length;
     const tradeCallsBeforeRefresh = listTrades.mock.calls.length;
 
-    fireEvent.click(screen.getByRole('button', { name: '刷新汇率' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh FX' }));
 
     await waitFor(() => expect(refreshFx).toHaveBeenCalledWith({ accountId: 1 }));
-    expect(await screen.findByText('汇率已刷新，共更新 1 对。')).toBeInTheDocument();
+    expect(await screen.findByText('FX rates refreshed. Updated 1 pairs.')).toBeInTheDocument();
     await waitFor(() => expect(getSnapshot).toHaveBeenCalledTimes(snapshotCallsBeforeRefresh + 1));
     await waitFor(() => expect(getRisk).toHaveBeenCalledTimes(riskCallsBeforeRefresh + 1));
     expect(listTrades).toHaveBeenCalledTimes(tradeCallsBeforeRefresh);
     expect(listCashLedger).not.toHaveBeenCalled();
     expect(listCorporateActions).not.toHaveBeenCalled();
-    expect(screen.getByText('最新')).toBeInTheDocument();
+    expect(screen.getByText('Current')).toBeInTheDocument();
   });
 
   it('refreshes FX for the full portfolio without sending accountId and shows neutral feedback when no pair exists', async () => {
@@ -294,10 +294,10 @@ describe('PortfolioPage FX refresh', () => {
 
     await waitForInitialLoad();
 
-    fireEvent.click(screen.getByRole('button', { name: '刷新汇率' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh FX' }));
 
     await waitFor(() => expect(refreshFx).toHaveBeenCalledWith({ accountId: undefined }));
-    expect(await screen.findByText('当前范围无可刷新的汇率对。')).toBeInTheDocument();
+    expect(await screen.findByText('No refreshable FX pairs in the current scope.')).toBeInTheDocument();
   });
 
   it('shows disabled feedback when FX online refresh is disabled even without a disabled reason', async () => {
@@ -315,9 +315,9 @@ describe('PortfolioPage FX refresh', () => {
 
     await waitForInitialLoad();
 
-    fireEvent.click(screen.getByRole('button', { name: '刷新汇率' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh FX' }));
 
-    expect(await screen.findByText('汇率在线刷新已被禁用。')).toBeInTheDocument();
+    expect(await screen.findByText('Online FX refresh is disabled.')).toBeInTheDocument();
   });
 
   it('renders backend-provided position valuation fields and stale missing-price hint', async () => {
@@ -334,8 +334,8 @@ describe('PortfolioPage FX refresh', () => {
     expect(screen.getByText('420.0000')).toBeInTheDocument();
     expect(screen.getByText('HKD 4,200.00')).toBeInTheDocument();
     expect(screen.getByText('+5.00%')).toBeInTheDocument();
-    expect(screen.getByText('收盘价 · 2026-03-18')).toBeInTheDocument();
-    expect(screen.getByText('缺价')).toBeInTheDocument();
+    expect(screen.getByText('Close price · 2026-03-18')).toBeInTheDocument();
+    expect(screen.getByText('No price')).toBeInTheDocument();
     expect(screen.getAllByText('--').length).toBeGreaterThanOrEqual(2);
 
     const hkRow = screen.getByText('HK00700').closest('tr');
@@ -365,10 +365,10 @@ describe('PortfolioPage FX refresh', () => {
 
     await waitForInitialLoad();
 
-    fireEvent.click(screen.getByRole('button', { name: '刷新汇率' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh FX' }));
 
-    expect(await screen.findByText('汇率在线刷新已被禁用。')).toBeInTheDocument();
-    expect(screen.queryByText('当前范围无可刷新的汇率对。')).not.toBeInTheDocument();
+    expect(await screen.findByText('Online FX refresh is disabled.')).toBeInTheDocument();
+    expect(screen.queryByText('No refreshable FX pairs in the current scope.')).not.toBeInTheDocument();
   });
 
   it('shows warning feedback when FX refresh still falls back to stale rates', async () => {
@@ -385,9 +385,9 @@ describe('PortfolioPage FX refresh', () => {
 
     await waitForInitialLoad();
 
-    fireEvent.click(screen.getByRole('button', { name: '刷新汇率' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh FX' }));
 
-    expect(await screen.findByText(/stale\/fallback 汇率/)).toBeInTheDocument();
+    expect(await screen.findByText(/stale\/fallback FX rates/)).toBeInTheDocument();
   });
 
   it('shows warning feedback when FX refresh returns online errors without stale pairs', async () => {
@@ -408,9 +408,9 @@ describe('PortfolioPage FX refresh', () => {
     const riskCallsBeforeRefresh = getRisk.mock.calls.length;
     const tradeCallsBeforeRefresh = listTrades.mock.calls.length;
 
-    fireEvent.click(screen.getByRole('button', { name: '刷新汇率' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh FX' }));
 
-    expect(await screen.findByText(/在线刷新未完全成功/)).toBeInTheDocument();
+    expect(await screen.findByText(/Online refresh was not fully successful/)).toBeInTheDocument();
     await waitFor(() => expect(getSnapshot).toHaveBeenCalledTimes(snapshotCallsBeforeRefresh + 1));
     await waitFor(() => expect(getRisk).toHaveBeenCalledTimes(riskCallsBeforeRefresh + 1));
     expect(listTrades).toHaveBeenCalledTimes(tradeCallsBeforeRefresh);
@@ -422,8 +422,8 @@ describe('PortfolioPage FX refresh', () => {
     refreshFx.mockRejectedValueOnce(
       createApiError(
         createParsedApiError({
-          title: '刷新失败',
-          message: '汇率服务暂时不可用',
+          title: 'Refresh failed',
+          message: 'FX service is temporarily unavailable',
         }),
       ),
     );
@@ -432,12 +432,12 @@ describe('PortfolioPage FX refresh', () => {
 
     await waitForInitialLoad();
 
-    const refreshButton = screen.getByRole('button', { name: '刷新汇率' });
+    const refreshButton = screen.getByRole('button', { name: 'Refresh FX' });
     fireEvent.click(refreshButton);
 
-    const fxAlertTitle = await screen.findByText('刷新失败');
-    expect(fxAlertTitle.closest('[role="alert"]')).toHaveTextContent('汇率服务暂时不可用');
-    await waitFor(() => expect(screen.getByRole('button', { name: '刷新汇率' })).not.toBeDisabled());
+    const fxAlertTitle = await screen.findByText('Refresh failed');
+    expect(fxAlertTitle.closest('[role="alert"]')).toHaveTextContent('FX service is temporarily unavailable');
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh FX' })).not.toBeDisabled());
   });
 
   it('does not keep success feedback when snapshot reload fails after FX refresh succeeds', async () => {
@@ -446,8 +446,8 @@ describe('PortfolioPage FX refresh', () => {
       .mockRejectedValueOnce(
         createApiError(
           createParsedApiError({
-            title: '快照刷新失败',
-            message: '无法加载最新持仓快照',
+            title: 'Snapshot refresh failed',
+            message: 'Unable to load the latest position snapshot',
           }),
         ),
       );
@@ -456,12 +456,12 @@ describe('PortfolioPage FX refresh', () => {
 
     await waitForInitialLoad();
 
-    fireEvent.click(screen.getByRole('button', { name: '刷新汇率' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh FX' }));
 
-    const fxAlertTitle = await screen.findByText('快照刷新失败');
-    expect(fxAlertTitle.closest('[role="alert"]')).toHaveTextContent('无法加载最新持仓快照');
-    await waitFor(() => expect(screen.queryByText('汇率已刷新，共更新 1 对。')).not.toBeInTheDocument());
-    await waitFor(() => expect(screen.getByRole('button', { name: '刷新汇率' })).not.toBeDisabled());
+    const fxAlertTitle = await screen.findByText('Snapshot refresh failed');
+    expect(fxAlertTitle.closest('[role="alert"]')).toHaveTextContent('Unable to load the latest position snapshot');
+    await waitFor(() => expect(screen.queryByText('FX rates refreshed. Updated 1 pairs.')).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh FX' })).not.toBeDisabled());
   });
 
   it('drops late FX refresh results after switching to another account scope', async () => {
@@ -491,12 +491,12 @@ describe('PortfolioPage FX refresh', () => {
     fireEvent.change(accountSelect, { target: { value: '1' } });
     await waitFor(() => expect(getSnapshot).toHaveBeenLastCalledWith({ accountId: 1, costMethod: 'fifo' }));
 
-    fireEvent.click(screen.getByRole('button', { name: '刷新汇率' }));
-    expect(await screen.findByRole('button', { name: '刷新中...' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh FX' }));
+    expect(await screen.findByRole('button', { name: 'Refreshing...' })).toBeDisabled();
 
     fireEvent.change(accountSelect, { target: { value: '2' } });
     await waitFor(() => expect(getSnapshot).toHaveBeenLastCalledWith({ accountId: 2, costMethod: 'fifo' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: '刷新汇率' })).not.toBeDisabled());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh FX' })).not.toBeDisabled());
 
     const snapshotCallsAfterSwitch = getSnapshot.mock.calls.length;
     const riskCallsAfterSwitch = getRisk.mock.calls.length;
@@ -515,7 +515,7 @@ describe('PortfolioPage FX refresh', () => {
 
     expect(getSnapshot).toHaveBeenCalledTimes(snapshotCallsAfterSwitch);
     expect(getRisk).toHaveBeenCalledTimes(riskCallsAfterSwitch);
-    expect(screen.queryByText('汇率已刷新，共更新 1 对。')).not.toBeInTheDocument();
+    expect(screen.queryByText('FX rates refreshed. Updated 1 pairs.')).not.toBeInTheDocument();
   });
 
   it('drops late FX refresh results after switching cost method', async () => {
@@ -535,12 +535,12 @@ describe('PortfolioPage FX refresh', () => {
 
     const costMethodSelect = screen.getAllByRole('combobox')[1];
 
-    fireEvent.click(screen.getByRole('button', { name: '刷新汇率' }));
-    expect(await screen.findByRole('button', { name: '刷新中...' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh FX' }));
+    expect(await screen.findByRole('button', { name: 'Refreshing...' })).toBeDisabled();
 
     fireEvent.change(costMethodSelect, { target: { value: 'avg' } });
     await waitFor(() => expect(getSnapshot).toHaveBeenLastCalledWith({ accountId: undefined, costMethod: 'avg' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: '刷新汇率' })).not.toBeDisabled());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh FX' })).not.toBeDisabled());
 
     const snapshotCallsAfterSwitch = getSnapshot.mock.calls.length;
     const riskCallsAfterSwitch = getRisk.mock.calls.length;
@@ -559,6 +559,6 @@ describe('PortfolioPage FX refresh', () => {
 
     expect(getSnapshot).toHaveBeenCalledTimes(snapshotCallsAfterSwitch);
     expect(getRisk).toHaveBeenCalledTimes(riskCallsAfterSwitch);
-    expect(screen.queryByText('汇率已刷新，共更新 1 对。')).not.toBeInTheDocument();
+    expect(screen.queryByText('FX rates refreshed. Updated 1 pairs.')).not.toBeInTheDocument();
   });
 });

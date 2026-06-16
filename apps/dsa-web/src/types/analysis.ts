@@ -79,11 +79,11 @@ export interface ReportMeta {
 
 /** Sentiment label */
 export type SentimentLabel =
-  | '极度悲观'
-  | '悲观'
-  | '中性'
-  | '乐观'
-  | '极度乐观'
+  | 'Extremely pessimistic'
+  | 'Pessimistic'
+  | 'Neutral'
+  | 'Optimistic'
+  | 'Extremely optimistic'
   | 'Very Bearish'
   | 'Bearish'
   | 'Neutral'
@@ -430,11 +430,11 @@ export const getSentimentLabel = (score: number, language: ReportLanguage = 'zh'
     if (score <= 80) return 'Bullish';
     return 'Very Bullish';
   }
-  if (score <= 20) return '极度悲观';
-  if (score <= 40) return '悲观';
-  if (score <= 60) return '中性';
-  if (score <= 80) return '乐观';
-  return '极度乐观';
+  if (score <= 20) return 'Extremely pessimistic';
+  if (score <= 40) return 'Pessimistic';
+  if (score <= 60) return 'Neutral';
+  if (score <= 80) return 'Optimistic';
+  return 'Extremely optimistic';
 };
 
 /** Get sentiment color by score */

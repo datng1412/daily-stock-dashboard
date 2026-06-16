@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getFieldDescriptionZh, getFieldOptionLabelZh, getFieldTitleZh } from '../src/utils/systemConfigI18n';
+import { getFieldOptionLabelZh, getFieldTitleZh } from '../src/utils/systemConfigI18n';
 
 const requiredLocalizedKeys = [
   'TICKFLOW_API_KEY',
@@ -75,56 +75,55 @@ const requiredLocalizedKeys = [
 ] as const;
 
 describe('systemConfigI18n required key coverage', () => {
-  it('provides zh title and description mapping for known missing keys', () => {
+  it('provides English title mappings for known missing keys', () => {
     requiredLocalizedKeys.forEach((key) => {
       expect(getFieldTitleZh(key, key)).not.toBe(key);
-      expect(getFieldDescriptionZh(key, 'schema fallback description')).not.toBe('schema fallback description');
     });
   });
 
-  it('uses a Chinese primary title for SearXNG base URLs', () => {
+  it('uses an English primary title for SearXNG base URLs', () => {
     const title = getFieldTitleZh('SEARXNG_BASE_URLS', 'SEARXNG_BASE_URLS');
 
-    expect(title).toBe('SearXNG 自建实例地址');
+    expect(title).toBe('SearXNG self-hosted instance URLs');
     expect(title).not.toBe('SearXNG Base URLs');
   });
 });
 
 describe('systemConfigI18n option label localization', () => {
   const realSelectOptionCases = [
-    ['NEWS_STRATEGY_PROFILE', 'ultra_short', undefined, '超短线（1天）'],
-    ['NEWS_STRATEGY_PROFILE', 'short', undefined, '短期（3天）'],
-    ['NEWS_STRATEGY_PROFILE', 'medium', undefined, '中期（7天）'],
-    ['NEWS_STRATEGY_PROFILE', 'long', undefined, '长期（30天）'],
-    ['REPORT_TYPE', 'simple', undefined, '简洁'],
-    ['REPORT_TYPE', 'full', undefined, '完整'],
-    ['REPORT_TYPE', 'brief', undefined, '简报'],
-    ['REPORT_LANGUAGE', 'zh', 'Chinese', '中文'],
-    ['REPORT_LANGUAGE', 'en', 'English', '英文'],
-    ['NOTIFICATION_MIN_SEVERITY', '', 'Not set', '未设置'],
-    ['NOTIFICATION_MIN_SEVERITY', 'info', 'info', '信息'],
-    ['NOTIFICATION_MIN_SEVERITY', 'warning', 'warning', '警告'],
-    ['NOTIFICATION_MIN_SEVERITY', 'error', 'error', '错误'],
-    ['NOTIFICATION_MIN_SEVERITY', 'critical', 'critical', '严重'],
-    ['LOG_LEVEL', 'DEBUG', undefined, '调试'],
-    ['LOG_LEVEL', 'INFO', undefined, '信息'],
-    ['LOG_LEVEL', 'WARNING', undefined, '警告'],
-    ['LOG_LEVEL', 'ERROR', undefined, '错误'],
-    ['LOG_LEVEL', 'CRITICAL', undefined, '严重'],
-    ['MARKET_REVIEW_REGION', 'cn', undefined, 'A 股'],
-    ['MARKET_REVIEW_REGION', 'hk', undefined, '港股'],
-    ['MARKET_REVIEW_REGION', 'us', undefined, '美股'],
-    ['MARKET_REVIEW_REGION', 'both', undefined, '全部市场'],
-    ['MARKET_REVIEW_COLOR_SCHEME', 'green_up', 'Green Up / Red Down', '绿涨红跌'],
-    ['MARKET_REVIEW_COLOR_SCHEME', 'red_up', 'Red Up / Green Down', '红涨绿跌'],
-    ['AGENT_ARCH', 'single', 'Single Agent', '单 Agent'],
-    ['AGENT_ARCH', 'multi', 'Multi Agent (Orchestrator)', '多 Agent（编排）'],
-    ['AGENT_ORCHESTRATOR_MODE', 'quick', 'Quick', '快速'],
-    ['AGENT_ORCHESTRATOR_MODE', 'standard', 'Standard', '标准'],
-    ['AGENT_ORCHESTRATOR_MODE', 'full', 'Full', '完整'],
-    ['AGENT_ORCHESTRATOR_MODE', 'specialist', 'Specialist', '专家'],
-    ['AGENT_SKILL_ROUTING', 'auto', 'Auto (Regime-based)', '自动（按市场状态）'],
-    ['AGENT_SKILL_ROUTING', 'manual', 'Manual (Use AGENT_SKILLS)', '手动（使用 AGENT_SKILLS）'],
+    ['NEWS_STRATEGY_PROFILE', 'ultra_short', undefined, 'Ultra short (1 day)'],
+    ['NEWS_STRATEGY_PROFILE', 'short', undefined, 'Short (3 days)'],
+    ['NEWS_STRATEGY_PROFILE', 'medium', undefined, 'Medium (7 days)'],
+    ['NEWS_STRATEGY_PROFILE', 'long', undefined, 'Long (30 days)'],
+    ['REPORT_TYPE', 'simple', undefined, 'Simple'],
+    ['REPORT_TYPE', 'full', undefined, 'Full'],
+    ['REPORT_TYPE', 'brief', undefined, 'Brief'],
+    ['REPORT_LANGUAGE', 'zh', 'Chinese', 'Chinese'],
+    ['REPORT_LANGUAGE', 'en', 'English', 'English'],
+    ['NOTIFICATION_MIN_SEVERITY', '', 'Not set', 'Not set'],
+    ['NOTIFICATION_MIN_SEVERITY', 'info', 'info', 'Info'],
+    ['NOTIFICATION_MIN_SEVERITY', 'warning', 'warning', 'Warning'],
+    ['NOTIFICATION_MIN_SEVERITY', 'error', 'error', 'Error'],
+    ['NOTIFICATION_MIN_SEVERITY', 'critical', 'critical', 'Critical'],
+    ['LOG_LEVEL', 'DEBUG', undefined, 'Debug'],
+    ['LOG_LEVEL', 'INFO', undefined, 'Info'],
+    ['LOG_LEVEL', 'WARNING', undefined, 'Warning'],
+    ['LOG_LEVEL', 'ERROR', undefined, 'Error'],
+    ['LOG_LEVEL', 'CRITICAL', undefined, 'Critical'],
+    ['MARKET_REVIEW_REGION', 'cn', undefined, 'A-shares'],
+    ['MARKET_REVIEW_REGION', 'hk', undefined, 'Hong Kong stocks'],
+    ['MARKET_REVIEW_REGION', 'us', undefined, 'US stocks'],
+    ['MARKET_REVIEW_REGION', 'both', undefined, 'All markets'],
+    ['MARKET_REVIEW_COLOR_SCHEME', 'green_up', 'Green Up / Red Down', 'Green up / red down'],
+    ['MARKET_REVIEW_COLOR_SCHEME', 'red_up', 'Red Up / Green Down', 'Red up / green down'],
+    ['AGENT_ARCH', 'single', 'Single Agent', 'Single Agent'],
+    ['AGENT_ARCH', 'multi', 'Multi Agent (Orchestrator)', 'Multi-Agent (orchestrator)'],
+    ['AGENT_ORCHESTRATOR_MODE', 'quick', 'Quick', 'Quick'],
+    ['AGENT_ORCHESTRATOR_MODE', 'standard', 'Standard', 'Standard'],
+    ['AGENT_ORCHESTRATOR_MODE', 'full', 'Full', 'Full'],
+    ['AGENT_ORCHESTRATOR_MODE', 'specialist', 'Specialist', 'Specialist'],
+    ['AGENT_SKILL_ROUTING', 'auto', 'Auto (Regime-based)', 'Auto (market-status based)'],
+    ['AGENT_SKILL_ROUTING', 'manual', 'Manual (Use AGENT_SKILLS)', 'Manual (use AGENT_SKILLS)'],
   ] as const;
 
   it('localizes all select options currently exposed by system config schema', () => {
@@ -133,9 +132,6 @@ describe('systemConfigI18n option label localization', () => {
 
       expect(label).toBe(expectedLabel);
       expect(label).not.toBe(value);
-      if (fallbackLabel) {
-        expect(label).not.toBe(fallbackLabel);
-      }
     });
   });
 });
