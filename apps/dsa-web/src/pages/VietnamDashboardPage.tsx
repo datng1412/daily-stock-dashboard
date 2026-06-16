@@ -18,7 +18,14 @@ import { cn } from '../utils/cn';
 import { buildVietnamConditionSummary, VIETNAM_CONDITION_SUMMARY_SUBTITLE } from '../utils/vietnamConditionSummary';
 import { getKbsSnapshotDisplayState, type KbsSnapshotDisplayResult } from '../utils/kbsSnapshotState';
 import { getVietnamMarketPhase, type VietnamMarketPhase } from '../utils/vietnamMarketPhase';
-import { formatRelativeAge, formatVietnamDateTime, formatVietnamTime, parseMozyTimestamp } from '../utils/vietnamTime';
+import {
+  formatAbsoluteDateTime,
+  formatRelativeAge,
+  formatRelativeTime,
+  formatVietnamDateTime,
+  formatVietnamTime,
+  parseMozyTimestamp,
+} from '../utils/vietnamTime';
 import {
   VIETNAM_WATCHLIST_MAX_SIZE,
   VIETNAM_WATCHLIST_PRESETS,
@@ -443,17 +450,24 @@ const WatchCard: React.FC<{ item: VietnamWatchItem; realtimeQuote?: VietnamRealt
       {item.news.length > 0 ? (
         <div className="mt-3 border-t border-border/60 pt-3">
           <p className="mb-2 text-xs font-medium text-secondary-text">Latest news</p>
-          {item.news.slice(0, 2).map((news) => (
-            <a
-              key={`${news.title}-${news.url}`}
-              href={news.url || '#'}
-              target="_blank"
-              rel="noreferrer"
-              className="block truncate text-sm text-cyan hover:underline"
-            >
-              {news.title}
-            </a>
-          ))}
+          {item.news.slice(0, 2).map((news, index) => {
+            const absoluteTime = parseMozyTimestamp(news.publishedAt) ? formatAbsoluteDateTime(news.publishedAt) : undefined;
+            return (
+              <div key={`${news.title}-${news.url ?? index}`} className="min-w-0">
+                <a
+                  href={news.url || '#'}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="block truncate text-sm text-cyan hover:underline"
+                >
+                  {news.title || 'Untitled news'}
+                </a>
+                <div className="truncate text-xs text-secondary-text" title={absoluteTime}>
+                  {[news.source, formatRelativeTime(news.publishedAt)].filter(Boolean).join(' · ')}
+                </div>
+              </div>
+            );
+          })}
         </div>
       ) : null}
     </article>
@@ -1401,6 +1415,15 @@ const StockDetailView: React.FC<{
   const hasSessionRangeFrom1H = item.intradayPulse?.sessionRangePctFrom1H != null;
   const hasSessionVolumeFrom1H = item.intradayPulse?.sessionVolumeFrom1H != null;
   const missingSessionMetricText = hasSessionCandles ? 'Session value unavailable' : 'Not enough session candles';
+  const missingSessionHighLowTitle = hasSessionCandles
+    ? 'Session high/low is unavailable from current 1H candles.'
+    : 'Session high/low requires current-session intraday candles.';
+  const missingSessionRangeTitle = hasSessionCandles
+    ? 'Session range is unavailable from current 1H candles.'
+    : 'Session range requires current-session intraday candles.';
+  const missingSessionVolumeTitle = hasSessionCandles
+    ? 'Session volume is unavailable from current 1H candles.'
+    : 'Session volume requires current-session intraday candles.';
   const hasVolumeVsAvg1h = item.intradayPulse?.volumeVsAvg1h != null;
   const avgVolume20D = indicators.avgVolume20D ?? item.liquidity?.avgVolume20D;
   const sessionVolumeRatioText = sessionVolumeToAvgDailyVolume(item, realtimeQuote, kbsState);
@@ -1658,7 +1681,7 @@ const StockDetailView: React.FC<{
           </div>
           <div className="rounded-lg bg-card/60 p-3">
             <dt className="text-xs text-secondary-text">Session high / low from 1H</dt>
-            <dd className="mt-1 font-medium text-foreground">
+            <dd className="mt-1 font-medium text-foreground" title={hasSessionHighLowFrom1H ? undefined : missingSessionHighLowTitle}>
               {hasSessionHighLowFrom1H
                 ? `${formatPrice(item.intradayPulse?.sessionHighFrom1H)} / ${formatPrice(item.intradayPulse?.sessionLowFrom1H)}`
                 : missingSessionMetricText}
@@ -1666,13 +1689,13 @@ const StockDetailView: React.FC<{
           </div>
           <div className="rounded-lg bg-card/60 p-3">
             <dt className="text-xs text-secondary-text">Session range from 1H</dt>
-            <dd className="mt-1 font-medium text-foreground">
+            <dd className="mt-1 font-medium text-foreground" title={hasSessionRangeFrom1H ? undefined : missingSessionRangeTitle}>
               {hasSessionRangeFrom1H ? `${formatNumber(item.intradayPulse?.sessionRangePctFrom1H, 2)}%` : missingSessionMetricText}
             </dd>
           </div>
           <div className="rounded-lg bg-card/60 p-3">
             <dt className="text-xs text-secondary-text">Mozyfin session 1H volume</dt>
-            <dd className="mt-1 font-medium text-foreground">
+            <dd className="mt-1 font-medium text-foreground" title={hasSessionVolumeFrom1H ? undefined : missingSessionVolumeTitle}>
               {hasSessionVolumeFrom1H ? formatNumber(item.intradayPulse?.sessionVolumeFrom1H) : missingSessionMetricText}
             </dd>
           </div>
@@ -1819,6 +1842,7 @@ const StockDetailView: React.FC<{
             {item.news.slice(0, DETAIL_NEWS_LIMIT).map((news, index) => {
               const summaryHasArtifacts = hasEncodingArtifacts(news.summary);
               const titleHasArtifacts = hasEncodingArtifacts(news.title);
+              const absoluteTime = parseMozyTimestamp(news.publishedAt) ? formatAbsoluteDateTime(news.publishedAt) : undefined;
               return (
                 <article key={`${item.ticker}-detail-news-${news.url ?? news.title ?? index}`} className="rounded-lg border border-border/50 bg-card/50 p-3">
                   <a
@@ -1829,9 +1853,10 @@ const StockDetailView: React.FC<{
                   >
                     {news.title || 'Untitled news'}
                   </a>
-                  <div className="mt-1 flex flex-wrap gap-2 text-xs text-secondary-text">
+                  <div className="mt-1 flex flex-wrap gap-2 text-xs text-secondary-text" title={absoluteTime}>
                     {news.source ? <span>{news.source}</span> : null}
-                    {news.publishedAt ? <span>{formatVietnamDateTime(news.publishedAt)}</span> : null}
+                    {news.source ? <span aria-hidden="true">·</span> : null}
+                    <span>{formatRelativeTime(news.publishedAt)}</span>
                   </div>
                   {news.summary && !summaryHasArtifacts ? (
                     <p className="mt-2 line-clamp-2 text-sm text-secondary-text">{news.summary}</p>

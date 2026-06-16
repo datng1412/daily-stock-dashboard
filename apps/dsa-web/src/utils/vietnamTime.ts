@@ -57,6 +57,33 @@ export const formatVietnamTime = (input: MozyTimestampInput): string => {
   return `${parts.hour}:${parts.minute}:${parts.second} VN`;
 };
 
+export const formatAbsoluteDateTime = (input: MozyTimestampInput): string => formatVietnamDateTime(input);
+
+export const formatRelativeTime = (input: MozyTimestampInput, now: MozyTimestampInput = new Date()): string => {
+  const date = parseMozyTimestamp(input);
+  const reference = parseMozyTimestamp(now);
+  if (!date || !reference) return 'Time unavailable';
+
+  const diffSeconds = Math.max(0, Math.floor((reference.getTime() - date.getTime()) / 1000));
+  if (diffSeconds < 60) return 'Just now';
+
+  const diffMinutes = Math.floor(diffSeconds / 60);
+  if (diffMinutes < 60) return `${diffMinutes} ${diffMinutes === 1 ? 'minute' : 'minutes'} ago`;
+
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) return `${diffHours} ${diffHours === 1 ? 'hour' : 'hours'} ago`;
+
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays < 7) return `${diffDays} ${diffDays === 1 ? 'day' : 'days'} ago`;
+
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: VIETNAM_TIME_ZONE,
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(date);
+};
+
 export const formatRelativeAge = (input: MozyTimestampInput, now: MozyTimestampInput = new Date()): string => {
   const date = parseMozyTimestamp(input);
   const reference = parseMozyTimestamp(now);

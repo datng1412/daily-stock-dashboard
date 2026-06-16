@@ -935,7 +935,10 @@ const settingsHelpEnUS: SettingsHelpMap = {
 
 const settingsHelpZhCN: SettingsHelpMap = settingsHelpEnUS;
 
-function getPreferredHelpMap(_locale?: string | null): SettingsHelpMap {
+function getPreferredHelpMap(locale?: string | null): SettingsHelpMap {
+  if (locale?.toLowerCase().startsWith('zh')) {
+    return settingsHelpZhCN;
+  }
   return settingsHelpEnUS;
 }
 

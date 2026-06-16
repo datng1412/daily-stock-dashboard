@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   formatRelativeAge,
+  formatRelativeTime,
   formatVietnamDateTime,
   formatVietnamTime,
   parseMozyTimestamp,
@@ -31,5 +32,17 @@ describe('Vietnam time helpers', () => {
     expect(parseMozyTimestamp('not-a-date')).toBeNull();
     expect(formatVietnamDateTime(null)).toBe('—');
     expect(formatVietnamDateTime('not-a-date')).toBe('—');
+  });
+  it('formats news relative time labels', () => {
+    const now = '2026-06-16T12:00:00+07:00';
+
+    expect(formatRelativeTime('2026-06-16T11:59:30+07:00', now)).toBe('Just now');
+    expect(formatRelativeTime('2026-06-16T11:45:00+07:00', now)).toBe('15 minutes ago');
+    expect(formatRelativeTime('2026-06-16T10:00:00+07:00', now)).toBe('2 hours ago');
+    expect(formatRelativeTime('2026-06-15T12:00:00+07:00', now)).toBe('1 day ago');
+    expect(formatRelativeTime('2026-06-13T12:00:00+07:00', now)).toBe('3 days ago');
+    expect(formatRelativeTime('2026-06-08T12:00:00+07:00', now)).toBe('Jun 8, 2026');
+    expect(formatRelativeTime('not-a-date', now)).toBe('Time unavailable');
+    expect(formatRelativeTime(null, now)).toBe('Time unavailable');
   });
 });
