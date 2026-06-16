@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [improvement] Separate Vietnam watchlist data caveats from primary market scan labels and show caveats as compact secondary row context.
+- [fix] Refine the Vietnam watchlist scan so normal warning-only rows no longer become primary Risk elevated scan states.
+- [improvement] Add a neutral Vietnam watchlist scan summary and table scan-state column for faster ticker comparison without changing Mozyfin daily or KBS snapshot semantics.
 - [fix] Ensure Docker and Render Vietnam dashboard deployments create and use a writable stock-index cache directory.
 - [chore] Share Vietnam inspect chart range, overlay, zoom, pan, reset, and expand controls between compact and expanded chart modes.
 - [improvement] Add expanded Vietnam inspect chart mode with shared range, overlay, zoom, pan, reset, and close controls while preserving Mozyfin daily and KBS snapshot separation.

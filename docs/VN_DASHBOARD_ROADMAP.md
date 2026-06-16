@@ -68,6 +68,7 @@ These rules must not be broken.
 * Date axis for inspect chart
 * Inspect chart zoom, pan, and reset controls
 * Expanded inspect chart mode
+* Watchlist scan summary and table scan-state column
 * Relative timestamps for news
 * News timestamp parsing from Mozyfin `published_date`
 * Corporate actions stub endpoint
@@ -298,6 +299,17 @@ Rules:
 * Keep source and timestamp visible.
 
 ### 7. Add watchlist table view
+
+Status: partial in current scanability batch.
+
+Implemented:
+
+* Added a compact watchlist scan summary with neutral `Strong`, `Improving`, `Neutral`, `Weakening`, `Risk elevated`, and `Data unavailable` counts.
+* Added a table-level scan-state column derived from existing status labels, cache freshness, and KBS snapshot state.
+* Kept normal warnings as secondary table context so warning-only rows do not dominate the scan summary.
+* Separated source/data caveats such as foreign-date mismatch, indicator-input caution, unconfirmed final close, and unknown adjusted-price metadata from primary market scan labels.
+* Kept caveats visible in compact row disclosures because existing response fields identify the limitations but do not provide enough confirmed source metadata to resolve them automatically.
+* Kept scan states ticker-level because the current watchlist payload does not include a sector field.
 
 Goal:
 

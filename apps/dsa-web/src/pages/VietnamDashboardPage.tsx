@@ -52,6 +52,17 @@ const INSPECT_RANGES = [
   { label: '1Y', days: 366 },
 ] as const;
 type InspectRangeLabel = typeof INSPECT_RANGES[number]['label'];
+type BadgeVariant = NonNullable<React.ComponentProps<typeof Badge>['variant']>;
+type WatchlistScanLabel = 'Strong' | 'Improving' | 'Neutral' | 'Weakening' | 'Risk elevated' | 'Data unavailable';
+
+interface WatchlistScanState {
+  label: WatchlistScanLabel;
+  variant: BadgeVariant;
+  reason: string;
+}
+
+const WATCHLIST_SCAN_ORDER: WatchlistScanLabel[] = ['Strong', 'Improving', 'Neutral', 'Weakening', 'Risk elevated', 'Data unavailable'];
+const DATA_CAVEAT_LABELS = new Set(['Foreign data stale', 'Indicator caution', 'Price finality unknown', 'Adjusted price unknown']);
 
 const formatNumber = (value?: number | null, maximumFractionDigits = 0) => {
   if (value === null || value === undefined || Number.isNaN(value)) return '-';
@@ -173,6 +184,20 @@ const rawDateLabel = (value?: string | number | null) => (value === null || valu
 const compactLabels = (labels?: string[], max = 4) => (labels ?? ['Watch']).slice(0, max);
 
 const hasEncodingArtifacts = (value?: string | null) => Boolean(value && /(?:Ã|Â|â€|�)/.test(value));
+
+const marketStatusLabels = (item: VietnamWatchItem, max = 3) => {
+  const labels = (item.statusLabels ?? []).filter((label) => !DATA_CAVEAT_LABELS.has(label));
+  return compactLabels(labels.length ? labels : ['Watch'], max);
+};
+
+const dataCaveatDetails = (item: VietnamWatchItem) => {
+  const details = (item.statusDetails ?? []).filter((detail) => DATA_CAVEAT_LABELS.has(detail.label));
+  const detailLabels = new Set(details.map((detail) => detail.label));
+  const syntheticDetails = (item.statusLabels ?? [])
+    .filter((label) => DATA_CAVEAT_LABELS.has(label) && !detailLabels.has(label))
+    .map((label) => ({ label, severity: 'caution' as const, reason: 'Source metadata caveat returned by the Vietnam watchlist response.' }));
+  return [...details, ...syntheticDetails];
+};
 
 const latestFetchedValue = (item: VietnamWatchItem) => {
   const values = [
@@ -306,10 +331,90 @@ const importantWarnings = (item: VietnamWatchItem) =>
     ].some((needle) => warning.includes(needle)),
   );
 
+const watchlistScanState = (
+  item: VietnamWatchItem,
+  realtimeQuote?: VietnamRealtimeQuote | null,
+  marketPhaseCode?: string | null,
+): WatchlistScanState => {
+  const labels = marketStatusLabels(item, item.statusLabels?.length ?? 0).map((label) => label.toLowerCase());
+  const kbsState = kbsSnapshotState(realtimeQuote, marketPhaseCode);
+  const freshness = cacheFreshness(item);
+
+  if (item.validation?.valid === false || item.error || (item.latestPrice ?? item.close) === null || (item.latestPrice ?? item.close) === undefined) {
+    return { label: 'Data unavailable', variant: 'default', reason: 'Missing required daily fields' };
+  }
+  if (freshness.variant === 'danger' || kbsState.severity === 'error') {
+    return { label: 'Data unavailable', variant: 'danger', reason: 'Data source error' };
+  }
+  if (
+    kbsState.severity === 'warning' ||
+    labels.some((label) =>
+      ['weak', 'risk', 'caution', 'negative', 'low liquidity', 'overextended'].some((needle) => label.includes(needle)),
+    )
+  ) {
+    return { label: 'Weakening', variant: 'warning', reason: kbsState.severity === 'warning' ? 'KBS snapshot needs context' : 'Neutral labels show caution' };
+  }
+
+  const constructiveLabelCount = labels.filter((label) =>
+    ['stronger', 'expansion', 'positive', 'intraday up'].some((needle) => label.includes(needle)),
+  ).length;
+  if (constructiveLabelCount >= 2 && (item.liquidity.score ?? 0) >= 70) {
+    return { label: 'Strong', variant: 'success', reason: 'Constructive labels with liquidity' };
+  }
+  if (constructiveLabelCount > 0) {
+    return { label: 'Improving', variant: 'info', reason: 'Constructive neutral labels' };
+  }
+  return { label: 'Neutral', variant: 'default', reason: 'No strong directional condition' };
+};
+
+const kbsStateTone = (state: KbsSnapshotDisplayResult) => {
+  if (state.severity === 'ok') return 'text-success';
+  if (state.severity === 'info') return 'text-cyan';
+  if (state.severity === 'warning') return 'text-warning';
+  if (state.severity === 'error') return 'text-danger';
+  return 'text-secondary-text';
+};
+
+const scanTone = (label: WatchlistScanLabel) => {
+  if (label === 'Strong') return 'text-success';
+  if (label === 'Improving') return 'text-cyan';
+  if (label === 'Weakening') return 'text-warning';
+  if (label === 'Risk elevated') return 'text-danger';
+  return 'text-secondary-text';
+};
+
+const DataCaveatDisclosure: React.FC<{ item: VietnamWatchItem; className?: string; testId?: string }> = ({ item, className, testId }) => {
+  const caveats = dataCaveatDetails(item);
+  const warnings = importantWarnings(item);
+  const total = caveats.length + warnings.length;
+  if (!total) return null;
+
+  return (
+    <details className={cn('rounded-lg border border-border/60 bg-elevated/30 p-3 text-xs text-secondary-text', className)} data-testid={testId}>
+      <summary className="cursor-pointer font-medium text-foreground">
+        Data caveats ({total})
+      </summary>
+      <div className="mt-3 space-y-2">
+        {caveats.map((detail) => (
+          <div key={`${item.ticker}-caveat-disclosure-${detail.label}`} className="flex gap-2">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
+            <span><span className="text-foreground">{detail.label}:</span> {detail.reason}</span>
+          </div>
+        ))}
+        {warnings.map((warning) => (
+          <div key={`${item.ticker}-warning-disclosure-${warning}`} className="flex gap-2">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
+            <span>{warning}</span>
+          </div>
+        ))}
+      </div>
+    </details>
+  );
+};
+
 const WatchCard: React.FC<{ item: VietnamWatchItem; realtimeQuote?: VietnamRealtimeQuote | null; marketPhase: VietnamMarketPhase }> = ({ item, realtimeQuote, marketPhase }) => {
   const positive = (item.changePct ?? 0) >= 0;
   const TrendIcon = positive ? ArrowUpRight : ArrowDownRight;
-  const displayWarnings = importantWarnings(item);
   const freshness = cacheFreshness(item);
   const lastFetched = latestFetchedValue(item);
   const kbsState = kbsSnapshotState(realtimeQuote, marketPhase.code);
@@ -325,10 +430,10 @@ const WatchCard: React.FC<{ item: VietnamWatchItem; realtimeQuote?: VietnamRealt
             <Badge variant="default">{item.marketIndex ?? 'VNINDEX.VN'}</Badge>
           </div>
           <div className="mt-2 flex flex-wrap gap-1">
-            {compactLabels(item.statusLabels, 3).map((label) => (
+            {marketStatusLabels(item, 3).map((label) => (
               <Badge key={label} variant={statusVariant(label)}>{label}</Badge>
             ))}
-            {(item.statusLabels?.length ?? 0) > 3 ? <Badge variant="default">+{(item.statusLabels?.length ?? 0) - 3}</Badge> : null}
+            {marketStatusLabels(item, item.statusLabels?.length ?? 0).length > 3 ? <Badge variant="default">+{marketStatusLabels(item, item.statusLabels?.length ?? 0).length - 3}</Badge> : null}
           </div>
           <p className="mt-1 text-xs text-secondary-text">
             Price date {item.latestPriceDate ?? item.priceDate ?? '-'} | refreshed {formatRelativeAge(lastFetched)}
@@ -446,16 +551,7 @@ const WatchCard: React.FC<{ item: VietnamWatchItem; realtimeQuote?: VietnamRealt
         </div>
       ) : null}
 
-      {displayWarnings.length > 0 ? (
-        <div className="mt-3 space-y-2">
-          {displayWarnings.map((warning) => (
-            <div key={warning} className="flex gap-2 rounded-lg border border-warning/20 bg-warning/10 p-2 text-xs text-warning">
-              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              <span>{warning}</span>
-            </div>
-          ))}
-        </div>
-      ) : null}
+      <DataCaveatDisclosure item={item} className="mt-3" />
       <details className="mt-3 rounded-lg border border-border/60 bg-elevated/30 p-3 text-xs text-secondary-text">
         <summary className="cursor-pointer font-medium text-foreground">Advanced / Raw Data</summary>
         <div className="mt-3 grid gap-2">
@@ -801,6 +897,73 @@ const SelectedTickerHeader: React.FC<{
   );
 };
 
+const WatchlistScanSummary: React.FC<{
+  items: VietnamWatchItem[];
+  realtimeQuotes: Record<string, VietnamRealtimeQuote | undefined>;
+  marketPhase: VietnamMarketPhase;
+}> = ({ items, realtimeQuotes, marketPhase }) => {
+  const states = items.map((item) => watchlistScanState(item, realtimeQuotes[item.ticker], marketPhase.code));
+  const counts = WATCHLIST_SCAN_ORDER.reduce<Record<WatchlistScanLabel, number>>((acc, label) => {
+    acc[label] = states.filter((state) => state.label === label).length;
+    return acc;
+  }, {
+    Strong: 0,
+    Improving: 0,
+    Neutral: 0,
+    Weakening: 0,
+    'Risk elevated': 0,
+    'Data unavailable': 0,
+  });
+
+  return (
+    <section className="rounded-lg border border-border/70 bg-card p-4" data-testid="watchlist-scan-summary">
+      <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+        <div>
+          <h2 className="text-base font-semibold text-foreground">Watchlist scan</h2>
+          <p className="mt-1 text-xs text-secondary-text">
+            Neutral ticker-level states derived from existing labels, cache freshness, and KBS snapshot state. Warning counts remain secondary context in the table.
+          </p>
+        </div>
+        <Badge variant="default">Sector grouping unavailable</Badge>
+      </div>
+      <dl className="mt-4 grid gap-2 sm:grid-cols-3 lg:grid-cols-6">
+        {WATCHLIST_SCAN_ORDER.map((label) => (
+          <div key={label} className="rounded-lg border border-border/50 bg-elevated/40 p-3">
+            <dt className={cn('text-xs font-medium', scanTone(label))}>{label}</dt>
+            <dd className="mt-1 text-xl font-semibold text-foreground">{counts[label]}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  );
+};
+
+const TableCaveatCell: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
+  const caveats = dataCaveatDetails(item);
+  const warnings = importantWarnings(item);
+  const total = caveats.length + warnings.length;
+  if (!total) return <span data-testid={`table-caveats-${item.ticker}`}><Badge variant="success">None</Badge></span>;
+
+  return (
+    <details className="max-w-[220px]" data-testid={`table-caveats-${item.ticker}`} onClick={(event) => event.stopPropagation()}>
+      <summary className="cursor-pointer list-none">
+        <Badge variant="warning">{total} caveat{total === 1 ? '' : 's'}</Badge>
+      </summary>
+      <div className="mt-2 space-y-2 rounded-lg border border-border/60 bg-elevated/40 p-2 text-xs text-secondary-text">
+        {caveats.map((detail) => (
+          <div key={`${item.ticker}-caveat-${detail.label}`}>
+            <span className="font-medium text-foreground">{detail.label}</span>
+            <span> - {detail.reason}</span>
+          </div>
+        ))}
+        {warnings.map((warning) => (
+          <div key={`${item.ticker}-warning-${warning}`}>{warning}</div>
+        ))}
+      </div>
+    </details>
+  );
+};
+
 const IndicatorTable: React.FC<{
   items: VietnamWatchItem[];
   realtimeQuotes: Record<string, VietnamRealtimeQuote | undefined>;
@@ -823,10 +986,11 @@ const IndicatorTable: React.FC<{
       </div>
     ) : null}
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[1320px] text-left text-sm">
+      <table className="w-full min-w-[1360px] text-left text-sm">
         <thead className="border-b border-border/70 text-xs uppercase text-secondary-text">
           <tr>
             <th className="py-2 pr-3">Ticker</th>
+            <th className="px-3 py-2">Scan state</th>
             <th className="px-3 py-2">Status</th>
             <th className="px-3 py-2 text-right">Daily close</th>
             <th className="px-3 py-2">Source</th>
@@ -839,7 +1003,7 @@ const IndicatorTable: React.FC<{
             <th className="px-3 py-2 text-right">MA20</th>
             <th className="px-3 py-2 text-right">RSI14 Wilder/RMA</th>
             <th className="px-3 py-2 text-right">Session vol / 20D avg</th>
-            <th className="px-3 py-2">Warnings</th>
+            <th className="px-3 py-2">Caveats</th>
             <th className="px-3 py-2">Cache</th>
           </tr>
         </thead>
@@ -848,6 +1012,7 @@ const IndicatorTable: React.FC<{
             const quote = realtimeQuotes[item.ticker];
             const kbsState = kbsSnapshotState(quote, marketPhase.code);
             const sessionVolumeRatioText = sessionVolumeToAvgDailyVolume(item, quote, kbsState);
+            const scanState = watchlistScanState(item, quote, marketPhase.code);
             return (
               <tr
                 key={item.ticker}
@@ -859,11 +1024,15 @@ const IndicatorTable: React.FC<{
               >
                 <td className="py-3 pr-3 font-semibold text-foreground">{item.ticker}</td>
                 <td className="px-3 py-3">
+                  <Badge variant={scanState.variant} data-testid={`scan-state-${item.ticker}`}>{scanState.label}</Badge>
+                  <div className="mt-1 max-w-[180px] text-xs text-secondary-text">{scanState.reason}</div>
+                </td>
+                <td className="px-3 py-3">
                   <div className="flex flex-wrap gap-1">
-                    {compactLabels(item.statusLabels, 3).map((label) => (
+                    {marketStatusLabels(item, 3).map((label) => (
                       <Badge key={label} variant={statusVariant(label)}>{label}</Badge>
                     ))}
-                    {(item.statusLabels?.length ?? 0) > 3 ? <Badge variant="default">+{(item.statusLabels?.length ?? 0) - 3}</Badge> : null}
+                    {marketStatusLabels(item, item.statusLabels?.length ?? 0).length > 3 ? <Badge variant="default">+{marketStatusLabels(item, item.statusLabels?.length ?? 0).length - 3}</Badge> : null}
                   </div>
                 </td>
                 <td className="px-3 py-3 text-right">{formatPrice(item.latestPrice ?? item.close)}</td>
@@ -873,7 +1042,7 @@ const IndicatorTable: React.FC<{
                 <td className="px-3 py-3">{item.latestPriceDate ?? item.priceDate ?? '-'}</td>
                 <td className="px-3 py-3 text-right">
                   <div className="font-medium text-foreground">{formatPrice(quote?.realtimePrice)}</div>
-                  <Badge variant={kbsStateVariant(kbsState)}>{kbsState.label}</Badge>
+                  <div className={cn('mt-1 text-xs font-medium', kbsStateTone(kbsState))}>{kbsState.label}</div>
                 </td>
                 <td className={cn('px-3 py-3 text-right', signalTone(quote?.priceChange))}>
                   {formatPrice(quote?.priceChange)} / {formatNumber(quote?.percentChange, 2)}%
@@ -891,7 +1060,7 @@ const IndicatorTable: React.FC<{
                 <td className="px-3 py-3 text-right">{formatNumber(item.indicators.rsi14Wilder ?? item.indicators.rsi14, 2)}</td>
                 <td className="px-3 py-3 text-right">{sessionVolumeRatioText}</td>
                 <td className="px-3 py-3">
-                  <Badge variant={importantWarnings(item).length ? 'warning' : 'success'}>{importantWarnings(item).length}</Badge>
+                  <TableCaveatCell item={item} />
                 </td>
                 <td className="px-3 py-3">
                   <Badge variant={cacheFreshness(item).variant}>{cacheFreshness(item).label}</Badge>
@@ -1641,8 +1810,8 @@ const StockDetailView: React.FC<{
   if (!item) return null;
   const indicators = item.indicators;
   const latestIntradayCandle = item.intradayCandles?.at(-1);
-  const displayWarnings = importantWarnings(item);
   const conditionSummary = buildVietnamConditionSummary({ item, fixtureMode });
+  const marketStatusDetails = (item.statusDetails ?? []).filter((detail) => !DATA_CAVEAT_LABELS.has(detail.label));
   const kbsState = kbsSnapshotState(realtimeQuote, marketPhase.code);
   const sessionCandlesCount = item.intradayPulse?.sessionCandlesCount ?? 0;
   const hasSessionCandles = sessionCandlesCount > 0;
@@ -1688,7 +1857,7 @@ const StockDetailView: React.FC<{
           <h2 className="mt-1 text-xl font-semibold text-foreground">{item.ticker}</h2>
         </div>
         <div className="flex flex-wrap gap-1">
-          {(item.statusLabels ?? ['Watch']).map((label) => (
+          {marketStatusLabels(item, item.statusLabels?.length ?? 0).map((label) => (
             <Badge key={label} variant={statusVariant(label)}>{label}</Badge>
           ))}
         </div>
@@ -1705,16 +1874,7 @@ const StockDetailView: React.FC<{
           ))}
         </ul>
       </div>
-      {displayWarnings.length > 0 ? (
-        <div className="mt-3 grid gap-2">
-          {displayWarnings.map((warning) => (
-            <div key={`detail-warning-${warning}`} className="flex gap-2 rounded-lg border border-warning/20 bg-warning/10 p-2 text-xs text-warning">
-              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              <span>{warning}</span>
-            </div>
-          ))}
-        </div>
-      ) : null}
+      <DataCaveatDisclosure item={item} className="mt-3" testId="selected-data-caveats" />
       <dl className="mt-4 grid gap-3 text-sm md:grid-cols-4">
         <div className="rounded-lg bg-elevated/50 p-3">
           <dt className="text-xs text-secondary-text">Bollinger 20,2 (VND)</dt>
@@ -2051,11 +2211,11 @@ const StockDetailView: React.FC<{
           </div>
         ) : null}
       </div>
-      {item.statusDetails?.length ? (
+      {marketStatusDetails.length ? (
         <div className="mt-4">
           <h3 className="text-sm font-semibold text-foreground">Label reasons</h3>
           <div className="mt-2 grid gap-2">
-            {item.statusDetails.map((detail) => (
+            {marketStatusDetails.map((detail) => (
               <div key={`${detail.label}-${detail.reason}`} className="rounded-lg border border-border/60 bg-elevated/40 p-3">
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge variant={severityVariant(detail.severity)}>{detail.label}</Badge>
@@ -2974,6 +3134,11 @@ const VietnamDashboardPage: React.FC = () => {
             corporateActionsError={corporateActionsError}
             tradesLoading={tradesLoading}
             tradesError={tradesError}
+            marketPhase={marketPhase}
+          />
+          <WatchlistScanSummary
+            items={data?.watchlist ?? []}
+            realtimeQuotes={realtimeQuotes}
             marketPhase={marketPhase}
           />
           <IndicatorTable

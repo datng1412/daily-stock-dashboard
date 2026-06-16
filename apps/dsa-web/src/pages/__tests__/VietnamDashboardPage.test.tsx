@@ -479,6 +479,74 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(header.getByText('KBS realtime')).toBeInTheDocument();
   });
 
+  it('shows neutral watchlist scan states for faster table comparison', async () => {
+    const response = makeResponse(['FPT', 'VPB', 'MSB', 'SCS', 'ACV']);
+    response.watchlist = response.watchlist.map((item) => {
+      if (item.ticker === 'FPT') {
+        return {
+          ...item,
+          statusLabels: ['Stronger than short-term average', 'Volume expansion', 'Foreign net positive'],
+          liquidity: { ...item.liquidity, score: 82 },
+        };
+      }
+      if (item.ticker === 'VPB') {
+        return {
+          ...item,
+          changePct: -0.7,
+          statusLabels: ['Weak short-term'],
+        };
+      }
+      if (item.ticker === 'MSB') {
+        return {
+          ...item,
+          statusLabels: ['Foreign data stale', 'Indicator caution', 'Price finality unknown', 'Adjusted price unknown'],
+          statusDetails: [
+            { label: 'Foreign data stale', severity: 'caution', reason: 'Foreign net date is missing or does not match the OHLCV date.' },
+            { label: 'Indicator caution', severity: 'caution', reason: 'Indicator inputs include non-final, unknown-adjustment, or limited-history data.' },
+            { label: 'Price finality unknown', severity: 'caution', reason: 'The dashboard cannot confirm whether the latest daily candle is final.' },
+            { label: 'Adjusted price unknown', severity: 'caution', reason: 'The dashboard cannot confirm whether the OHLCV prices are adjusted or unadjusted.' },
+          ],
+          warnings: ['latest price uses OHLCV close because Mozyfin quote field is unreliable'],
+        };
+      }
+      if (item.ticker === 'SCS') {
+        return {
+          ...item,
+          validation: { ...item.validation, valid: false, errors: ['Missing daily close'] },
+        };
+      }
+      return {
+        ...item,
+        cacheStatus: { ...item.cacheStatus, ohlcvCache: 'error' },
+      };
+    });
+    mockedGetVietnamWatchlist.mockResolvedValue(response);
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledWith(defaultTickers));
+
+    const scanSummary = within(screen.getByTestId('watchlist-scan-summary'));
+    expect(scanSummary.getByRole('heading', { name: 'Watchlist scan' })).toBeInTheDocument();
+    expect(scanSummary.getByText('Sector grouping unavailable')).toBeInTheDocument();
+    expect(scanSummary.getByText('Strong').closest('div')).toHaveTextContent('1');
+    expect(scanSummary.getByText('Neutral').closest('div')).toHaveTextContent('1');
+    expect(scanSummary.getByText('Weakening').closest('div')).toHaveTextContent('1');
+    expect(scanSummary.getByText('Risk elevated').closest('div')).toHaveTextContent('0');
+    expect(scanSummary.getByText('Data unavailable').closest('div')).toHaveTextContent('2');
+    expect(scanSummary.queryByText(/buy|sell|hold/i)).not.toBeInTheDocument();
+
+    const indicatorTable = within(screen.getByRole('heading', { name: 'Indicator table' }).closest('section') as HTMLElement);
+    expect(indicatorTable.getByText('Scan state')).toBeInTheDocument();
+    expect(indicatorTable.getByTestId('scan-state-FPT')).toHaveTextContent('Strong');
+    expect(indicatorTable.getByTestId('scan-state-VPB')).toHaveTextContent('Weakening');
+    expect(indicatorTable.getByTestId('scan-state-MSB')).toHaveTextContent('Neutral');
+    expect(indicatorTable.getByTestId('scan-state-SCS')).toHaveTextContent('Data unavailable');
+    expect(indicatorTable.getByTestId('scan-state-ACV')).toHaveTextContent('Data unavailable');
+    expect(indicatorTable.getByTestId('table-caveats-FPT')).toHaveTextContent('None');
+    expect(indicatorTable.getByTestId('table-caveats-MSB')).toHaveTextContent('5 caveats');
+  });
+
   it('renders news source with relative time', async () => {
     const response = makeResponse(defaultTickers);
     response.watchlist[0] = {
