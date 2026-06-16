@@ -1,6 +1,6 @@
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, AlertTriangle, ArrowDown, ArrowDownRight, ArrowUp, ArrowUpRight, Banknote, DatabaseZap, Plus, RefreshCw, RotateCcw, ShieldAlert, X } from 'lucide-react';
+import { Activity, AlertTriangle, ArrowDown, ArrowDownRight, ArrowUp, ArrowUpRight, Banknote, DatabaseZap, Maximize2, Plus, RefreshCw, RotateCcw, ShieldAlert, X } from 'lucide-react';
 import {
   stocksApi,
   type VietnamChartPoint,
@@ -1054,11 +1054,6 @@ const BrokerInspectChartSvg: React.FC<{
   showBollinger: boolean;
 }> = ({ points, showMA20, showMA50, showBollinger }) => {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
-  const firstPointDate = points[0]?.date;
-  const lastPointDate = points[points.length - 1]?.date;
-  useEffect(() => {
-    setHoverIndex(null);
-  }, [points.length, firstPointDate, lastPointDate]);
   const priceKeys: Array<keyof VietnamChartPoint> = ['high', 'low', 'open', 'close'];
   if (showMA20) priceKeys.push('ma20');
   if (showMA50) priceKeys.push('ma50');
@@ -1072,7 +1067,7 @@ const BrokerInspectChartSvg: React.FC<{
   const volumeScale = chartScale(0, Math.max(...volumeValues, 1), VOLUME_TOP, VOLUME_HEIGHT);
   const rsiScale = chartScale(0, 100, RSI_TOP, RSI_HEIGHT);
   const candleWidth = Math.max(3, Math.min(11, PLOT_WIDTH / Math.max(points.length, 1) * 0.62));
-  const hoverPoint = hoverIndex === null ? null : points[hoverIndex];
+  const hoverPoint = hoverIndex === null ? null : points[hoverIndex] ?? null;
   const dateTicks = chartDateTicks(points);
 
   const handleMove = (event: React.MouseEvent<SVGSVGElement>) => {
@@ -1203,10 +1198,11 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
   const [showBollinger, setShowBollinger] = useState(false);
   const [chart, setChart] = useState<VietnamChartResponse | null>(null);
   const [visibleWindow, setVisibleWindow] = useState<ChartVisibleWindow>(fullChartWindow(0));
+  const [isExpanded, setIsExpanded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const requestIdRef = useRef(0);
-  const points = chart?.points ?? [];
+  const points = useMemo(() => chart?.points ?? [], [chart]);
   const clampedVisibleWindow = clampChartWindow(visibleWindow, points.length);
   const visiblePoints = useMemo(
     () => points.slice(clampedVisibleWindow.start, clampedVisibleWindow.end),
@@ -1224,25 +1220,35 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
   };
 
   useEffect(() => {
+    if (!isExpanded) return undefined;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setIsExpanded(false);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isExpanded]);
+
+  useEffect(() => {
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
-    setLoading(true);
-    setError(null);
-    stocksApi.getVietnamChart(item.ticker, rangeLabel)
-      .then((response) => {
+    const loadChart = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const response = await stocksApi.getVietnamChart(item.ticker, rangeLabel);
         if (requestId !== requestIdRef.current) return;
         setChart(response);
         setVisibleWindow(fullChartWindow(response.points.length));
-      })
-      .catch((err) => {
+      } catch (err) {
         if (requestId !== requestIdRef.current) return;
         setChart(null);
         setVisibleWindow(fullChartWindow(0));
         setError(err instanceof Error ? err.message : 'Chart data unavailable');
-      })
-      .finally(() => {
+      } finally {
         if (requestId === requestIdRef.current) setLoading(false);
-      });
+      }
+    };
+    void loadChart();
   }, [item.ticker, rangeLabel]);
 
   return (
@@ -1352,6 +1358,15 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
             >
               Reset
             </button>
+            <button
+              type="button"
+              onClick={() => setIsExpanded(true)}
+              aria-label="Expand chart"
+              className="inline-flex h-8 items-center gap-2 rounded-md border border-border/70 bg-card/60 px-3 text-xs font-medium text-secondary-text transition-colors hover:bg-hover hover:text-foreground"
+            >
+              <Maximize2 className="h-3.5 w-3.5" aria-hidden="true" />
+              Expand
+            </button>
             <span className="ml-2 text-xs text-secondary-text" data-testid="inspect-chart-visible-count">
               Showing {visibleCount} of {points.length}
             </span>
@@ -1378,6 +1393,151 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
         <p>KBS snapshot is separate and not used as daily close.</p>
         {chart?.latestDate ? <p>Latest chart date: {chart.latestDate}</p> : null}
       </div>
+      {isExpanded && points.length ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="inspect-chart-expanded-title"
+          className="fixed inset-0 z-50 flex bg-background/95 p-3 backdrop-blur-sm md:p-6"
+        >
+          <div className="flex min-h-0 w-full flex-col rounded-lg border border-border/70 bg-elevated p-4 shadow-soft-card">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 id="inspect-chart-expanded-title" className="text-base font-semibold text-foreground">Expanded inspect chart</h3>
+                <p className="mt-1 text-xs text-secondary-text">Daily OHLCV from Mozyfin. KBS snapshot remains separate.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsExpanded(false)}
+                aria-label="Close expanded chart"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border/70 bg-card/60 text-secondary-text transition-colors hover:bg-hover hover:text-foreground"
+              >
+                <X className="h-4 w-4" aria-hidden="true" />
+              </button>
+            </div>
+
+            <div className="mt-3 flex flex-wrap gap-1">
+              {INSPECT_RANGES.map((range) => (
+                <button
+                  key={`expanded-${range.label}`}
+                  type="button"
+                  onClick={() => setRangeLabel(range.label)}
+                  className={cn(
+                    'h-8 rounded-md border px-3 text-xs font-medium transition-colors',
+                    rangeLabel === range.label
+                      ? 'border-cyan bg-cyan/10 text-cyan'
+                      : 'border-border/70 bg-card/60 text-secondary-text hover:bg-hover hover:text-foreground',
+                  )}
+                  aria-pressed={rangeLabel === range.label}
+                >
+                  {range.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="mt-3 flex flex-wrap gap-2">
+              <label className="inline-flex h-8 items-center gap-2 rounded-md border border-border/70 bg-card/60 px-3 text-xs text-secondary-text">
+                <input type="checkbox" checked={showMA20} onChange={(event) => setShowMA20(event.target.checked)} />
+                MA20
+              </label>
+              <label className="inline-flex h-8 items-center gap-2 rounded-md border border-border/70 bg-card/60 px-3 text-xs text-secondary-text">
+                <input type="checkbox" checked={showMA50} onChange={(event) => setShowMA50(event.target.checked)} />
+                MA50
+              </label>
+              <label className="inline-flex h-8 items-center gap-2 rounded-md border border-border/70 bg-card/60 px-3 text-xs text-secondary-text">
+                <input type="checkbox" checked={showBollinger} onChange={(event) => setShowBollinger(event.target.checked)} />
+                Bollinger
+              </label>
+            </div>
+
+            <div className="mt-4 flex flex-wrap items-center gap-1">
+              <button
+                type="button"
+                onClick={() => updateVisibleWindow((window) => zoomChartWindow(window, points.length, 'in'))}
+                disabled={!canZoomIn}
+                aria-label="Zoom in chart"
+                className={cn(
+                  'h-8 rounded-md border px-3 text-xs font-medium transition-colors',
+                  canZoomIn ? 'border-border/70 bg-card/60 text-secondary-text hover:bg-hover hover:text-foreground' : 'cursor-not-allowed border-border/40 bg-card/30 text-secondary-text/50',
+                )}
+              >
+                +
+              </button>
+              <button
+                type="button"
+                onClick={() => updateVisibleWindow((window) => zoomChartWindow(window, points.length, 'out'))}
+                disabled={!canZoomOut}
+                aria-label="Zoom out chart"
+                className={cn(
+                  'h-8 rounded-md border px-3 text-xs font-medium transition-colors',
+                  canZoomOut ? 'border-border/70 bg-card/60 text-secondary-text hover:bg-hover hover:text-foreground' : 'cursor-not-allowed border-border/40 bg-card/30 text-secondary-text/50',
+                )}
+              >
+                -
+              </button>
+              <button
+                type="button"
+                onClick={() => updateVisibleWindow((window) => panChartWindow(window, points.length, 'left'))}
+                disabled={!canPanLeft}
+                aria-label="Pan left"
+                className={cn(
+                  'h-8 rounded-md border px-3 text-xs font-medium transition-colors',
+                  canPanLeft ? 'border-border/70 bg-card/60 text-secondary-text hover:bg-hover hover:text-foreground' : 'cursor-not-allowed border-border/40 bg-card/30 text-secondary-text/50',
+                )}
+              >
+                Left
+              </button>
+              <button
+                type="button"
+                onClick={() => updateVisibleWindow((window) => panChartWindow(window, points.length, 'right'))}
+                disabled={!canPanRight}
+                aria-label="Pan right"
+                className={cn(
+                  'h-8 rounded-md border px-3 text-xs font-medium transition-colors',
+                  canPanRight ? 'border-border/70 bg-card/60 text-secondary-text hover:bg-hover hover:text-foreground' : 'cursor-not-allowed border-border/40 bg-card/30 text-secondary-text/50',
+                )}
+              >
+                Right
+              </button>
+              <button
+                type="button"
+                onClick={() => setVisibleWindow(fullChartWindow(points.length))}
+                disabled={!isZoomed}
+                aria-label="Reset chart zoom"
+                className={cn(
+                  'h-8 rounded-md border px-3 text-xs font-medium transition-colors',
+                  isZoomed ? 'border-border/70 bg-card/60 text-secondary-text hover:bg-hover hover:text-foreground' : 'cursor-not-allowed border-border/40 bg-card/30 text-secondary-text/50',
+                )}
+              >
+                Reset
+              </button>
+              <span className="ml-2 text-xs text-secondary-text" data-testid="inspect-chart-expanded-visible-count">
+                Showing {visibleCount} of {points.length}
+              </span>
+            </div>
+
+            <div className="mt-3 flex flex-wrap gap-2 text-xs text-secondary-text">
+              <span>Candlesticks</span>
+              {showMA20 ? <span>MA20</span> : null}
+              {showMA50 ? <span>MA50</span> : null}
+              {showBollinger ? <span>Bollinger upper/mid/lower</span> : null}
+              <span>Volume MA20</span>
+              <span>Volume MA50</span>
+              <span>RSI14</span>
+            </div>
+
+            <div className="mt-3 min-h-0 flex-1 overflow-y-auto pr-1 [&_svg]:h-[min(68vh,760px)]">
+              <BrokerInspectChartSvg points={visiblePoints} showMA20={showMA20} showMA50={showMA50} showBollinger={showBollinger} />
+              <div className="mt-3 space-y-1 text-xs text-secondary-text">
+                <p>RSI14 numeric guides: 30 and 70.</p>
+                <p>Daily OHLCV source: Mozyfin</p>
+                <p>KBS snapshot is separate and not used as daily close.</p>
+                {chart?.latestDate ? <p>Latest chart date: {chart.latestDate}</p> : null}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 };

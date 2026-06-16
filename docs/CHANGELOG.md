@@ -10,29 +10,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 - [fix] Ensure Docker and Render Vietnam dashboard deployments create and use a writable stock-index cache directory.
+- [improvement] Add expanded Vietnam inspect chart mode with shared range, overlay, zoom, pan, reset, and close controls while preserving Mozyfin daily and KBS snapshot separation.
 - [improvement] First round of hierarchy improvements for the Vietnam market dashboard: enhanced the selected ticker header, separated Mozyfin daily data from KBS snapshot data, and collapsed data diagnostics by default.
-- [Improvement] Add frontend-only zoom, pan, and reset controls to the Vietnam inspect chart while preserving Mozyfin/KBS data semantics.
-- [Improvement] Add an inspect-only Vietnam daily OHLCV chart with close, volume, RSI14, MA20/MA50, and optional Bollinger overlays while keeping KBS snapshot separate.
-- [Fix] Clarify Vietnam dashboard session volume ratio semantics, hide unavailable 1H average-volume comparisons, and show corporate actions as recent/upcoming states without inferring events.
-- [Improvement] Add lightweight in-memory Vietnam dashboard fetch observability for Mozyfin/KBS counters and compact Data status display.
-- [Fix] Harden Vietnam KBS refresh loops and provider error paths so overlapping refreshes, stale trade responses, cancellations, and diagnostic counter failures do not break the dashboard.
-- [Improvement] Add phase-aware Vietnam KBS snapshot display state so closed/post-close/weekend snapshots are shown as last available while raw stale age and reasons remain visible.
-- [Feature] Add optional vnstock KBS snapshot API endpoints `/api/v1/stocks/vn/realtime` and `/api/v1/stocks/vn/realtime/trades` while preserving Mozyfin `latest_price` semantics.
-- [Improvement] Add separate Vietnam dashboard display for Daily close, KBS snapshot, and Latest trade tape, including KBS staleness status and compact failure states.
-- [Improvement] Add manual and automatic KBS refresh with split intervals: quotes 10/15/30 seconds and latest trade tape 5/10/15 seconds, without reloading Mozyfin overview/detail data.
-- [Improvement] Add Vietnam dashboard Data status panel with Mozyfin source/fixture state, KBS status, selected ticker state, stale/unavailable counts, and KBS refresh timestamps.
-- [Improvement] Add VN market phase labels for normal weekdays, including ATO, continuous sessions, lunch break, ATC, post-close, closed, and weekend/closed states with `holidayAware=false`.
+- [improvement] Add frontend-only zoom, pan, and reset controls to the Vietnam inspect chart while preserving Mozyfin/KBS data semantics.
+- [improvement] Add an inspect-only Vietnam daily OHLCV chart with close, volume, RSI14, MA20/MA50, and optional Bollinger overlays while keeping KBS snapshot separate.
+- [fix] Clarify Vietnam dashboard session volume ratio semantics, hide unavailable 1H average-volume comparisons, and show corporate actions as recent/upcoming states without inferring events.
+- [improvement] Add lightweight in-memory Vietnam dashboard fetch observability for Mozyfin/KBS counters and compact Data status display.
+- [fix] Harden Vietnam KBS refresh loops and provider error paths so overlapping refreshes, stale trade responses, cancellations, and diagnostic counter failures do not break the dashboard.
+- [improvement] Add phase-aware Vietnam KBS snapshot display state so closed/post-close/weekend snapshots are shown as last available while raw stale age and reasons remain visible.
+- [new feature] Add optional vnstock KBS snapshot API endpoints `/api/v1/stocks/vn/realtime` and `/api/v1/stocks/vn/realtime/trades` while preserving Mozyfin `latest_price` semantics.
+- [improvement] Add separate Vietnam dashboard display for Daily close, KBS snapshot, and Latest trade tape, including KBS staleness status and compact failure states.
+- [improvement] Add manual and automatic KBS refresh with split intervals: quotes 10/15/30 seconds and latest trade tape 5s/10s/15 seconds, without reloading Mozyfin overview/detail data.
+- [improvement] Add Vietnam dashboard Data status panel with Mozyfin source/fixture state, KBS status, selected ticker state, stale/unavailable counts, and KBS refresh timestamps.
+- [improvement] Add VN market phase labels for normal weekdays, including ATO, continuous sessions, lunch break, ATC, post-close, closed, and weekend/closed states with `holidayAware=false`.
 - [chore] Add `vnstock==4.0.4` as a runtime deployment dependency and validate Docker/Render KBS snapshot readiness.
 
-- [docs] Document the Vietnam KBS/vnstock snapshot architecture as a separate optional layer that preserves Mozyfin daily OHLCV and 1H intraday semantics.
+- [documentation] Document the Vietnam KBS/vnstock snapshot architecture as a separate optional layer that preserves Mozyfin daily OHLCV and 1H intraday semantics.
 
-- [docs] Add root Docker and Render deployment support for the Vietnam dashboard, including live-mode environment guidance and fixture-mode guardrails.
+- [documentation] Add root Docker and Render deployment support for the Vietnam dashboard, including live-mode environment guidance and fixture-mode guardrails.
 
-- [docs] Add reference-only Vietnam realtime data and news source resource docs for future provider evaluation.
+- [documentation] Add reference-only Vietnam realtime data and news source resource docs for future provider evaluation.
 
-- [docs] Add a concise local Windows quick runbook for starting the Vietnam dashboard in live or fixture mode.
+- [documentation] Add a concise local Windows quick runbook for starting the Vietnam dashboard in live or fixture mode.
 
-- [docs] Add Vietnam dashboard continuity and guardrail documentation, protect local Mozyfin config/runtime artifacts in `.gitignore`, update `.env.example` with VN live-mode placeholders, and clarify README/RUNBOOK semantics for Mozyfin quote limitations plus live/fixture mode checks.
+- [documentation] Add Vietnam dashboard continuity and guardrail documentation, protect local Mozyfin config/runtime artifacts in `.gitignore`, update `.env.example` with VN live-mode placeholders, and clarify README/RUNBOOK semantics for Mozyfin quote limitations plus live/fixture mode checks.
 
 - [改进] 越南行情看板新增 Asia/Ho_Chi_Minh 时间格式化与数据新鲜度展示，并将原始时间戳、字段名和缓存调试信息收纳到 Advanced/Raw Data。
 

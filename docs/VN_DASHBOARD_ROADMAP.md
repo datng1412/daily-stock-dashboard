@@ -66,6 +66,8 @@ These rules must not be broken.
 * Inspect chart endpoint
 * Inspect chart with candles, volume, RSI14, MA20, MA50, Bollinger
 * Date axis for inspect chart
+* Inspect chart zoom, pan, and reset controls
+* Expanded inspect chart mode
 * Relative timestamps for news
 * News timestamp parsing from Mozyfin `published_date`
 * Corporate actions stub endpoint
@@ -204,6 +206,17 @@ Rules:
 
 ### 4. Add zoom, pan, and reset to inspect chart
 
+Status: complete in current codebase.
+
+Implemented:
+
+* Zoom in and zoom out controls.
+* Pan left and pan right controls.
+* Reset to the full selected range.
+* Visible candle window rendering while the full chart data remains loaded.
+* Date labels and hover data update with the visible window.
+* Candles, volume, RSI14, MA20/MA50, and Bollinger overlays stay aligned.
+
 Goal:
 
 Make the chart closer to SSI/VPS-style inspection.
@@ -227,6 +240,16 @@ Behavior:
 * Candles, volume, RSI, and overlays must stay aligned.
 
 ### 5. Add fullscreen chart mode
+
+Status: complete in current batch.
+
+Implemented:
+
+* Expanded chart button on the inspect chart.
+* Larger chart overlay using the existing loaded Mozyfin daily OHLCV chart points.
+* Same range, MA20/MA50/Bollinger, zoom, pan, and reset controls.
+* Close button and Escape key support.
+* Daily OHLCV and KBS snapshot separation remains visible in expanded mode.
 
 Goal:
 

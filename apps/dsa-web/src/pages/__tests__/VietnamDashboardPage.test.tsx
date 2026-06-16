@@ -728,6 +728,42 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(chartCard.getByRole('button', { name: 'Reset chart zoom' })).toBeDisabled();
   });
 
+  it('opens an expanded inspect chart with the same controls and closes it', async () => {
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('FPT', '6M'));
+
+    const chartCard = inspectChartCard();
+    fireEvent.click(chartCard.getByRole('button', { name: 'Expand chart' }));
+
+    const dialogElement = screen.getByRole('dialog', { name: 'Expanded inspect chart' });
+    const dialog = within(dialogElement);
+    expect(dialog.getByText('Daily OHLCV from Mozyfin. KBS snapshot remains separate.')).toBeInTheDocument();
+    expect(dialog.getByRole('button', { name: '6M' })).toHaveAttribute('aria-pressed', 'true');
+    expect(dialog.getByLabelText('MA20')).toBeChecked();
+    expect(dialog.getByLabelText('MA50')).toBeChecked();
+    expect(dialog.getByLabelText('Bollinger')).not.toBeChecked();
+    expect(dialog.getByTestId('inspect-chart-expanded-visible-count')).toHaveTextContent('Showing 70 of 70');
+    expect(dialog.getByTestId('inspect-candlestick-chart')).toBeInTheDocument();
+
+    fireEvent.click(dialog.getByRole('button', { name: 'Zoom in chart' }));
+
+    expect(dialog.getByTestId('inspect-chart-expanded-visible-count')).toHaveTextContent('Showing 48 of 70');
+    expect(chartCard.getByTestId('inspect-chart-visible-count')).toHaveTextContent('Showing 48 of 70');
+
+    fireEvent.click(dialog.getByLabelText('Bollinger'));
+    expect(dialog.getByText('Bollinger upper/mid/lower')).toBeInTheDocument();
+    expect(dialog.queryByText(/buy|sell|hold|recommendation/i)).not.toBeInTheDocument();
+
+    fireEvent.click(dialog.getByRole('button', { name: 'Close expanded chart' }));
+    expect(screen.queryByRole('dialog', { name: 'Expanded inspect chart' })).not.toBeInTheDocument();
+
+    fireEvent.click(chartCard.getByRole('button', { name: 'Expand chart' }));
+    expect(screen.getByRole('dialog', { name: 'Expanded inspect chart' })).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: 'Expanded inspect chart' })).not.toBeInTheDocument();
+  });
+
   it('shows Bollinger overlay only after enabling the chart toggle', async () => {
     render(<VietnamDashboardPage />);
 
