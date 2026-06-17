@@ -30,6 +30,29 @@ These rules must not be broken.
 * No buy/sell/hold/recommendation wording.
 * Use neutral labels such as status, trend, momentum, liquidity, source, unavailable, last updated.
 
+## Provider strategy
+
+SSI FastConnect is the preferred future official market-data provider.
+
+SSI should be added incrementally and validated before replacing existing providers. Mozyfin and KBS must not be removed immediately. Provider migration must be comparison-first, not replacement-first. Dashboard source labels must remain honest and explicit.
+
+| Area | Preferred future provider | Current/fallback provider | Notes |
+| --- | --- | --- | --- |
+| Daily OHLCV | SSI DailyOhlc | Mozyfin | Compare before switching primary |
+| Inspect chart | SSI DailyOhlc | Mozyfin chart data | Indicators remain calculated internally |
+| Daily stock price | SSI DailyStockPrice | Mozyfin/KBS partial fields | Use for reference, ceiling/floor, foreign flow |
+| Reference / ceiling / floor | SSI DailyStockPrice | KBS reference fallback | Do not infer corporate actions |
+| Foreign flow | SSI DailyStockPrice | Mozyfin fallback | Prefer source with matching daily date |
+| Daily index | SSI DailyIndex | Mozyfin/index fallback | Use for VNINDEX/VN30 snapshot and breadth |
+| Index components | SSI IndexComponents | Static/manual fallback | Use for VN30/watchlist generation |
+| Symbol metadata | SSI Securities/SecuritiesDetails | Existing metadata fallback | Use for exchange/type/company name |
+| Intraday OHLCV | SSI IntradayOhlc | Mozyfin intraday fallback | Use for intraday pulse later |
+| Realtime snapshot | SSI streaming later | KBS | KBS remains until SSI streaming is stable |
+| Trade tape | SSI streaming later | KBS | Do not remove KBS yet |
+| News | Mozyfin | Other future news provider | SSI FC Data does not currently own news in roadmap |
+| Corporate actions | Future explicit event source | Stub/unavailable | Do not infer from price/reference gaps |
+| Fundamentals/TA | Mozyfin or future source | Internal calculations | Use whichever source is validated |
+
 ## Product/design principles
 
 * Make selected ticker context obvious first.
@@ -267,7 +290,27 @@ Requirements:
 * Escape/close support
 * Mobile-friendly layout
 
-### 6. Improve news structure
+### 6. Add SSI FastConnect provider skeleton and comparison layer
+
+Goal:
+
+Start SSI FastConnect integration as an additive comparison layer before any provider replacement.
+
+Scope:
+
+* Provider skeleton and secure configuration placeholders.
+* Authentication and connection smoke tests.
+* Comparison-first endpoints or cards before switching primary source.
+* Explicit source labels for SSI, Mozyfin, and KBS values.
+
+Rules:
+
+* SSI must stay disabled until configuration is present.
+* Do not change `latest_price` semantics without explicit validation.
+* Do not remove Mozyfin news or KBS realtime fallback paths.
+* If providers disagree, show source-specific values rather than silently overwriting.
+
+### 7. Improve news structure
 
 Goal:
 
@@ -298,7 +341,7 @@ Rules:
 * Do not imply importance unless source data supports it.
 * Keep source and timestamp visible.
 
-### 7. Add watchlist table view
+### 8. Add watchlist table view
 
 Status: partial in current scanability batch.
 
@@ -333,7 +376,7 @@ Rules:
 * Sorting can be added later.
 * Keep labels neutral.
 
-### 8. Improve mobile layout
+### 9. Improve mobile layout
 
 Goal:
 
@@ -356,7 +399,7 @@ Rules:
 * Avoid dense side-by-side layouts.
 * Keep buttons reachable and compact.
 
-### 9. Add real corporate actions source later
+### 10. Add real corporate actions source later
 
 Goal:
 
@@ -385,6 +428,34 @@ Rules:
 * Do not mutate OHLCV.
 * Do not call reference price dividend-adjusted unless confirmed.
 * Keep card hidden or compact when unavailable.
+
+## SSI FastConnect integration track
+
+1. Provider skeleton and secure config.
+2. Auth/connection smoke test.
+3. DailyOhlc comparison against Mozyfin.
+4. DailyStockPrice mapping and comparison.
+5. DailyIndex and market breadth.
+6. Securities metadata and index components.
+7. IntradayOhlc for intraday pulse.
+8. SSI streaming prototype.
+9. Realtime comparison against KBS.
+10. Optional migration of primary market-data provider.
+11. Keep Mozyfin/KBS fallback paths until SSI is proven stable.
+12. Apply SSI migration rules before each provider switch.
+
+## SSI migration rules
+
+* SSI must be disabled by default until config is present.
+* Never commit SSI credentials.
+* Never print tokens, private keys, account IDs, or secrets.
+* Add `.env.example` placeholders only.
+* Add comparison endpoints/cards before switching primary source.
+* Do not switch `latest_price` semantics without explicit validation.
+* Do not remove Mozyfin news.
+* Do not remove KBS realtime until SSI streaming is stable.
+* Keep source labels explicit: `SSI`, `Mozyfin`, `KBS`.
+* If providers disagree, show source-specific values rather than silently overwriting.
 
 ## Later backlog
 
@@ -496,7 +567,8 @@ Manual dashboard check:
 5. Collapse debug/observability sections.
 6. Add zoom/pan/reset to chart.
 7. Add fullscreen chart mode.
-8. Group news.
-9. Add watchlist table view.
-10. Improve mobile layout.
-11. Revisit corporate actions source.
+8. Add SSI FastConnect provider skeleton and comparison layer.
+9. Group news.
+10. Add watchlist table view.
+11. Improve mobile layout.
+12. Revisit corporate actions source.

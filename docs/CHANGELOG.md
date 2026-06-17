@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [documentation] Document the SSI/Mozyfin/KBS provider strategy for the Vietnam dashboard.
+- [documentation] Add SSI FastConnect integration phases and migration rules.
 - [improvement] Separate Vietnam watchlist data caveats from primary market scan labels and show caveats as compact secondary row context.
 - [fix] Refine the Vietnam watchlist scan so normal warning-only rows no longer become primary Risk elevated scan states.
 - [improvement] Add a neutral Vietnam watchlist scan summary and table scan-state column for faster ticker comparison without changing Mozyfin daily or KBS snapshot semantics.
