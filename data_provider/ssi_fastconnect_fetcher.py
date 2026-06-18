@@ -513,7 +513,9 @@ class SsiFastConnectFetcher:
         )
 
     def get_securities(self, market: Optional[str] = None) -> Dict[str, Any]:
-        params = {"market": market.strip().upper()} if market else {}
+        params: Dict[str, Any] = {"pageIndex": 1, "pageSize": 1000}
+        if market:
+            params["market"] = market.strip().upper()
         return self._cached_normalized(
             "Securities",
             params,
@@ -529,7 +531,7 @@ class SsiFastConnectFetcher:
         symbol: Optional[str] = None,
         market: Optional[str] = None,
     ) -> Dict[str, Any]:
-        params: Dict[str, Any] = {}
+        params: Dict[str, Any] = {"pageIndex": 1, "pageSize": 1000}
         if symbol:
             params["symbol"] = symbol.strip().upper()
         if market:
@@ -938,15 +940,15 @@ class SsiFastConnectFetcher:
 
     def _map_security(self, row: Dict[str, Any]) -> Dict[str, Any]:
         return {
-            "symbol": str(_first_value(row, "Symbol", "Ticker", "SecurityCode", "Code", "symbol", "ticker", "securityCode", "code") or "").upper() or None,
-            "exchange": _first_value(row, "Exchange", "Market", "StockExchange", "exchange", "market", "stockExchange"),
-            "security_type": _first_value(row, "SecurityType", "Type", "securityType", "security_type", "type"),
-            "name": _first_value(row, "Name", "CompanyName", "CompanyNameVi", "SecurityName", "name", "companyName", "company_name", "securityName"),
-            "name_en": _first_value(row, "NameEn", "EnglishName", "CompanyNameEn", "SecurityNameEn", "nameEn", "name_en", "englishName", "companyNameEn"),
-            "issuer": _first_value(row, "Issuer", "IssuerName", "issuer", "issuerName"),
-            "lot_size": _to_int(_first_value(row, "LotSize", "TradingUnit", "lotSize", "lot_size", "tradingUnit")),
-            "listed_shares": _to_int(_first_value(row, "ListedShares", "SharesOutstanding", "listedShares", "listed_shares", "sharesOutstanding")),
-            "listed_date": _parse_date(_first_value(row, "ListedDate", "ListingDate", "listedDate", "listed_date", "listingDate")),
-            "market": _first_value(row, "Market", "exchange", "Exchange", "market"),
+            "symbol": str(_first_value(row, "Symbol", "Ticker", "SecurityCode", "StockSymbol", "StockCode", "Code", "symbol", "ticker", "securityCode", "stockSymbol", "stockCode", "code") or "").upper() or None,
+            "exchange": _first_value(row, "Exchange", "Market", "StockExchange", "ExchangeCode", "exchange", "market", "stockExchange", "exchangeCode"),
+            "security_type": _first_value(row, "SecurityType", "SecuritiesType", "Type", "StockType", "securityType", "securitiesType", "security_type", "stockType", "type"),
+            "name": _first_value(row, "Name", "CompanyName", "CompanyNameVi", "SecurityName", "VietnameseName", "IssuerNameVn", "name", "companyName", "company_name", "securityName", "vietnameseName", "issuerNameVn"),
+            "name_en": _first_value(row, "NameEn", "EnglishName", "CompanyNameEn", "SecurityNameEn", "IssuerNameEn", "nameEn", "name_en", "englishName", "companyNameEn", "securityNameEn", "issuerNameEn"),
+            "issuer": _first_value(row, "Issuer", "IssuerName", "OrganizationName", "OrganName", "issuer", "issuerName", "organizationName", "organName"),
+            "lot_size": _to_int(_first_value(row, "LotSize", "TradingUnit", "RoundLot", "lotSize", "lot_size", "tradingUnit", "roundLot")),
+            "listed_shares": _to_int(_first_value(row, "ListedShares", "ListedShare", "TotalListedShares", "SharesOutstanding", "listedShares", "listedShare", "totalListedShares", "listed_shares", "sharesOutstanding")),
+            "listed_date": _parse_date(_first_value(row, "ListedDate", "ListingDate", "FirstTradingDate", "listedDate", "listed_date", "listingDate", "firstTradingDate")),
+            "market": _first_value(row, "Market", "Exchange", "StockExchange", "market", "exchange", "stockExchange"),
             "source": SSI_SOURCE,
         }

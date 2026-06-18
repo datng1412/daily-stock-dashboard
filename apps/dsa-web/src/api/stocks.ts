@@ -20,6 +20,14 @@ export type VietnamWatchItem = {
   companyName?: string | null;
   entity?: string | null;
   exchange?: string | null;
+  market?: string | null;
+  securityType?: string | null;
+  metadataSource?: string | null;
+  symbolMetadata?: VietnamSymbolMetadata;
+  issuer?: string | null;
+  lotSize?: number | null;
+  listedShares?: number | null;
+  listedDate?: string | null;
   marketIndex?: string | null;
   source?: string | null;
   primarySource?: string | null;
@@ -200,6 +208,22 @@ export type VietnamWatchItem = {
   cacheNextRefreshAt: Record<string, string | null>;
   cacheErrors: Record<string, string>;
   error?: string | null;
+};
+
+export type VietnamSymbolMetadata = {
+  status?: 'ok' | 'unavailable' | string | null;
+  reason?: string | null;
+  symbol?: string | null;
+  exchange?: string | null;
+  market?: string | null;
+  securityType?: string | null;
+  name?: string | null;
+  nameEn?: string | null;
+  issuer?: string | null;
+  lotSize?: number | null;
+  listedShares?: number | null;
+  listedDate?: string | null;
+  source?: string | null;
 };
 
 export type VietnamDailyStockPrice = {

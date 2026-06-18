@@ -117,15 +117,21 @@ class _StubManager:
 
 
 class _StubSsiFetcher:
-    def __init__(self, daily_ohlcv=None, daily_stock_price=None, daily_index=None):
+    def __init__(self, daily_ohlcv=None, daily_stock_price=None, daily_index=None, securities=None, securities_details=None):
         self.daily_ohlcv = daily_ohlcv or {"status": "unavailable", "source": "SSI", "reason": "SSI FastConnect disabled"}
         self.daily_stock_price = daily_stock_price or {"status": "unavailable", "source": "SSI", "reason": "SSI FastConnect disabled"}
         self.daily_index = daily_index or {"status": "unavailable", "source": "SSI", "reason": "SSI FastConnect disabled"}
+        self.securities = securities or {"status": "unavailable", "source": "SSI", "reason": "SSI FastConnect disabled"}
+        self.securities_details = securities_details or {"status": "unavailable", "source": "SSI", "reason": "SSI FastConnect disabled"}
         self.daily_ohlcv_calls = 0
         self.daily_stock_price_calls = 0
         self.daily_index_calls = 0
+        self.securities_calls = 0
+        self.securities_details_calls = 0
         self.daily_stock_price_args = []
         self.daily_index_args = []
+        self.securities_args = []
+        self.securities_details_args = []
 
     def get_daily_ohlcv(self, symbol, from_date=None, to_date=None, limit=260):
         self.daily_ohlcv_calls += 1
@@ -155,6 +161,16 @@ class _StubSsiFetcher:
             }
         )
         return self.daily_index
+
+    def get_securities(self, market=None):
+        self.securities_calls += 1
+        self.securities_args.append({"market": market})
+        return self.securities
+
+    def get_securities_details(self, symbol=None, market=None):
+        self.securities_details_calls += 1
+        self.securities_details_args.append({"symbol": symbol, "market": market})
+        return self.securities_details
 
 
 def _sample_vn_rows():
@@ -554,6 +570,132 @@ def test_ssi_daily_provider_uses_ssi_ohlcv_for_watchlist(monkeypatch):
     assert item["daily_close"] == 259
     assert item["latest_price_source"] == "SSI"
     assert item["fallback_used"] is False
+
+
+def test_ssi_symbol_metadata_enrichment_uses_securities_details(monkeypatch):
+    monkeypatch.delenv("MOZYFIN_FIXTURE_DIR", raising=False)
+    manager = _StubManager(_sample_vn_rows_count(60))
+    ssi = _StubSsiFetcher(
+        daily_ohlcv={"status": "ok", "source": "SSI", "rows": _sample_ssi_ohlcv_rows()},
+        securities_details={
+            "status": "ok",
+            "source": "SSI",
+            "rows": [
+                {
+                    "symbol": "FPT",
+                    "exchange": "HOSE",
+                    "market": "HOSE",
+                    "security_type": "stock",
+                    "name": "Cong ty Co phan FPT",
+                    "name_en": "FPT Corporation",
+                    "issuer": "FPT",
+                    "lot_size": 100,
+                    "listed_shares": 1_471_069_982,
+                    "listed_date": "2006-12-13",
+                    "source": "SSI",
+                }
+            ],
+        },
+    )
+    service = VietnamMarketService(
+        manager=manager,
+        config=VietnamDashboardConfig(history_days=30, news_limit=0),
+        ssi_fetcher=ssi,
+    )
+
+    item = service.build_watchlist(["FPT"], include_intraday=False)["watchlist"][0]
+
+    assert manager.daily_calls == 0
+    assert ssi.securities_details_calls == 1
+    assert ssi.securities_calls == 0
+    assert ssi.securities_details_args == [{"symbol": "FPT", "market": "HOSE"}]
+    assert item["symbol_metadata"]["status"] == "ok"
+    assert item["symbol_metadata"]["source"] == "SSI"
+    assert item["symbol_metadata"]["symbol"] == "FPT"
+    assert item["company_name"] == "Cong ty Co phan FPT"
+    assert item["name"] == "Cong ty Co phan FPT"
+    assert item["exchange"] == "HOSE"
+    assert item["market"] == "HOSE"
+    assert item["security_type"] == "stock"
+    assert item["metadata_source"] == "SSI"
+    assert item["issuer"] == "FPT"
+    assert item["lot_size"] == 100
+    assert item["listed_shares"] == 1_471_069_982
+    assert item["listed_date"] == "2006-12-13"
+
+
+def test_ssi_symbol_metadata_falls_back_only_to_ssi_securities(monkeypatch):
+    monkeypatch.delenv("MOZYFIN_FIXTURE_DIR", raising=False)
+    manager = _StubManager(_sample_vn_rows_count(60))
+    ssi = _StubSsiFetcher(
+        daily_ohlcv={"status": "ok", "source": "SSI", "rows": _sample_ssi_ohlcv_rows()},
+        securities_details={"status": "ok", "source": "SSI", "rows": []},
+        securities={
+            "status": "ok",
+            "source": "SSI",
+            "rows": [
+                {
+                    "symbol": "ACB",
+                    "exchange": "HOSE",
+                    "market": "HOSE",
+                    "security_type": "stock",
+                    "name": "ACB",
+                    "source": "SSI",
+                },
+                {
+                    "symbol": "FPT",
+                    "exchange": "HOSE",
+                    "market": "HOSE",
+                    "security_type": "stock",
+                    "name": "FPT",
+                    "source": "SSI",
+                },
+            ],
+        },
+    )
+    service = VietnamMarketService(
+        manager=manager,
+        config=VietnamDashboardConfig(history_days=30, news_limit=0),
+        ssi_fetcher=ssi,
+    )
+
+    item = service.build_watchlist(["FPT"], include_intraday=False)["watchlist"][0]
+
+    assert manager.daily_calls == 0
+    assert ssi.securities_details_calls == 1
+    assert ssi.securities_calls == 1
+    assert manager.fetcher.quote_calls == 0
+    assert item["symbol_metadata"]["status"] == "ok"
+    assert item["symbol_metadata"]["symbol"] == "FPT"
+    assert item["company_name"] == "FPT"
+    assert item["metadata_source"] == "SSI"
+
+
+def test_ssi_symbol_metadata_unavailable_has_no_mozyfin_fallback(monkeypatch):
+    monkeypatch.delenv("MOZYFIN_FIXTURE_DIR", raising=False)
+    manager = _StubManager(_sample_vn_rows_count(60))
+    ssi = _StubSsiFetcher(
+        daily_ohlcv={"status": "ok", "source": "SSI", "rows": _sample_ssi_ohlcv_rows()},
+        securities_details={"status": "unavailable", "source": "SSI", "reason": "SSI FastConnect request failed"},
+        securities={"status": "unavailable", "source": "SSI", "reason": "SSI FastConnect request failed"},
+    )
+    service = VietnamMarketService(
+        manager=manager,
+        config=VietnamDashboardConfig(history_days=30, news_limit=0),
+        ssi_fetcher=ssi,
+    )
+
+    item = service.build_watchlist(["FPT"], include_intraday=False)["watchlist"][0]
+
+    assert manager.daily_calls == 0
+    assert ssi.securities_details_calls == 1
+    assert ssi.securities_calls == 1
+    assert item["symbol_metadata"]["status"] == "unavailable"
+    assert item["symbol_metadata"]["source"] == "SSI"
+    assert item["symbol_metadata"]["name"] is None
+    assert item["company_name"] is None
+    assert item["metadata_source"] == "SSI"
+    assert "secret" not in str(item).lower()
 
 
 def test_ssi_daily_provider_unavailable_does_not_fallback_to_mozyfin(monkeypatch):

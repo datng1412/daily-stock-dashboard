@@ -62,8 +62,8 @@ External providers are still required for BCTC/KQKD, financial statements, finan
 | Capability | Owner | Current implementation status | Dashboard rule |
 | --- | --- | --- | --- |
 | AccessToken | SSI FastConnect Data REST | Implemented | Authenticate with env/secret-manager credentials only |
-| Securities | SSI FastConnect Data REST | Implemented provider method | Use for symbol metadata when wired into dashboard metadata |
-| SecuritiesDetails | SSI FastConnect Data REST | Implemented provider method | Use for exchange, security type, listed info, and issuer/name fields when wired |
+| Securities | SSI FastConnect Data REST | Implemented and wired as same-provider metadata fallback | Use for symbol metadata when SecuritiesDetails does not return a usable row |
+| SecuritiesDetails | SSI FastConnect Data REST | Implemented and wired | Use for exchange, security type, listed info, and issuer/name fields |
 | IndexComponents | SSI FastConnect Data REST | SSI-owned future provider method | Use for index membership after endpoint validation |
 | IndexList | SSI FastConnect Data REST | Implemented provider method | Discover official index identifiers before DailyIndex calls |
 | DailyOhlc | SSI FastConnect Data REST | Implemented and wired | Use for watchlist daily close, chart candles, and internal MA/RSI/Bollinger calculations |
@@ -210,6 +210,8 @@ Strict DailyIndex behavior:
 
 `Securities` and `SecuritiesDetails` rows normalize symbol metadata such as symbol, exchange, market, security type, names, issuer, lot size, listed shares, and listed date when present.
 
+VN watchlist/detail responses now expose SSI metadata through `symbol_metadata` plus compatibility fields such as `company_name`, `security_type`, `metadata_source`, `issuer`, `lot_size`, `listed_shares`, and `listed_date`. The service queries `SecuritiesDetails` first and may use `Securities` only as an SSI same-provider metadata fallback. Mozyfin is not used for SSI-owned symbol metadata.
+
 ## Unavailable behavior
 
 Disabled provider:
@@ -258,6 +260,16 @@ python scripts\ssi_fastconnect_smoke.py --probe
 
 Probe mode tests both documented FC Data base URL shapes and prints only endpoint names, base URL labels, parameter keys, HTTP status, top-level response keys, status/message metadata, counts, and row keys. The normal smoke path validates full-year chunked DailyStockPrice and DailyIndex counts and prints chunk counts plus first/last dates. It prints only safe status and row counts. It does not print tokens, credentials, headers, or full provider bodies.
 
+## Known limitations / operational notes
+
+* SSI metadata coverage may be limited. A live metadata row can be `status=ok` while only returning symbol, exchange, market, and source; optional name, issuer, type, lot-size, listed-shares, and listed-date fields may remain null.
+* Quote fields are not currently a reliable REST latest-price source. Watchlist payloads can have `quote_cache=missing`, `quote=null`, `quote_price_date=null`, and `quote_price_raw_field=null`; `latest_price` uses SSI DailyOhlc close when SSI daily rows are available.
+* DailyStockPrice and DailyIndex require <=29/30-day request windows. Provider chunking is available for smoke/debug/internal validation, but broad automatic UI requests should be avoided unless deliberately designed.
+* Local market-data DB storage is deferred. Current mode remains SSI live API plus backend cache/TTL.
+* Intraday still uses Mozyfin OHLCV until the SSI IntradayOhlc phase is implemented and validated.
+* News encoding/mojibake is an external/Mozyfin text issue, not an SSI market-data issue.
+* Keep DailyOhlc and DailyStockPrice labels separate: daily close/chart candles come from SSI DailyOhlc; reference/limits/foreign/matched/put-through fields come from SSI DailyStockPrice.
+
 ## Current limitations
 
 * SSI FastConnect credentials are not bundled; with default placeholder config, SSI-owned sections are unavailable.
@@ -267,10 +279,10 @@ Probe mode tests both documented FC Data base URL shapes and prints only endpoin
 * No UI source switcher or comparison card exists.
 * No provider comparison endpoint exists in this strict-default phase.
 * SSI streaming is not implemented.
-* IntradayOhlc, IndexComponents, and Securities/SecuritiesDetails dashboard metadata are later phases.
+* IntradayOhlc and IndexComponents are later phases.
 * Fundamentals, corporate actions, dividends, rights, splits, and macro data require external providers.
 * FC Trading remains out of scope.
 
 ## Next phase
 
-Use the roadmap priority order: first finalize the current SSI strict migration with browser validation, source consistency checks, secret scanning, and commit; then add Securities/SecuritiesDetails metadata, IndexList/IndexComponents, IntradayOhlc, SSI streaming prototype, and external fundamentals/corporate-actions/news provider work. Do not introduce FC Trading or Mozyfin/KBS fallback for SSI-owned market data in any phase.
+Use the roadmap priority order: finalize the current SSI strict migration and metadata documentation, then continue with IndexList/IndexComponents, IntradayOhlc, SSI streaming prototype, and external fundamentals/corporate-actions/news provider work. Do not introduce FC Trading or Mozyfin/KBS fallback for SSI-owned market data in any phase.

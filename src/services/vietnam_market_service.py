@@ -51,6 +51,7 @@ VN_CACHE_TTL_SECONDS = {
     "quote": 60,
     "intraday_ohlcv": 60,
     "news": 1800,
+    "symbol_metadata": 3600,
 }
 VN_PROVIDER_MOZYFIN = "mozyfin"
 VN_PROVIDER_SSI = "ssi"
@@ -318,6 +319,18 @@ def _safe_float(value: Any) -> Optional[float]:
         if math.isnan(numeric):
             return None
         return numeric
+    except (TypeError, ValueError):
+        return None
+
+
+def _safe_int(value: Any) -> Optional[int]:
+    try:
+        if value is None:
+            return None
+        numeric = float(value)
+        if math.isnan(numeric):
+            return None
+        return int(numeric)
     except (TypeError, ValueError):
         return None
 
@@ -1357,6 +1370,100 @@ class VietnamMarketService:
             return None, SSI_UNAVAILABLE_REASON
         return rows[-1], None
 
+    @staticmethod
+    def _normalize_ssi_symbol_metadata(row: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "status": "ok",
+            "symbol": str(row.get("symbol")).upper() if row.get("symbol") not in (None, "") else None,
+            "exchange": row.get("exchange"),
+            "market": row.get("market"),
+            "security_type": row.get("security_type"),
+            "name": row.get("name"),
+            "name_en": row.get("name_en"),
+            "issuer": row.get("issuer"),
+            "lot_size": _safe_int(row.get("lot_size")),
+            "listed_shares": _safe_int(row.get("listed_shares")),
+            "listed_date": row.get("listed_date"),
+            "source": VN_SOURCE_SSI,
+        }
+
+    @staticmethod
+    def _matching_ssi_metadata_row(payload: Dict[str, Any], symbol: str) -> Optional[Dict[str, Any]]:
+        if payload.get("status") != "ok":
+            return None
+        rows = payload.get("rows") or []
+        if not isinstance(rows, list):
+            return None
+        normalized_symbol = vn_ticker(symbol)
+        for row in rows:
+            if isinstance(row, dict) and str(row.get("symbol") or "").upper() == normalized_symbol:
+                return row
+        return rows[0] if len(rows) == 1 and isinstance(rows[0], dict) else None
+
+    def _load_ssi_symbol_metadata(self, symbol: str) -> Dict[str, Any]:
+        normalized_symbol = vn_ticker(symbol)
+        market = get_vn_exchange(normalized_symbol)
+        fetcher = self._get_ssi_fetcher()
+
+        details_payload = fetcher.get_securities_details(symbol=normalized_symbol, market=market)
+        row = self._matching_ssi_metadata_row(details_payload, normalized_symbol)
+        if row:
+            return self._normalize_ssi_symbol_metadata(row)
+
+        securities_payload = fetcher.get_securities(market=market)
+        row = self._matching_ssi_metadata_row(securities_payload, normalized_symbol)
+        if row:
+            return self._normalize_ssi_symbol_metadata(row)
+
+        reason = self._safe_provider_reason(details_payload, SSI_UNAVAILABLE_REASON)
+        if isinstance(securities_payload, dict) and securities_payload.get("status") != "ok":
+            reason = self._safe_provider_reason(securities_payload, reason)
+        return {
+            "status": "unavailable",
+            "source": VN_SOURCE_SSI,
+            "reason": reason,
+            "symbol": None,
+            "exchange": None,
+            "market": None,
+            "security_type": None,
+            "name": None,
+            "name_en": None,
+            "issuer": None,
+            "lot_size": None,
+            "listed_shares": None,
+            "listed_date": None,
+        }
+
+    def _ssi_symbol_metadata(self, symbol: str, force_refresh: bool = False) -> Dict[str, Any]:
+        key = _cache_key("symbol_metadata", symbol, provider=VN_PROVIDER_SSI, market=get_vn_exchange(symbol))
+        try:
+            result = _read_cache(
+                key,
+                "symbol_metadata",
+                lambda: self._load_ssi_symbol_metadata(symbol),
+                force_refresh=force_refresh,
+            )
+            value = result["value"]
+            if isinstance(value, dict):
+                return value
+        except Exception:
+            logger.debug("SSI symbol metadata unavailable for %s", symbol)
+        return {
+            "status": "unavailable",
+            "source": VN_SOURCE_SSI,
+            "reason": SSI_UNAVAILABLE_REASON,
+            "symbol": None,
+            "exchange": None,
+            "market": None,
+            "security_type": None,
+            "name": None,
+            "name_en": None,
+            "issuer": None,
+            "lot_size": None,
+            "listed_shares": None,
+            "listed_date": None,
+        }
+
     def _load_mozyfin_news(
         self,
         symbol: str,
@@ -1825,6 +1932,9 @@ class VietnamMarketService:
         if ohlcv_result["error"]:
             cache_errors["ohlcv"] = ohlcv_result["error"]
         fetcher = self.manager._get_fetcher_by_name("MozyfinFetcher")  # Mozyfin remains news-only in strict SSI mode.
+        symbol_metadata = self._ssi_symbol_metadata(symbol, force_refresh=force_refresh)
+        metadata_source = symbol_metadata.get("source") if symbol_metadata.get("status") == "ok" else VN_SOURCE_SSI
+        company_name = symbol_metadata.get("name") if symbol_metadata.get("status") == "ok" else None
         if df is None or df.empty:
             news, news_cache_status, news_fetched_at, news_next_refresh_at, news_error = self._load_mozyfin_news(
                 symbol,
@@ -1842,6 +1952,16 @@ class VietnamMarketService:
                 "status": "unavailable",
                 "reason": unavailable_reason,
                 "error": "ssi_unavailable" if provider_meta.get("primary_source") == VN_SOURCE_SSI else "no_data",
+                "name": company_name,
+                "company_name": company_name,
+                "security_type": symbol_metadata.get("security_type"),
+                "market": symbol_metadata.get("market"),
+                "metadata_source": metadata_source,
+                "symbol_metadata": symbol_metadata,
+                "issuer": symbol_metadata.get("issuer"),
+                "lot_size": symbol_metadata.get("lot_size"),
+                "listed_shares": symbol_metadata.get("listed_shares"),
+                "listed_date": symbol_metadata.get("listed_date"),
                 "source": source,
                 "primary_source": provider_meta.get("primary_source"),
                 "actual_source": provider_meta.get("actual_source"),
@@ -1886,7 +2006,7 @@ class VietnamMarketService:
 
         liquidity = calculate_liquidity_score(df, self.config.liquidity_target_avg_volume)
         limit_state = calculate_price_limit_state(df, symbol)
-        exchange = str(_last_value(df, "exchange") or get_vn_exchange(symbol))
+        exchange = str(symbol_metadata.get("exchange") or _last_value(df, "exchange") or get_vn_exchange(symbol))
         ex_dividend_warning = bool(_last_value(df, "ex_dividend_warning"))
         ohlcv_date = _valid_date_string(latest.get("date"))
         price_adjustment_status = str(_last_value(df, "price_adjustment_status") or "unknown")
@@ -2119,8 +2239,18 @@ class VietnamMarketService:
             "ticker": symbol,
             "status": "ok",
             "reason": None,
+            "name": company_name,
+            "company_name": company_name,
             "entity": normalize_vn_symbol(symbol),
             "exchange": exchange,
+            "market": symbol_metadata.get("market"),
+            "security_type": symbol_metadata.get("security_type"),
+            "metadata_source": metadata_source,
+            "symbol_metadata": symbol_metadata,
+            "issuer": symbol_metadata.get("issuer"),
+            "lot_size": symbol_metadata.get("lot_size"),
+            "listed_shares": symbol_metadata.get("listed_shares"),
+            "listed_date": symbol_metadata.get("listed_date"),
             "market_index": _last_value(df, "market_index"),
             "source": source,
             "primary_source": provider_meta.get("primary_source"),

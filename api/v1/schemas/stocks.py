@@ -157,14 +157,42 @@ class VietnamDailyStockPrice(BaseModel):
     source: Optional[str] = None
 
 
+class VietnamSymbolMetadata(BaseModel):
+    """SSI Securities/SecuritiesDetails metadata for Vietnam dashboard symbols."""
+
+    status: Optional[str] = None
+    reason: Optional[str] = None
+    symbol: Optional[str] = None
+    exchange: Optional[str] = None
+    market: Optional[str] = None
+    security_type: Optional[str] = None
+    name: Optional[str] = None
+    name_en: Optional[str] = None
+    issuer: Optional[str] = None
+    lot_size: Optional[int] = None
+    listed_shares: Optional[int] = None
+    listed_date: Optional[str] = None
+    source: Optional[str] = None
+
+
 class VietnamWatchItem(BaseModel):
     """Vietnam watchlist dashboard row."""
 
     ticker: str
     status: str = "ok"
     reason: Optional[str] = None
+    name: Optional[str] = None
+    company_name: Optional[str] = None
     entity: Optional[str] = None
     exchange: Optional[str] = None
+    market: Optional[str] = None
+    security_type: Optional[str] = None
+    metadata_source: Optional[str] = None
+    symbol_metadata: VietnamSymbolMetadata = Field(default_factory=VietnamSymbolMetadata)
+    issuer: Optional[str] = None
+    lot_size: Optional[int] = None
+    listed_shares: Optional[int] = None
+    listed_date: Optional[str] = None
     market_index: Optional[str] = None
     source: Optional[str] = None
     primary_source: Optional[str] = None

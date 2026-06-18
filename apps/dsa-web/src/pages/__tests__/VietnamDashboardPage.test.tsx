@@ -84,6 +84,27 @@ const makeItem = (ticker: string): VietnamWatchItem => ({
   name: `${ticker} Listed Company`,
   entity: `${ticker}.VN`,
   exchange: 'HOSE',
+  market: 'HOSE',
+  securityType: 'stock',
+  metadataSource: 'SSI',
+  symbolMetadata: {
+    status: 'ok',
+    symbol: ticker,
+    exchange: 'HOSE',
+    market: 'HOSE',
+    securityType: 'stock',
+    name: `${ticker} Listed Company`,
+    nameEn: `${ticker} Corporation`,
+    issuer: `${ticker} issuer`,
+    lotSize: 100,
+    listedShares: 123456789,
+    listedDate: '2006-12-13',
+    source: 'SSI',
+  },
+  issuer: `${ticker} issuer`,
+  lotSize: 100,
+  listedShares: 123456789,
+  listedDate: '2006-12-13',
   marketIndex: 'VNINDEX.VN',
   source: 'SSI',
   primarySource: 'SSI',
@@ -644,6 +665,57 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(detail.getByText('No verified Vietnam corporate-action event provider is configured.')).toBeInTheDocument();
     expect(detail.getByText('Latest price / OHLCV close (VND)')).toBeInTheDocument();
     expect(detail.getByText('100 / 100')).toBeInTheDocument();
+  });
+
+  it('renders SSI symbol metadata compactly when provided', async () => {
+    render(<VietnamDashboardPage />);
+
+    const header = within((await screen.findByText('Selected ticker')).closest('section') as HTMLElement);
+    expect(header.getByText('FPT Listed Company')).toBeInTheDocument();
+    expect(header.getByText('HOSE')).toBeInTheDocument();
+    expect(header.getByText('stock')).toBeInTheDocument();
+    expect(header.getByText('SSI metadata')).toBeInTheDocument();
+
+    const detail = within(screen.getByText('Stock detail').closest('section') as HTMLElement);
+    expect(detail.getByRole('heading', { name: 'SSI symbol metadata' })).toBeInTheDocument();
+    expect(detail.getByText('Vietnamese name')).toBeInTheDocument();
+    expect(detail.getAllByText('FPT Listed Company').length).toBeGreaterThan(0);
+    expect(detail.getByText('English name')).toBeInTheDocument();
+    expect(detail.getByText('FPT Corporation')).toBeInTheDocument();
+    expect(detail.getByText('Exchange / market')).toBeInTheDocument();
+    expect(detail.getByText('HOSE / HOSE')).toBeInTheDocument();
+    expect(detail.getByText('Security type')).toBeInTheDocument();
+    expect(detail.getByText('FPT issuer')).toBeInTheDocument();
+    expect(detail.getByText('Lot size')).toBeInTheDocument();
+    expect(detail.getByText('123,456,789')).toBeInTheDocument();
+    expect(detail.getByText('2006-12-13')).toBeInTheDocument();
+  });
+
+  it('hides absent optional SSI symbol metadata rows', async () => {
+    const response = makeResponse(defaultTickers);
+    response.watchlist[0] = {
+      ...response.watchlist[0],
+      companyName: null,
+      name: null,
+      securityType: null,
+      issuer: null,
+      lotSize: null,
+      listedShares: null,
+      listedDate: null,
+      symbolMetadata: {
+        status: 'unavailable',
+        source: 'SSI',
+        reason: 'SSI FastConnect request failed',
+      },
+    };
+    mockedGetVietnamWatchlist.mockResolvedValue(response);
+
+    render(<VietnamDashboardPage />);
+
+    const detail = within(await screen.findByText('Stock detail').then((node) => node.closest('section') as HTMLElement));
+    expect(detail.queryByRole('heading', { name: 'SSI symbol metadata' })).not.toBeInTheDocument();
+    expect(detail.queryByText('Vietnamese name')).not.toBeInTheDocument();
+    expect(detail.queryByText('Listed shares')).not.toBeInTheDocument();
   });
 
   it('hides absent optional SSI DailyStockPrice rows without blank detail fields', async () => {

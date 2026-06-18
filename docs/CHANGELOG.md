@@ -9,7 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [documentation] Documented observed SSI watchlist payload missing/null fields and latest-price source semantics.
+- [documentation] Added current SSI migration follow-up notes for the Vietnam dashboard.
+- [documentation] Documented limited SSI metadata coverage, Mozyfin news encoding issues, temporary Mozyfin intraday source, and the deferred local DB decision.
+- [documentation] Added a project workflow instruction to self-record newly discovered VN dashboard issues in docs after future phases.
 - [documentation] Consolidated VN dashboard provider ownership and SSI migration roadmap.
+- [new feature] Add SSI Securities/SecuritiesDetails symbol metadata to the Vietnam dashboard API and selected ticker UI.
 - [documentation] Deferred local DB market-data storage for the VN dashboard while SSI live API plus backend cache/TTL remains sufficient.
 - [documentation] Clarified next implementation priorities for SSI metadata, index components, intraday OHLCV, streaming, and external providers.
 - [documentation] Add a Vietnam SSI provider capability matrix and strict data-ownership decision rule.

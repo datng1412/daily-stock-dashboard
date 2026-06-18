@@ -313,10 +313,29 @@ const rawKbsFreshnessText = (quote?: VietnamRealtimeQuote | null) => (
 
 const companyDisplayName = (item?: VietnamWatchItem | null) => {
   if (!item) return '-';
-  const name = item.companyName ?? item.name ?? item.entity;
+  const name = item.companyName ?? item.name ?? item.symbolMetadata?.name ?? item.entity;
   if (!name || name === item.ticker) return 'Company unavailable';
   return name;
 };
+
+const metadataValue = (item: VietnamWatchItem, key: 'exchange' | 'market' | 'securityType' | 'issuer' | 'lotSize' | 'listedShares' | 'listedDate') => (
+  item.symbolMetadata?.[key] ?? item[key] ?? null
+);
+
+const hasSsiSymbolMetadata = (item: VietnamWatchItem) => (
+  item.symbolMetadata?.status === 'ok'
+  && [
+    item.symbolMetadata?.name,
+    item.symbolMetadata?.nameEn,
+    item.symbolMetadata?.exchange,
+    item.symbolMetadata?.market,
+    item.symbolMetadata?.securityType,
+    item.symbolMetadata?.issuer,
+    item.symbolMetadata?.lotSize,
+    item.symbolMetadata?.listedShares,
+    item.symbolMetadata?.listedDate,
+  ].some(hasDisplayValue)
+);
 
 const latestNewsAge = (item?: VietnamWatchItem | null) => {
   const timestamp = item?.news?.map(newsTimestamp).find(Boolean);
@@ -900,6 +919,9 @@ const SelectedTickerHeader: React.FC<{
   const ssiDailyClose = item.dailyClose ?? item.latestPrice ?? item.close ?? null;
   const priceVsReference = ssiDailyClose != null && ssiReferencePrice != null ? ssiDailyClose - ssiReferencePrice : null;
   const priceVsReferencePct = priceVsReference != null && ssiReferencePrice ? priceVsReference / ssiReferencePrice * 100 : null;
+  const metadataExchange = metadataValue(item, 'exchange');
+  const metadataSecurityType = metadataValue(item, 'securityType');
+  const metadataSource = item.symbolMetadata?.source ?? item.metadataSource;
   const dailySourceLabel = item.status === 'unavailable'
     ? 'SSI unavailable'
     : item.actualSource ?? item.primarySource ?? (isSsiDailyPriceSource(item.latestPriceSource) ? 'SSI' : 'SSI');
@@ -912,6 +934,11 @@ const SelectedTickerHeader: React.FC<{
           <div className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-1">
             <h2 className="text-2xl font-semibold text-foreground">{item.ticker}</h2>
             <p className="min-w-0 text-sm text-secondary-text">{companyDisplayName(item)}</p>
+          </div>
+          <div className="mt-2 flex flex-wrap gap-2 text-xs text-secondary-text">
+            {metadataExchange ? <Badge variant="default">{metadataExchange}</Badge> : null}
+            {metadataSecurityType ? <Badge variant="default">{metadataSecurityType}</Badge> : null}
+            {metadataSource ? <Badge variant="default">{metadataSource} metadata</Badge> : null}
           </div>
           <div className="mt-3 flex flex-wrap gap-2">
             <Badge variant="info">{dailySourceLabel} daily</Badge>
@@ -1921,6 +1948,17 @@ const StockDetailView: React.FC<{
     { label: 'Put-through value', value: formatNumber(ssiDailyStockPrice.putThroughValue ?? item.ssiPutThroughValue), show: hasDisplayValue(ssiDailyStockPrice.putThroughValue ?? item.ssiPutThroughValue) },
     { label: 'Adjusted close', value: formatPrice(ssiDailyStockPrice.adjustedClose ?? item.ssiAdjustedClose), show: hasDisplayValue(ssiDailyStockPrice.adjustedClose ?? item.ssiAdjustedClose) },
   ].filter((row) => row.show);
+  const symbolMetadata = item.symbolMetadata ?? {};
+  const symbolMetadataRows = [
+    { label: 'Vietnamese name', value: symbolMetadata.name ?? item.companyName ?? item.name, show: hasDisplayValue(symbolMetadata.name ?? item.companyName ?? item.name) },
+    { label: 'English name', value: symbolMetadata.nameEn, show: hasDisplayValue(symbolMetadata.nameEn) },
+    { label: 'Exchange / market', value: `${metadataValue(item, 'exchange') ?? '-'} / ${metadataValue(item, 'market') ?? '-'}`, show: hasDisplayValue(metadataValue(item, 'exchange')) || hasDisplayValue(metadataValue(item, 'market')) },
+    { label: 'Security type', value: metadataValue(item, 'securityType'), show: hasDisplayValue(metadataValue(item, 'securityType')) },
+    { label: 'Issuer', value: metadataValue(item, 'issuer'), show: hasDisplayValue(metadataValue(item, 'issuer')) },
+    { label: 'Lot size', value: formatNumber(metadataValue(item, 'lotSize') as number | null), show: hasDisplayValue(metadataValue(item, 'lotSize') as number | null) },
+    { label: 'Listed shares', value: formatNumber(metadataValue(item, 'listedShares') as number | null), show: hasDisplayValue(metadataValue(item, 'listedShares') as number | null) },
+    { label: 'Listed date', value: metadataValue(item, 'listedDate'), show: hasDisplayValue(metadataValue(item, 'listedDate')) },
+  ].filter((row) => row.show);
   const corporateActionEvents = (corporateActions?.items ?? []).filter((event) => event.ticker === item.ticker);
   const upcomingCorporateActions = corporateActionEvents.filter((event) => event.status === 'upcoming');
   const recentCorporateActions = corporateActionEvents.filter((event) => event.status === 'recent' || event.status === 'past');
@@ -2036,6 +2074,28 @@ const StockDetailView: React.FC<{
         ) : null}
       </dl>
       <InspectChartCard item={item} />
+      {hasSsiSymbolMetadata(item) && symbolMetadataRows.length ? (
+        <div className="mt-4 rounded-lg border border-border/60 bg-elevated/30 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 className="text-sm font-semibold text-foreground">SSI symbol metadata</h3>
+              <p className="mt-1 text-xs text-secondary-text">Securities and SecuritiesDetails fields from SSI.</p>
+            </div>
+            <div className="flex flex-wrap gap-1">
+              <Badge variant="info">{symbolMetadata.status ?? 'ok'}</Badge>
+              <Badge variant="default">{symbolMetadata.source ?? item.metadataSource ?? 'SSI'}</Badge>
+            </div>
+          </div>
+          <dl className="mt-3 grid gap-3 text-sm md:grid-cols-3 xl:grid-cols-4">
+            {symbolMetadataRows.map((row) => (
+              <div key={`${item.ticker}-metadata-${row.label}`}>
+                <dt className="text-xs text-secondary-text">{row.label}</dt>
+                <dd className="mt-1 font-medium text-foreground">{row.value}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      ) : null}
       <div className="mt-4 rounded-lg border border-border/60 bg-elevated/30 p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>

@@ -756,6 +756,8 @@ def test_securities_maps_symbol_metadata():
 
     row = fetcher.get_securities("HOSE")["rows"][0]
 
+    _, _, kwargs = session.calls[-1]
+    assert kwargs["params"] == {"pageIndex": 1, "pageSize": 1000, "market": "HOSE"}
     assert row == {
         "symbol": "FPT",
         "exchange": "HOSE",
@@ -800,6 +802,8 @@ def test_securities_details_maps_symbol_metadata():
 
     row = fetcher.get_securities_details("FPT")["rows"][0]
 
+    _, _, kwargs = session.calls[-1]
+    assert kwargs["params"] == {"pageIndex": 1, "pageSize": 1000, "symbol": "FPT"}
     assert row["symbol"] == "FPT"
     assert row["exchange"] == "HOSE"
     assert row["security_type"] == "stock"
@@ -811,6 +815,38 @@ def test_securities_details_maps_symbol_metadata():
     assert row["listed_date"] == "2020-01-02"
     assert row["market"] == "HOSE"
     assert row["source"] == "SSI"
+
+
+def test_securities_details_missing_metadata_fields_become_none():
+    session = _FakeSession(
+        post_items=[_token_response()],
+        get_items=[
+            _FakeResponse(
+                payload={
+                    "data": [
+                        {
+                            "StockSymbol": "FPT",
+                            "Market": "HOSE",
+                        }
+                    ]
+                }
+            )
+        ],
+    )
+    fetcher = _fetcher(session=session)
+
+    row = fetcher.get_securities_details("FPT", market="HOSE")["rows"][0]
+
+    assert row["symbol"] == "FPT"
+    assert row["exchange"] == "HOSE"
+    assert row["market"] == "HOSE"
+    assert row["security_type"] is None
+    assert row["name"] is None
+    assert row["name_en"] is None
+    assert row["issuer"] is None
+    assert row["lot_size"] is None
+    assert row["listed_shares"] is None
+    assert row["listed_date"] is None
 
 
 def test_missing_ssi_fields_become_none():

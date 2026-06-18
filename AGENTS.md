@@ -12,6 +12,8 @@ When resuming work with Codex or another coding agent, read these project-manage
 
 For Vietnam dashboard work, keep live/fixture mode explicit, do not print Mozyfin secrets, do not present quote output as a reliable realtime matched price unless source semantics change, treat the intraday pulse as 1H OHLCV rather than realtime quote, keep RSI14 as Wilder/RMA, and preserve neutral labels with no buy/sell recommendations.
 
+After each VN dashboard implementation or validation phase, Codex must update the relevant roadmap/docs with any newly discovered limitations, known issues, data-source caveats, validation findings, or deferred tasks. Do this before reporting the phase as complete. Prefer `docs/VN_DASHBOARD_ROADMAP.md` for roadmap/backlog issues, `docs/SSI_FASTCONNECT_INTEGRATION.md` for SSI-specific caveats, and `docs/CHANGELOG.md` for user-visible documentation changes. Do not silently leave important findings only in chat output.
+
 Before using any `docs/resources/` provider, ask for explicit approval and summarize auth, rate-limit, timestamp, and data/price semantics.
 
 This file defines the default development workflow for this repository. Its purpose is to reduce repeated communication, reduce rework, and keep changes aligned with the current project structure.

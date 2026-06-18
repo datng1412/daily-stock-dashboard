@@ -38,8 +38,8 @@ This roadmap is the source of truth for Vietnam dashboard provider ownership. SS
 
 | Capability or data domain | Owner | Current implementation state | Dashboard rule |
 | --- | --- | --- | --- |
-| Securities | SSI FastConnect Data REST | Provider method exists; UI metadata wiring is next | Use for symbol metadata |
-| SecuritiesDetails | SSI FastConnect Data REST | Provider method exists; UI metadata wiring is next | Use for exchange, security type, listed info, issuer/name, lot size, listed shares, and listed date if available |
+| Securities | SSI FastConnect Data REST | Implemented and wired as same-provider metadata fallback | Use for symbol metadata |
+| SecuritiesDetails | SSI FastConnect Data REST | Implemented and wired | Use for exchange, security type, listed info, issuer/name, lot size, listed shares, and listed date if available |
 | IndexList | SSI FastConnect Data REST | Provider method exists | Discover official index identifiers instead of hardcoded assumptions |
 | IndexComponents | SSI FastConnect Data REST | SSI-owned next phase | Use for index membership and VN30 diagnostics after validation |
 | DailyOhlc | SSI FastConnect Data REST | Implemented and wired for daily data/chart | Use for daily OHLCV, chart candles, and internal indicators |
@@ -83,6 +83,113 @@ If SSI-owned data is unavailable, show unavailable. Do not silently fallback.
 * KBS remains separate for realtime snapshot and trade tape.
 * Mozyfin remains separate for news and unsupported external domains.
 * Local DB market-data storage is deferred; current mode is SSI live API plus backend cache/TTL.
+
+## Current known issues / follow-up notes
+
+### SSI symbol metadata is currently limited
+
+Live SSI metadata can be `status=ok` while only providing:
+
+* `symbol`
+* `exchange`
+* `market`
+* `source`
+
+Optional fields may remain null:
+
+* Vietnamese name
+* English name
+* issuer
+* security type
+* lot size
+* listed shares
+* listed date
+
+Null optional metadata is not fatal. The UI should hide optional metadata rows when absent. Future work should inspect additional SSI field names or alternate SSI response shapes before promising richer company metadata.
+
+Observed live watchlist payload for ticker `SSI` after Priority 1:
+
+* Core market-data state was valid: `status=ok`, `source=SSI`, `actual_source=SSI`, `fallback_used=false`, `data_quality.missing_fields={}`, `validation.missing_fields=[]`.
+* SSI DailyOhlc fields were present: `latest_price`, `daily_close`, `ohlcv_close`, `open`, `high`, `low`, `close`, `previous_close`, `volume`, and `amount`.
+* SSI DailyStockPrice was present with `daily_stock_price.status=ok`, reference/ceiling/floor, matched volume/value, put-through volume/value, and latest foreign buy/sell/net volume/value.
+* Metadata remained limited: `company_name`, `name`, `security_type`, `issuer`, `lot_size`, `listed_shares`, and `listed_date` were null even though `symbol_metadata.status=ok` can mean symbol/exchange/market/source only.
+
+Treat these null metadata fields as optional and non-fatal. Hide absent metadata rows in the UI.
+
+### Quote fields are intentionally missing in strict SSI daily mode
+
+Observed live watchlist payload can include:
+
+* `quote_cache = missing`
+* `quote = null`
+* `quote_price_date = null`
+* `quote_price_raw_field = null`
+
+This is not fatal because the current design uses SSI DailyOhlc close for `latest_price`. Keep the warning that quote does not provide a reliable latest price and latest price uses SSI DailyOhlc close. Future realtime/quote work should come from KBS snapshot now or SSI streaming later, not a forced REST quote fallback.
+
+### Mozyfin news text encoding issue
+
+News title/summary may contain mojibake or broken Vietnamese text, for example `Khá»i ngoáº¡i`, `Cá» phiáº¿u`, or `VN-Index giÃ nh`. This is not an SSI market-data issue. Keep news source separate from SSI. Future work should normalize/decode Vietnamese news text before rendering.
+
+### Intraday remains Mozyfin temporarily
+
+Current `intraday_source` can still be `Mozyfin OHLCV`. This is expected until the SSI IntradayOhlc priority is implemented. The UI must clearly label intraday data as not a realtime quote and not the official SSI daily close. Do not mix intraday candle data with official daily close.
+
+### Final close / adjusted price status remains conservative
+
+`final_close_status = unknown` and `adjusted_price_status = unknown` should remain conservative unless SSI provides explicit finality/adjustment metadata. Do not infer corporate actions from adjusted close/reference gaps. Do not mutate raw OHLCV close.
+
+Observed live watchlist payload can also include `candle_status = unknown`, `price_adjustment_status = unknown`, and `corporate_action.status = unavailable`. Keep these conservative warnings until an explicit source provides finality, adjustment, or event metadata.
+
+### Foreign rolling history is separate from latest SSI foreign flow
+
+Observed live watchlist payload can include null rolling fields:
+
+* `foreign_net_5d`
+* `foreign_net_20d`
+* `foreign_net_5d_latest_available`
+* `foreign_net_20d_latest_available`
+
+Latest matched-date foreign buy/sell/net volume/value can still be present and valid from SSI DailyStockPrice. Rolling 5D/20D foreign flow requires historical foreign-flow rows and should be handled as a separate enhancement if needed.
+
+### DailyOhlc vs DailyStockPrice consistency
+
+Current live checks showed watchlist daily close and DailyStockPrice close can align after refresh. If DailyOhlc close and DailyStockPrice close differ, first check:
+
+* same trading date
+* cache freshness
+* old backend response
+* chart/watchlist TTL mismatch
+
+Do not use DailyStockPrice close to silently overwrite DailyOhlc close unless that behavior is explicitly designed. Keep labels separate:
+
+* Daily close: SSI DailyOhlc
+* Reference/limits/foreign/matched/put-through: SSI DailyStockPrice
+
+### PowerShell JSON depth can mislead debugging
+
+`ConvertTo-Json -Depth 4` may stringify nested objects as `@{...}`. Use `ConvertTo-Json -Depth 12` before assuming the backend response shape is broken.
+
+### SSI DailyStockPrice / DailyIndex chunking
+
+These endpoints require <=29/30-day windows. Full-year chunking is allowed for smoke/debug/internal validation, but should not become heavy automatic UI behavior. The UI should keep DailyStockPrice quick facts to recent windows unless a later design changes this.
+
+### Local DB remains deferred
+
+Current design remains SSI live API plus backend cache/TTL. Local market-data DB is intentionally deferred because current call volume is low. Revisit only if SSI rate limits, latency, or repeated full-history calls become a problem.
+
+### Strict provider boundaries remain mandatory
+
+SSI-owned market data must not silently fallback to Mozyfin/KBS. Mozyfin is news/unsupported domains only. KBS is realtime snapshot/trade tape only.
+
+External providers are required for:
+
+* BCTC/KQKD
+* financial statements
+* financial ratios
+* corporate actions
+* dividends/rights/splits
+* macro/Fed/oil/USD/gold
 
 ## Product/design principles
 
@@ -494,9 +601,12 @@ Rules:
 
 ### Priority 1 - SSI Securities/SecuritiesDetails metadata
 
-* Add symbol metadata coverage.
-* Add company name, exchange, security type, lot size, listed shares, and listed date if available.
-* Show metadata compactly in the selected ticker UI.
+Status: implemented in the current working tree.
+
+* Added SSI-only symbol metadata coverage through `SecuritiesDetails`, with `Securities` as a same-provider metadata fallback.
+* Added company name, exchange, market, security type, issuer, lot size, listed shares, and listed date when SSI returns them.
+* Added compact selected-ticker metadata display.
+* Missing metadata fields remain unavailable/null; Mozyfin is not used for SSI-owned symbol metadata.
 
 ### Priority 2 - SSI IndexList/IndexComponents
 
