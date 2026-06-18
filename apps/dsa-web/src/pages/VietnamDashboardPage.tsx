@@ -193,6 +193,21 @@ const rawDateLabel = (value?: string | number | null) => (value === null || valu
 
 const compactLabels = (labels?: string[], max = 4) => (labels ?? ['Watch']).slice(0, max);
 
+const RECOMMENDATION_WORD_RE = /\b(buy|sell|hold|recommendation)\b/gi;
+
+const neutralizeRecommendationText = (value?: string | null) => (
+  value ? value.replace(RECOMMENDATION_WORD_RE, 'source term') : value
+);
+
+const neutralTradeType = (value?: string | null) => {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  if (!normalized) return '-';
+  if (normalized === 'buy') return 'Bid-side';
+  if (normalized === 'sell') return 'Offer-side';
+  if (normalized === 'unknown') return 'Unknown';
+  return neutralizeRecommendationText(String(value)) ?? '-';
+};
+
 const hasEncodingArtifacts = (value?: string | null) => Boolean(value && /(?:Ã|Â|â€|�)/.test(value));
 
 const marketStatusLabels = (item: VietnamWatchItem, max = 3) => {
@@ -620,7 +635,7 @@ const WatchCard: React.FC<{ item: VietnamWatchItem; realtimeQuote?: VietnamRealt
                   rel="noreferrer"
                   className="block truncate text-sm text-cyan hover:underline"
                 >
-                  {news.title || 'Untitled news'}
+                  {neutralizeRecommendationText(news.title) || 'Untitled news'}
                 </a>
                 <div className="truncate text-xs text-secondary-text" title={absoluteTime}>
                   {[news.source, formatRelativeTime(timestamp)].filter(Boolean).join(' · ')}
@@ -2281,7 +2296,7 @@ const StockDetailView: React.FC<{
                     <td className="py-2 pr-3">{trade.time ?? '-'}</td>
                     <td className="px-3 py-2 text-right text-foreground">{formatPrice(trade.price)}</td>
                     <td className="px-3 py-2 text-right">{formatNumber(trade.volume)}</td>
-                    <td className="px-3 py-2">{trade.matchType ?? '-'}</td>
+                    <td className="px-3 py-2">{neutralTradeType(trade.matchType)}</td>
                     <td className="px-3 py-2">{trade.source}</td>
                   </tr>
                 ))}
@@ -2326,7 +2341,7 @@ const StockDetailView: React.FC<{
                     rel="noreferrer"
                     className="text-sm font-medium text-cyan hover:underline"
                   >
-                    {news.title || 'Untitled news'}
+                    {neutralizeRecommendationText(news.title) || 'Untitled news'}
                   </a>
                   <div className="mt-1 flex flex-wrap gap-2 text-xs text-secondary-text" title={absoluteTime}>
                     {news.source ? <span>{news.source}</span> : null}
@@ -2334,7 +2349,7 @@ const StockDetailView: React.FC<{
                     <span>{formatRelativeTime(timestamp)}</span>
                   </div>
                   {news.summary && !summaryHasArtifacts ? (
-                    <p className="mt-2 line-clamp-2 text-sm text-secondary-text">{news.summary}</p>
+                    <p className="mt-2 line-clamp-2 text-sm text-secondary-text">{neutralizeRecommendationText(news.summary)}</p>
                   ) : summaryHasArtifacts ? (
                     <p className="mt-2 text-xs text-warning">Summary hidden because text encoding looks damaged.</p>
                   ) : null}
