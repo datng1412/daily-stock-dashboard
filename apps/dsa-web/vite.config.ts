@@ -7,6 +7,7 @@ const packageJson = JSON.parse(
   readFileSync(new URL('./package.json', import.meta.url), 'utf-8'),
 ) as { version?: string }
 const buildTime = new Date().toISOString()
+const apiProxyTarget = process.env.VITE_API_PROXY_TARGET?.trim() || 'http://127.0.0.1:8000'
 
 const vendorChunkByPackage: Record<string, string> = {
   react: 'vendor-react',
@@ -107,7 +108,7 @@ export default defineConfig({
     port: 5173,       // 默认端口
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:8000',
+        target: apiProxyTarget,
         changeOrigin: true,
       },
     },

@@ -128,14 +128,51 @@ class VietnamChartPoint(BaseModel):
     bb_lower: Optional[float] = None
 
 
+class VietnamDailyStockPrice(BaseModel):
+    """SSI DailyStockPrice enrichment row for Vietnam dashboard detail fields."""
+
+    status: Optional[str] = None
+    reason: Optional[str] = None
+    date: Optional[str] = None
+    reference_price: Optional[float] = None
+    ceiling_price: Optional[float] = None
+    floor_price: Optional[float] = None
+    open: Optional[float] = None
+    high: Optional[float] = None
+    low: Optional[float] = None
+    close: Optional[float] = None
+    adjusted_close: Optional[float] = None
+    matched_volume: Optional[float] = None
+    matched_value: Optional[float] = None
+    put_through_volume: Optional[float] = None
+    put_through_value: Optional[float] = None
+    total_volume: Optional[float] = None
+    total_value: Optional[float] = None
+    foreign_buy_volume: Optional[float] = None
+    foreign_sell_volume: Optional[float] = None
+    foreign_net_volume: Optional[float] = None
+    foreign_buy_value: Optional[float] = None
+    foreign_sell_value: Optional[float] = None
+    foreign_net_value: Optional[float] = None
+    source: Optional[str] = None
+
+
 class VietnamWatchItem(BaseModel):
     """Vietnam watchlist dashboard row."""
 
     ticker: str
+    status: str = "ok"
+    reason: Optional[str] = None
     entity: Optional[str] = None
     exchange: Optional[str] = None
     market_index: Optional[str] = None
     source: Optional[str] = None
+    primary_source: Optional[str] = None
+    actual_source: Optional[str] = None
+    fallback_used: bool = False
+    fallback_reason: Optional[str] = None
+    reference_source: Optional[str] = None
+    foreign_flow_source: Optional[str] = None
     rows_loaded: Optional[int] = None
     date: Optional[str] = None
     latest_price: Optional[float] = None
@@ -146,6 +183,7 @@ class VietnamWatchItem(BaseModel):
     quote_price_raw_field: Optional[str] = None
     price_source_warning: Optional[str] = None
     ohlcv_close: Optional[float] = None
+    daily_close: Optional[float] = None
     price_date: Optional[str] = None
     ohlcv_date: Optional[str] = None
     quote_date: Optional[str] = None
@@ -165,6 +203,17 @@ class VietnamWatchItem(BaseModel):
     amount: Optional[float] = None
     liquidity: Dict[str, Any] = Field(default_factory=dict)
     price_limit: Dict[str, Any] = Field(default_factory=dict)
+    daily_stock_price: VietnamDailyStockPrice = Field(default_factory=VietnamDailyStockPrice)
+    ssi_reference_price: Optional[float] = None
+    ssi_ceiling_price: Optional[float] = None
+    ssi_floor_price: Optional[float] = None
+    ssi_adjusted_close: Optional[float] = None
+    ssi_foreign_net_volume: Optional[float] = None
+    ssi_foreign_net_value: Optional[float] = None
+    ssi_matched_volume: Optional[float] = None
+    ssi_matched_value: Optional[float] = None
+    ssi_put_through_volume: Optional[float] = None
+    ssi_put_through_value: Optional[float] = None
     corporate_action: Dict[str, Any] = Field(default_factory=dict)
     foreign: Dict[str, Any] = Field(default_factory=dict)
     foreign_net_unit: Optional[str] = None
@@ -211,11 +260,18 @@ class VietnamChartResponse(BaseModel):
     """Selected Vietnam symbol daily chart response."""
 
     symbol: str
-    source: str = "Mozyfin"
+    status: str = "ok"
+    reason: Optional[str] = None
+    source: str = "SSI"
+    primary_source: Optional[str] = None
+    actual_source: Optional[str] = None
+    fallback_used: bool = False
+    fallback_reason: Optional[str] = None
     timeframe: str = "1d"
     range: str = "6M"
     latest_date: Optional[str] = None
     points: List[VietnamChartPoint] = Field(default_factory=list)
+    candles: List[VietnamChartPoint] = Field(default_factory=list)
 
 
 class VietnamWatchlistHealthResponse(BaseModel):

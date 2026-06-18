@@ -16,8 +16,8 @@ The dashboard must remain:
 
 These rules must not be broken.
 
-* Mozyfin daily OHLCV is the daily source.
-* `latest_price` comes from Mozyfin daily OHLCV close.
+* SSI DailyOhlc is the strict daily OHLCV source for supported VN REST market data.
+* `latest_price` comes from SSI DailyOhlc close when SSI daily data is available.
 * KBS snapshot is realtime board state only.
 * KBS trade tape is separate from daily OHLCV.
 * Do not replace daily close with KBS snapshot.
@@ -32,21 +32,54 @@ These rules must not be broken.
 
 ## Provider strategy
 
-SSI FastConnect is the preferred future official market-data provider.
+SSI FastConnect is the strict official market-data provider for supported Vietnam REST market data.
 
-SSI should be added incrementally and validated before replacing existing providers. Mozyfin and KBS must not be removed immediately. Provider migration must be comparison-first, not replacement-first. Dashboard source labels must remain honest and explicit.
+Mozyfin and KBS must not be removed immediately, but they no longer act as fallback for SSI-owned REST data. Mozyfin remains for news and unsupported domains. KBS remains for realtime snapshot and trade tape until SSI streaming is implemented and validated. Dashboard source labels must remain honest and explicit.
+
+### Provider capability matrix
+
+| Capability | Owner | Current implementation status | Dashboard rule |
+| --- | --- | --- | --- |
+| AccessToken | SSI FastConnect Data REST | Implemented provider auth foundation | Environment credentials only; never expose tokens |
+| Securities | SSI FastConnect Data REST | Implemented provider method | Use for symbol metadata when wired |
+| SecuritiesDetails | SSI FastConnect Data REST | Implemented provider method | Use for exchange, type, listed info, and names when wired |
+| IndexComponents | SSI FastConnect Data REST | SSI-owned future provider method | Use for index membership/watchlist generation after validation |
+| IndexList | SSI FastConnect Data REST | Implemented provider method | Discover official index identifiers before DailyIndex calls |
+| DailyOhlc | SSI FastConnect Data REST | Implemented and wired for daily data/chart | Primary daily close, OHLCV, chart, and internal indicators |
+| IntradayOhlc | SSI FastConnect Data REST | SSI-owned later phase | Migrate intraday pulse after endpoint validation |
+| DailyIndex | SSI FastConnect Data REST | Implemented provider method with 29-day chunking | Use for index value, change, breadth, and liquidity when wired |
+| DailyStockPrice | SSI FastConnect Data REST | Implemented and wired for selected-ticker enrichment | Use for reference, ceiling/floor, adjusted close, matched, put-through, and foreign flow |
+| Realtime best bid/ask | SSI streaming later | Not implemented | KBS remains temporary realtime source |
+| Realtime matched data | SSI streaming later | Not implemented | KBS trade tape remains separate |
+| Realtime foreign room | SSI streaming later | Not implemented | Show unavailable until SSI streaming is stable |
+| Realtime index stream | SSI streaming later | Not implemented | Keep daily index separate from realtime blocks |
+| Realtime bars/OHLC | SSI streaming later | Not implemented | Do not treat KBS snapshot as official daily OHLCV |
+| News | External provider | Mozyfin remains active | Keep separate from SSI-owned market data |
+| Financial statements and ratios | External provider | Unsupported/future provider | Do not infer fundamentals from price data |
+| Corporate actions, dividends, rights, splits | External provider | Stub/unavailable | Do not infer events from reference/adjusted-price gaps |
+| Macro/Fed/oil/USD/gold | External provider | Unsupported/future provider | Keep outside SSI market-data ownership |
+
+Decision rule:
+
+```text
+If data is official market price/volume/index/symbol and SSI has endpoint: use SSI.
+If data is derived indicator from price/volume: calculate internally from SSI.
+If data is realtime and SSI streaming is not ready: use KBS, label clearly.
+If data is news/fundamentals/corporate actions/macro: use external provider.
+If SSI-owned data is unavailable: show unavailable, do not silently fallback.
+```
 
 | Area | Preferred future provider | Current/fallback provider | Notes |
 | --- | --- | --- | --- |
-| Daily OHLCV | SSI DailyOhlc | Mozyfin | Compare before switching primary |
-| Inspect chart | SSI DailyOhlc | Mozyfin chart data | Indicators remain calculated internally |
-| Daily stock price | SSI DailyStockPrice | Mozyfin/KBS partial fields | Use for reference, ceiling/floor, foreign flow |
-| Reference / ceiling / floor | SSI DailyStockPrice | KBS reference fallback | Do not infer corporate actions |
-| Foreign flow | SSI DailyStockPrice | Mozyfin fallback | Prefer source with matching daily date |
-| Daily index | SSI DailyIndex | Mozyfin/index fallback | Use for VNINDEX/VN30 snapshot and breadth |
+| Daily OHLCV | SSI DailyOhlc | None | Unavailable if SSI is unavailable |
+| Inspect chart | SSI DailyOhlc | None | Indicators remain calculated internally |
+| Daily stock price | SSI DailyStockPrice | None | Use for reference, ceiling/floor, foreign flow |
+| Reference / ceiling / floor | SSI DailyStockPrice | None | Do not infer corporate actions |
+| Foreign flow | SSI DailyStockPrice | None | Unavailable if SSI is unavailable |
+| Daily index | SSI DailyIndex | None | Use for VNINDEX/VN30 snapshot and breadth |
 | Index components | SSI IndexComponents | Static/manual fallback | Use for VN30/watchlist generation |
 | Symbol metadata | SSI Securities/SecuritiesDetails | Existing metadata fallback | Use for exchange/type/company name |
-| Intraday OHLCV | SSI IntradayOhlc | Mozyfin intraday fallback | Use for intraday pulse later |
+| Intraday OHLCV | SSI IntradayOhlc later | Existing intraday implementation until migrated | Use for intraday pulse later |
 | Realtime snapshot | SSI streaming later | KBS | KBS remains until SSI streaming is stable |
 | Trade tape | SSI streaming later | KBS | Do not remove KBS yet |
 | News | Mozyfin | Other future news provider | SSI FC Data does not currently own news in roadmap |
@@ -71,10 +104,10 @@ SSI should be added incrementally and validated before replacing existing provid
 ### Data and source separation
 
 * Vietnam watchlist cards
-* Mozyfin daily OHLCV source
+* SSI daily OHLCV source
 * KBS realtime snapshot
 * KBS trade tape
-* KBS reference price block
+* SSI DailyStockPrice reference/limit/foreign/matched detail block
 * Daily close / realtime snapshot / trade tape separation
 * Phase-aware KBS snapshot state
 * KBS unavailable/error normalization
@@ -159,8 +192,8 @@ Status: partial in first roadmap batch.
 Implemented so far:
 
 * Added a compact selected ticker header.
-* Shows symbol/company label, Daily close, KBS snapshot, Vs reference, Session volume, 20D avg volume, Latest news, and Mozyfin/KBS source badges.
-* Keeps Mozyfin daily and KBS realtime labels visually separate.
+* Shows symbol/company label, Daily close, KBS snapshot, Vs SSI reference, Session volume, 20D avg volume, Latest news, and SSI/KBS source badges.
+* Keeps SSI daily and KBS realtime labels visually separate.
 
 Goal:
 
@@ -169,9 +202,9 @@ Make the selected ticker context obvious.
 Suggested header content:
 
 * Symbol and company name
-* Mozyfin daily close
+* SSI daily close
 * KBS snapshot price
-* Price vs reference
+* Price vs SSI reference
 * Session volume
 * 20D average volume
 * News freshness
@@ -183,9 +216,9 @@ Example:
 ACB — Asia Commercial Bank
 Daily close: 22.65
 KBS snapshot: 22.65
-Price vs reference: -0.88%
+Price vs SSI reference: -0.88%
 Volume: 14.64M / 20D avg 31.43M
-Sources: Mozyfin daily · KBS realtime
+Sources: SSI daily · KBS realtime
 ```
 
 Design rules:
@@ -290,25 +323,43 @@ Requirements:
 * Escape/close support
 * Mobile-friendly layout
 
-### 6. Add SSI FastConnect provider skeleton and comparison layer
+### 6. Make SSI FastConnect the strict REST market-data owner
+
+Status: strict SSI defaults added for supported REST market data; Mozyfin/KBS fallback removed for SSI-owned paths.
+
+Implemented so far:
+
+* Added disabled-by-default SSI FastConnect FC Data configuration placeholders.
+* Added standalone SSI FC Data provider foundation for AccessToken, Securities, SecuritiesDetails, DailyOhlc, DailyStockPrice, and DailyIndex.
+* Made SSI the default and strict source for Vietnam daily OHLCV, chart OHLCV, DailyStockPrice, reference/ceiling/floor, foreign flow, and DailyIndex preparation.
+* Removed Mozyfin fallback from SSI-owned OHLCV/chart/index/reference/foreign paths.
+* Added chart source metadata so the inspect chart can show SSI or SSI unavailable labels.
+* Added DailyStockPrice fields for reference, ceiling/floor, matched/put-through values, total volume/value, and foreign flow through `VN_DAILY_STOCK_PRICE_PROVIDER=ssi`.
+* Added UI detail rendering for SSI reference, ceiling/floor, foreign net volume/value, matched value, put-through value, and adjusted close when available.
+* Wired chunked SSI DailyStockPrice rows into explicit `daily_stock_price.status=ok` API/UI state, optional `ssi_*` convenience fields, and stale foreign-history caveat suppression.
+* Added chart response `candles` compatibility alongside `points` and a configurable Vite API proxy target for non-default local backend ports.
+* Expanded tolerant mappings for SSI DailyOhlc, DailyStockPrice, DailyIndex, and SecuritiesDetails field-name variants.
+* Added 29-day provider-level chunking for SSI DailyStockPrice and DailyIndex, which reject broad ranges even though DailyOhlc supports direct 1Y chart queries.
+* Added mocked provider tests and a local safe smoke script.
+* Preserved Mozyfin news and KBS realtime/trade tape behavior.
 
 Goal:
 
-Start SSI FastConnect integration as an additive comparison layer before any provider replacement.
+Use SSI FastConnect as the strict owner for supported VN REST market data while keeping unsupported domains explicit.
 
 Scope:
 
 * Provider skeleton and secure configuration placeholders.
 * Authentication and connection smoke tests.
-* Comparison-first endpoints or cards before switching primary source.
+* Clean unavailable states when SSI-owned data is unavailable.
 * Explicit source labels for SSI, Mozyfin, and KBS values.
 
 Rules:
 
-* SSI must stay disabled until configuration is present.
-* Do not change `latest_price` semantics without explicit validation.
-* Do not remove Mozyfin news or KBS realtime fallback paths.
-* If providers disagree, show source-specific values rather than silently overwriting.
+* SSI-owned data must not fall back to Mozyfin or KBS.
+* `latest_price` uses SSI DailyOhlc close when SSI daily rows are available.
+* Do not remove Mozyfin news or KBS realtime/trade tape paths.
+* If SSI is unavailable, show unavailable rather than silently replacing values.
 
 ### 7. Improve news structure
 
@@ -433,29 +484,28 @@ Rules:
 
 1. Provider skeleton and secure config.
 2. Auth/connection smoke test.
-3. DailyOhlc comparison against Mozyfin.
-4. DailyStockPrice mapping and comparison.
-5. DailyIndex and market breadth.
+3. DailyOhlc strict provider selection.
+4. DailyStockPrice mapping and strict enrichment.
+5. DailyIndex backend preparation and market breadth.
 6. Securities metadata and index components.
 7. IntradayOhlc for intraday pulse.
 8. SSI streaming prototype.
-9. Realtime comparison against KBS.
-10. Optional migration of primary market-data provider.
-11. Keep Mozyfin/KBS fallback paths until SSI is proven stable.
-12. Apply SSI migration rules before each provider switch.
+9. Realtime transition away from KBS only after SSI streaming is stable.
+10. Keep Mozyfin news and unsupported domains explicit.
+11. Apply SSI migration rules before each new SSI-owned area.
 
 ## SSI migration rules
 
-* SSI must be disabled by default until config is present.
+* SSI credential access remains disabled by default until config is present, but supported VN REST provider selection defaults to SSI.
 * Never commit SSI credentials.
 * Never print tokens, private keys, account IDs, or secrets.
 * Add `.env.example` placeholders only.
-* Add comparison endpoints/cards before switching primary source.
-* Do not switch `latest_price` semantics without explicit validation.
+* Do not add FC Trading or account/order/cash/stock-transfer actions.
+* Do not use Mozyfin or KBS fallback for SSI-owned REST data.
+* If SSI-owned data is unavailable, return unavailable.
 * Do not remove Mozyfin news.
 * Do not remove KBS realtime until SSI streaming is stable.
 * Keep source labels explicit: `SSI`, `Mozyfin`, `KBS`.
-* If providers disagree, show source-specific values rather than silently overwriting.
 
 ## Later backlog
 
@@ -551,7 +601,7 @@ Manual dashboard check:
 
 1. Open `/vietnam`.
 2. Confirm selected ticker loads.
-3. Confirm Mozyfin daily close remains separate from KBS snapshot.
+3. Confirm SSI daily close remains separate from KBS snapshot.
 4. Confirm chart works.
 5. Confirm news shows relative time.
 6. Confirm KBS unavailable path is clean.

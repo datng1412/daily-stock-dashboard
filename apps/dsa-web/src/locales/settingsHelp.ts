@@ -28,7 +28,7 @@ const settingsHelpEnUS: SettingsHelpMap = {
   'settings.base.MARKET': {
     title: 'Market',
     summary: 'Selects the primary market routing mode for data adapters.',
-    usage: 'Use CN for the original China-market flow, or VN for the Vietnam Mozyfin-backed watchlist flow.',
+    usage: 'Use VN for the Vietnam SSI-backed watchlist flow.',
     valueNotes: ['VN mode routes daily data requests through the Mozyfin adapter for supported Vietnam tickers.'],
     impact: ['Affects which market data provider is selected for stock history and dashboard data.'],
   },

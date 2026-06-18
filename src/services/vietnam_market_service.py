@@ -23,6 +23,8 @@ from data_provider.mozyfin_fetcher import (
     normalize_vn_symbol,
     vn_ticker,
 )
+from data_provider.ssi_fastconnect_fetcher import SsiFastConnectFetcher
+from src.config import get_config
 from src.services.vietnam_observability import (
     monotonic_ms,
     observe_mozyfin_cache_result,
@@ -50,6 +52,13 @@ VN_CACHE_TTL_SECONDS = {
     "intraday_ohlcv": 60,
     "news": 1800,
 }
+VN_PROVIDER_MOZYFIN = "mozyfin"
+VN_PROVIDER_SSI = "ssi"
+VN_PROVIDER_NONE = "none"
+VN_SOURCE_MOZYFIN = "Mozyfin"
+VN_SOURCE_SSI = "SSI"
+SSI_DAILY_STOCK_PRICE_SOURCE = "SSI DailyStockPrice"
+SSI_UNAVAILABLE_REASON = "SSI FastConnect unavailable"
 VN_INTRADAY_WARNING = "Intraday 1H candle data is not a realtime matched quote."
 STALE_CACHE_WARNING = "Live refresh failed; showing stale cached data."
 VN_STATUS_RULE_METADATA = {
@@ -283,6 +292,22 @@ class VietnamDashboardConfig:
     include_intraday: bool = True
     intraday_timeframe: str = "1h"
     intraday_limit: int = 8
+    daily_data_provider: str = VN_PROVIDER_SSI
+    chart_data_provider: str = VN_PROVIDER_SSI
+    daily_stock_price_provider: str = VN_PROVIDER_SSI
+    index_data_provider: str = VN_PROVIDER_SSI
+    provider_comparison_enabled: bool = False
+
+
+def _default_dashboard_config() -> VietnamDashboardConfig:
+    app_config = get_config()
+    return VietnamDashboardConfig(
+        daily_data_provider=getattr(app_config, "vn_daily_data_provider", VN_PROVIDER_SSI),
+        chart_data_provider=getattr(app_config, "vn_chart_data_provider", VN_PROVIDER_SSI),
+        daily_stock_price_provider=getattr(app_config, "vn_daily_stock_price_provider", VN_PROVIDER_SSI),
+        index_data_provider=getattr(app_config, "vn_index_data_provider", VN_PROVIDER_SSI),
+        provider_comparison_enabled=getattr(app_config, "vn_provider_comparison_enabled", False),
+    )
 
 
 def _safe_float(value: Any) -> Optional[float]:
@@ -1174,41 +1199,292 @@ def filter_chart_points_by_range(points: List[Dict[str, Any]], range_label: str)
 
 
 class VietnamMarketService:
-    def __init__(self, manager: Optional[DataFetcherManager] = None, config: Optional[VietnamDashboardConfig] = None):
+    def __init__(
+        self,
+        manager: Optional[DataFetcherManager] = None,
+        config: Optional[VietnamDashboardConfig] = None,
+        ssi_fetcher: Optional[SsiFastConnectFetcher] = None,
+    ):
         self.manager = manager or DataFetcherManager()
-        self.config = config or VietnamDashboardConfig()
+        self.config = config or _default_dashboard_config()
+        self._ssi_fetcher = ssi_fetcher
+
+    def _get_ssi_fetcher(self) -> SsiFastConnectFetcher:
+        if self._ssi_fetcher is None:
+            self._ssi_fetcher = SsiFastConnectFetcher()
+        return self._ssi_fetcher
+
+    @staticmethod
+    def _provider_label(provider: str) -> str:
+        return VN_SOURCE_SSI if provider == VN_PROVIDER_SSI else VN_SOURCE_MOZYFIN
+
+    @staticmethod
+    def _safe_provider_reason(payload: Any, fallback: str = "SSI provider unavailable") -> str:
+        if not isinstance(payload, dict):
+            return fallback
+        reason = str(payload.get("reason") or "")
+        if reason in {
+            "SSI FastConnect disabled",
+            "SSI FastConnect credentials missing",
+            "SSI FastConnect request failed",
+        }:
+            return reason
+        return fallback
+
+    @staticmethod
+    def _ssi_ohlcv_dataframe(symbol: str, rows: List[Dict[str, Any]]) -> pd.DataFrame:
+        records: List[Dict[str, Any]] = []
+        exchange = get_vn_exchange(symbol)
+        for row in rows:
+            date_value = pd.to_datetime(row.get("date"), errors="coerce")
+            if pd.isna(date_value):
+                continue
+            records.append(
+                {
+                    "date": date_value,
+                    "open": _safe_float(row.get("open")),
+                    "high": _safe_float(row.get("high")),
+                    "low": _safe_float(row.get("low")),
+                    "close": _safe_float(row.get("close")),
+                    "volume": _safe_float(row.get("volume")),
+                    "amount": _safe_float(row.get("value")),
+                    "exchange": exchange,
+                    "market_index": "VNINDEX.VN",
+                    "price_adjustment_status": "unknown",
+                }
+            )
+        if not records:
+            return pd.DataFrame()
+        return pd.DataFrame(records).sort_values("date").reset_index(drop=True)
+
+    def _load_ssi_daily_ohlcv(self, symbol: str, limit: int) -> Tuple[pd.DataFrame, str]:
+        payload = self._get_ssi_fetcher().get_daily_ohlcv(symbol, limit=limit)
+        if payload.get("status") != "ok":
+            raise RuntimeError(self._safe_provider_reason(payload))
+        rows = payload.get("rows") or []
+        df = self._ssi_ohlcv_dataframe(symbol, rows)
+        if df.empty:
+            raise RuntimeError("SSI DailyOhlc returned no rows")
+        return df, VN_SOURCE_SSI
+
+    def _load_mozyfin_daily_ohlcv(self, symbol: str, days: int) -> Tuple[pd.DataFrame, str]:
+        return self.manager.get_daily_data(normalize_vn_symbol(symbol), days=days)
+
+    def _daily_ohlcv_cache_key(self, symbol: str, provider: str, *, limit: int, days: int) -> Tuple[Any, ...]:
+        params: Dict[str, Any] = {"timeframe": "1d", "limit": limit, "days": days}
+        if provider == VN_PROVIDER_SSI:
+            params["provider"] = VN_PROVIDER_SSI
+        return _cache_key("ohlcv", symbol, **params)
+
+    def _build_daily_ohlcv_loader(
+        self,
+        symbol: str,
+        provider: str,
+        *,
+        limit: int,
+        days: int,
+    ) -> Callable[[], Tuple[pd.DataFrame, str, Dict[str, Any]]]:
+        primary_source = self._provider_label(provider)
+
+        def load() -> Tuple[pd.DataFrame, str, Dict[str, Any]]:
+            if provider == VN_PROVIDER_SSI:
+                try:
+                    df, source = self._load_ssi_daily_ohlcv(symbol, limit)
+                    return df, source, {
+                        "status": "ok",
+                        "primary_source": primary_source,
+                        "actual_source": VN_SOURCE_SSI,
+                        "fallback_used": False,
+                        "fallback_reason": None,
+                        "unavailable_reason": None,
+                    }
+                except Exception:
+                    return pd.DataFrame(), VN_SOURCE_SSI, {
+                        "status": "unavailable",
+                        "primary_source": primary_source,
+                        "actual_source": VN_SOURCE_SSI,
+                        "fallback_used": False,
+                        "fallback_reason": None,
+                        "unavailable_reason": SSI_UNAVAILABLE_REASON,
+                    }
+
+            df, source = self._load_mozyfin_daily_ohlcv(symbol, days)
+            return df, source, {
+                "status": "ok",
+                "primary_source": VN_SOURCE_MOZYFIN,
+                "actual_source": VN_SOURCE_MOZYFIN,
+                "fallback_used": False,
+                "fallback_reason": None,
+                "unavailable_reason": None,
+            }
+
+        return load
+
+    def _unpack_daily_ohlcv_value(
+        self,
+        value: Any,
+        provider: str,
+    ) -> Tuple[pd.DataFrame, str, Dict[str, Any]]:
+        if isinstance(value, tuple) and len(value) >= 3:
+            return value[0], value[1], dict(value[2] or {})
+        df, source = value
+        actual_source = VN_SOURCE_SSI if str(source).upper() == VN_SOURCE_SSI else VN_SOURCE_MOZYFIN
+        return df, source, {
+            "status": "ok",
+            "primary_source": self._provider_label(provider),
+            "actual_source": actual_source,
+            "fallback_used": False,
+            "fallback_reason": None,
+            "unavailable_reason": None,
+        }
+
+    def _latest_ssi_daily_stock_price(self, symbol: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+        if self.config.daily_stock_price_provider != VN_PROVIDER_SSI:
+            return None, None
+        to_date = datetime.now(VN_TIMEZONE).date()
+        from_date = to_date - timedelta(days=28)
+        payload = self._get_ssi_fetcher().get_daily_stock_price(
+            symbol,
+            market=get_vn_exchange(symbol),
+            from_date=from_date.isoformat(),
+            to_date=to_date.isoformat(),
+            limit=260,
+        )
+        if payload.get("status") != "ok":
+            return None, self._safe_provider_reason(payload, SSI_UNAVAILABLE_REASON)
+        rows = payload.get("rows") or []
+        if not rows:
+            return None, SSI_UNAVAILABLE_REASON
+        return rows[-1], None
+
+    def _load_mozyfin_news(
+        self,
+        symbol: str,
+        fetcher: Any,
+        force_refresh: bool,
+    ) -> Tuple[List[Dict[str, Any]], str, Optional[str], Optional[str], Optional[str]]:
+        if not fetcher or not hasattr(fetcher, "get_news"):
+            return [], "missing", None, None, None
+        try:
+            news_key = _cache_key("news", symbol, limit=self.config.news_limit)
+            news_result = _read_cache(
+                news_key,
+                "news",
+                lambda: fetcher.get_news(symbol, self.config.news_limit),
+                force_refresh=force_refresh,
+            )
+            return (
+                news_result["value"],
+                news_result["status"],
+                _iso(news_result["entry"].fetched_at),
+                _iso(news_result["entry"].expires_at),
+                news_result["error"],
+            )
+        except Exception as exc:
+            logger.debug("News unavailable for %s: %s", symbol, exc)
+            return [], "error", None, None, str(exc)
+
+    @staticmethod
+    def _apply_ssi_daily_stock_price_enrichment(
+        symbol: str,
+        latest_price_row: Dict[str, Any],
+        limit_state: Dict[str, Any],
+        foreign: Dict[str, Any],
+        foreign_history: List[Dict[str, Any]],
+    ) -> Tuple[Dict[str, Any], Dict[str, Any], List[Dict[str, Any]]]:
+        enriched_limit = dict(limit_state)
+        for source_key, target_key in (
+            ("reference_price", "reference_price"),
+            ("ceiling_price", "ceiling_price"),
+            ("floor_price", "floor_price"),
+        ):
+            value = _safe_float(latest_price_row.get(source_key))
+            if value is not None:
+                enriched_limit[target_key] = value
+        enriched_limit["reference_source"] = SSI_DAILY_STOCK_PRICE_SOURCE
+        enriched_limit["source"] = SSI_DAILY_STOCK_PRICE_SOURCE
+        enriched_limit["status"] = "ok"
+        close = _safe_float(latest_price_row.get("close"))
+        ceiling = _safe_float(enriched_limit.get("ceiling_price"))
+        floor = _safe_float(enriched_limit.get("floor_price"))
+        reference = _safe_float(enriched_limit.get("reference_price"))
+        if close is not None and reference and ceiling is not None and floor is not None:
+            distance = min(abs(ceiling - close), abs(close - floor)) / reference * 100
+            enriched_limit["distance_to_limit_pct"] = round(distance, 2)
+            enriched_limit["near_limit"] = distance <= 0.5
+
+        enriched_foreign = dict(foreign)
+        enriched_foreign.update(
+            {
+                "buy": _safe_float(latest_price_row.get("foreign_buy_volume")),
+                "sell": _safe_float(latest_price_row.get("foreign_sell_volume")),
+                "net": _safe_float(latest_price_row.get("foreign_net_volume")),
+                "date": latest_price_row.get("date"),
+                "net_unit": "shares",
+                "buy_raw_field": "foreign_buy_volume",
+                "sell_raw_field": "foreign_sell_volume",
+                "latest_price": None,
+                "price_raw_field": None,
+                "price_date": None,
+            }
+        )
+        history_row = {
+            "buy": enriched_foreign.get("buy"),
+            "sell": enriched_foreign.get("sell"),
+            "net": enriched_foreign.get("net"),
+            "date": enriched_foreign.get("date"),
+            "net_unit": "shares",
+            "buy_raw_field": "foreign_buy_volume",
+            "sell_raw_field": "foreign_sell_volume",
+        }
+        enriched_history = [history_row] if history_row.get("date") else foreign_history
+        enriched_limit["ssi_symbol"] = symbol
+        return enriched_limit, enriched_foreign, enriched_history
 
     def build_chart(self, symbol: str, range_label: str = "6M") -> Dict[str, Any]:
-        """Build selected-symbol daily OHLCV chart data from Mozyfin only."""
+        """Build selected-symbol daily OHLCV chart data from the configured daily provider."""
         normalized_symbol = normalize_vn_symbol(symbol)
         ticker = normalized_symbol.replace(".VN", "")
         effective_range = range_label.upper()
         if effective_range not in VN_CHART_RANGES:
             effective_range = "6M"
-        ohlcv_key = _cache_key(
-            "ohlcv",
+        provider = self.config.chart_data_provider
+        ohlcv_key = self._daily_ohlcv_cache_key(
             ticker,
-            timeframe="1d",
+            provider,
             limit=VN_CHART_POINT_LIMIT,
             days=VN_CHART_HISTORY_DAYS,
         )
         ohlcv_result = _read_cache(
             ohlcv_key,
             "ohlcv",
-            lambda: self.manager.get_daily_data(normalized_symbol, days=VN_CHART_HISTORY_DAYS),
+            self._build_daily_ohlcv_loader(
+                ticker,
+                provider,
+                limit=VN_CHART_POINT_LIMIT,
+                days=VN_CHART_HISTORY_DAYS,
+            ),
             force_refresh=False,
         )
-        df, _source = ohlcv_result["value"]
+        df, _source, provider_meta = self._unpack_daily_ohlcv_value(ohlcv_result["value"], provider)
         all_points = normalize_daily_chart_data(df, VN_CHART_POINT_LIMIT)
         points = filter_chart_points_by_range(all_points, effective_range)
         latest_date = points[-1].get("date") if points else None
+        status = provider_meta.get("status") or ("ok" if points else "unavailable")
         return {
             "symbol": ticker,
-            "source": "Mozyfin",
+            "status": status,
+            "reason": provider_meta.get("unavailable_reason") if status == "unavailable" else None,
+            "source": provider_meta.get("actual_source") or provider_meta.get("primary_source") or VN_SOURCE_SSI,
+            "primary_source": provider_meta.get("primary_source"),
+            "actual_source": provider_meta.get("actual_source"),
+            "fallback_used": False,
+            "fallback_reason": None,
             "timeframe": "1d",
             "range": effective_range,
             "latest_date": latest_date,
             "points": points,
+            "candles": points,
         }
 
     def build_watchlist(
@@ -1353,6 +1629,31 @@ class VietnamMarketService:
             ),
         }
 
+    def build_daily_index(
+        self,
+        index_code: str = "VNINDEX",
+        limit: int = 260,
+        from_date: Optional[str] = None,
+        to_date: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Return strict SSI daily index rows for future market breadth cards."""
+        normalized_index = str(index_code or "VNINDEX").strip().upper()
+        payload = self._get_ssi_fetcher().get_daily_index(
+            normalized_index,
+            from_date=from_date,
+            to_date=to_date,
+            limit=limit,
+        )
+        if payload.get("status") != "ok":
+            return {
+                "status": "unavailable",
+                "source": VN_SOURCE_SSI,
+                "reason": self._safe_provider_reason(payload),
+                "index_code": normalized_index,
+                "rows": [],
+            }
+        return payload
+
     def _build_cache_metadata(self, rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         hit_count = 0
         miss_count = 0
@@ -1390,7 +1691,10 @@ class VietnamMarketService:
         ohlcv_entry = _get_cache_entry(ohlcv_key)
         if ohlcv_entry is None:
             return None
-        df, source = ohlcv_entry.value
+        df, source, _provider_meta = self._unpack_daily_ohlcv_value(
+            ohlcv_entry.value,
+            self.config.daily_data_provider,
+        )
         if df is None or df.empty:
             return None
         df = df.sort_values("date").reset_index(drop=True)
@@ -1454,8 +1758,15 @@ class VietnamMarketService:
             for row in rows
             if row.get("validation", {}).get("trading_date") or row.get("date")
         ]
+        actual_sources = {row.get("actual_source") for row in rows if row.get("actual_source")}
+        primary_sources = {row.get("primary_source") for row in rows if row.get("primary_source")}
+        source_label = _source_label(fixture_mode)
+        if self.config.daily_data_provider == VN_PROVIDER_SSI:
+            source_label = "SSI live" if VN_SOURCE_SSI in actual_sources else "SSI unavailable"
+        elif VN_SOURCE_SSI in actual_sources or VN_SOURCE_SSI in primary_sources:
+            source_label = "SSI live" if VN_SOURCE_SSI in actual_sources else "SSI unavailable"
         return {
-            "source": _source_label(fixture_mode),
+            "source": source_label,
             "fixture_mode": fixture_mode,
             "symbols_loaded": sum(1 for row in rows if not row.get("error")),
             "last_trading_date": max(valid_dates) if valid_dates else None,
@@ -1473,14 +1784,25 @@ class VietnamMarketService:
         intraday_timeframe: str = "1h",
         intraday_limit: int = 8,
     ) -> Dict[str, Any]:
-        ohlcv_key = _cache_key("ohlcv", symbol, timeframe="1d", limit=260, days=self.config.history_days)
+        daily_provider = self.config.daily_data_provider
+        ohlcv_key = self._daily_ohlcv_cache_key(
+            symbol,
+            daily_provider,
+            limit=260,
+            days=self.config.history_days,
+        )
         ohlcv_result = _read_cache(
             ohlcv_key,
             "ohlcv",
-            lambda: self.manager.get_daily_data(normalize_vn_symbol(symbol), days=self.config.history_days),
+            self._build_daily_ohlcv_loader(
+                symbol,
+                daily_provider,
+                limit=260,
+                days=self.config.history_days,
+            ),
             force_refresh=force_refresh,
         )
-        df, source = ohlcv_result["value"]
+        df, source, provider_meta = self._unpack_daily_ohlcv_value(ohlcv_result["value"], daily_provider)
         cache_status = {
             "ohlcv_cache": ohlcv_result["status"],
             "quote_cache": "missing",
@@ -1502,24 +1824,43 @@ class VietnamMarketService:
         cache_errors = {}
         if ohlcv_result["error"]:
             cache_errors["ohlcv"] = ohlcv_result["error"]
+        fetcher = self.manager._get_fetcher_by_name("MozyfinFetcher")  # Mozyfin remains news-only in strict SSI mode.
         if df is None or df.empty:
+            news, news_cache_status, news_fetched_at, news_next_refresh_at, news_error = self._load_mozyfin_news(
+                symbol,
+                fetcher,
+                force_refresh,
+            )
+            cache_status["news_cache"] = news_cache_status
+            cache_last_fetched_at["news"] = news_fetched_at
+            cache_next_refresh_at["news"] = news_next_refresh_at
+            if news_error:
+                cache_errors["news"] = news_error
+            unavailable_reason = provider_meta.get("unavailable_reason") or "No OHLCV rows were returned."
             return {
                 "ticker": symbol,
-                "error": "no_data",
+                "status": "unavailable",
+                "reason": unavailable_reason,
+                "error": "ssi_unavailable" if provider_meta.get("primary_source") == VN_SOURCE_SSI else "no_data",
                 "source": source,
+                "primary_source": provider_meta.get("primary_source"),
+                "actual_source": provider_meta.get("actual_source"),
+                "fallback_used": False,
+                "fallback_reason": None,
                 "rows_loaded": 0,
                 "validation": {
                     "valid": False,
                     "trading_date": None,
                     "missing_fields": ["date", "close", "volume", "foreign_net"],
-                    "errors": ["No OHLCV rows were returned."],
+                    "errors": [unavailable_reason],
                 },
                 "indicators": {},
                 "status_labels": ["Watch"],
                 "status_details": [
                     _status_detail("Watch", "info", "No OHLCV rows were returned for rule evaluation.", {})
                 ],
-                "warnings": ["No OHLCV rows were returned."],
+                "warnings": [unavailable_reason],
+                "news": news,
                 "intraday_timeframe": intraday_timeframe,
                 "intraday_source": "Mozyfin OHLCV",
                 "intraday_is_realtime_quote": False,
@@ -1531,6 +1872,7 @@ class VietnamMarketService:
                 "cache_status": cache_status,
                 "cache_last_fetched_at": cache_last_fetched_at,
                 "cache_next_refresh_at": cache_next_refresh_at,
+                "cache_errors": cache_errors,
             }
 
         df = df.sort_values("date").reset_index(drop=True)
@@ -1546,7 +1888,6 @@ class VietnamMarketService:
         limit_state = calculate_price_limit_state(df, symbol)
         exchange = str(_last_value(df, "exchange") or get_vn_exchange(symbol))
         ex_dividend_warning = bool(_last_value(df, "ex_dividend_warning"))
-        fetcher = self.manager._get_fetcher_by_name("MozyfinFetcher")  # dashboard-only helper path
         ohlcv_date = _valid_date_string(latest.get("date"))
         price_adjustment_status = str(_last_value(df, "price_adjustment_status") or "unknown")
         foreign = {
@@ -1562,7 +1903,37 @@ class VietnamMarketService:
             "price_date": None,
         }
         foreign_history: List[Dict[str, Any]] = []
-        if fetcher and hasattr(fetcher, "get_foreign_trading"):
+        strict_daily_stock_price = self.config.daily_stock_price_provider == VN_PROVIDER_SSI
+        reference_source = SSI_DAILY_STOCK_PRICE_SOURCE if strict_daily_stock_price else "exchange_limit_estimate"
+        foreign_flow_source = SSI_DAILY_STOCK_PRICE_SOURCE if strict_daily_stock_price else "Mozyfin daily"
+        ssi_daily_stock_price: Optional[Dict[str, Any]] = None
+        ssi_daily_stock_price_reason: Optional[str] = None
+        if strict_daily_stock_price:
+            limit_state = {
+                "limit_pct": get_vn_price_limit_pct(symbol),
+                "reference_price": None,
+                "ceiling_price": None,
+                "floor_price": None,
+                "distance_to_limit_pct": None,
+                "near_limit": False,
+                "source": SSI_DAILY_STOCK_PRICE_SOURCE,
+                "status": "unavailable",
+            }
+            foreign = {
+                "buy": None,
+                "sell": None,
+                "net": None,
+                "date": None,
+                "net_unit": "shares",
+                "buy_raw_field": None,
+                "sell_raw_field": None,
+                "latest_price": None,
+                "price_raw_field": None,
+                "price_date": None,
+                "source": SSI_DAILY_STOCK_PRICE_SOURCE,
+                "status": "unavailable",
+            }
+        elif fetcher and hasattr(fetcher, "get_foreign_trading"):
             try:
                 quote_key = _cache_key("quote", symbol, limit=FOREIGN_HISTORY_LIMIT)
                 quote_result = _read_cache(
@@ -1577,6 +1948,8 @@ class VietnamMarketService:
                 )
                 foreign_history = quote_result["value"] or []
                 foreign = _foreign_history_latest(foreign_history) or foreign
+                if foreign_history:
+                    foreign_flow_source = "Mozyfin quote"
                 cache_status["quote_cache"] = quote_result["status"]
                 cache_last_fetched_at["quote"] = _iso(quote_result["entry"].fetched_at)
                 cache_next_refresh_at["quote"] = _iso(quote_result["entry"].expires_at)
@@ -1586,6 +1959,34 @@ class VietnamMarketService:
                 logger.debug("Foreign trading unavailable for %s: %s", symbol, exc)
                 cache_status["quote_cache"] = "error"
                 cache_errors["quote"] = str(exc)
+        ssi_daily_stock_price, ssi_daily_stock_price_reason = self._latest_ssi_daily_stock_price(symbol)
+        if ssi_daily_stock_price:
+            ssi_daily_stock_price = dict(ssi_daily_stock_price)
+            ssi_daily_stock_price.setdefault("status", "ok")
+            ssi_daily_stock_price.setdefault("source", VN_SOURCE_SSI)
+            limit_state, foreign, foreign_history = self._apply_ssi_daily_stock_price_enrichment(
+                symbol,
+                ssi_daily_stock_price,
+                limit_state,
+                foreign,
+                foreign_history,
+            )
+            reference_source = SSI_DAILY_STOCK_PRICE_SOURCE
+            foreign_flow_source = SSI_DAILY_STOCK_PRICE_SOURCE
+            limit_state["status"] = "ok"
+            foreign["status"] = "ok"
+            foreign["source"] = SSI_DAILY_STOCK_PRICE_SOURCE
+        elif strict_daily_stock_price:
+            ssi_daily_stock_price = {
+                "status": "unavailable",
+                "source": SSI_DAILY_STOCK_PRICE_SOURCE,
+                "reason": ssi_daily_stock_price_reason or SSI_UNAVAILABLE_REASON,
+            }
+        ssi_daily_stock_price_available = (
+            bool(ssi_daily_stock_price)
+            and ssi_daily_stock_price.get("status") != "unavailable"
+            and bool(ssi_daily_stock_price.get("date"))
+        )
         foreign_net = _safe_float(foreign.get("net"))
         quote_date = _valid_date_string(foreign.get("date"))
         foreign_net_date = quote_date
@@ -1608,6 +2009,9 @@ class VietnamMarketService:
             latest_price_raw_field = "close" if close is not None else None
             latest_price_date = ohlcv_date
             price_source_warning = "Quote does not provide a reliable latest price field; latest price uses OHLCV close."
+        if latest_price_source == "ohlcv" and provider_meta.get("actual_source") == VN_SOURCE_SSI:
+            latest_price_source = VN_SOURCE_SSI
+            price_source_warning = "Quote does not provide a reliable latest price field; latest price uses SSI DailyOhlc close."
         corporate_action = build_corporate_action_reference(
             previous_close=prev_close,
             current_price=latest_price,
@@ -1685,9 +2089,9 @@ class VietnamMarketService:
             warnings.append(STALE_CACHE_WARNING)
         warnings.extend(validation["errors"])
         warnings.extend(f"Missing {field}; dashboard value shown as '-'." for field in validation["missing_fields"])
-        if foreign_date_match == "mismatched":
+        if foreign_date_match == "mismatched" and not ssi_daily_stock_price_available:
             warnings.append("Foreign net date does not match OHLCV date.")
-        if foreign_date_match != "matched":
+        if foreign_date_match != "matched" and not ssi_daily_stock_price_available:
             warnings.append("Foreign net is not confirmed as same-day flow.")
         if price_source_warning:
             warnings.append(price_source_warning)
@@ -1702,7 +2106,10 @@ class VietnamMarketService:
         if limit_state["near_limit"]:
             warnings.append("Latest close is within 0.5% of the exchange daily price limit band.")
         if foreign_net is None:
-            warnings.append("Foreign trading signal is unavailable from the current Mozy output.")
+            if strict_daily_stock_price:
+                warnings.append("Foreign trading signal is unavailable from SSI DailyStockPrice.")
+            else:
+                warnings.append("Foreign trading signal is unavailable from the current Mozy output.")
         if include_intraday:
             warnings.append(VN_INTRADAY_WARNING)
             if cache_status.get("intraday_cache") == "error":
@@ -1710,10 +2117,18 @@ class VietnamMarketService:
 
         return {
             "ticker": symbol,
+            "status": "ok",
+            "reason": None,
             "entity": normalize_vn_symbol(symbol),
             "exchange": exchange,
             "market_index": _last_value(df, "market_index"),
             "source": source,
+            "primary_source": provider_meta.get("primary_source"),
+            "actual_source": provider_meta.get("actual_source"),
+            "fallback_used": False,
+            "fallback_reason": None,
+            "reference_source": reference_source,
+            "foreign_flow_source": foreign_flow_source,
             "rows_loaded": len(df),
             "date": latest.get("date").strftime("%Y-%m-%d") if hasattr(latest.get("date"), "strftime") else str(latest.get("date")),
             "latest_price": latest_price,
@@ -1724,6 +2139,7 @@ class VietnamMarketService:
             "quote_price_raw_field": str(quote_price_raw_field) if quote_price_raw_field else None,
             "price_source_warning": price_source_warning,
             "ohlcv_close": close,
+            "daily_close": close,
             "price_date": latest_price_date,
             "ohlcv_date": ohlcv_date,
             "quote_date": quote_date,
@@ -1744,10 +2160,26 @@ class VietnamMarketService:
             "amount": _safe_float(latest.get("amount")),
             "liquidity": liquidity,
             "price_limit": limit_state,
+            "daily_stock_price": ssi_daily_stock_price or {},
+            "ssi_reference_price": _safe_float((ssi_daily_stock_price or {}).get("reference_price")),
+            "ssi_ceiling_price": _safe_float((ssi_daily_stock_price or {}).get("ceiling_price")),
+            "ssi_floor_price": _safe_float((ssi_daily_stock_price or {}).get("floor_price")),
+            "ssi_adjusted_close": _safe_float((ssi_daily_stock_price or {}).get("adjusted_close")),
+            "ssi_foreign_net_volume": _safe_float((ssi_daily_stock_price or {}).get("foreign_net_volume")),
+            "ssi_foreign_net_value": _safe_float((ssi_daily_stock_price or {}).get("foreign_net_value")),
+            "ssi_matched_volume": _safe_float((ssi_daily_stock_price or {}).get("matched_volume")),
+            "ssi_matched_value": _safe_float((ssi_daily_stock_price or {}).get("matched_value")),
+            "ssi_put_through_volume": _safe_float((ssi_daily_stock_price or {}).get("put_through_volume")),
+            "ssi_put_through_value": _safe_float((ssi_daily_stock_price or {}).get("put_through_value")),
             "foreign": {
                 "buy": _safe_float(foreign.get("buy")),
                 "sell": _safe_float(foreign.get("sell")),
                 "net": foreign_net,
+                "buy_value": _safe_float((ssi_daily_stock_price or {}).get("foreign_buy_value")),
+                "sell_value": _safe_float((ssi_daily_stock_price or {}).get("foreign_sell_value")),
+                "net_value": _safe_float((ssi_daily_stock_price or {}).get("foreign_net_value")),
+                "source": foreign_flow_source,
+                "status": foreign.get("status"),
                 "net_unit": foreign_net_unit,
                 "date": foreign_net_date,
                 "date_match": foreign_date_match,

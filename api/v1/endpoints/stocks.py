@@ -431,12 +431,12 @@ def get_vietnam_watchlist_health(
     "/vn/watchlist",
     response_model=VietnamWatchlistResponse,
     summary="Vietnam watchlist dashboard",
-    description="Return Vietnam watchlist monitoring data from mozyfin-cli.",
+    description="Return Vietnam watchlist monitoring data from the configured SSI-backed daily provider, with Mozyfin news and KBS realtime data kept separate.",
 )
 def get_vietnam_watchlist(
     tickers: Optional[str] = Query(None, description="Comma-separated VN tickers. Defaults to FPT,VPB,MSB,SCS,ACV,ACB"),
-    force_refresh: bool = Query(False, description="Bypass VN in-memory cache and refresh Mozyfin data"),
-    include_intraday: bool = Query(True, description="Include Mozyfin OHLCV intraday candle pulse data"),
+    force_refresh: bool = Query(False, description="Bypass VN in-memory cache and refresh configured VN provider data"),
+    include_intraday: bool = Query(True, description="Include current intraday candle pulse data when available"),
     intraday_timeframe: str = Query("1h", description="Intraday OHLCV timeframe. Defaults to 1h"),
     intraday_limit: int = Query(8, ge=1, le=48, description="Number of latest intraday candles to load"),
 ) -> VietnamWatchlistResponse:
@@ -462,7 +462,7 @@ def get_vietnam_watchlist(
     "/vn/chart",
     response_model=VietnamChartResponse,
     summary="Vietnam selected ticker daily chart",
-    description="Return selected-symbol daily OHLCV chart data from Mozyfin only.",
+    description="Return selected-symbol daily OHLCV chart data from the configured Vietnam chart provider.",
 )
 def get_vietnam_chart(
     symbol: str = Query(..., description="VN ticker symbol, for example FPT or FPT.VN"),
@@ -470,6 +470,8 @@ def get_vietnam_chart(
 ) -> VietnamChartResponse:
     try:
         payload = VietnamMarketService().build_chart(symbol, range_label=range_label)
+        if "candles" not in payload:
+            payload["candles"] = payload.get("points", [])
         return VietnamChartResponse(**payload)
     except Exception as e:
         logger.error("Vietnam chart failed: %s", e, exc_info=True)

@@ -148,6 +148,23 @@ def parse_env_bool(value: Optional[str], default: bool = False) -> bool:
     return normalized not in _FALSEY_ENV_VALUES
 
 
+def parse_env_choice(value: Optional[str], allowed: set[str], default: str, *, field_name: str) -> str:
+    """Parse a constrained string env value with warning + fallback semantics."""
+    if value is None or not str(value).strip():
+        return default
+    normalized = str(value).strip().lower()
+    if normalized not in allowed:
+        logger.warning(
+            "%s=%r is not one of %s; falling back to %s",
+            field_name,
+            value,
+            sorted(allowed),
+            default,
+        )
+        return default
+    return normalized
+
+
 def parse_env_int(
     value: Optional[str],
     default: int,
@@ -633,6 +650,18 @@ class Config:
     longbridge_oauth_client_id: Optional[str] = None
     stock_index_remote_update_enabled: bool = True
     data_cache_dir: Optional[str] = None
+    ssi_fastconnect_enabled: bool = False
+    ssi_fastconnect_base_url: str = "https://fc-data.ssi.com.vn/api/v2/Market"
+    ssi_fastconnect_consumer_id: Optional[str] = None
+    ssi_fastconnect_consumer_secret: Optional[str] = None
+    ssi_fastconnect_timeout_seconds: int = 10
+    ssi_fastconnect_cache_ttl_seconds: int = 300
+    ssi_fastconnect_token_ttl_seconds: int = 900
+    vn_daily_data_provider: str = "ssi"
+    vn_chart_data_provider: str = "ssi"
+    vn_daily_stock_price_provider: str = "ssi"
+    vn_index_data_provider: str = "ssi"
+    vn_provider_comparison_enabled: bool = False
 
     # === AlphaSift optional stock screening integration ===
     alphasift_enabled: bool = False
@@ -1808,6 +1837,59 @@ class Config:
                 if os.getenv('ALPHASIFT_INSTALL_SPEC') is None
                 else os.getenv('ALPHASIFT_INSTALL_SPEC', '').strip()
             ),
+            ssi_fastconnect_enabled=parse_env_bool(os.getenv('SSI_FASTCONNECT_ENABLED'), default=False),
+            ssi_fastconnect_base_url=(
+                os.getenv('SSI_FASTCONNECT_BASE_URL')
+                or 'https://fc-data.ssi.com.vn/api/v2/Market'
+            ).strip().rstrip('/'),
+            ssi_fastconnect_consumer_id=(os.getenv('SSI_FASTCONNECT_CONSUMER_ID') or '').strip() or None,
+            ssi_fastconnect_consumer_secret=(os.getenv('SSI_FASTCONNECT_CONSUMER_SECRET') or '').strip() or None,
+            ssi_fastconnect_timeout_seconds=parse_env_int(
+                os.getenv('SSI_FASTCONNECT_TIMEOUT_SECONDS'),
+                10,
+                field_name='SSI_FASTCONNECT_TIMEOUT_SECONDS',
+                minimum=1,
+            ),
+            ssi_fastconnect_cache_ttl_seconds=parse_env_int(
+                os.getenv('SSI_FASTCONNECT_CACHE_TTL_SECONDS'),
+                300,
+                field_name='SSI_FASTCONNECT_CACHE_TTL_SECONDS',
+                minimum=0,
+            ),
+            ssi_fastconnect_token_ttl_seconds=parse_env_int(
+                os.getenv('SSI_FASTCONNECT_TOKEN_TTL_SECONDS'),
+                900,
+                field_name='SSI_FASTCONNECT_TOKEN_TTL_SECONDS',
+                minimum=1,
+            ),
+            vn_daily_data_provider=parse_env_choice(
+                os.getenv('VN_DAILY_DATA_PROVIDER'),
+                {'ssi'},
+                'ssi',
+                field_name='VN_DAILY_DATA_PROVIDER',
+            ),
+            vn_chart_data_provider=parse_env_choice(
+                os.getenv('VN_CHART_DATA_PROVIDER'),
+                {'ssi'},
+                'ssi',
+                field_name='VN_CHART_DATA_PROVIDER',
+            ),
+            vn_daily_stock_price_provider=parse_env_choice(
+                os.getenv('VN_DAILY_STOCK_PRICE_PROVIDER'),
+                {'ssi'},
+                'ssi',
+                field_name='VN_DAILY_STOCK_PRICE_PROVIDER',
+            ),
+            vn_index_data_provider=parse_env_choice(
+                os.getenv('VN_INDEX_DATA_PROVIDER'),
+                {'ssi'},
+                'ssi',
+                field_name='VN_INDEX_DATA_PROVIDER',
+            ),
+            vn_provider_comparison_enabled=parse_env_bool(
+                os.getenv('VN_PROVIDER_COMPARISON_ENABLED'),
+                default=False,
+            ),
         )
     
     @classmethod
@@ -2452,6 +2534,16 @@ class Config:
                 severity="info",
                 message="Tushare token is not configured; other data sources will be used.",
                 field="TUSHARE_TOKEN",
+            ))
+
+        if self.ssi_fastconnect_enabled and (
+            not self.ssi_fastconnect_consumer_id
+            or not self.ssi_fastconnect_consumer_secret
+        ):
+            issues.append(ConfigIssue(
+                severity="warning",
+                message="SSI FastConnect is enabled but credentials are incomplete; SSI FC Data calls will remain unavailable.",
+                field="SSI_FASTCONNECT_CONSUMER_ID",
             ))
 
         # --- LLM availability ---

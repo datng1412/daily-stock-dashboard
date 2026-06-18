@@ -12,7 +12,7 @@ Do not commit runtime secrets. Pass `MOZYFIN_API_KEY` through environment variab
 - The Vite frontend is built inside the Docker image and copied to `static/`.
 - FastAPI serves `static/index.html` and `/assets/*` through the existing web UI flow.
 - Live Vietnam data uses Mozyfin. Fixture mode is local testing only.
-- The image installs `vnstock==4.0.4` for optional KBS snapshot/trades endpoints. KBS data is separate from Mozyfin daily close and does not replace `latest_price`.
+- The image installs `vnstock==4.0.4` for optional KBS snapshot/trades endpoints. KBS data is separate from SSI daily close and does not replace `latest_price`.
 - KBS snapshot/trade tape endpoints were validated in Docker, but public deployment should still be reviewed against vnstock/KBS license and provider behavior.
 
 ## Local Docker Build

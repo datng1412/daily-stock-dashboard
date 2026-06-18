@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [documentation] Add a Vietnam SSI provider capability matrix and strict data-ownership decision rule.
+- [fix] Expose canonical SSI daily close/source metadata through the Vietnam watchlist API response.
+- [fix] Add tolerant SSI field mappings for DailyOhlc, DailyStockPrice, DailyIndex, and SecuritiesDetails optional fields.
+- [fix] Wire chunked SSI DailyStockPrice and SSI chart payloads through the VN dashboard API/UI, including explicit DailyStockPrice availability and stale foreign-history caveat suppression.
+- [fix] Add SSI 30-day window chunking for DailyStockPrice and DailyIndex while preserving strict SSI-only behavior for supported REST market data.
+- [fix] Add safe SSI FastConnect endpoint probe diagnostics for DailyStockPrice and DailyIndex zero-row responses.
+- [fix] Use explicit SSI FastConnect date, pagination, market, and indexID query parameters in provider and smoke checks.
+- [improvement] Surface SSI DailyStockPrice reference, ceiling/floor, foreign, matched, put-through, and adjusted-close fields in the Vietnam selected ticker detail.
+- [new feature] Made SSI FastConnect the strict source for supported Vietnam REST market data.
+- [fix] Removed Mozyfin fallback from SSI-owned OHLCV/chart/index/reference/foreign data paths.
+- [improvement] Kept Mozyfin for news and KBS for realtime snapshot/trade tape.
+- [new feature] Add a disabled-by-default SSI FastConnect FC Data provider foundation with AccessToken handling and normalized Securities, DailyOhlc, DailyStockPrice, and DailyIndex responses.
+- [test] Add mocked SSI FastConnect provider tests covering disabled, missing-credential, auth, mapping, and secret-safe failure paths.
+- [documentation] Document SSI FastConnect FC Data integration scope, security rules, configuration, and non-migration limits.
 - [documentation] Document the SSI/Mozyfin/KBS provider strategy for the Vietnam dashboard.
 - [documentation] Add SSI FastConnect integration phases and migration rules.
 - [improvement] Separate Vietnam watchlist data caveats from primary market scan labels and show caveats as compact secondary row context.

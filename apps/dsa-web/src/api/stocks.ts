@@ -14,12 +14,20 @@ export type ExtractFromImageResponse = {
 
 export type VietnamWatchItem = {
   ticker: string;
+  status?: 'ok' | 'unavailable' | string;
+  reason?: string | null;
   name?: string | null;
   companyName?: string | null;
   entity?: string | null;
   exchange?: string | null;
   marketIndex?: string | null;
   source?: string | null;
+  primarySource?: string | null;
+  actualSource?: string | null;
+  fallbackUsed?: boolean;
+  fallbackReason?: string | null;
+  referenceSource?: string | null;
+  foreignFlowSource?: string | null;
   rowsLoaded?: number | null;
   date?: string | null;
   latestPrice?: number | null;
@@ -30,6 +38,7 @@ export type VietnamWatchItem = {
   quotePriceRawField?: string | null;
   priceSourceWarning?: string | null;
   ohlcvClose?: number | null;
+  dailyClose?: number | null;
   priceDate?: string | null;
   ohlcvDate?: string | null;
   quoteDate?: string | null;
@@ -50,11 +59,26 @@ export type VietnamWatchItem = {
   liquidity: { avgVolume20D?: number | null; score?: number | null };
   priceLimit: {
     limitPct?: number | null;
+    referencePrice?: number | null;
     ceilingPrice?: number | null;
     floorPrice?: number | null;
     distanceToLimitPct?: number | null;
     nearLimit?: boolean;
+    source?: string | null;
+    status?: string | null;
+    referenceSource?: string | null;
   };
+  dailyStockPrice?: VietnamDailyStockPrice;
+  ssiReferencePrice?: number | null;
+  ssiCeilingPrice?: number | null;
+  ssiFloorPrice?: number | null;
+  ssiAdjustedClose?: number | null;
+  ssiForeignNetVolume?: number | null;
+  ssiForeignNetValue?: number | null;
+  ssiMatchedVolume?: number | null;
+  ssiMatchedValue?: number | null;
+  ssiPutThroughVolume?: number | null;
+  ssiPutThroughValue?: number | null;
   corporateAction?: {
     status?: 'none' | 'detected' | 'unavailable' | string | null;
     type?: 'cash_dividend' | 'stock_dividend' | 'rights' | 'unknown' | string | null;
@@ -67,7 +91,22 @@ export type VietnamWatchItem = {
     priceVsAdjustedReferencePct?: number | null;
     note?: string | null;
   };
-  foreign: { buy?: number | null; sell?: number | null; net?: number | null; signal?: string | null };
+  foreign: {
+    buy?: number | null;
+    sell?: number | null;
+    net?: number | null;
+    buyValue?: number | null;
+    sellValue?: number | null;
+    netValue?: number | null;
+    source?: string | null;
+    status?: string | null;
+    netUnit?: string | null;
+    date?: string | null;
+    dateMatch?: string | null;
+    buyRawField?: string | null;
+    sellRawField?: string | null;
+    signal?: string | null;
+  };
   foreignNetUnit?: string | null;
   foreignBuyRawField?: string | null;
   foreignSellRawField?: string | null;
@@ -161,6 +200,33 @@ export type VietnamWatchItem = {
   cacheNextRefreshAt: Record<string, string | null>;
   cacheErrors: Record<string, string>;
   error?: string | null;
+};
+
+export type VietnamDailyStockPrice = {
+  status?: 'ok' | 'unavailable' | string | null;
+  reason?: string | null;
+  date?: string | null;
+  referencePrice?: number | null;
+  ceilingPrice?: number | null;
+  floorPrice?: number | null;
+  open?: number | null;
+  high?: number | null;
+  low?: number | null;
+  close?: number | null;
+  adjustedClose?: number | null;
+  matchedVolume?: number | null;
+  matchedValue?: number | null;
+  putThroughVolume?: number | null;
+  putThroughValue?: number | null;
+  totalVolume?: number | null;
+  totalValue?: number | null;
+  foreignBuyVolume?: number | null;
+  foreignSellVolume?: number | null;
+  foreignNetVolume?: number | null;
+  foreignBuyValue?: number | null;
+  foreignSellValue?: number | null;
+  foreignNetValue?: number | null;
+  source?: string | null;
 };
 
 export type VietnamCacheMetadata = {
@@ -290,11 +356,18 @@ export type VietnamChartPoint = {
 
 export type VietnamChartResponse = {
   symbol: string;
+  status?: 'ok' | 'unavailable' | string;
+  reason?: string | null;
   source: string;
+  primarySource?: string | null;
+  actualSource?: string | null;
+  fallbackUsed?: boolean;
+  fallbackReason?: string | null;
   timeframe: string;
   range: '1M' | '3M' | '6M' | '1Y' | string;
   latestDate?: string | null;
   points: VietnamChartPoint[];
+  candles?: VietnamChartPoint[];
 };
 
 export type VietnamCorporateActionEvent = {

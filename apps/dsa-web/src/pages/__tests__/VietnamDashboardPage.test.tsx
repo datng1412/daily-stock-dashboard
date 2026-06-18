@@ -63,13 +63,20 @@ const makeChartData = () => Array.from({ length: 70 }, (_, index) => {
   };
 });
 
-const makeChartResponse = (symbol = 'FPT', range = '6M', points = makeChartData()): VietnamChartResponse => ({
+const makeChartResponse = (
+  symbol = 'FPT',
+  range = '6M',
+  points = makeChartData(),
+  overrides: Partial<VietnamChartResponse> = {},
+): VietnamChartResponse => ({
   symbol,
-  source: 'Mozyfin',
+  status: 'ok',
+  source: 'SSI',
   timeframe: '1d',
   range,
   latestDate: points[points.length - 1]?.date ?? null,
   points,
+  ...overrides,
 });
 
 const makeItem = (ticker: string): VietnamWatchItem => ({
@@ -78,17 +85,20 @@ const makeItem = (ticker: string): VietnamWatchItem => ({
   entity: `${ticker}.VN`,
   exchange: 'HOSE',
   marketIndex: 'VNINDEX.VN',
-  source: 'mozyfin-cli',
+  source: 'SSI',
+  primarySource: 'SSI',
+  actualSource: 'SSI',
   rowsLoaded: 3,
   date: '2026-06-10',
   latestPrice: 100,
-  latestPriceSource: 'ohlcv',
+  latestPriceSource: 'SSI',
   latestPriceRawField: 'close',
   latestPriceDate: '2026-06-10',
   quotePriceDate: null,
   quotePriceRawField: null,
   priceSourceWarning: null,
   ohlcvClose: 100,
+  dailyClose: 100,
   priceDate: '2026-06-10',
   ohlcvDate: '2026-06-10',
   quoteDate: '2026-06-10',
@@ -109,10 +119,38 @@ const makeItem = (ticker: string): VietnamWatchItem => ({
   liquidity: { avgVolume20D: 1000, score: 80 },
   priceLimit: {
     limitPct: 7,
+    referencePrice: 99,
     ceilingPrice: 106,
     floorPrice: 92,
     distanceToLimitPct: 5,
     nearLimit: false,
+    source: 'SSI DailyStockPrice',
+    status: 'ok',
+  },
+  dailyStockPrice: {
+    status: 'ok',
+    date: '2026-06-10',
+    referencePrice: 99,
+    ceilingPrice: 106,
+    floorPrice: 92,
+    open: 99,
+    high: 101,
+    low: 98,
+    close: 100,
+    adjustedClose: 100,
+    matchedVolume: 1234567,
+    matchedValue: 123456789000,
+    putThroughVolume: 1000,
+    putThroughValue: 25000000,
+    totalVolume: 1235567,
+    totalValue: 123481789000,
+    foreignBuyVolume: 10,
+    foreignSellVolume: 5,
+    foreignNetVolume: 5,
+    foreignBuyValue: 1000000,
+    foreignSellValue: 800000,
+    foreignNetValue: 200000,
+    source: 'SSI',
   },
   corporateAction: {
     status: 'unavailable',
@@ -126,7 +164,7 @@ const makeItem = (ticker: string): VietnamWatchItem => ({
     priceVsAdjustedReferencePct: null,
     note: 'Corporate action data is unavailable; raw OHLCV close is unchanged.',
   },
-  foreign: { buy: 10, sell: 5, net: 5, signal: 'foreign_net_positive' },
+  foreign: { buy: 10, sell: 5, net: 5, netValue: 200000, signal: 'foreign_net_positive' },
   foreignNetUnit: 'shares',
   foreignBuyRawField: 'foreign_buy',
   foreignSellRawField: 'foreign_sell',
@@ -184,12 +222,12 @@ const makeItem = (ticker: string): VietnamWatchItem => ({
 
 const makeResponse = (tickers: string[], options: { fixtureMode?: boolean } = {}): VietnamWatchlistResponse => ({
   market: 'VN',
-  source: options.fixtureMode ? 'Mozyfin fixture' : 'Mozyfin live',
+  source: options.fixtureMode ? 'Mozyfin fixture' : 'SSI live',
   fixtureMode: options.fixtureMode ?? false,
   lastRefreshTime: '2026-06-10T08:00:00Z',
   units: { close: 'VND', volume: 'shares' },
   dataQuality: {
-    source: options.fixtureMode ? 'Mozyfin fixture' : 'Mozyfin live',
+    source: options.fixtureMode ? 'Mozyfin fixture' : 'SSI live',
     fixtureMode: options.fixtureMode ?? false,
     symbolsLoaded: tickers.length,
     lastTradingDate: '2026-06-10',
@@ -447,7 +485,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     });
   });
 
-  it('keeps Mozyfin daily close, KBS snapshot, and trade tape separate', async () => {
+  it('keeps SSI daily close, KBS snapshot, and trade tape separate', async () => {
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledWith(defaultTickers));
@@ -471,11 +509,11 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(header.getByText('FPT Listed Company')).toBeInTheDocument();
     expect(header.getByText('Daily close')).toBeInTheDocument();
     expect(header.getByText('KBS snapshot')).toBeInTheDocument();
-    expect(header.getByText('Vs reference')).toBeInTheDocument();
+    expect(header.getByText('Vs SSI reference')).toBeInTheDocument();
     expect(header.getByText('Session volume')).toBeInTheDocument();
     expect(header.getByText('20D avg volume')).toBeInTheDocument();
     expect(header.getByText('Latest news')).toBeInTheDocument();
-    expect(header.getByText('Mozyfin daily')).toBeInTheDocument();
+    expect(header.getByText('SSI daily')).toBeInTheDocument();
     expect(header.getByText('KBS realtime')).toBeInTheDocument();
   });
 
@@ -544,7 +582,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(indicatorTable.getByTestId('scan-state-SCS')).toHaveTextContent('Data unavailable');
     expect(indicatorTable.getByTestId('scan-state-ACV')).toHaveTextContent('Data unavailable');
     expect(indicatorTable.getByTestId('table-caveats-FPT')).toHaveTextContent('None');
-    expect(indicatorTable.getByTestId('table-caveats-MSB')).toHaveTextContent('5 caveats');
+    expect(indicatorTable.getByTestId('table-caveats-MSB')).toHaveTextContent('4 caveats');
   });
 
   it('renders news source with relative time', async () => {
@@ -571,20 +609,35 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(screen.queryByText('Time unavailable')).not.toBeInTheDocument();
   });
 
-  it('shows KBS reference price separately and corporate-action calendar unavailable state', async () => {
+  it('shows SSI DailyStockPrice fields and corporate-action calendar unavailable state', async () => {
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledWith(defaultTickers));
     await waitFor(() => expect(mockedGetVietnamCorporateActions).toHaveBeenCalledWith(['FPT'], 6));
 
     const detail = within(screen.getByText('Stock detail').closest('section') as HTMLElement);
-    const referencePriceLabel = detail.getAllByText('Reference price')[1];
-    expect(detail.getByRole('heading', { name: 'Reference price' })).toBeInTheDocument();
-    expect(within(referencePriceLabel.closest('div') as HTMLElement).getByText('100')).toBeInTheDocument();
-    expect(within(detail.getByText('Price vs reference').closest('div') as HTMLElement).getByText('+1.5 / +1.5%')).toBeInTheDocument();
-    expect(within(detail.getAllByText('Source')[0].closest('div') as HTMLElement).getByText('KBS board')).toBeInTheDocument();
-    expect(detail.getByText('KBS board reference only')).toBeInTheDocument();
-    expect(detail.getByText('Reference price is not labeled dividend-adjusted unless the Corporate actions card has a confirmed event.')).toBeInTheDocument();
+    expect(detail.getByRole('heading', { name: 'SSI DailyStockPrice' })).toBeInTheDocument();
+    expect(detail.getByText('Reference')).toBeInTheDocument();
+    expect(within(detail.getByText('Reference').closest('div') as HTMLElement).getByText('99')).toBeInTheDocument();
+    expect(detail.getByText('Ceiling / floor')).toBeInTheDocument();
+    expect(detail.getByText('106 / 92')).toBeInTheDocument();
+    expect(detail.getByText('Foreign net')).toBeInTheDocument();
+    expect(detail.getByText('5 shares')).toBeInTheDocument();
+    expect(detail.getByText('Foreign net value')).toBeInTheDocument();
+    expect(detail.getByText('200,000')).toBeInTheDocument();
+    expect(detail.getByText('Matched value')).toBeInTheDocument();
+    expect(detail.getByText('123,456,789,000')).toBeInTheDocument();
+    expect(detail.getByText('Put-through value')).toBeInTheDocument();
+    expect(detail.getByText('25,000,000')).toBeInTheDocument();
+    expect(detail.getByText('Adjusted close')).toBeInTheDocument();
+    expect(detail.getAllByText('100').length).toBeGreaterThan(0);
+    expect(detail.getByText('Daily close vs reference')).toBeInTheDocument();
+    expect(within(detail.getByText('Daily close vs reference').closest('div') as HTMLElement).getByText('+1 / +1.01%')).toBeInTheDocument();
+    expect(detail.getByText('Adjusted close is shown only when SSI provides it. Corporate actions are not inferred from reference or adjusted prices.')).toBeInTheDocument();
+    expect(detail.queryByText('Foreign net 5D latest available')).not.toBeInTheDocument();
+    expect(detail.queryByText('Foreign net 20D latest available')).not.toBeInTheDocument();
+    expect(detail.queryByText('Need 5 foreign rows')).not.toBeInTheDocument();
+    expect(detail.queryByText('Need 20 foreign rows')).not.toBeInTheDocument();
     expect(detail.getByRole('heading', { name: 'Corporate actions' })).toBeInTheDocument();
     expect(detail.getByText('Recent and upcoming events')).toBeInTheDocument();
     expect(detail.getByText('Corporate action history/calendar unavailable.')).toBeInTheDocument();
@@ -593,14 +646,62 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(detail.getByText('100 / 100')).toBeInTheDocument();
   });
 
+  it('hides absent optional SSI DailyStockPrice rows without blank detail fields', async () => {
+    const response = makeResponse(defaultTickers);
+    response.watchlist[0] = {
+      ...response.watchlist[0],
+      dailyStockPrice: {
+        status: 'ok',
+        date: '2026-06-10',
+        referencePrice: 99,
+        ceilingPrice: 106,
+        floorPrice: 92,
+        source: 'SSI',
+      },
+      foreign: {
+        ...response.watchlist[0].foreign,
+        netValue: null,
+      },
+    };
+    mockedGetVietnamWatchlist.mockResolvedValue(response);
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+
+    const detail = within(screen.getByText('Stock detail').closest('section') as HTMLElement);
+    expect(detail.getByRole('heading', { name: 'SSI DailyStockPrice' })).toBeInTheDocument();
+    expect(detail.getByText('Reference')).toBeInTheDocument();
+    expect(detail.getByText('Ceiling / floor')).toBeInTheDocument();
+    expect(detail.queryByText('Foreign net value')).not.toBeInTheDocument();
+    expect(detail.queryByText('Matched value')).not.toBeInTheDocument();
+    expect(detail.queryByText('Put-through value')).not.toBeInTheDocument();
+    expect(detail.queryByText('Adjusted close')).not.toBeInTheDocument();
+    expect(detail.queryByText('SSI DailyStockPrice fields are unavailable for this ticker.')).not.toBeInTheDocument();
+  });
+
   it('shows explicit upcoming and recent corporate-action events without replacing raw close', async () => {
     const response = makeResponse(defaultTickers);
     response.watchlist[0] = {
       ...response.watchlist[0],
       latestPrice: 26500,
+      dailyClose: 26500,
       ohlcvClose: 26500,
       close: 26500,
       previousClose: 27000,
+      priceLimit: {
+        ...response.watchlist[0].priceLimit,
+        referencePrice: 26000,
+        ceilingPrice: 27800,
+        floorPrice: 24200,
+      },
+      dailyStockPrice: {
+        ...response.watchlist[0].dailyStockPrice,
+        referencePrice: 26000,
+        ceilingPrice: 27800,
+        floorPrice: 24200,
+        close: 26500,
+      },
     };
     mockedGetVietnamWatchlist.mockResolvedValue(response);
     mockedGetVietnamCorporateActions.mockImplementation(async (tickers) => makeCorporateActionsResponse(tickers, {
@@ -654,11 +755,10 @@ describe('VietnamDashboardPage watchlist loading', () => {
     await waitFor(() => expect(mockedGetVietnamCorporateActions).toHaveBeenCalledWith(['FPT'], 6));
 
     const detail = within(screen.getByText('Stock detail').closest('section') as HTMLElement);
-    const referencePriceLabel = detail.getAllByText('Reference price')[1];
     expect(detail.getByText('Latest price / OHLCV close (VND)')).toBeInTheDocument();
     expect(detail.getByText('26,500 / 26,500')).toBeInTheDocument();
-    expect(within(referencePriceLabel.closest('div') as HTMLElement).getByText('26,000')).toBeInTheDocument();
-    expect(within(detail.getByText('Price vs reference').closest('div') as HTMLElement).getByText('+500 / +1.92%')).toBeInTheDocument();
+    expect(within(detail.getByText('Reference').closest('div') as HTMLElement).getByText('26,000')).toBeInTheDocument();
+    expect(within(detail.getByText('Daily close vs reference').closest('div') as HTMLElement).getByText('+500 / +1.92%')).toBeInTheDocument();
     expect(detail.getByRole('heading', { name: 'Corporate actions' })).toBeInTheDocument();
     expect(detail.getByText('Recent and upcoming events')).toBeInTheDocument();
     expect(detail.getByText('Upcoming')).toBeInTheDocument();
@@ -701,7 +801,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     const chartHeading = detail.getByRole('heading', { name: 'Inspect chart' });
     const chartCard = within(chartHeading.closest('div')?.parentElement?.parentElement as HTMLElement);
 
-    expect(chartCard.getByText('Daily OHLCV from Mozyfin. KBS snapshot remains separate.')).toBeInTheDocument();
+    expect(chartCard.getByText('Daily OHLCV from SSI. KBS snapshot remains separate.')).toBeInTheDocument();
     expect(chartCard.getByRole('button', { name: '1M' })).toBeInTheDocument();
     expect(chartCard.getByRole('button', { name: '3M' })).toBeInTheDocument();
     expect(chartCard.getByRole('button', { name: '6M' })).toHaveAttribute('aria-pressed', 'true');
@@ -728,8 +828,37 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(chartCard.getByText('Volume MA50')).toBeInTheDocument();
     expect(chartCard.getAllByText('RSI14').length).toBeGreaterThan(0);
     expect(chartCard.getByText('RSI14 numeric guides: 30 and 70.')).toBeInTheDocument();
-    expect(chartCard.getByText('Daily OHLCV source: Mozyfin')).toBeInTheDocument();
+    expect(chartCard.getByText('Daily OHLCV source: SSI')).toBeInTheDocument();
     expect(chartCard.getByText('KBS snapshot is separate and not used as daily close.')).toBeInTheDocument();
+    expect(chartCard.queryByText(/buy|sell|hold|recommendation/i)).not.toBeInTheDocument();
+  });
+
+  it('renders SSI as the inspect chart source when the chart payload uses SSI', async () => {
+    mockedGetVietnamChart.mockResolvedValue(makeChartResponse('FPT', '6M', makeChartData(), { source: 'SSI' }));
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('FPT', '6M'));
+
+    const chartCard = inspectChartCard();
+    expect(chartCard.getByText('Daily OHLCV from SSI. KBS snapshot remains separate.')).toBeInTheDocument();
+    expect(chartCard.getByText('Daily OHLCV source: SSI')).toBeInTheDocument();
+    expect(chartCard.queryByText(/buy|sell|hold|recommendation/i)).not.toBeInTheDocument();
+  });
+
+  it('renders an SSI unavailable source label for inspect chart payloads', async () => {
+    mockedGetVietnamChart.mockResolvedValue(
+      makeChartResponse('FPT', '6M', [], { status: 'unavailable', source: 'SSI', reason: 'SSI FastConnect unavailable' }),
+    );
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('FPT', '6M'));
+
+    const chartCard = inspectChartCard();
+    expect(chartCard.getByText('Daily OHLCV from SSI unavailable. KBS snapshot remains separate.')).toBeInTheDocument();
+    expect(chartCard.getByText('Daily OHLCV source: SSI unavailable')).toBeInTheDocument();
+    expect(chartCard.getByText('Chart data unavailable')).toBeInTheDocument();
     expect(chartCard.queryByText(/buy|sell|hold|recommendation/i)).not.toBeInTheDocument();
   });
 
@@ -807,7 +936,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     const dialogElement = screen.getByRole('dialog', { name: 'Expanded inspect chart' });
     const dialog = within(dialogElement);
-    expect(dialog.getByText('Daily OHLCV from Mozyfin. KBS snapshot remains separate.')).toBeInTheDocument();
+    expect(dialog.getByText('Daily OHLCV from SSI. KBS snapshot remains separate.')).toBeInTheDocument();
     expect(dialog.getByRole('button', { name: '6M' })).toHaveAttribute('aria-pressed', 'true');
     expect(dialog.getByLabelText('MA20')).toBeChecked();
     expect(dialog.getByLabelText('MA50')).toBeChecked();
@@ -1273,6 +1402,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     const response = makeResponse(defaultTickers);
     response.watchlist[0] = {
       ...response.watchlist[0],
+      dailyStockPrice: { status: 'unavailable', source: 'SSI DailyStockPrice' },
       ohlcvDate: '2026-06-12',
       foreignNetDate: '2026-06-11',
       foreignDateMatch: 'mismatched',
@@ -1300,6 +1430,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     const response = makeResponse(defaultTickers);
     response.watchlist[0] = {
       ...response.watchlist[0],
+      dailyStockPrice: { status: 'unavailable', source: 'SSI DailyStockPrice' },
       indicators: {
         ...response.watchlist[0].indicators,
         foreignNet5dLatestAvailable: null,
@@ -1327,7 +1458,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(panel.getByText('Data status: OK')).toBeInTheDocument();
     expect(panel.getByText('Continuous afternoon')).toBeInTheDocument();
     expect(panel.getAllByText('holidayAware=false').length).toBeGreaterThan(0);
-    expect(panel.getAllByText('Mozyfin live').length).toBeGreaterThan(0);
+    expect(panel.getAllByText('SSI live').length).toBeGreaterThan(0);
     expect(dataStatusDiagnostics()).not.toHaveAttribute('open');
     fireEvent.click(panel.getByText('Show diagnostics'));
     expect(dataStatusDiagnostics()).toHaveAttribute('open');

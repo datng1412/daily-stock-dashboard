@@ -47,6 +47,7 @@ For stock-related UI or API behavior:
   * Web frontend changes belong in `apps/dsa-web/`.
   * Desktop app changes belong in `apps/dsa-desktop/`.
   * Deployment and pipeline changes belong in `scripts/`, `.github/workflows/`, and `docker/`.
+* Use environment variables only. Do not print env values. Do not log tokens. Do not include credentials in tests, docs, examples, errors, or output.
 * Do not run `git commit`, `git tag`, or `git push` without explicit confirmation.
 * Commit messages must be written in English. Do not add `Co-Authored-By`.
 * Do not hardcode secrets, accounts, paths, model names, ports, or environment-specific logic.

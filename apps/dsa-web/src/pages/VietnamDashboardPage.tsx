@@ -84,8 +84,15 @@ const formatSignedNumber = (value?: number | null, maximumFractionDigits = 2) =>
   return formatted;
 };
 
-const formatReferenceDelta = (value?: number | null, percent?: number | null) => (
-  `${formatSignedNumber(value, 2)} / ${formatSignedNumber(percent, 2)}%`
+const formatReferenceDelta = (value?: number | null, percent?: number | null) => {
+  if (value === null || value === undefined || percent === null || percent === undefined) {
+    return 'Unavailable';
+  }
+  return `${formatSignedNumber(value, 2)} / ${formatSignedNumber(percent, 2)}%`;
+};
+
+const hasDisplayValue = (value?: number | string | null) => (
+  value !== null && value !== undefined && value !== '' && !(typeof value === 'number' && Number.isNaN(value))
 );
 
 type VietnamNewsItem = VietnamWatchItem['news'][number];
@@ -149,9 +156,12 @@ const dateMatchVariant = (status?: string | null) => {
 
 const priceSourceVariant = (source?: string | null) => {
   if (source === 'quote') return 'success';
+  if (source === 'SSI' || source === 'ssi_ohlcv') return 'info';
   if (source === 'ohlcv') return 'warning';
   return 'default';
 };
+
+const isSsiDailyPriceSource = (source?: string | null) => source === 'SSI' || source === 'ssi_ohlcv';
 
 const finalCloseDisplayLabel = (status?: string | null) => {
   if (!status || status === 'unknown' || status === 'not_confirmed') return 'not confirmed';
@@ -190,11 +200,34 @@ const marketStatusLabels = (item: VietnamWatchItem, max = 3) => {
   return compactLabels(labels.length ? labels : ['Watch'], max);
 };
 
+const hasAvailableSsiDailyStockPrice = (item: VietnamWatchItem) => {
+  const daily = item.dailyStockPrice;
+  if (daily?.status === 'ok') return true;
+  if (daily?.status === 'unavailable') return false;
+  return [
+    daily?.date,
+    daily?.referencePrice,
+    daily?.ceilingPrice,
+    daily?.floorPrice,
+    item.ssiReferencePrice,
+    item.ssiCeilingPrice,
+    item.ssiFloorPrice,
+  ].some(hasDisplayValue);
+};
+
 const dataCaveatDetails = (item: VietnamWatchItem) => {
-  const details = (item.statusDetails ?? []).filter((detail) => DATA_CAVEAT_LABELS.has(detail.label));
+  const suppressLegacyForeignCaveats = hasAvailableSsiDailyStockPrice(item);
+  const details = (item.statusDetails ?? []).filter((detail) => (
+    DATA_CAVEAT_LABELS.has(detail.label)
+    && !(suppressLegacyForeignCaveats && detail.label === 'Foreign data stale')
+  ));
   const detailLabels = new Set(details.map((detail) => detail.label));
   const syntheticDetails = (item.statusLabels ?? [])
-    .filter((label) => DATA_CAVEAT_LABELS.has(label) && !detailLabels.has(label))
+    .filter((label) => (
+      DATA_CAVEAT_LABELS.has(label)
+      && !detailLabels.has(label)
+      && !(suppressLegacyForeignCaveats && label === 'Foreign data stale')
+    ))
     .map((label) => ({ label, severity: 'caution' as const, reason: 'Source metadata caveat returned by the Vietnam watchlist response.' }));
   return [...details, ...syntheticDetails];
 };
@@ -318,8 +351,9 @@ const kbsProviderStatus = (
   return { label: 'ok', variant: 'success' as const, staleCount, unavailableCount };
 };
 
-const importantWarnings = (item: VietnamWatchItem) =>
-  (item.warnings ?? []).filter((warning) =>
+const importantWarnings = (item: VietnamWatchItem) => {
+  const suppressLegacyForeignCaveats = hasAvailableSsiDailyStockPrice(item);
+  return (item.warnings ?? []).filter((warning) =>
     [
       'Quote does not provide a reliable latest price field',
       'latest price uses OHLCV close',
@@ -329,7 +363,14 @@ const importantWarnings = (item: VietnamWatchItem) =>
       'Intraday 1H candle data is not a realtime matched quote',
       'stale cached data',
     ].some((needle) => warning.includes(needle)),
-  );
+  ).filter((warning) => !(
+    suppressLegacyForeignCaveats
+    && (
+      warning.includes('Foreign net date does not match')
+      || warning.includes('Foreign net is not confirmed as same-day flow')
+    )
+  ));
+};
 
 const watchlistScanState = (
   item: VietnamWatchItem,
@@ -792,7 +833,7 @@ const DataStatusPanel: React.FC<{
                 </div>
               </dl>
               <p className="mt-3">
-                Units: latest price and OHLCV fields are VND, volume is shares, and foreign net is labeled shares only when Mozyfin quote quantity fields are used. KBS snapshot is separate and does not replace daily close.
+                Units: latest price and OHLCV fields are VND, volume is shares, and foreign net is labeled shares when SSI DailyStockPrice provides quantity fields. KBS snapshot is separate and does not replace daily close.
               </p>
             </div>
             {Object.keys(data.dataQuality.missingFields).length || Object.keys(data.dataQuality.errors).length ? (
@@ -840,12 +881,13 @@ const SelectedTickerHeader: React.FC<{
   const avgVolume20D = item.indicators.avgVolume20D ?? item.liquidity?.avgVolume20D;
   const sessionVolume = usableKbsSessionVolume(realtimeQuote, kbsState) ?? item.intradayPulse?.sessionVolumeFrom1H ?? null;
   const kbsPrice = realtimeQuote?.snapshotPrice ?? realtimeQuote?.realtimePrice;
-  const priceVsReference = realtimeQuote?.priceVsReference ?? (
-    kbsPrice != null && realtimeQuote?.referencePrice != null ? kbsPrice - realtimeQuote.referencePrice : null
-  );
-  const priceVsReferencePct = realtimeQuote?.priceVsReferencePct ?? (
-    priceVsReference != null && realtimeQuote?.referencePrice ? priceVsReference / realtimeQuote.referencePrice * 100 : null
-  );
+  const ssiReferencePrice = item.dailyStockPrice?.referencePrice ?? item.ssiReferencePrice ?? item.priceLimit?.referencePrice ?? null;
+  const ssiDailyClose = item.dailyClose ?? item.latestPrice ?? item.close ?? null;
+  const priceVsReference = ssiDailyClose != null && ssiReferencePrice != null ? ssiDailyClose - ssiReferencePrice : null;
+  const priceVsReferencePct = priceVsReference != null && ssiReferencePrice ? priceVsReference / ssiReferencePrice * 100 : null;
+  const dailySourceLabel = item.status === 'unavailable'
+    ? 'SSI unavailable'
+    : item.actualSource ?? item.primarySource ?? (isSsiDailyPriceSource(item.latestPriceSource) ? 'SSI' : 'SSI');
 
   return (
     <section className="rounded-lg border border-cyan/25 bg-card p-4 shadow-soft-card">
@@ -857,7 +899,7 @@ const SelectedTickerHeader: React.FC<{
             <p className="min-w-0 text-sm text-secondary-text">{companyDisplayName(item)}</p>
           </div>
           <div className="mt-3 flex flex-wrap gap-2">
-            <Badge variant="info">Mozyfin daily</Badge>
+            <Badge variant="info">{dailySourceLabel} daily</Badge>
             <Badge variant={kbsStateVariant(kbsState)}>KBS realtime</Badge>
             <Badge variant={priceSourceVariant(item.latestPriceSource)}>Daily source {(item.latestPriceSource ?? 'unknown').toUpperCase()}</Badge>
           </div>
@@ -874,7 +916,7 @@ const SelectedTickerHeader: React.FC<{
             <dd className="mt-1 text-xs text-secondary-text">{kbsState.label}</dd>
           </div>
           <div className="rounded-lg bg-elevated/50 p-3">
-            <dt className="text-xs text-secondary-text">Vs reference</dt>
+            <dt className="text-xs text-secondary-text">Vs SSI reference</dt>
             <dd className={cn('mt-1 font-semibold', signalTone(priceVsReference))}>
               {formatReferenceDelta(priceVsReference, priceVsReferencePct)}
             </dd>
@@ -1535,7 +1577,9 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const requestIdRef = useRef(0);
-  const points = useMemo(() => chart?.points ?? [], [chart]);
+  const points = useMemo(() => (
+    chart?.points?.length ? chart.points : chart?.candles ?? []
+  ), [chart]);
   const clampedVisibleWindow = clampChartWindow(visibleWindow, points.length);
   const visiblePoints = useMemo(
     () => points.slice(clampedVisibleWindow.start, clampedVisibleWindow.end),
@@ -1547,6 +1591,9 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
   const canPanLeft = clampedVisibleWindow.start > 0;
   const canPanRight = clampedVisibleWindow.end < points.length;
   const isZoomed = visibleCount > 0 && visibleCount < points.length;
+  const chartSourceLabel = chart?.status === 'unavailable'
+    ? 'SSI unavailable'
+    : chart?.source || 'SSI';
 
   const updateVisibleWindow = (updater: (window: ChartVisibleWindow) => ChartVisibleWindow) => {
     setVisibleWindow((current) => clampChartWindow(updater(clampChartWindow(current, points.length)), points.length));
@@ -1589,7 +1636,7 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 className="text-sm font-semibold text-foreground">Inspect chart</h3>
-          <p className="mt-1 text-xs text-secondary-text">Daily OHLCV from Mozyfin. KBS snapshot remains separate.</p>
+          <p className="mt-1 text-xs text-secondary-text">Daily OHLCV from {chartSourceLabel}. KBS snapshot remains separate.</p>
         </div>
         <ChartRangeControls rangeLabel={rangeLabel} onRangeChange={setRangeLabel} />
       </div>
@@ -1643,7 +1690,7 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
       {error ? <p className="mt-2 text-xs text-secondary-text">Chart endpoint unavailable: {error}</p> : null}
 
       <div className="mt-3 space-y-1 text-xs text-secondary-text">
-        <p>Daily OHLCV source: Mozyfin</p>
+        <p>Daily OHLCV source: {chartSourceLabel}</p>
         <p>KBS snapshot is separate and not used as daily close.</p>
         {chart?.latestDate ? <p>Latest chart date: {chart.latestDate}</p> : null}
       </div>
@@ -1658,7 +1705,7 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <h3 id="inspect-chart-expanded-title" className="text-base font-semibold text-foreground">Expanded inspect chart</h3>
-                <p className="mt-1 text-xs text-secondary-text">Daily OHLCV from Mozyfin. KBS snapshot remains separate.</p>
+                <p className="mt-1 text-xs text-secondary-text">Daily OHLCV from {chartSourceLabel}. KBS snapshot remains separate.</p>
               </div>
               <button
                 type="button"
@@ -1717,7 +1764,7 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
               <BrokerInspectChartSvg points={visiblePoints} showMA20={showMA20} showMA50={showMA50} showBollinger={showBollinger} />
               <div className="mt-3 space-y-1 text-xs text-secondary-text">
                 <p>RSI14 numeric guides: 30 and 70.</p>
-                <p>Daily OHLCV source: Mozyfin</p>
+                <p>Daily OHLCV source: {chartSourceLabel}</p>
                 <p>KBS snapshot is separate and not used as daily close.</p>
                 {chart?.latestDate ? <p>Latest chart date: {chart.latestDate}</p> : null}
               </div>
@@ -1835,16 +1882,30 @@ const StockDetailView: React.FC<{
   const foreignNet5dLatestAvailable = indicators.foreignNet5dLatestAvailable;
   const foreignNet20dLatestAvailable = indicators.foreignNet20dLatestAvailable;
   const foreignHistoryCount = indicators.foreignNetHistoryCount ?? 0;
-  const referencePrice = realtimeQuote?.referencePrice;
-  const rawReferencePriceSource = realtimeQuote?.referencePriceSource === 'kbs_board' ? 'KBS board' : realtimeQuote?.referencePriceSource;
-  const referencePriceSource = referencePrice != null ? rawReferencePriceSource ?? 'KBS board' : 'unavailable';
-  const kbsReferencePrice = realtimeQuote?.snapshotPrice ?? realtimeQuote?.realtimePrice;
-  const priceVsReference = realtimeQuote?.priceVsReference ?? (
-    kbsReferencePrice != null && referencePrice != null ? kbsReferencePrice - referencePrice : null
+  const ssiDailyStockPrice = item.dailyStockPrice ?? {};
+  const ssiReferencePrice = ssiDailyStockPrice.referencePrice ?? item.ssiReferencePrice ?? item.priceLimit?.referencePrice ?? null;
+  const ssiCeilingPrice = ssiDailyStockPrice.ceilingPrice ?? item.ssiCeilingPrice ?? item.priceLimit?.ceilingPrice ?? null;
+  const ssiFloorPrice = ssiDailyStockPrice.floorPrice ?? item.ssiFloorPrice ?? item.priceLimit?.floorPrice ?? null;
+  const ssiDailyClose = item.latestPrice ?? item.close ?? null;
+  const priceVsReference = ssiDailyClose != null && ssiReferencePrice != null ? ssiDailyClose - ssiReferencePrice : null;
+  const priceVsReferencePct = priceVsReference != null && ssiReferencePrice ? priceVsReference / ssiReferencePrice * 100 : null;
+  const ssiDailyHasCoreValues = [ssiReferencePrice, ssiCeilingPrice, ssiFloorPrice, ssiDailyStockPrice.date].some(hasDisplayValue);
+  const ssiDailyStatus = ssiDailyStockPrice.status ?? item.priceLimit?.status ?? (
+    ssiDailyHasCoreValues ? 'ok' : 'unavailable'
   );
-  const priceVsReferencePct = realtimeQuote?.priceVsReferencePct ?? (
-    priceVsReference != null && referencePrice ? priceVsReference / referencePrice * 100 : null
-  );
+  const hasSsiDailyStockPrice = ssiDailyStatus === 'ok' && ssiDailyHasCoreValues;
+  const ssiDailySource = ssiDailyStockPrice.source ?? item.referenceSource ?? item.priceLimit?.source ?? 'SSI DailyStockPrice';
+  const ssiDailyRows = [
+    { label: 'Reference', value: formatPrice(ssiReferencePrice), show: hasDisplayValue(ssiReferencePrice) },
+    { label: 'Ceiling / floor', value: `${formatPrice(ssiCeilingPrice)} / ${formatPrice(ssiFloorPrice)}`, show: hasDisplayValue(ssiCeilingPrice) || hasDisplayValue(ssiFloorPrice) },
+    { label: 'Foreign net', value: `${formatNumber(ssiDailyStockPrice.foreignNetVolume ?? item.ssiForeignNetVolume ?? item.foreign?.net)} shares`, tone: signalTone(ssiDailyStockPrice.foreignNetVolume ?? item.ssiForeignNetVolume ?? item.foreign?.net), show: hasDisplayValue(ssiDailyStockPrice.foreignNetVolume ?? item.ssiForeignNetVolume ?? item.foreign?.net) },
+    { label: 'Foreign net value', value: formatNumber(ssiDailyStockPrice.foreignNetValue ?? item.ssiForeignNetValue ?? item.foreign?.netValue), tone: signalTone(ssiDailyStockPrice.foreignNetValue ?? item.ssiForeignNetValue ?? item.foreign?.netValue), show: hasDisplayValue(ssiDailyStockPrice.foreignNetValue ?? item.ssiForeignNetValue ?? item.foreign?.netValue) },
+    { label: 'Matched volume', value: formatNumber(ssiDailyStockPrice.matchedVolume ?? item.ssiMatchedVolume), show: hasDisplayValue(ssiDailyStockPrice.matchedVolume ?? item.ssiMatchedVolume) },
+    { label: 'Matched value', value: formatNumber(ssiDailyStockPrice.matchedValue ?? item.ssiMatchedValue), show: hasDisplayValue(ssiDailyStockPrice.matchedValue ?? item.ssiMatchedValue) },
+    { label: 'Put-through volume', value: formatNumber(ssiDailyStockPrice.putThroughVolume ?? item.ssiPutThroughVolume), show: hasDisplayValue(ssiDailyStockPrice.putThroughVolume ?? item.ssiPutThroughVolume) },
+    { label: 'Put-through value', value: formatNumber(ssiDailyStockPrice.putThroughValue ?? item.ssiPutThroughValue), show: hasDisplayValue(ssiDailyStockPrice.putThroughValue ?? item.ssiPutThroughValue) },
+    { label: 'Adjusted close', value: formatPrice(ssiDailyStockPrice.adjustedClose ?? item.ssiAdjustedClose), show: hasDisplayValue(ssiDailyStockPrice.adjustedClose ?? item.ssiAdjustedClose) },
+  ].filter((row) => row.show);
   const corporateActionEvents = (corporateActions?.items ?? []).filter((event) => event.ticker === item.ticker);
   const upcomingCorporateActions = corporateActionEvents.filter((event) => event.status === 'upcoming');
   const recentCorporateActions = corporateActionEvents.filter((event) => event.status === 'recent' || event.status === 'past');
@@ -1908,7 +1969,7 @@ const StockDetailView: React.FC<{
         </div>
         <div className="rounded-lg bg-elevated/50 p-3">
           <dt className="text-xs text-secondary-text">Latest price / OHLCV close (VND)</dt>
-          <dd className="mt-1 font-medium text-foreground">{formatPrice(item.latestPrice ?? item.close)} / {formatPrice(item.ohlcvClose ?? item.close)}</dd>
+          <dd className="mt-1 font-medium text-foreground">{formatPrice(item.dailyClose ?? item.latestPrice ?? item.close)} / {formatPrice(item.ohlcvClose ?? item.close)}</dd>
         </div>
         <div className="rounded-lg bg-elevated/50 p-3">
           <dt className="text-xs text-secondary-text">Latest price source</dt>
@@ -1918,6 +1979,8 @@ const StockDetailView: React.FC<{
           <dd className="mt-2 text-xs text-secondary-text">
             {item.latestPriceSource === 'ohlcv'
               ? 'Mozyfin quote has no reliable latest matched price, so daily OHLCV close is used.'
+              : isSsiDailyPriceSource(item.latestPriceSource)
+                ? 'SSI DailyOhlc close is used because no reliable latest matched quote field is present.'
               : 'Latest price comes from quote data when a reliable field is present.'}
           </dd>
         </div>
@@ -1930,57 +1993,73 @@ const StockDetailView: React.FC<{
           <dd className="mt-1 font-medium text-foreground">{formatVietnamTime(latestFetchedValue(item))}</dd>
           <dd className="mt-1 text-xs text-secondary-text">{formatRelativeAge(latestFetchedValue(item))}</dd>
         </div>
-        <div className="rounded-lg bg-elevated/50 p-3">
-          <dt className="text-xs text-secondary-text">Foreign net 5D latest available</dt>
-          <dd className={cn('mt-1 font-medium', signalTone(foreignNet5dLatestAvailable))}>
-            {foreignNet5dLatestAvailable == null && foreignHistoryCount < 5 ? 'Need 5 foreign rows' : formatNumber(foreignNet5dLatestAvailable)}
-          </dd>
-        </div>
-        <div className="rounded-lg bg-elevated/50 p-3">
-          <dt className="text-xs text-secondary-text">Foreign net 20D latest available</dt>
-          <dd className={cn('mt-1 font-medium', signalTone(foreignNet20dLatestAvailable))}>
-            {foreignNet20dLatestAvailable == null && foreignHistoryCount < 20 ? 'Need 20 foreign rows' : formatNumber(foreignNet20dLatestAvailable)}
-          </dd>
-        </div>
-        <div className="rounded-lg bg-elevated/50 p-3">
-          <dt className="text-xs text-secondary-text">OHLCV / foreign dates</dt>
-          <dd className="mt-1 font-medium text-foreground">{item.ohlcvDate ?? '-'} / {item.foreignNetDate ?? '-'}</dd>
-        </div>
-        <div className="rounded-lg bg-elevated/50 p-3">
-          <dt className="text-xs text-secondary-text">Foreign date match</dt>
-          <dd className="mt-1">
-            <Badge variant={dateMatchVariant(item.foreignDateMatch)}>{item.foreignDateMatch ?? 'unknown'}</Badge>
-          </dd>
-        </div>
+        {!hasSsiDailyStockPrice ? (
+          <>
+            <div className="rounded-lg bg-elevated/50 p-3">
+              <dt className="text-xs text-secondary-text">Foreign net 5D latest available</dt>
+              <dd className={cn('mt-1 font-medium', signalTone(foreignNet5dLatestAvailable))}>
+                {foreignNet5dLatestAvailable == null && foreignHistoryCount < 5 ? 'Need 5 foreign rows' : formatNumber(foreignNet5dLatestAvailable)}
+              </dd>
+            </div>
+            <div className="rounded-lg bg-elevated/50 p-3">
+              <dt className="text-xs text-secondary-text">Foreign net 20D latest available</dt>
+              <dd className={cn('mt-1 font-medium', signalTone(foreignNet20dLatestAvailable))}>
+                {foreignNet20dLatestAvailable == null && foreignHistoryCount < 20 ? 'Need 20 foreign rows' : formatNumber(foreignNet20dLatestAvailable)}
+              </dd>
+            </div>
+            <div className="rounded-lg bg-elevated/50 p-3">
+              <dt className="text-xs text-secondary-text">OHLCV / foreign dates</dt>
+              <dd className="mt-1 font-medium text-foreground">{item.ohlcvDate ?? '-'} / {item.foreignNetDate ?? '-'}</dd>
+            </div>
+            <div className="rounded-lg bg-elevated/50 p-3">
+              <dt className="text-xs text-secondary-text">Foreign date match</dt>
+              <dd className="mt-1">
+                <Badge variant={dateMatchVariant(item.foreignDateMatch)}>{item.foreignDateMatch ?? 'unknown'}</Badge>
+              </dd>
+            </div>
+          </>
+        ) : null}
       </dl>
       <InspectChartCard item={item} />
       <div className="mt-4 rounded-lg border border-border/60 bg-elevated/30 p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-sm font-semibold text-foreground">Reference price</h3>
-          <Badge variant={referencePrice != null ? 'info' : 'default'}>{referencePriceSource}</Badge>
+          <div>
+            <h3 className="text-sm font-semibold text-foreground">SSI DailyStockPrice</h3>
+            <p className="mt-1 text-xs text-secondary-text">Reference, limits, matched, put-through, and foreign fields from SSI.</p>
+          </div>
+          <div className="flex flex-wrap gap-1">
+            <Badge variant={ssiDailyStatus === 'ok' ? 'info' : 'default'}>{ssiDailyStatus ?? 'unavailable'}</Badge>
+            <Badge variant="default">{ssiDailySource}</Badge>
+          </div>
         </div>
-        <dl className="mt-3 grid gap-3 text-sm md:grid-cols-4">
-          <div>
-            <dt className="text-xs text-secondary-text">Reference price</dt>
-            <dd className="mt-1 font-medium text-foreground">{formatPrice(referencePrice)}</dd>
-          </div>
-          <div>
-            <dt className="text-xs text-secondary-text">Price vs reference</dt>
-            <dd className={cn('mt-1 font-medium', signalTone(priceVsReference))}>
-              {formatReferenceDelta(priceVsReference, priceVsReferencePct)}
-            </dd>
-          </div>
-          <div>
-            <dt className="text-xs text-secondary-text">Source</dt>
-            <dd className="mt-1 font-medium text-foreground">{referencePrice != null ? referencePriceSource : '-'}</dd>
-          </div>
-          <div>
-            <dt className="text-xs text-secondary-text">Reference note</dt>
-            <dd className="mt-1 font-medium text-foreground">KBS board reference only</dd>
-          </div>
-        </dl>
+        {ssiDailyRows.length ? (
+          <dl className="mt-3 grid gap-3 text-sm md:grid-cols-3 xl:grid-cols-4">
+            <div>
+              <dt className="text-xs text-secondary-text">Daily close vs reference</dt>
+              <dd className={cn('mt-1 font-medium', signalTone(priceVsReference))}>
+                {formatReferenceDelta(priceVsReference, priceVsReferencePct)}
+              </dd>
+            </div>
+            {ssiDailyRows.map((row) => (
+              <div key={`${item.ticker}-ssi-daily-${row.label}`}>
+                <dt className="text-xs text-secondary-text">{row.label}</dt>
+                <dd className={cn('mt-1 font-medium text-foreground', row.tone)}>{row.value}</dd>
+              </div>
+            ))}
+            {ssiDailyStockPrice.date ? (
+              <div>
+                <dt className="text-xs text-secondary-text">SSI date</dt>
+                <dd className="mt-1 font-medium text-foreground">{ssiDailyStockPrice.date}</dd>
+              </div>
+            ) : null}
+          </dl>
+        ) : (
+          <p className="mt-3 text-sm text-secondary-text">
+            SSI DailyStockPrice fields are unavailable for this ticker.
+          </p>
+        )}
         <p className="mt-3 text-xs text-secondary-text">
-          Reference price is not labeled dividend-adjusted unless the Corporate actions card has a confirmed event.
+          Adjusted close is shown only when SSI provides it. Corporate actions are not inferred from reference or adjusted prices.
         </p>
       </div>
       <div className="mt-4 rounded-lg border border-border/60 bg-elevated/30 p-4">
@@ -2028,7 +2107,7 @@ const StockDetailView: React.FC<{
           <p className="mt-2 text-xs text-secondary-text">{corporateActions.errorDetail}</p>
         ) : null}
       </div>
-      {item.foreignDateMatch === 'mismatched' && item.foreignNetDate && item.ohlcvDate ? (
+      {!hasSsiDailyStockPrice && item.foreignDateMatch === 'mismatched' && item.foreignNetDate && item.ohlcvDate ? (
         <p className="mt-3 text-xs text-secondary-text">
           Foreign data as of {item.foreignNetDate}; OHLCV date {item.ohlcvDate}.
         </p>
@@ -2820,7 +2899,7 @@ const VietnamDashboardPage: React.FC = () => {
           <p className="label-uppercase text-secondary-text">Vietnam market</p>
           <h1 className="mt-2 text-2xl font-semibold text-foreground md:text-3xl">Watchlist Monitor</h1>
           <p className="mt-2 max-w-3xl text-sm text-secondary-text">
-            Mozyfin-backed OHLCV, price-limit awareness, foreign flow, liquidity, and technical score tracking.
+            SSI daily OHLCV, price-limit awareness, foreign flow, liquidity, and technical score tracking.
           </p>
           <p className="mt-2 max-w-3xl text-xs text-secondary-text">
             During trading hours, the latest daily candle close may represent the latest traded price. After market close, it represents the final close.
@@ -2963,7 +3042,7 @@ const VietnamDashboardPage: React.FC = () => {
           </div>
         </dl>
         <div className="mt-3 rounded-lg border border-border/60 bg-elevated/30 p-3 text-xs text-secondary-text">
-          Latest price currently uses OHLCV candle close because Mozyfin quote does not expose a reliable realtime matched price.
+          Latest price currently uses the configured daily OHLCV candle close when no reliable realtime matched quote field is present.
         </div>
       </section>
 

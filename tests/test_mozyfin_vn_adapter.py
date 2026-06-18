@@ -3,7 +3,7 @@
 import subprocess
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -116,6 +116,47 @@ class _StubManager:
         return self.fetcher if name == "MozyfinFetcher" else None
 
 
+class _StubSsiFetcher:
+    def __init__(self, daily_ohlcv=None, daily_stock_price=None, daily_index=None):
+        self.daily_ohlcv = daily_ohlcv or {"status": "unavailable", "source": "SSI", "reason": "SSI FastConnect disabled"}
+        self.daily_stock_price = daily_stock_price or {"status": "unavailable", "source": "SSI", "reason": "SSI FastConnect disabled"}
+        self.daily_index = daily_index or {"status": "unavailable", "source": "SSI", "reason": "SSI FastConnect disabled"}
+        self.daily_ohlcv_calls = 0
+        self.daily_stock_price_calls = 0
+        self.daily_index_calls = 0
+        self.daily_stock_price_args = []
+        self.daily_index_args = []
+
+    def get_daily_ohlcv(self, symbol, from_date=None, to_date=None, limit=260):
+        self.daily_ohlcv_calls += 1
+        return self.daily_ohlcv
+
+    def get_daily_stock_price(self, symbol, market=None, from_date=None, to_date=None, limit=260):
+        self.daily_stock_price_calls += 1
+        self.daily_stock_price_args.append(
+            {
+                "symbol": symbol,
+                "market": market,
+                "from_date": from_date,
+                "to_date": to_date,
+                "limit": limit,
+            }
+        )
+        return self.daily_stock_price
+
+    def get_daily_index(self, index_code, from_date=None, to_date=None, limit=260):
+        self.daily_index_calls += 1
+        self.daily_index_args.append(
+            {
+                "index_code": index_code,
+                "from_date": from_date,
+                "to_date": to_date,
+                "limit": limit,
+            }
+        )
+        return self.daily_index
+
+
 def _sample_vn_rows():
     return pd.DataFrame(
         [
@@ -139,6 +180,51 @@ def _sample_vn_rows_count(count=60):
             for index in range(count)
         ]
     )
+
+
+def _sample_ssi_ohlcv_rows(count=60):
+    return [
+        {
+            "date": (pd.Timestamp("2026-01-01") + pd.Timedelta(days=index)).strftime("%Y-%m-%d"),
+            "open": 200 + index,
+            "high": 202 + index,
+            "low": 198 + index,
+            "close": 200 + index,
+            "volume": 2000 + index * 10,
+            "value": 2_000_000 + index * 1000,
+            "source": "SSI",
+        }
+        for index in range(count)
+    ]
+
+
+def _sample_ssi_daily_stock_price_rows():
+    return [
+        {
+            "date": "2026-06-17",
+            "reference_price": 123.0,
+            "ceiling_price": 131.6,
+            "floor_price": 114.4,
+            "open": 123.4,
+            "high": 125.0,
+            "low": 122.8,
+            "close": 124.6,
+            "adjusted_close": 124.6,
+            "matched_volume": 1_234_567,
+            "matched_value": 123_456_789_000,
+            "put_through_volume": 0,
+            "put_through_value": 0,
+            "total_volume": 1_234_567,
+            "total_value": 123_456_789_000,
+            "foreign_buy_volume": 100_000,
+            "foreign_sell_volume": 80_000,
+            "foreign_net_volume": 20_000,
+            "foreign_buy_value": 1_000_000_000,
+            "foreign_sell_value": 800_000_000,
+            "foreign_net_value": 200_000_000,
+            "source": "SSI",
+        }
+    ]
 
 
 def _sample_intraday_rows():
@@ -188,11 +274,22 @@ def _expire_cache_entry(data_type, symbol="FPT", **params):
         vn_service._VN_CACHE[key].expires_at = vn_service._utc_now() - timedelta(seconds=1)
 
 
+def _mozyfin_config(**overrides):
+    values = {
+        "daily_data_provider": "mozyfin",
+        "chart_data_provider": "mozyfin",
+        "daily_stock_price_provider": "none",
+        "index_data_provider": "mozyfin",
+    }
+    values.update(overrides)
+    return VietnamDashboardConfig(**values)
+
+
 def test_default_vietnam_news_limit_is_five(monkeypatch):
     monkeypatch.delenv("MOZYFIN_FIXTURE_DIR", raising=False)
     rows = _sample_vn_rows()
     manager = _StubManager(rows)
-    service = VietnamMarketService(manager=manager, config=VietnamDashboardConfig(history_days=30))
+    service = VietnamMarketService(manager=manager, config=_mozyfin_config(history_days=30))
 
     service.build_watchlist(["FPT"])
 
@@ -207,7 +304,7 @@ def test_watchlist_dedupes_before_fetching(monkeypatch):
     monkeypatch.delenv("MOZYFIN_FIXTURE_DIR", raising=False)
     rows = _sample_vn_rows()
     manager = _StubManager(rows)
-    service = VietnamMarketService(manager=manager, config=VietnamDashboardConfig(history_days=30, news_limit=0))
+    service = VietnamMarketService(manager=manager, config=_mozyfin_config(history_days=30, news_limit=0))
 
     payload = service.build_watchlist(["fpt", "FPT", "FPT.VN", " acb"], include_intraday=False)
 
@@ -219,7 +316,7 @@ def test_concurrent_identical_watchlist_requests_singleflight_daily_fetch(monkey
     monkeypatch.delenv("MOZYFIN_FIXTURE_DIR", raising=False)
     rows = _sample_vn_rows()
     manager = _StubManager(rows, daily_delay=0.2)
-    service = VietnamMarketService(manager=manager, config=VietnamDashboardConfig(history_days=30, news_limit=0))
+    service = VietnamMarketService(manager=manager, config=_mozyfin_config(history_days=30, news_limit=0))
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         futures = [
@@ -292,7 +389,7 @@ def test_vietnam_dashboard_formulas_and_warnings(monkeypatch):
 
     payload = VietnamMarketService(
         manager=manager,
-        config=VietnamDashboardConfig(history_days=30, news_limit=1),
+        config=_mozyfin_config(history_days=30, news_limit=1),
     ).build_watchlist(["FPT", "VPB", "ACV"])
 
     assert payload["market"] == "VN"
@@ -357,7 +454,7 @@ def test_chart_endpoint_data_uses_daily_ohlcv_without_changing_latest_price(monk
             "price_date": "2026-03-01",
         },
     )
-    service = VietnamMarketService(manager=manager, config=VietnamDashboardConfig(history_days=90, news_limit=1))
+    service = VietnamMarketService(manager=manager, config=_mozyfin_config(history_days=90, news_limit=1))
 
     item = service.build_watchlist(["FPT"], include_intraday=False)["watchlist"][0]
     chart = service.build_chart("FPT", "1Y")
@@ -397,7 +494,7 @@ def test_build_chart_returns_more_than_100_ordered_points_for_one_year(monkeypat
     rows = _sample_vn_rows_count(260)
     service = VietnamMarketService(
         manager=_StubManager(rows),
-        config=VietnamDashboardConfig(history_days=90, news_limit=1),
+        config=_mozyfin_config(history_days=90, news_limit=1),
     )
 
     chart = service.build_chart("FPT", "1Y")
@@ -412,6 +509,276 @@ def test_build_chart_returns_more_than_100_ordered_points_for_one_year(monkeypat
     assert chart["points"][-1]["ma50"] is not None
     assert chart["points"][-1]["bb_upper"] is not None
     assert chart["points"][-1]["rsi14"] is not None
+
+
+def test_default_provider_uses_ssi_daily_path(monkeypatch):
+    monkeypatch.delenv("MOZYFIN_FIXTURE_DIR", raising=False)
+    manager = _StubManager(_sample_vn_rows_count(60))
+    ssi = _StubSsiFetcher(daily_ohlcv={"status": "ok", "source": "SSI", "rows": _sample_ssi_ohlcv_rows()})
+    service = VietnamMarketService(
+        manager=manager,
+        config=VietnamDashboardConfig(history_days=30, news_limit=0),
+        ssi_fetcher=ssi,
+    )
+
+    payload = service.build_watchlist(["FPT"], include_intraday=False)
+    item = payload["watchlist"][0]
+
+    assert manager.daily_calls == 0
+    assert ssi.daily_ohlcv_calls == 1
+    assert item["source"] == "SSI"
+    assert item["primary_source"] == "SSI"
+    assert item["actual_source"] == "SSI"
+    assert item["latest_price_source"] == "SSI"
+    assert item["fallback_used"] is False
+
+
+def test_ssi_daily_provider_uses_ssi_ohlcv_for_watchlist(monkeypatch):
+    monkeypatch.delenv("MOZYFIN_FIXTURE_DIR", raising=False)
+    manager = _StubManager(_sample_vn_rows_count(60))
+    ssi = _StubSsiFetcher(daily_ohlcv={"status": "ok", "source": "SSI", "rows": _sample_ssi_ohlcv_rows()})
+    service = VietnamMarketService(
+        manager=manager,
+        config=VietnamDashboardConfig(history_days=30, news_limit=0),
+        ssi_fetcher=ssi,
+    )
+
+    payload = service.build_watchlist(["FPT"], include_intraday=False)
+    item = payload["watchlist"][0]
+
+    assert ssi.daily_ohlcv_calls == 1
+    assert manager.daily_calls == 0
+    assert item["source"] == "SSI"
+    assert item["actual_source"] == "SSI"
+    assert item["latest_price"] == 259
+    assert item["daily_close"] == 259
+    assert item["latest_price_source"] == "SSI"
+    assert item["fallback_used"] is False
+
+
+def test_ssi_daily_provider_unavailable_does_not_fallback_to_mozyfin(monkeypatch):
+    monkeypatch.delenv("MOZYFIN_FIXTURE_DIR", raising=False)
+    manager = _StubManager(_sample_vn_rows_count(60))
+    ssi = _StubSsiFetcher(daily_ohlcv={"status": "unavailable", "source": "SSI", "reason": "SSI FastConnect request failed"})
+    service = VietnamMarketService(
+        manager=manager,
+        config=VietnamDashboardConfig(history_days=30, news_limit=1),
+        ssi_fetcher=ssi,
+    )
+
+    payload = service.build_watchlist(["FPT"], include_intraday=False)
+    item = payload["watchlist"][0]
+
+    assert ssi.daily_ohlcv_calls == 1
+    assert manager.daily_calls == 0
+    assert manager.fetcher.news_calls == 1
+    assert item["status"] == "unavailable"
+    assert item["source"] == "SSI"
+    assert item["primary_source"] == "SSI"
+    assert item["actual_source"] == "SSI"
+    assert item["fallback_used"] is False
+    assert item["fallback_reason"] is None
+    assert item["reason"] == "SSI FastConnect unavailable"
+    assert "secret" not in str(item).lower()
+
+
+def test_ssi_chart_provider_uses_ssi_ohlcv(monkeypatch):
+    monkeypatch.delenv("MOZYFIN_FIXTURE_DIR", raising=False)
+    manager = _StubManager(_sample_vn_rows_count(60))
+    ssi = _StubSsiFetcher(daily_ohlcv={"status": "ok", "source": "SSI", "rows": _sample_ssi_ohlcv_rows()})
+    service = VietnamMarketService(
+        manager=manager,
+        config=VietnamDashboardConfig(history_days=30),
+        ssi_fetcher=ssi,
+    )
+
+    chart = service.build_chart("FPT", "6M")
+
+    assert ssi.daily_ohlcv_calls == 1
+    assert manager.daily_calls == 0
+    assert chart["source"] == "SSI"
+    assert chart["fallback_used"] is False
+    assert chart["points"][-1]["close"] == 259
+
+
+def test_ssi_chart_provider_unavailable_does_not_fallback_to_mozyfin(monkeypatch):
+    monkeypatch.delenv("MOZYFIN_FIXTURE_DIR", raising=False)
+    manager = _StubManager(_sample_vn_rows_count(60))
+    ssi = _StubSsiFetcher(daily_ohlcv={"status": "unavailable", "source": "SSI", "reason": "SSI FastConnect credentials missing"})
+    service = VietnamMarketService(
+        manager=manager,
+        config=VietnamDashboardConfig(history_days=30),
+        ssi_fetcher=ssi,
+    )
+
+    chart = service.build_chart("FPT", "6M")
+
+    assert ssi.daily_ohlcv_calls == 1
+    assert manager.daily_calls == 0
+    assert chart["status"] == "unavailable"
+    assert chart["source"] == "SSI"
+    assert chart["actual_source"] == "SSI"
+    assert chart["fallback_used"] is False
+    assert chart["fallback_reason"] is None
+    assert chart["points"] == []
+
+
+def test_ssi_daily_stock_price_enrichment_maps_limit_and_foreign_fields(monkeypatch):
+    monkeypatch.delenv("MOZYFIN_FIXTURE_DIR", raising=False)
+    manager = _StubManager(_sample_vn_rows_count(60))
+    ssi = _StubSsiFetcher(
+        daily_ohlcv={"status": "ok", "source": "SSI", "rows": _sample_ssi_ohlcv_rows()},
+        daily_stock_price={"status": "ok", "source": "SSI", "rows": _sample_ssi_daily_stock_price_rows()},
+    )
+    service = VietnamMarketService(
+        manager=manager,
+        config=VietnamDashboardConfig(history_days=30, news_limit=0),
+        ssi_fetcher=ssi,
+    )
+
+    payload = service.build_watchlist(["FPT"], include_intraday=False)
+    item = payload["watchlist"][0]
+
+    assert ssi.daily_stock_price_calls == 1
+    assert manager.daily_calls == 0
+    assert manager.fetcher.quote_calls == 0
+    assert item["reference_source"] == "SSI DailyStockPrice"
+    assert item["foreign_flow_source"] == "SSI DailyStockPrice"
+    assert item["price_limit"]["reference_price"] == 123.0
+    assert item["price_limit"]["ceiling_price"] == 131.6
+    assert item["price_limit"]["floor_price"] == 114.4
+    assert item["foreign"]["buy"] == 100000
+    assert item["foreign"]["sell"] == 80000
+    assert item["foreign"]["net"] == 20000
+    assert item["foreign"]["net_value"] == 200000000
+    assert item["daily_stock_price"]["status"] == "ok"
+    assert item["daily_stock_price"]["source"] == "SSI"
+    assert item["ssi_reference_price"] == 123.0
+    assert item["ssi_ceiling_price"] == 131.6
+    assert item["ssi_floor_price"] == 114.4
+    assert item["ssi_foreign_net_volume"] == 20000
+    assert item["ssi_foreign_net_value"] == 200000000
+    assert item["ssi_matched_value"] == 123_456_789_000
+    assert item["ssi_put_through_value"] == 0
+    assert item["daily_stock_price"]["adjusted_close"] == 124.6
+    assert item["daily_stock_price"]["matched_volume"] == 1_234_567
+    assert item["daily_stock_price"]["matched_value"] == 123_456_789_000
+    assert item["daily_stock_price"]["put_through_volume"] == 0
+    assert item["daily_stock_price"]["put_through_value"] == 0
+    assert item["daily_stock_price"]["total_volume"] == 1_234_567
+    assert item["daily_stock_price"]["total_value"] == 123_456_789_000
+    assert item["corporate_action"]["status"] == "unavailable"
+    request_args = ssi.daily_stock_price_args[0]
+    assert request_args["market"] == "HOSE"
+    assert request_args["limit"] == 260
+    from_date = datetime.strptime(request_args["from_date"], "%Y-%m-%d").date()
+    to_date = datetime.strptime(request_args["to_date"], "%Y-%m-%d").date()
+    assert from_date <= to_date
+    assert (to_date - from_date).days + 1 == 29
+
+
+def test_selected_ticker_uses_latest_ssi_daily_stock_price_row(monkeypatch):
+    monkeypatch.delenv("MOZYFIN_FIXTURE_DIR", raising=False)
+    manager = _StubManager(_sample_vn_rows_count(60))
+    older = dict(_sample_ssi_daily_stock_price_rows()[0])
+    older.update({"date": "2026-06-16", "reference_price": 100.0, "foreign_net_volume": 1})
+    latest = dict(_sample_ssi_daily_stock_price_rows()[0])
+    latest.update({"date": "2026-06-17", "reference_price": 123.0, "foreign_net_volume": 20000})
+    ssi = _StubSsiFetcher(
+        daily_ohlcv={"status": "ok", "source": "SSI", "rows": _sample_ssi_ohlcv_rows()},
+        daily_stock_price={"status": "ok", "source": "SSI", "rows": [older, latest], "chunks_used": 1},
+    )
+    service = VietnamMarketService(
+        manager=manager,
+        config=VietnamDashboardConfig(history_days=30, news_limit=0),
+        ssi_fetcher=ssi,
+    )
+
+    item = service.build_watchlist(["FPT"], include_intraday=False)["watchlist"][0]
+
+    assert item["daily_stock_price"]["date"] == "2026-06-17"
+    assert item["daily_stock_price"]["status"] == "ok"
+    assert item["price_limit"]["reference_price"] == 123.0
+    assert item["foreign"]["net"] == 20000
+
+
+def test_daily_index_service_forwards_range_to_ssi(monkeypatch):
+    monkeypatch.delenv("MOZYFIN_FIXTURE_DIR", raising=False)
+    ssi = _StubSsiFetcher(
+        daily_index={
+            "status": "ok",
+            "source": "SSI",
+            "index_code": "VN30",
+            "rows": [{"date": "2026-06-17", "index_code": "VN30", "index_value": 1300.0, "source": "SSI"}],
+            "count": 1,
+        }
+    )
+    service = VietnamMarketService(
+        manager=_StubManager(_sample_vn_rows_count(60)),
+        config=VietnamDashboardConfig(history_days=30, news_limit=0),
+        ssi_fetcher=ssi,
+    )
+
+    payload = service.build_daily_index("vn30", from_date="2026-01-01", to_date="2026-06-17", limit=1000)
+
+    assert payload["status"] == "ok"
+    assert ssi.daily_index_args == [
+        {
+            "index_code": "VN30",
+            "from_date": "2026-01-01",
+            "to_date": "2026-06-17",
+            "limit": 1000,
+        }
+    ]
+
+
+def test_daily_index_unavailable_state_remains_clean(monkeypatch):
+    monkeypatch.delenv("MOZYFIN_FIXTURE_DIR", raising=False)
+    ssi = _StubSsiFetcher(
+        daily_index={"status": "unavailable", "source": "SSI", "reason": "SSI FastConnect request failed"}
+    )
+    service = VietnamMarketService(
+        manager=_StubManager(_sample_vn_rows_count(60)),
+        config=VietnamDashboardConfig(history_days=30, news_limit=0),
+        ssi_fetcher=ssi,
+    )
+
+    payload = service.build_daily_index("VN30", from_date="2026-01-01", to_date="2026-06-17", limit=1000)
+
+    assert payload == {
+        "status": "unavailable",
+        "source": "SSI",
+        "reason": "SSI FastConnect request failed",
+        "index_code": "VN30",
+        "rows": [],
+    }
+
+
+def test_ssi_daily_stock_price_unavailable_does_not_use_mozyfin_quote(monkeypatch):
+    monkeypatch.delenv("MOZYFIN_FIXTURE_DIR", raising=False)
+    manager = _StubManager(_sample_vn_rows_count(60))
+    ssi = _StubSsiFetcher(
+        daily_ohlcv={"status": "ok", "source": "SSI", "rows": _sample_ssi_ohlcv_rows()},
+        daily_stock_price={"status": "unavailable", "source": "SSI", "reason": "SSI FastConnect credentials missing"},
+    )
+    service = VietnamMarketService(
+        manager=manager,
+        config=VietnamDashboardConfig(history_days=30, news_limit=0),
+        ssi_fetcher=ssi,
+    )
+
+    item = service.build_watchlist(["FPT"], include_intraday=False)["watchlist"][0]
+
+    assert ssi.daily_stock_price_calls == 1
+    assert manager.fetcher.quote_calls == 0
+    assert item["reference_source"] == "SSI DailyStockPrice"
+    assert item["foreign_flow_source"] == "SSI DailyStockPrice"
+    assert item["price_limit"]["status"] == "unavailable"
+    assert item["price_limit"]["reference_price"] is None
+    assert item["foreign"]["source"] == "SSI DailyStockPrice"
+    assert item["foreign"]["status"] == "unavailable"
+    assert item["foreign"]["net"] is None
+    assert item["daily_stock_price"]["status"] == "unavailable"
 
 
 def test_vietnam_chart_api_returns_ordered_points(monkeypatch, tmp_path):
@@ -469,12 +836,108 @@ def test_vietnam_chart_api_returns_ordered_points(monkeypatch, tmp_path):
     assert response.status_code == 200
     payload = response.json()
     assert payload["symbol"] == "ACB"
+    assert payload["candles"] == payload["points"]
     assert payload["source"] == "Mozyfin"
     assert payload["timeframe"] == "1d"
     assert payload["range"] == "6M"
     assert [point["date"] for point in payload["points"]] == ["2026-01-02", "2026-01-03"]
     assert payload["points"][1]["close"] == 12
     assert payload["points"][1]["volume_ma20"] == 1100
+
+
+def test_vietnam_watchlist_api_preserves_ssi_daily_stock_price_fields(monkeypatch, tmp_path):
+    class StubVietnamMarketService:
+        def build_watchlist(self, symbols=None, **kwargs):
+            assert symbols == ["ACB"]
+            return {
+                "source": "SSI",
+                "status": "ok",
+                "count": 1,
+                "watchlist": [
+                    {
+                        "ticker": "ACB",
+                        "status": "ok",
+                        "source": "SSI",
+                        "primary_source": "SSI",
+                        "actual_source": "SSI",
+                        "fallback_used": False,
+                        "date": "2026-06-17",
+                        "daily_close": 124.6,
+                        "latest_price": 124.6,
+                        "latest_price_source": "SSI",
+                        "latest_price_raw_field": "close",
+                        "latest_price_date": "2026-06-17",
+                        "ohlcv_close": 124.6,
+                        "price_date": "2026-06-17",
+                        "open": 123.4,
+                        "high": 125.0,
+                        "low": 122.8,
+                        "close": 124.6,
+                        "daily_stock_price": {
+                            "status": "ok",
+                            "date": "2026-06-17",
+                            "reference_price": 123.0,
+                            "ceiling_price": 131.6,
+                            "floor_price": 114.4,
+                            "adjusted_close": 124.6,
+                            "matched_volume": 1_234_567,
+                            "matched_value": 123_456_789_000,
+                            "put_through_volume": 1000,
+                            "put_through_value": 25_000_000,
+                            "foreign_net_volume": 20_000,
+                            "foreign_net_value": 200_000_000,
+                            "source": "SSI",
+                        },
+                        "ssi_reference_price": 123.0,
+                        "ssi_ceiling_price": 131.6,
+                        "ssi_floor_price": 114.4,
+                        "ssi_adjusted_close": 124.6,
+                        "ssi_foreign_net_volume": 20_000,
+                        "ssi_foreign_net_value": 200_000_000,
+                        "ssi_matched_volume": 1_234_567,
+                        "ssi_matched_value": 123_456_789_000,
+                        "ssi_put_through_volume": 1000,
+                        "ssi_put_through_value": 25_000_000,
+                        "liquidity": {},
+                        "price_limit": {},
+                        "foreign": {},
+                        "corporate_action": {},
+                        "indicators": {},
+                        "status_labels": [],
+                        "status_details": [],
+                        "validation": {},
+                        "trend": {},
+                        "warnings": [],
+                        "news": [],
+                    }
+                ],
+                "metadata": {},
+                "generated_at": "2026-06-17T16:00:00+07:00",
+            }
+
+    monkeypatch.setattr("api.v1.endpoints.stocks.VietnamMarketService", StubVietnamMarketService)
+    client = TestClient(create_app(static_dir=tmp_path / "static"))
+
+    response = client.get("/api/v1/stocks/vn/watchlist?tickers=ACB")
+
+    assert response.status_code == 200
+    item = response.json()["watchlist"][0]
+    assert item["source"] == "SSI"
+    assert item["actual_source"] == "SSI"
+    assert item["fallback_used"] is False
+    assert item["daily_close"] == 124.6
+    assert item["latest_price_source"] == "SSI"
+    assert item["daily_stock_price"]["status"] == "ok"
+    assert item["daily_stock_price"]["reference_price"] == 123.0
+    assert item["daily_stock_price"]["ceiling_price"] == 131.6
+    assert item["daily_stock_price"]["floor_price"] == 114.4
+    assert item["daily_stock_price"]["matched_value"] == 123_456_789_000
+    assert item["daily_stock_price"]["put_through_value"] == 25_000_000
+    assert item["daily_stock_price"]["foreign_net_value"] == 200_000_000
+    assert item["ssi_reference_price"] == 123.0
+    assert item["ssi_foreign_net_volume"] == 20_000
+    assert item["ssi_matched_value"] == 123_456_789_000
+    assert item["ssi_put_through_value"] == 25_000_000
 
 
 def test_price_semantics_and_foreign_date_match(monkeypatch):
@@ -492,7 +955,7 @@ def test_price_semantics_and_foreign_date_match(monkeypatch):
             "sell_raw_field": "sell_foreign_quantity",
         },
     )
-    service = VietnamMarketService(manager=manager, config=VietnamDashboardConfig(history_days=30, news_limit=1))
+    service = VietnamMarketService(manager=manager, config=_mozyfin_config(history_days=30, news_limit=1))
 
     payload = service.build_watchlist(["FPT"])
     item = payload["watchlist"][0]
@@ -534,7 +997,7 @@ def test_corporate_action_reference_unavailable_does_not_change_raw_price():
 
 def test_vietnam_corporate_actions_unavailable_without_verified_provider(monkeypatch):
     monkeypatch.delenv("MOZYFIN_FIXTURE_DIR", raising=False)
-    service = VietnamMarketService(manager=_StubManager(_sample_vn_rows()), config=VietnamDashboardConfig(history_days=30, news_limit=1))
+    service = VietnamMarketService(manager=_StubManager(_sample_vn_rows()), config=_mozyfin_config(history_days=30, news_limit=1))
 
     payload = service.build_corporate_actions(["FPT", "ACB"], months_back=6)
 
@@ -589,7 +1052,7 @@ def test_quote_price_field_sets_latest_price_source_quote(monkeypatch):
             "price_date": "2026-05-21",
         },
     )
-    service = VietnamMarketService(manager=manager, config=VietnamDashboardConfig(history_days=30, news_limit=1))
+    service = VietnamMarketService(manager=manager, config=_mozyfin_config(history_days=30, news_limit=1))
 
     payload = service.build_watchlist(["FPT"])
     item = payload["watchlist"][0]
@@ -621,7 +1084,7 @@ def test_status_labels_match_status_details(monkeypatch):
             "sell_raw_field": "sell_foreign_quantity",
         },
     )
-    service = VietnamMarketService(manager=manager, config=VietnamDashboardConfig(history_days=30, news_limit=1))
+    service = VietnamMarketService(manager=manager, config=_mozyfin_config(history_days=30, news_limit=1))
 
     item = service.build_watchlist(["FPT"])["watchlist"][0]
     detail_labels = [detail["label"] for detail in item["status_details"]]
@@ -648,7 +1111,7 @@ def test_missing_quote_price_falls_back_to_ohlcv_with_warning(monkeypatch):
             "price_date": None,
         },
     )
-    service = VietnamMarketService(manager=manager, config=VietnamDashboardConfig(history_days=30, news_limit=1))
+    service = VietnamMarketService(manager=manager, config=_mozyfin_config(history_days=30, news_limit=1))
 
     item = service.build_watchlist(["FPT"])["watchlist"][0]
 
@@ -676,7 +1139,7 @@ def test_foreign_date_mismatch_warns(monkeypatch):
             "sell_raw_field": "sell_foreign_quantity",
         },
     )
-    service = VietnamMarketService(manager=manager, config=VietnamDashboardConfig(history_days=30, news_limit=1))
+    service = VietnamMarketService(manager=manager, config=_mozyfin_config(history_days=30, news_limit=1))
 
     item = service.build_watchlist(["FPT"])["watchlist"][0]
 
@@ -692,7 +1155,7 @@ def test_latest_available_foreign_history_sums_and_preserves_mismatch(monkeypatc
     rows = _sample_vn_rows()
     history = _foreign_history_rows(20, latest_day=20)
     manager = _StubManager(rows, foreign_history=history)
-    service = VietnamMarketService(manager=manager, config=VietnamDashboardConfig(history_days=30, news_limit=1))
+    service = VietnamMarketService(manager=manager, config=_mozyfin_config(history_days=30, news_limit=1))
 
     item = service.build_watchlist(["FPT"])["watchlist"][0]
 
@@ -712,7 +1175,7 @@ def test_latest_available_foreign_history_requires_twenty_rows_for_20d(monkeypat
     rows = _sample_vn_rows()
     history = _foreign_history_rows(5, latest_day=21)
     manager = _StubManager(rows, foreign_history=history)
-    service = VietnamMarketService(manager=manager, config=VietnamDashboardConfig(history_days=30, news_limit=1))
+    service = VietnamMarketService(manager=manager, config=_mozyfin_config(history_days=30, news_limit=1))
 
     item = service.build_watchlist(["FPT"])["watchlist"][0]
 
@@ -737,7 +1200,7 @@ def test_foreign_unit_unknown_without_quantity_fields(monkeypatch):
             "sell_raw_field": "foreign_sell",
         },
     )
-    service = VietnamMarketService(manager=manager, config=VietnamDashboardConfig(history_days=30, news_limit=1))
+    service = VietnamMarketService(manager=manager, config=_mozyfin_config(history_days=30, news_limit=1))
 
     item = service.build_watchlist(["FPT"])["watchlist"][0]
 
@@ -1128,7 +1591,7 @@ def test_watchlist_intraday_fields_and_latest_price_unchanged(monkeypatch):
     monkeypatch.delenv("MOZYFIN_FIXTURE_DIR", raising=False)
     rows = _sample_vn_rows()
     manager = _StubManager(rows, intraday=_sample_intraday_rows())
-    service = VietnamMarketService(manager=manager, config=VietnamDashboardConfig(history_days=30, news_limit=1))
+    service = VietnamMarketService(manager=manager, config=_mozyfin_config(history_days=30, news_limit=1))
 
     item = service.build_watchlist(["FPT"])["watchlist"][0]
 
@@ -1150,7 +1613,7 @@ def test_intraday_cache_hit_miss_behavior(monkeypatch):
     monkeypatch.delenv("MOZYFIN_FIXTURE_DIR", raising=False)
     rows = _sample_vn_rows()
     manager = _StubManager(rows, intraday=_sample_intraday_rows())
-    service = VietnamMarketService(manager=manager, config=VietnamDashboardConfig(history_days=30, news_limit=1))
+    service = VietnamMarketService(manager=manager, config=_mozyfin_config(history_days=30, news_limit=1))
 
     first = service.build_watchlist(["FPT"])
     second = service.build_watchlist(["FPT"])
@@ -1173,7 +1636,7 @@ def test_validation_warns_for_missing_fields_without_crashing(monkeypatch):
     )
     service = VietnamMarketService(
         manager=_StubManager(rows, foreign={"buy": None, "sell": None, "net": None}),
-        config=VietnamDashboardConfig(history_days=2, news_limit=0),
+        config=_mozyfin_config(history_days=2, news_limit=0),
     )
 
     payload = service.build_watchlist(["FPT"])
@@ -1196,7 +1659,7 @@ def test_health_payload_matches_required_shape(monkeypatch):
         ]
     )
     manager = _StubManager(rows, foreign={"buy": None, "sell": None, "net": None})
-    service = VietnamMarketService(manager=manager, config=VietnamDashboardConfig(history_days=2, news_limit=0))
+    service = VietnamMarketService(manager=manager, config=_mozyfin_config(history_days=2, news_limit=0))
     service.build_watchlist(["FPT"])
 
     health = service.build_health(["FPT"])
@@ -1213,7 +1676,7 @@ def test_watchlist_cache_miss_then_hit(monkeypatch):
     monkeypatch.delenv("MOZYFIN_FIXTURE_DIR", raising=False)
     rows = _sample_vn_rows()
     manager = _StubManager(rows)
-    service = VietnamMarketService(manager=manager, config=VietnamDashboardConfig(history_days=30, news_limit=1))
+    service = VietnamMarketService(manager=manager, config=_mozyfin_config(history_days=30, news_limit=1))
 
     first = service.build_watchlist(["FPT"])
     second = service.build_watchlist(["FPT"])
@@ -1242,7 +1705,7 @@ def test_watchlist_cache_mixed_ttl_expires_independently(monkeypatch):
     monkeypatch.delenv("MOZYFIN_FIXTURE_DIR", raising=False)
     rows = _sample_vn_rows()
     manager = _StubManager(rows)
-    service = VietnamMarketService(manager=manager, config=VietnamDashboardConfig(history_days=30, news_limit=1))
+    service = VietnamMarketService(manager=manager, config=_mozyfin_config(history_days=30, news_limit=1))
 
     first = service.build_watchlist(["FPT"])
     second = service.build_watchlist(["FPT"])
@@ -1310,7 +1773,7 @@ def test_force_refresh_bypasses_cache(monkeypatch):
     monkeypatch.delenv("MOZYFIN_FIXTURE_DIR", raising=False)
     rows = _sample_vn_rows()
     manager = _StubManager(rows)
-    service = VietnamMarketService(manager=manager, config=VietnamDashboardConfig(history_days=30, news_limit=1))
+    service = VietnamMarketService(manager=manager, config=_mozyfin_config(history_days=30, news_limit=1))
 
     service.build_watchlist(["FPT"])
     forced = service.build_watchlist(["FPT"], force_refresh=True)
@@ -1329,7 +1792,7 @@ def test_stale_cache_returned_when_live_refresh_fails(monkeypatch):
     monkeypatch.delenv("MOZYFIN_FIXTURE_DIR", raising=False)
     rows = _sample_vn_rows()
     manager = _StubManager(rows)
-    service = VietnamMarketService(manager=manager, config=VietnamDashboardConfig(history_days=30, news_limit=1))
+    service = VietnamMarketService(manager=manager, config=_mozyfin_config(history_days=30, news_limit=1))
     service.build_watchlist(["FPT"])
 
     manager.fail_daily = True
@@ -1355,7 +1818,7 @@ def test_no_cache_live_error_returns_row_error(monkeypatch):
         [{"date": "2026-06-01", "open": 10, "high": 11, "low": 9, "close": 10, "volume": 100}]
     )
     manager = _StubManager(rows, fail_daily=True)
-    service = VietnamMarketService(manager=manager, config=VietnamDashboardConfig(history_days=30, news_limit=1))
+    service = VietnamMarketService(manager=manager, config=_mozyfin_config(history_days=30, news_limit=1))
 
     payload = service.build_watchlist(["FPT"])
     item = payload["watchlist"][0]
