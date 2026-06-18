@@ -534,7 +534,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(header.getByText('Session volume')).toBeInTheDocument();
     expect(header.getByText('20D avg volume')).toBeInTheDocument();
     expect(header.getByText('Latest news')).toBeInTheDocument();
-    expect(header.getByText('SSI daily')).toBeInTheDocument();
+    expect(header.getByText('SSI DailyOhlc')).toBeInTheDocument();
     expect(header.getByText('KBS realtime')).toBeInTheDocument();
   });
 
@@ -571,7 +571,11 @@ describe('VietnamDashboardPage watchlist loading', () => {
       if (item.ticker === 'SCS') {
         return {
           ...item,
-          validation: { ...item.validation, valid: false, errors: ['Missing daily close'] },
+          latestPrice: null,
+          dailyClose: null,
+          ohlcvClose: null,
+          close: null,
+          validation: { valid: false, tradingDate: '2026-06-10', missingFields: ['close'], errors: ['Missing daily close'] },
         };
       }
       return {
@@ -604,6 +608,69 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(indicatorTable.getByTestId('scan-state-ACV')).toHaveTextContent('Data unavailable');
     expect(indicatorTable.getByTestId('table-caveats-FPT')).toHaveTextContent('None');
     expect(indicatorTable.getByTestId('table-caveats-MSB')).toHaveTextContent('4 caveats');
+  });
+
+  it('does not mark rows unavailable for missing optional quote metadata or corporate action fields', async () => {
+    const response = makeResponse(defaultTickers);
+    response.watchlist[0] = {
+      ...response.watchlist[0],
+      name: null,
+      companyName: null,
+      securityType: null,
+      issuer: null,
+      lotSize: null,
+      listedShares: null,
+      listedDate: null,
+      symbolMetadata: {
+        status: 'ok',
+        symbol: 'FPT',
+        exchange: 'HOSE',
+        market: 'HOSE',
+        source: 'SSI',
+      },
+      quotePriceDate: null,
+      quotePriceRawField: null,
+      finalCloseStatus: 'unknown',
+      adjustedPriceStatus: 'unknown',
+      corporateAction: { status: 'unavailable', type: 'unknown' },
+      indicators: {
+        ...response.watchlist[0].indicators,
+        foreignNet5D: null,
+        foreignNet20D: null,
+        foreignNet5dLatestAvailable: null,
+        foreignNet20dLatestAvailable: null,
+      },
+      cacheStatus: {
+        ...response.watchlist[0].cacheStatus,
+        ohlcvCache: 'hit',
+        quoteCache: 'error',
+        intradayCache: 'error',
+        newsCache: 'error',
+      },
+      validation: {
+        valid: false,
+        tradingDate: '2026-06-10',
+        missingFields: ['foreign_net'],
+        errors: [],
+      },
+      warnings: [
+        'Quote does not provide a reliable latest price field; latest price uses SSI DailyOhlc close.',
+        'Final close status is unknown; daily candle may still be in progress.',
+        'Adjusted/unadjusted price status is unknown.',
+        'Intraday 1H candle data is not a realtime matched quote.',
+      ],
+    };
+    mockedGetVietnamWatchlist.mockResolvedValue(response);
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledWith(defaultTickers));
+
+    const indicatorTable = within(screen.getByRole('heading', { name: 'Indicator table' }).closest('section') as HTMLElement);
+    expect(indicatorTable.getByTestId('scan-state-FPT')).not.toHaveTextContent('Data unavailable');
+    expect(indicatorTable.getByTestId('scan-state-FPT')).toHaveTextContent('Neutral');
+    expect(indicatorTable.getByTestId('table-caveats-FPT')).toHaveTextContent('4 caveats');
+    expect(indicatorTable.queryByText('Data source error')).not.toBeInTheDocument();
   });
 
   it('renders news source with relative time', async () => {

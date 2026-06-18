@@ -191,6 +191,12 @@ const cacheLabel = (status?: string | null) => status ?? 'missing';
 
 const rawDateLabel = (value?: string | number | null) => (value === null || value === undefined || value === '' ? '—' : String(value));
 
+const officialDailySourceLabel = (item: VietnamWatchItem) => (
+  item.actualSource === 'SSI' || item.primarySource === 'SSI' || isSsiDailyPriceSource(item.latestPriceSource)
+    ? 'SSI DailyOhlc'
+    : item.actualSource ?? item.primarySource ?? item.latestPriceSource ?? 'unknown'
+);
+
 const compactLabels = (labels?: string[], max = 4) => (labels ?? ['Watch']).slice(0, max);
 
 const RECOMMENDATION_WORD_RE = /\b(buy|sell|hold|recommendation)\b/gi;
@@ -260,13 +266,19 @@ const latestFetchedValue = (item: VietnamWatchItem) => {
   return values[0]?.toISOString() ?? null;
 };
 
-const cacheFreshness = (item: VietnamWatchItem) => {
-  if (Object.values(item.cacheStatus ?? {}).includes('stale')) return { label: 'stale', variant: 'warning' as const };
-  if (Object.values(item.cacheStatus ?? {}).includes('error')) return { label: 'error', variant: 'danger' as const };
-  if (Object.values(item.cacheStatus ?? {}).includes('miss') || Object.values(item.cacheStatus ?? {}).includes('refresh')) {
-    return { label: 'live refreshed', variant: 'info' as const };
-  }
-  return { label: 'cached', variant: 'success' as const };
+const officialDailyCacheFreshness = (item: VietnamWatchItem) => {
+  const status = item.cacheStatus?.ohlcvCache;
+  if (status === 'error') return { label: 'daily error', variant: 'danger' as const };
+  if (status === 'stale') return { label: 'daily stale', variant: 'warning' as const };
+  if (status === 'miss' || status === 'refresh') return { label: 'daily refreshed', variant: 'info' as const };
+  if (status === 'hit') return { label: 'daily cached', variant: 'success' as const };
+  return { label: 'daily cache unknown', variant: 'default' as const };
+};
+
+const hasOfficialDailyData = (item: VietnamWatchItem) => {
+  const close = item.dailyClose ?? item.ohlcvClose ?? item.latestPrice ?? item.close;
+  const date = item.ohlcvDate ?? item.latestPriceDate ?? item.priceDate ?? item.date;
+  return hasDisplayValue(close) && hasDisplayValue(date) && hasDisplayValue(item.volume);
 };
 
 const kbsStateVariant = (state: KbsSnapshotDisplayResult) => {
@@ -413,21 +425,22 @@ const watchlistScanState = (
 ): WatchlistScanState => {
   const labels = marketStatusLabels(item, item.statusLabels?.length ?? 0).map((label) => label.toLowerCase());
   const kbsState = kbsSnapshotState(realtimeQuote, marketPhaseCode);
-  const freshness = cacheFreshness(item);
+  const dailyFreshness = officialDailyCacheFreshness(item);
 
-  if (item.validation?.valid === false || item.error || (item.latestPrice ?? item.close) === null || (item.latestPrice ?? item.close) === undefined) {
+  if (item.status === 'unavailable' || item.error || !hasOfficialDailyData(item)) {
     return { label: 'Data unavailable', variant: 'default', reason: 'Missing required daily fields' };
   }
-  if (freshness.variant === 'danger' || kbsState.severity === 'error') {
-    return { label: 'Data unavailable', variant: 'danger', reason: 'Data source error' };
+  if (dailyFreshness.variant === 'danger') {
+    return { label: 'Data unavailable', variant: 'danger', reason: 'SSI DailyOhlc source error' };
   }
   if (
     kbsState.severity === 'warning' ||
+    kbsState.severity === 'error' ||
     labels.some((label) =>
       ['weak', 'risk', 'caution', 'negative', 'low liquidity', 'overextended'].some((needle) => label.includes(needle)),
     )
   ) {
-    return { label: 'Weakening', variant: 'warning', reason: kbsState.severity === 'warning' ? 'KBS snapshot needs context' : 'Neutral labels show caution' };
+    return { label: 'Weakening', variant: 'warning', reason: kbsState.severity === 'warning' || kbsState.severity === 'error' ? 'KBS snapshot needs context' : 'Neutral labels show caution' };
   }
 
   const constructiveLabelCount = labels.filter((label) =>
@@ -490,7 +503,6 @@ const DataCaveatDisclosure: React.FC<{ item: VietnamWatchItem; className?: strin
 const WatchCard: React.FC<{ item: VietnamWatchItem; realtimeQuote?: VietnamRealtimeQuote | null; marketPhase: VietnamMarketPhase }> = ({ item, realtimeQuote, marketPhase }) => {
   const positive = (item.changePct ?? 0) >= 0;
   const TrendIcon = positive ? ArrowUpRight : ArrowDownRight;
-  const freshness = cacheFreshness(item);
   const lastFetched = latestFetchedValue(item);
   const kbsState = kbsSnapshotState(realtimeQuote, marketPhase.code);
   const sessionVolumeRatioText = sessionVolumeToAvgDailyVolume(item, realtimeQuote, kbsState);
@@ -522,7 +534,7 @@ const WatchCard: React.FC<{ item: VietnamWatchItem; realtimeQuote?: VietnamRealt
 
       <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
         <div>
-          <p className="text-xs text-secondary-text">Daily close (VND)</p>
+          <p className="text-xs text-secondary-text">Official daily close (SSI DailyOhlc)</p>
           <div className="mt-1 flex flex-wrap items-center gap-2">
             <p className="text-lg font-semibold text-foreground">{formatPrice(item.latestPrice ?? item.close)}</p>
             <Badge variant={priceSourceVariant(item.latestPriceSource)}>{(item.latestPriceSource ?? 'unknown').toUpperCase()}</Badge>
@@ -557,8 +569,8 @@ const WatchCard: React.FC<{ item: VietnamWatchItem; realtimeQuote?: VietnamRealt
           <p className="font-semibold text-foreground">{sessionVolumeRatioText}</p>
         </div>
         <div>
-          <p className="text-xs text-secondary-text">Cache</p>
-          <Badge variant={freshness.variant}>{freshness.label}</Badge>
+          <p className="text-xs text-secondary-text">Daily cache</p>
+          <Badge variant={officialDailyCacheFreshness(item).variant}>{officialDailyCacheFreshness(item).label}</Badge>
         </div>
       </div>
 
@@ -601,7 +613,7 @@ const WatchCard: React.FC<{ item: VietnamWatchItem; realtimeQuote?: VietnamRealt
           <span className="text-foreground">{formatPrice(item.indicators.ma20)} / {formatPrice(item.indicators.ma50)}</span>
         </div>
         <div className="flex items-center justify-between gap-2">
-          <span className="text-secondary-text">Cache</span>
+          <span className="text-secondary-text">Latest source refresh</span>
           <span className="text-foreground">{formatVietnamTime(lastFetched)} ({formatRelativeAge(lastFetched)})</span>
         </div>
       </div>
@@ -924,7 +936,7 @@ const SelectedTickerHeader: React.FC<{
   const metadataSource = item.symbolMetadata?.source ?? item.metadataSource;
   const dailySourceLabel = item.status === 'unavailable'
     ? 'SSI unavailable'
-    : item.actualSource ?? item.primarySource ?? (isSsiDailyPriceSource(item.latestPriceSource) ? 'SSI' : 'SSI');
+    : officialDailySourceLabel(item);
 
   return (
     <section className="rounded-lg border border-cyan/25 bg-card p-4 shadow-soft-card">
@@ -941,7 +953,7 @@ const SelectedTickerHeader: React.FC<{
             {metadataSource ? <Badge variant="default">{metadataSource} metadata</Badge> : null}
           </div>
           <div className="mt-3 flex flex-wrap gap-2">
-            <Badge variant="info">{dailySourceLabel} daily</Badge>
+            <Badge variant="info">{dailySourceLabel}</Badge>
             <Badge variant={kbsStateVariant(kbsState)}>KBS realtime</Badge>
             <Badge variant={priceSourceVariant(item.latestPriceSource)}>Daily source {(item.latestPriceSource ?? 'unknown').toUpperCase()}</Badge>
           </div>
@@ -1005,7 +1017,7 @@ const WatchlistScanSummary: React.FC<{
         <div>
           <h2 className="text-base font-semibold text-foreground">Watchlist scan</h2>
           <p className="mt-1 text-xs text-secondary-text">
-            Neutral ticker-level states derived from existing labels, cache freshness, and KBS snapshot state. Warning counts remain secondary context in the table.
+            Neutral ticker-level states derived from existing labels, SSI DailyOhlc cache freshness, and KBS snapshot state. Warning counts remain secondary context in the table.
           </p>
         </div>
         <Badge variant="default">Sector grouping unavailable</Badge>
@@ -1088,7 +1100,7 @@ const IndicatorTable: React.FC<{
             <th className="px-3 py-2 text-right">RSI14 Wilder/RMA</th>
             <th className="px-3 py-2 text-right">Session vol / 20D avg</th>
             <th className="px-3 py-2">Caveats</th>
-            <th className="px-3 py-2">Cache</th>
+            <th className="px-3 py-2">Daily cache</th>
           </tr>
         </thead>
         <tbody>
@@ -1097,6 +1109,7 @@ const IndicatorTable: React.FC<{
             const kbsState = kbsSnapshotState(quote, marketPhase.code);
             const sessionVolumeRatioText = sessionVolumeToAvgDailyVolume(item, quote, kbsState);
             const scanState = watchlistScanState(item, quote, marketPhase.code);
+            const dailyFreshness = officialDailyCacheFreshness(item);
             return (
               <tr
                 key={item.ticker}
@@ -1147,7 +1160,7 @@ const IndicatorTable: React.FC<{
                   <TableCaveatCell item={item} />
                 </td>
                 <td className="px-3 py-3">
-                  <Badge variant={cacheFreshness(item).variant}>{cacheFreshness(item).label}</Badge>
+                  <Badge variant={dailyFreshness.variant}>{dailyFreshness.label}</Badge>
                   <div className="mt-1 text-xs text-secondary-text">{formatRelativeAge(latestFetchedValue(item))}</div>
                 </td>
               </tr>

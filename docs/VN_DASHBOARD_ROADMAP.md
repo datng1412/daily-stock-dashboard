@@ -127,6 +127,19 @@ Observed live watchlist payload can include:
 
 This is not fatal because the current design uses SSI DailyOhlc close for `latest_price`. Keep the warning that quote does not provide a reliable latest price and latest price uses SSI DailyOhlc close. Future realtime/quote work should come from KBS snapshot now or SSI streaming later, not a forced REST quote fallback.
 
+### Row-level status must not mix optional source caveats with SSI daily validity
+
+Confirmed UI issue after strict SSI migration: rows could show valid SSI DailyOhlc close/date/volume, valid SSI DailyStockPrice reference/foreign/matched fields, and valid KBS snapshot values while the scan badge still showed `Data unavailable` or `Data source error`.
+
+Root cause: the frontend primary scan state was using broad validation/cache/KBS state. Optional quote cache, limited metadata, unavailable corporate actions, final/adjusted unknown statuses, temporary Mozyfin intraday, news cache, or KBS snapshot context could be elevated into a row-level data error.
+
+Fixed status taxonomy:
+
+* Row-level `Data unavailable` is reserved for missing/invalid required SSI DailyOhlc fields, explicit row unavailable state, row error, or SSI DailyOhlc cache error.
+* Quote missing, limited metadata, unavailable corporate actions, final/adjusted unknown statuses, temporary Mozyfin intraday, news/cache issues, and KBS snapshot issues remain caveats or separate source states.
+* Cache labels shown in the primary watchlist/table should refer to SSI DailyOhlc. Broader source refresh/cache details belong in diagnostics.
+* Source labels should stay explicit: daily close/chart = `SSI DailyOhlc`, reference/limits/foreign/matched/put-through = `SSI DailyStockPrice`, realtime snapshot/trade tape = `KBS`, intraday = `Mozyfin OHLCV` until SSI IntradayOhlc is implemented.
+
 ### Mozyfin news text encoding issue
 
 News title/summary may contain mojibake or broken Vietnamese text, for example `Khá»i ngoáº¡i`, `Cá» phiáº¿u`, or `VN-Index giÃ nh`. This is not an SSI market-data issue. Keep news source separate from SSI. Future work should normalize/decode Vietnamese news text before rendering.

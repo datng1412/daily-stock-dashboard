@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [fix] Separated Vietnam dashboard row-level data errors from optional quote, metadata, corporate-action, intraday, news, and KBS source caveats after the SSI strict migration.
 - [documentation] Documented observed SSI watchlist payload missing/null fields and latest-price source semantics.
 - [documentation] Added current SSI migration follow-up notes for the Vietnam dashboard.
 - [documentation] Documented limited SSI metadata coverage, Mozyfin news encoding issues, temporary Mozyfin intraday source, and the deferred local DB decision.

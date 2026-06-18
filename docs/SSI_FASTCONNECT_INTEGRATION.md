@@ -150,6 +150,7 @@ Strict daily/chart behavior:
 * Chart responses include `source`, `primary_source`, `actual_source`, `fallback_used`, `fallback_reason`, `points`, and a compatibility `candles` alias.
 * Watchlist rows include the same provider metadata. `latest_price` and `daily_close` use the SSI daily close when SSI supplied the daily OHLCV row, and `latest_price_source` is tagged as `SSI`.
 * Vite local development proxies `/api` to `http://127.0.0.1:8000` by default. Set `VITE_API_PROXY_TARGET=http://127.0.0.1:<port>` when testing a backend on a non-default port.
+* Primary row-level `Data unavailable` UI state is tied to required SSI DailyOhlc validity and SSI DailyOhlc cache errors. Optional quote, metadata, corporate-action, news, temporary intraday, and KBS realtime states are caveats or separate source statuses, not fatal SSI daily-data failures.
 
 Strict DailyStockPrice behavior:
 
@@ -269,6 +270,7 @@ Probe mode tests both documented FC Data base URL shapes and prints only endpoin
 * Intraday still uses Mozyfin OHLCV until the SSI IntradayOhlc phase is implemented and validated.
 * News encoding/mojibake is an external/Mozyfin text issue, not an SSI market-data issue.
 * Keep DailyOhlc and DailyStockPrice labels separate: daily close/chart candles come from SSI DailyOhlc; reference/limits/foreign/matched/put-through fields come from SSI DailyStockPrice.
+* Keep primary cache labels scoped to SSI DailyOhlc. Quote/news/intraday/KBS cache or availability issues should remain in diagnostics or caveats so they do not imply official daily market data is unavailable.
 
 ## Current limitations
 

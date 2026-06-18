@@ -819,6 +819,55 @@ def test_ssi_daily_stock_price_enrichment_maps_limit_and_foreign_fields(monkeypa
     assert (to_date - from_date).days + 1 == 29
 
 
+def test_optional_source_caveats_do_not_make_ssi_row_unavailable(monkeypatch):
+    monkeypatch.delenv("MOZYFIN_FIXTURE_DIR", raising=False)
+    manager = _StubManager(_sample_vn_rows_count(60))
+    manager.fetcher.fail_intraday = True
+    manager.fetcher.fail_news = True
+    ssi = _StubSsiFetcher(
+        daily_ohlcv={"status": "ok", "source": "SSI", "rows": _sample_ssi_ohlcv_rows()},
+        daily_stock_price={"status": "ok", "source": "SSI", "rows": _sample_ssi_daily_stock_price_rows()},
+        securities_details={
+            "status": "ok",
+            "source": "SSI",
+            "rows": [{"symbol": "FPT", "exchange": "HOSE", "market": "HOSE", "source": "SSI"}],
+        },
+    )
+    service = VietnamMarketService(
+        manager=manager,
+        config=VietnamDashboardConfig(history_days=30, news_limit=1),
+        ssi_fetcher=ssi,
+    )
+
+    payload = service.build_watchlist(["FPT"], include_intraday=True)
+    item = payload["watchlist"][0]
+
+    assert manager.daily_calls == 0
+    assert manager.fetcher.quote_calls == 0
+    assert item["status"] == "ok"
+    assert item["source"] == "SSI"
+    assert item["actual_source"] == "SSI"
+    assert item["fallback_used"] is False
+    assert item["latest_price"] == item["daily_close"] == item["ohlcv_close"]
+    assert item["latest_price_source"] == "SSI"
+    assert item["daily_stock_price"]["status"] == "ok"
+    assert item["symbol_metadata"]["status"] == "ok"
+    assert item["symbol_metadata"]["symbol"] == "FPT"
+    assert item["company_name"] is None
+    assert item["security_type"] is None
+    assert item["corporate_action"]["status"] == "unavailable"
+    assert item["quote_price_date"] is None
+    assert item["quote_price_raw_field"] is None
+    assert item["final_close_status"] == "unknown"
+    assert item["adjusted_price_status"] == "unknown"
+    assert item["cache_status"]["quote_cache"] == "missing"
+    assert item["cache_status"]["intraday_cache"] == "error"
+    assert item["cache_status"]["news_cache"] == "error"
+    assert item["validation"]["valid"] is True
+    assert item["validation"]["errors"] == []
+    assert not any("Data unavailable" in warning for warning in item["warnings"])
+
+
 def test_selected_ticker_uses_latest_ssi_daily_stock_price_row(monkeypatch):
     monkeypatch.delenv("MOZYFIN_FIXTURE_DIR", raising=False)
     manager = _StubManager(_sample_vn_rows_count(60))
