@@ -14,6 +14,7 @@ Current phase:
 * No Mozyfin or KBS fallback for SSI-owned daily OHLCV, chart OHLCV, DailyStockPrice, reference/ceiling/floor, foreign flow, or DailyIndex.
 * Mocked tests and an optional local smoke script.
 * Dashboard detail rendering for SSI DailyStockPrice fields when SSI provides them.
+* SSI live API plus backend cache/TTL; local DB market-data storage is deferred.
 
 Out of scope:
 
@@ -53,6 +54,8 @@ KBS remains active temporarily for:
 * Realtime fallback only until SSI streaming is implemented and validated.
 
 SSI is now the strict owner for supported VN REST market data. If SSI is disabled, credentials are missing, or a request fails, SSI-owned sections return an unavailable state instead of falling back to Mozyfin or KBS.
+
+External providers are still required for BCTC/KQKD, financial statements, financial ratios, corporate action event lists, dividends, rights, splits, and macro context such as Fed, oil, USD, and gold. These domains are outside current SSI REST market-data ownership.
 
 ## Provider capability matrix
 
@@ -260,11 +263,14 @@ Probe mode tests both documented FC Data base URL shapes and prints only endpoin
 * SSI FastConnect credentials are not bundled; with default placeholder config, SSI-owned sections are unavailable.
 * Mozyfin remains for news only and unsupported domains.
 * KBS snapshot and trade tape remain separate.
+* Local DB market-data storage is deferred while current call volume remains low and backend cache/TTL is sufficient.
 * No UI source switcher or comparison card exists.
 * No provider comparison endpoint exists in this strict-default phase.
 * SSI streaming is not implemented.
+* IntradayOhlc, IndexComponents, and Securities/SecuritiesDetails dashboard metadata are later phases.
+* Fundamentals, corporate actions, dividends, rights, splits, and macro data require external providers.
 * FC Trading remains out of scope.
 
 ## Next phase
 
-Validate strict SSI behavior with local credentials and add explicit unavailable-state UI refinements where needed. SSI streaming, intraday OHLCV, index components, and symbol metadata can be added later without reintroducing Mozyfin/KBS fallback for SSI-owned REST data.
+Use the roadmap priority order: first finalize the current SSI strict migration with browser validation, source consistency checks, secret scanning, and commit; then add Securities/SecuritiesDetails metadata, IndexList/IndexComponents, IntradayOhlc, SSI streaming prototype, and external fundamentals/corporate-actions/news provider work. Do not introduce FC Trading or Mozyfin/KBS fallback for SSI-owned market data in any phase.

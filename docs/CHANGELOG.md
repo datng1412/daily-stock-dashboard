@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [documentation] Consolidated VN dashboard provider ownership and SSI migration roadmap.
+- [documentation] Deferred local DB market-data storage for the VN dashboard while SSI live API plus backend cache/TTL remains sufficient.
+- [documentation] Clarified next implementation priorities for SSI metadata, index components, intraday OHLCV, streaming, and external providers.
 - [documentation] Add a Vietnam SSI provider capability matrix and strict data-ownership decision rule.
 - [fix] Expose canonical SSI daily close/source metadata through the Vietnam watchlist API response.
 - [fix] Add tolerant SSI field mappings for DailyOhlc, DailyStockPrice, DailyIndex, and SecuritiesDetails optional fields.
