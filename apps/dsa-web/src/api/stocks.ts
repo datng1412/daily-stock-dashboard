@@ -164,6 +164,12 @@ export type VietnamWatchItem = {
     timestamp?: string | number | null;
     summary?: string;
   }>;
+  newsStatus?: {
+    status?: string | null;
+    source?: string | null;
+    message?: string | null;
+    items?: unknown[];
+  };
   intradayTimeframe?: string | null;
   intradaySource?: string | null;
   intradayIsRealtimeQuote?: boolean;
@@ -203,6 +209,11 @@ export type VietnamWatchItem = {
     reason: string;
     inputs?: Record<string, unknown>;
   }>;
+  intradayStatus?: {
+    status?: string | null;
+    source?: string | null;
+    message?: string | null;
+  };
   cacheStatus: Record<string, string>;
   cacheLastFetchedAt: Record<string, string | null>;
   cacheNextRefreshAt: Record<string, string | null>;
@@ -394,6 +405,128 @@ export type VietnamChartResponse = {
   candles?: VietnamChartPoint[];
 };
 
+export type VietnamCompanyProfile = {
+  ticker: string;
+  name?: string | null;
+  exchange?: string | null;
+  industry?: string | null;
+  source?: string | null;
+  status: 'ok' | 'missing' | string;
+};
+
+export type VietnamCompanyPrice = {
+  latestPrice?: number | null;
+  dailyClose?: number | null;
+  referencePrice?: number | null;
+  ceilingPrice?: number | null;
+  floorPrice?: number | null;
+  priceDate?: string | null;
+  source?: string | null;
+  status: 'ok' | 'missing' | string;
+};
+
+export type VietnamCompanyTradingStats = {
+  open?: number | null;
+  high?: number | null;
+  low?: number | null;
+  close?: number | null;
+  volume?: number | null;
+  value?: number | null;
+  source?: string | null;
+  status: 'ok' | 'missing' | string;
+};
+
+export type VietnamCompanyForeignFlow = {
+  foreignBuyVolume?: number | null;
+  foreignSellVolume?: number | null;
+  foreignNetVolume?: number | null;
+  foreignBuyValue?: number | null;
+  foreignSellValue?: number | null;
+  foreignNetValue?: number | null;
+  source?: string | null;
+  status: 'ok' | 'missing' | string;
+};
+
+export type VietnamCompanyTechnical = {
+  ma20?: number | null;
+  ma50?: number | null;
+  rsi14?: number | null;
+  bollingerUpper?: number | null;
+  bollingerMiddle?: number | null;
+  bollingerLower?: number | null;
+  source?: string | null;
+  status: 'ok' | 'missing' | string;
+};
+
+export type VietnamCompanySourceCoverageItem = {
+  block: string;
+  source?: string | null;
+  status: string;
+};
+
+export type VietnamCompanyPlaceholderBlock = {
+  items: Array<Record<string, unknown>>;
+  status: 'not_implemented' | string;
+  source?: string | null;
+  message?: string | null;
+};
+
+export type VietnamCompanyResearchResponse = {
+  ticker: string;
+  status: 'ok' | 'partial' | 'unavailable' | string;
+  profile: VietnamCompanyProfile;
+  price: VietnamCompanyPrice;
+  tradingStats: VietnamCompanyTradingStats;
+  foreignFlow: VietnamCompanyForeignFlow;
+  technical: VietnamCompanyTechnical;
+  sourceCoverage: VietnamCompanySourceCoverageItem[];
+  news: VietnamCompanyPlaceholderBlock;
+  financials: VietnamCompanyPlaceholderBlock;
+  events: VietnamCompanyPlaceholderBlock;
+  warnings: string[];
+  errors: Record<string, unknown>;
+};
+
+export type VietnamIndexInfo = {
+  indexId?: string | null;
+  indexCode?: string | null;
+  indexName?: string | null;
+  exchange?: string | null;
+  market?: string | null;
+  source?: string | null;
+};
+
+export type VietnamIndexListResponse = {
+  status: 'ok' | 'unavailable' | string;
+  source: string;
+  reason?: string | null;
+  market?: string | null;
+  rows: VietnamIndexInfo[];
+  count: number;
+  fallbackUsed?: boolean;
+};
+
+export type VietnamIndexComponent = {
+  indexCode?: string | null;
+  symbol?: string | null;
+  exchange?: string | null;
+  market?: string | null;
+  weight?: number | null;
+  name?: string | null;
+  source?: string | null;
+};
+
+export type VietnamIndexComponentsResponse = {
+  status: 'ok' | 'unavailable' | string;
+  source: string;
+  reason?: string | null;
+  indexCode: string;
+  market?: string | null;
+  rows: VietnamIndexComponent[];
+  count: number;
+  fallbackUsed?: boolean;
+};
+
 export type VietnamCorporateActionEvent = {
   ticker: string;
   eventType: 'cash_dividend' | 'stock_dividend' | 'bonus_share' | 'rights_issue' | 'split' | 'meeting' | 'unknown' | string;
@@ -426,6 +559,9 @@ export type VietnamObservabilityResponse = {
   market: 'VN';
   status: 'ok' | 'error';
   mozyfin: {
+    status?: string | null;
+    source?: string | null;
+    reason?: string | null;
     watchlistRequestsTotal: number;
     watchlistCacheHitsTotal: number;
     watchlistCacheMissesTotal: number;
@@ -527,6 +663,36 @@ export const stocksApi = {
     });
     const { toCamelCase } = await import('./utils');
     return toCamelCase<VietnamChartResponse>(response.data);
+  },
+
+  async getVietnamCompanyResearch(ticker: string, forceRefresh = false): Promise<VietnamCompanyResearchResponse> {
+    const response = await apiClient.get(`/api/v1/stocks/vn/company/${encodeURIComponent(ticker)}`, {
+      params: forceRefresh ? { force_refresh: true } : undefined,
+      timeout: 120000,
+    });
+    const { toCamelCase } = await import('./utils');
+    return toCamelCase<VietnamCompanyResearchResponse>(response.data);
+  },
+
+  async getVietnamIndexList(market = 'HOSE'): Promise<VietnamIndexListResponse> {
+    const response = await apiClient.get('/api/v1/stocks/vn/index-list', {
+      params: market ? { market } : undefined,
+      timeout: 30000,
+    });
+    const { toCamelCase } = await import('./utils');
+    return toCamelCase<VietnamIndexListResponse>(response.data);
+  },
+
+  async getVietnamIndexComponents(indexCode = 'VN30', market?: string): Promise<VietnamIndexComponentsResponse> {
+    const response = await apiClient.get('/api/v1/stocks/vn/index-components', {
+      params: {
+        index_code: indexCode,
+        ...(market ? { market } : {}),
+      },
+      timeout: 30000,
+    });
+    const { toCamelCase } = await import('./utils');
+    return toCamelCase<VietnamIndexComponentsResponse>(response.data);
   },
 
   async getVietnamRealtimeQuotes(tickers: string[]): Promise<VietnamRealtimeResponse> {

@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [fix] Disabled Mozyfin in VN dashboard runtime paths and replaced news/intraday fallback behavior with explicit disabled or not-implemented states.
+- [improvement] Kept SSI FastConnect as the strict VN market-data source while preserving KBS only for realtime snapshot and trade tape.
+- [documentation] Documented that future VN news should use a separate NewsProvider instead of Mozyfin free-tier news/social APIs.
+- [new feature] Add a Phase 1 Vietnam company research endpoint and page shell that reuses SSI-backed market data and explicit not-implemented provider placeholders.
+- [fix] Restore visible Vietnam dashboard SSI index coverage diagnostics and selected ticker news rendering after the SSI IndexList/IndexComponents phase.
+- [new feature] Add SSI IndexList and IndexComponents provider/service/API coverage for Vietnam index metadata.
+- [documentation] Document live SSI IndexComponents availability limitation and IndexList market-filter caveat.
 - [fix] Separated Vietnam dashboard row-level data errors from optional quote, metadata, corporate-action, intraday, news, and KBS source caveats after the SSI strict migration.
 - [documentation] Documented observed SSI watchlist payload missing/null fields and latest-price source semantics.
 - [documentation] Added current SSI migration follow-up notes for the Vietnam dashboard.

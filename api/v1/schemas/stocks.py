@@ -254,6 +254,7 @@ class VietnamWatchItem(BaseModel):
     trend: Dict[str, Any] = Field(default_factory=dict)
     warnings: List[str] = Field(default_factory=list)
     news: List[Dict[str, Any]] = Field(default_factory=list)
+    news_status: Dict[str, Any] = Field(default_factory=dict)
     intraday_timeframe: Optional[str] = None
     intraday_source: Optional[str] = None
     intraday_is_realtime_quote: bool = False
@@ -262,6 +263,7 @@ class VietnamWatchItem(BaseModel):
     intraday_pulse: Dict[str, Any] = Field(default_factory=dict)
     intraday_labels: List[str] = Field(default_factory=list)
     intraday_details: List[Dict[str, Any]] = Field(default_factory=list)
+    intraday_status: Dict[str, Any] = Field(default_factory=dict)
     cache_status: Dict[str, Any] = Field(default_factory=dict)
     cache_last_fetched_at: Dict[str, Any] = Field(default_factory=dict)
     cache_next_refresh_at: Dict[str, Any] = Field(default_factory=dict)
@@ -273,7 +275,7 @@ class VietnamWatchlistResponse(BaseModel):
     """Vietnam watchlist dashboard response."""
 
     market: str = "VN"
-    source: str = "Mozyfin live"
+    source: str = "SSI live"
     fixture_mode: bool = False
     last_refresh_time: Optional[str] = None
     units: Dict[str, str] = Field(default_factory=dict)
@@ -302,10 +304,156 @@ class VietnamChartResponse(BaseModel):
     candles: List[VietnamChartPoint] = Field(default_factory=list)
 
 
+class VietnamIndexInfo(BaseModel):
+    """SSI IndexList row for Vietnam index metadata."""
+
+    index_id: Optional[str] = None
+    index_code: Optional[str] = None
+    index_name: Optional[str] = None
+    exchange: Optional[str] = None
+    market: Optional[str] = None
+    source: Optional[str] = None
+
+
+class VietnamIndexListResponse(BaseModel):
+    """SSI IndexList response for Vietnam dashboard index discovery."""
+
+    status: str = "ok"
+    source: str = "SSI"
+    reason: Optional[str] = None
+    market: Optional[str] = None
+    rows: List[VietnamIndexInfo] = Field(default_factory=list)
+    count: int = 0
+    fallback_used: bool = False
+
+
+class VietnamIndexComponent(BaseModel):
+    """SSI IndexComponents row for Vietnam index membership."""
+
+    index_code: Optional[str] = None
+    symbol: Optional[str] = None
+    exchange: Optional[str] = None
+    market: Optional[str] = None
+    weight: Optional[float] = None
+    name: Optional[str] = None
+    source: Optional[str] = None
+
+
+class VietnamIndexComponentsResponse(BaseModel):
+    """SSI IndexComponents response for Vietnam dashboard index membership."""
+
+    status: str = "ok"
+    source: str = "SSI"
+    reason: Optional[str] = None
+    index_code: str
+    market: Optional[str] = None
+    rows: List[VietnamIndexComponent] = Field(default_factory=list)
+    count: int = 0
+    fallback_used: bool = False
+
+
+class VietnamCompanyProfile(BaseModel):
+    """Company profile block for the Vietnam company research page."""
+
+    ticker: str
+    name: Optional[str] = None
+    exchange: Optional[str] = None
+    industry: Optional[str] = None
+    source: Optional[str] = None
+    status: str = "missing"
+
+
+class VietnamCompanyPrice(BaseModel):
+    """Daily price and limit summary for the Vietnam company research page."""
+
+    latest_price: Optional[float] = None
+    daily_close: Optional[float] = None
+    reference_price: Optional[float] = None
+    ceiling_price: Optional[float] = None
+    floor_price: Optional[float] = None
+    price_date: Optional[str] = None
+    source: Optional[str] = None
+    status: str = "missing"
+
+
+class VietnamCompanyTradingStats(BaseModel):
+    """Trading stats block for the Vietnam company research page."""
+
+    open: Optional[float] = None
+    high: Optional[float] = None
+    low: Optional[float] = None
+    close: Optional[float] = None
+    volume: Optional[float] = None
+    value: Optional[float] = None
+    source: Optional[str] = None
+    status: str = "missing"
+
+
+class VietnamCompanyForeignFlow(BaseModel):
+    """Foreign-flow block for the Vietnam company research page."""
+
+    foreign_buy_volume: Optional[float] = None
+    foreign_sell_volume: Optional[float] = None
+    foreign_net_volume: Optional[float] = None
+    foreign_buy_value: Optional[float] = None
+    foreign_sell_value: Optional[float] = None
+    foreign_net_value: Optional[float] = None
+    source: Optional[str] = None
+    status: str = "missing"
+
+
+class VietnamCompanyTechnical(BaseModel):
+    """Technical snapshot derived from SSI daily OHLCV."""
+
+    ma20: Optional[float] = None
+    ma50: Optional[float] = None
+    rsi14: Optional[float] = None
+    bollinger_upper: Optional[float] = None
+    bollinger_middle: Optional[float] = None
+    bollinger_lower: Optional[float] = None
+    source: Optional[str] = None
+    status: str = "missing"
+
+
+class VietnamCompanySourceCoverageItem(BaseModel):
+    """Per-block source coverage row for Vietnam company research."""
+
+    block: str
+    source: Optional[str] = None
+    status: str
+
+
+class VietnamCompanyPlaceholderBlock(BaseModel):
+    """Placeholder block for future company research providers."""
+
+    items: List[Dict[str, Any]] = Field(default_factory=list)
+    status: str = "not_implemented"
+    source: Optional[str] = None
+    message: Optional[str] = None
+
+
+class VietnamCompanyResearchResponse(BaseModel):
+    """Phase 1 Vietnam company research snapshot response."""
+
+    ticker: str
+    status: str = "partial"
+    profile: VietnamCompanyProfile
+    price: VietnamCompanyPrice
+    trading_stats: VietnamCompanyTradingStats
+    foreign_flow: VietnamCompanyForeignFlow
+    technical: VietnamCompanyTechnical
+    source_coverage: List[VietnamCompanySourceCoverageItem] = Field(default_factory=list)
+    news: VietnamCompanyPlaceholderBlock
+    financials: VietnamCompanyPlaceholderBlock
+    events: VietnamCompanyPlaceholderBlock
+    warnings: List[str] = Field(default_factory=list)
+    errors: Dict[str, Any] = Field(default_factory=dict)
+
+
 class VietnamWatchlistHealthResponse(BaseModel):
     """Vietnam watchlist data-quality health response."""
 
-    source: str = "Mozyfin live"
+    source: str = "SSI live"
     fixture_mode: bool = False
     symbols_loaded: int = 0
     last_trading_date: Optional[str] = None
@@ -429,8 +577,11 @@ class VietnamRealtimeTradesResponse(BaseModel):
 
 
 class VietnamMozyfinObservability(BaseModel):
-    """Process-local Mozyfin fetch counters for the Vietnam dashboard."""
+    """Legacy Mozyfin counter block retained for API compatibility."""
 
+    status: str = "disabled"
+    source: str = "legacy"
+    reason: Optional[str] = None
     watchlist_requests_total: int = 0
     watchlist_cache_hits_total: int = 0
     watchlist_cache_misses_total: int = 0

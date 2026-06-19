@@ -230,15 +230,25 @@ class MozyfinFetcher(BaseFetcher):
     def _command_prefix(self) -> List[str]:
         if self.command:
             return self.command.split()
-        for executable in ("mozyfin.cmd", "mozyfin"):
-            if shutil.which(executable):
-                return [executable]
-        for executable in ("mozyfin-cli.cmd", "mozyfin-cli"):
-            if shutil.which(executable):
-                return [executable]
+
+        for executable in ("mozyfin.cmd", "mozyfin", "mozyfin-cli.cmd", "mozyfin-cli"):
+            resolved = shutil.which(executable)
+            if resolved:
+                return [resolved]
+
+        appdata = os.getenv("APPDATA")
+        if appdata:
+            npm_bin = Path(appdata) / "npm"
+            for filename in ("mozyfin-cli.cmd", "mozyfin.cmd"):
+                candidate = npm_bin / filename
+                if candidate.is_file():
+                    return [str(candidate)]
+
         for executable in ("npx.cmd", "npx"):
-            if shutil.which(executable):
-                return [executable, "mozyfin-cli"]
+            resolved = shutil.which(executable)
+            if resolved:
+                return [resolved, "mozyfin-cli"]
+
         return []
 
     def _fixture_file(self, command: str, entity: str) -> Optional[Path]:
@@ -525,18 +535,27 @@ class MozyfinFetcher(BaseFetcher):
         return result
 
     def get_news(self, stock_code: str, limit: int = 5) -> List[Dict[str, Any]]:
+        symbol = normalize_vn_symbol(stock_code)
+
         try:
             rows = self._run_csv_command(
                 "news",
-                normalize_vn_symbol(stock_code),
+                symbol,
                 "--entities",
-                normalize_vn_symbol(stock_code),
+                symbol,
                 "--limit",
                 str(limit),
             )
         except Exception as exc:
-            logger.debug("[MozyfinFetcher] news unavailable for %s: %s", stock_code, exc)
-            return []
+            message = str(exc)
+
+            api_key = os.getenv("MOZYFIN_API_KEY")
+            if api_key:
+                message = message.replace(api_key, "[redacted]")
+
+            logger.debug("[MozyfinFetcher] news unavailable for %s: %s", stock_code, message)
+            raise RuntimeError(f"Mozyfin news unavailable for {stock_code}: {message}") from exc
+
         news = []
         for row in rows[:limit]:
             published_at = _normalize_datetime_value(
@@ -562,6 +581,7 @@ class MozyfinFetcher(BaseFetcher):
                     "summary": _first_value(row, "summary", "snippet", "description") or "",
                 }
             )
+            
         return [item for item in news if item["title"]]
 
     def get_stock_name(self, stock_code: str) -> str:

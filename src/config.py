@@ -662,6 +662,10 @@ class Config:
     vn_daily_stock_price_provider: str = "ssi"
     vn_index_data_provider: str = "ssi"
     vn_provider_comparison_enabled: bool = False
+    mozyfin_enabled: bool = False
+    mozyfin_news_enabled: bool = False
+    vn_news_provider: str = "disabled"
+    vn_allow_legacy_mozyfin_provider: bool = False
 
     # === AlphaSift optional stock screening integration ===
     alphasift_enabled: bool = False
@@ -1888,6 +1892,24 @@ class Config:
             ),
             vn_provider_comparison_enabled=parse_env_bool(
                 os.getenv('VN_PROVIDER_COMPARISON_ENABLED'),
+                default=False,
+            ),
+            mozyfin_enabled=parse_env_bool(
+                os.getenv('MOZYFIN_ENABLED'),
+                default=False,
+            ),
+            mozyfin_news_enabled=parse_env_bool(
+                os.getenv('MOZYFIN_NEWS_ENABLED'),
+                default=False,
+            ),
+            vn_news_provider=parse_env_choice(
+                os.getenv('VN_NEWS_PROVIDER'),
+                {'disabled'},
+                'disabled',
+                field_name='VN_NEWS_PROVIDER',
+            ),
+            vn_allow_legacy_mozyfin_provider=parse_env_bool(
+                os.getenv('VN_ALLOW_LEGACY_MOZYFIN_PROVIDER'),
                 default=False,
             ),
         )

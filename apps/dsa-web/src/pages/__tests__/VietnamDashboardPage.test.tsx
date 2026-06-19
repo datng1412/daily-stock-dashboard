@@ -4,6 +4,8 @@ import {
   stocksApi,
   type VietnamChartResponse,
   type VietnamCorporateActionsResponse,
+  type VietnamIndexComponentsResponse,
+  type VietnamIndexListResponse,
   type VietnamObservabilityResponse,
   type VietnamRealtimeResponse,
   type VietnamRealtimeTradesResponse,
@@ -23,6 +25,8 @@ vi.mock('../../api/stocks', () => ({
     getVietnamCorporateActions: vi.fn(),
     getVietnamObservability: vi.fn(),
     getVietnamChart: vi.fn(),
+    getVietnamIndexList: vi.fn(),
+    getVietnamIndexComponents: vi.fn(),
   },
 }));
 
@@ -216,19 +220,27 @@ const makeItem = (ticker: string): VietnamWatchItem => ({
   trend: {},
   warnings: [],
   news: [],
+  newsStatus: { status: 'disabled', source: null, message: 'News provider disabled.' },
   intradayTimeframe: '1h',
-  intradaySource: 'Mozyfin OHLCV',
+  intradaySource: null,
   intradayIsRealtimeQuote: false,
-  intradayWarning: 'Intraday 1H candle data is not a realtime matched quote.',
+  intradayWarning: 'SSI IntradayOhlc is not implemented yet.',
   intradayCandles: [],
   intradayPulse: undefined,
-  intradayLabels: [],
-  intradayDetails: [],
+  intradayLabels: ['Intraday data limited'],
+  intradayDetails: [
+    {
+      label: 'Intraday data limited',
+      severity: 'info',
+      reason: 'SSI IntradayOhlc is not implemented yet.',
+    },
+  ],
+  intradayStatus: { status: 'not_implemented', source: null, message: 'SSI IntradayOhlc is not implemented yet.' },
   cacheStatus: {
     ohlcvCache: 'miss',
-    quoteCache: 'miss',
-    intradayCache: 'miss',
-    newsCache: 'miss',
+    quoteCache: 'disabled',
+    intradayCache: 'disabled',
+    newsCache: 'disabled',
   },
   cacheLastFetchedAt: {
     ohlcv: '2026-06-10T08:00:00Z',
@@ -243,12 +255,12 @@ const makeItem = (ticker: string): VietnamWatchItem => ({
 
 const makeResponse = (tickers: string[], options: { fixtureMode?: boolean } = {}): VietnamWatchlistResponse => ({
   market: 'VN',
-  source: options.fixtureMode ? 'Mozyfin fixture' : 'SSI live',
+  source: options.fixtureMode ? 'SSI fixture' : 'SSI live',
   fixtureMode: options.fixtureMode ?? false,
   lastRefreshTime: '2026-06-10T08:00:00Z',
   units: { close: 'VND', volume: 'shares' },
   dataQuality: {
-    source: options.fixtureMode ? 'Mozyfin fixture' : 'SSI live',
+    source: options.fixtureMode ? 'SSI fixture' : 'SSI live',
     fixtureMode: options.fixtureMode ?? false,
     symbolsLoaded: tickers.length,
     lastTradingDate: '2026-06-10',
@@ -277,6 +289,34 @@ const mockedGetVietnamRealtimeTrades = vi.mocked(stocksApi.getVietnamRealtimeTra
 const mockedGetVietnamCorporateActions = vi.mocked(stocksApi.getVietnamCorporateActions);
 const mockedGetVietnamObservability = vi.mocked(stocksApi.getVietnamObservability);
 const mockedGetVietnamChart = vi.mocked(stocksApi.getVietnamChart);
+const mockedGetVietnamIndexList = vi.mocked(stocksApi.getVietnamIndexList);
+const mockedGetVietnamIndexComponents = vi.mocked(stocksApi.getVietnamIndexComponents);
+
+const makeIndexListResponse = (overrides: Partial<VietnamIndexListResponse> = {}): VietnamIndexListResponse => ({
+  status: 'ok',
+  source: 'SSI',
+  market: 'HOSE',
+  rows: [
+    { indexId: 'VN30', indexCode: 'VN30', indexName: 'VN30 Index', exchange: 'HOSE', market: 'HOSE', source: 'SSI' },
+    { indexId: 'VNINDEX', indexCode: 'VNINDEX', indexName: 'VN Index', exchange: 'HOSE', market: 'HOSE', source: 'SSI' },
+  ],
+  count: 2,
+  fallbackUsed: false,
+  ...overrides,
+});
+
+const makeIndexComponentsResponse = (
+  overrides: Partial<VietnamIndexComponentsResponse> = {},
+): VietnamIndexComponentsResponse => ({
+  status: 'unavailable',
+  source: 'SSI',
+  reason: 'SSI FastConnect request failed',
+  indexCode: 'VN30',
+  rows: [],
+  count: 0,
+  fallbackUsed: false,
+  ...overrides,
+});
 
 const makeObservabilityResponse = (overrides: Partial<VietnamObservabilityResponse> = {}): VietnamObservabilityResponse => ({
   market: 'VN',
@@ -458,6 +498,8 @@ describe('VietnamDashboardPage watchlist loading', () => {
     mockedGetVietnamCorporateActions.mockReset();
     mockedGetVietnamObservability.mockReset();
     mockedGetVietnamChart.mockReset();
+    mockedGetVietnamIndexList.mockReset();
+    mockedGetVietnamIndexComponents.mockReset();
     mockedGetVietnamMarketPhase.mockReset();
     mockedGetVietnamMarketPhase.mockReturnValue(makeMarketPhase());
     mockedGetVietnamWatchlist.mockImplementation(async (tickers) => makeResponse(tickers?.length ? tickers : defaultTickers));
@@ -466,6 +508,8 @@ describe('VietnamDashboardPage watchlist loading', () => {
     mockedGetVietnamCorporateActions.mockImplementation(async (tickers) => makeCorporateActionsResponse(tickers));
     mockedGetVietnamObservability.mockImplementation(async () => makeObservabilityResponse());
     mockedGetVietnamChart.mockImplementation(async (symbol, range = '6M') => makeChartResponse(symbol, range));
+    mockedGetVietnamIndexList.mockImplementation(async () => makeIndexListResponse());
+    mockedGetVietnamIndexComponents.mockImplementation(async () => makeIndexComponentsResponse());
   });
 
   afterEach(() => {
@@ -538,6 +582,16 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(header.getByText('KBS realtime')).toBeInTheDocument();
   });
 
+  it('links watchlist ticker symbols to the company research page', async () => {
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledWith(defaultTickers));
+
+    const links = await screen.findAllByRole('link', { name: 'Open FPT company research' });
+    expect(links.length).toBeGreaterThan(0);
+    expect(links[0]).toHaveAttribute('href', '/vietnam/company/FPT');
+  });
+
   it('shows neutral watchlist scan states for faster table comparison', async () => {
     const response = makeResponse(['FPT', 'VPB', 'MSB', 'SCS', 'ACV']);
     response.watchlist = response.watchlist.map((item) => {
@@ -565,7 +619,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
             { label: 'Price finality unknown', severity: 'caution', reason: 'The dashboard cannot confirm whether the latest daily candle is final.' },
             { label: 'Adjusted price unknown', severity: 'caution', reason: 'The dashboard cannot confirm whether the OHLCV prices are adjusted or unadjusted.' },
           ],
-          warnings: ['latest price uses OHLCV close because Mozyfin quote field is unreliable'],
+          warnings: ['latest price uses OHLCV close because no reliable quote field is present'],
         };
       }
       if (item.ticker === 'SCS') {
@@ -695,6 +749,96 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect((await screen.findAllByText('FPT reports cloud revenue growth')).length).toBeGreaterThan(0);
     expect(screen.getByText('CafeF · 2 hours ago')).toBeInTheDocument();
     expect(screen.queryByText('Time unavailable')).not.toBeInTheDocument();
+  });
+
+  it('renders SSI index coverage when VN30 components are unavailable', async () => {
+    mockedGetVietnamIndexList.mockResolvedValue(makeIndexListResponse({
+      rows: [
+        { indexId: 'VN30', indexCode: 'VN30', indexName: 'VN30 Index', exchange: 'HOSE', market: 'HOSE', source: 'SSI' },
+        { indexId: 'VNINDEX', indexCode: 'VNINDEX', indexName: 'VN Index', exchange: 'HOSE', market: 'HOSE', source: 'SSI' },
+        { indexId: 'HNX30', indexCode: 'HNX30', indexName: 'HNX30 Index', exchange: 'HNX', market: 'HNX', source: 'SSI' },
+      ],
+      count: 3,
+    }));
+    mockedGetVietnamIndexComponents.mockResolvedValue(makeIndexComponentsResponse());
+
+    render(<VietnamDashboardPage />);
+
+    expect(await screen.findByText('SSI index coverage')).toBeInTheDocument();
+    expect(mockedGetVietnamIndexList).toHaveBeenCalledWith('HOSE');
+    expect(mockedGetVietnamIndexComponents).toHaveBeenCalledWith('VN30');
+    expect(screen.getByText('IndexList source/status/count')).toBeInTheDocument();
+    expect(screen.getByText('VN30 components source/status/count')).toBeInTheDocument();
+    expect(screen.getAllByText('VN30').length).toBeGreaterThan(0);
+    expect(screen.getByText('VNINDEX')).toBeInTheDocument();
+    expect(screen.getByText('HNX30')).toBeInTheDocument();
+    expect(screen.getByText('VN30 components unavailable from SSI')).toBeInTheDocument();
+
+    const indicatorTable = within(screen.getByRole('heading', { name: 'Indicator table' }).closest('section') as HTMLElement);
+    expect(indicatorTable.getByTestId('scan-state-FPT')).not.toHaveTextContent('Data unavailable');
+  });
+
+  it('keeps selected ticker news visible when quote and metadata are limited', async () => {
+    const response = makeResponse(defaultTickers);
+    response.watchlist[0] = {
+      ...response.watchlist[0],
+      name: null,
+      companyName: null,
+      securityType: null,
+      issuer: null,
+      lotSize: null,
+      listedShares: null,
+      listedDate: null,
+      quotePriceDate: null,
+      quotePriceRawField: null,
+      symbolMetadata: {
+        status: 'ok',
+        symbol: 'FPT',
+        exchange: 'HOSE',
+        market: 'HOSE',
+        source: 'SSI',
+      },
+      news: [
+        {
+          title: 'FPT expands data center capacity',
+          url: 'https://example.com/fpt-data-center',
+          source: 'News provider',
+          publishedDate: new Date(Date.now() - 45 * 60 * 1000).toISOString(),
+          summary: 'Company update from the news provider.',
+        },
+      ],
+    };
+    mockedGetVietnamWatchlist.mockResolvedValue(response);
+
+    render(<VietnamDashboardPage />);
+
+    expect((await screen.findAllByText('FPT expands data center capacity')).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('News provider').length).toBeGreaterThan(0);
+    const indicatorTable = within(screen.getByRole('heading', { name: 'Indicator table' }).closest('section') as HTMLElement);
+    expect(indicatorTable.getByTestId('scan-state-FPT')).not.toHaveTextContent('Data unavailable');
+  });
+
+  it('renders disabled news placeholder without provider error text', async () => {
+    const response = makeResponse(defaultTickers);
+    response.watchlist[0] = {
+      ...response.watchlist[0],
+      news: [],
+      newsStatus: { status: 'disabled', source: null, message: 'News provider disabled.' },
+      quotePriceDate: null,
+      symbolMetadata: {
+        status: 'ok',
+        symbol: 'FPT',
+        exchange: 'HOSE',
+        market: 'HOSE',
+        source: 'SSI',
+      },
+    };
+    mockedGetVietnamWatchlist.mockResolvedValue(response);
+
+    render(<VietnamDashboardPage />);
+
+    expect(await screen.findByText('News provider disabled.')).toBeInTheDocument();
+    expect(screen.queryByText(/Mozyfin.*error/i)).not.toBeInTheDocument();
   });
 
   it('shows SSI DailyStockPrice fields and corporate-action calendar unavailable state', async () => {
@@ -1192,7 +1336,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(detail.getByText('Chart endpoint unavailable: chart failed')).toBeInTheDocument();
   });
 
-  it('clarifies Mozyfin 1H and KBS volume labels while preserving numeric values', async () => {
+  it('clarifies intraday disabled state and KBS volume labels while preserving numeric values', async () => {
     const response = makeResponse(defaultTickers);
     response.watchlist[0] = {
       ...response.watchlist[0],
@@ -1246,13 +1390,13 @@ describe('VietnamDashboardPage watchlist loading', () => {
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
 
     expect(screen.getByText('Latest 1H candle volume')).toBeInTheDocument();
-    expect(screen.getByText('Mozyfin session 1H volume')).toBeInTheDocument();
+    expect(screen.getByText('Session 1H volume')).toBeInTheDocument();
     expect(screen.getAllByText('Session volume / 20D avg daily volume').length).toBeGreaterThan(0);
     expect(screen.queryByText('Loaded 1H candles total volume (all loaded)')).not.toBeInTheDocument();
     expect(screen.queryByText('Volume ratio')).not.toBeInTheDocument();
     expect(screen.queryByText('Vol ratio')).not.toBeInTheDocument();
     expect(screen.getByText('KBS session accumulated volume')).toBeInTheDocument();
-    expect(screen.getByText('Mozyfin session 1H volume is calculated from filtered 1H candles; KBS session volume comes from the realtime board and may differ.')).toBeInTheDocument();
+    expect(screen.getByText('Intraday OHLCV is disabled until SSI IntradayOhlc is implemented. KBS session volume remains separate realtime board context.')).toBeInTheDocument();
     expect(screen.getAllByText('1,234,567').length).toBeGreaterThanOrEqual(2);
     expect(screen.getAllByText('3,456,000').length).toBeGreaterThan(0);
     expect(screen.getAllByText('0.72x').length).toBeGreaterThan(0);
@@ -1265,7 +1409,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(screen.getByText('1.75x')).toBeInTheDocument();
   });
 
-  it('falls back to Mozyfin session 1H volume when KBS accumulated volume is stale', async () => {
+  it('falls back to intraday session 1H volume when KBS accumulated volume is stale', async () => {
     const response = makeResponse(defaultTickers);
     response.watchlist[0] = {
       ...response.watchlist[0],
@@ -1350,7 +1494,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(screen.getAllByText('20D avg unavailable').length).toBeGreaterThan(0);
   });
 
-  it('shows a session volume missing state when neither KBS nor Mozyfin session volume is available', async () => {
+  it('shows a session volume missing state when neither KBS nor intraday session volume is available', async () => {
     const response = makeResponse(defaultTickers);
     response.watchlist[0] = {
       ...response.watchlist[0],
@@ -1433,7 +1577,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     );
     expect(within(sessionHighLowCard as HTMLElement).queryByText('- / -')).not.toBeInTheDocument();
 
-    const sessionVolumeLabel = screen.getByText('Mozyfin session 1H volume');
+    const sessionVolumeLabel = screen.getByText('Session 1H volume');
     const sessionVolumeCard = sessionVolumeLabel.closest('div');
     expect(within(sessionVolumeCard as HTMLElement).getByText('Not enough session candles')).toHaveAttribute(
       'title',
@@ -1587,7 +1731,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(screen.getByText('Need 20 foreign rows')).toBeInTheDocument();
   });
 
-  it('renders data status with Mozyfin source and fixture state', async () => {
+  it('renders data status with SSI source and fixture state', async () => {
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
@@ -1602,7 +1746,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     fireEvent.click(panel.getByText('Show diagnostics'));
     expect(dataStatusDiagnostics()).toHaveAttribute('open');
     expect(panel.getByText('VN market phase')).toBeInTheDocument();
-    expect(panel.getByText('fixture_mode false')).toBeInTheDocument();
+    expect(panel.getByText(/fixture_mode false/)).toBeInTheDocument();
     expect(panel.getByText('Overview refresh')).toBeInTheDocument();
     expect(panel.getByText('Selected detail')).toBeInTheDocument();
   });
@@ -1631,7 +1775,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     const panel = dataStatusPanel();
     fireEvent.click(panel.getByText('Show diagnostics'));
-    expect(panel.getByText('Mozyfin req')).toBeInTheDocument();
+    expect(panel.getByText('VN data req')).toBeInTheDocument();
     expect(panel.getAllByText('3').length).toBeGreaterThan(0);
     expect(panel.getByText('Cache hit/miss')).toBeInTheDocument();
     expect(panel.getByText('40/8')).toBeInTheDocument();
@@ -1671,7 +1815,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(panel.getByText('Trade tape may differ during auction phases.')).toBeInTheDocument();
   });
 
-  it('shows fixture warning in data status when Mozyfin fixture mode is active', async () => {
+  it('shows fixture warning in data status when fixture mode is active', async () => {
     mockedGetVietnamWatchlist.mockImplementation(async (tickers) => makeResponse(tickers?.length ? tickers : defaultTickers, { fixtureMode: true }));
 
     render(<VietnamDashboardPage />);
@@ -1679,10 +1823,10 @@ describe('VietnamDashboardPage watchlist loading', () => {
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
 
     const panel = dataStatusPanel();
-    expect(panel.getAllByText('Mozyfin fixture').length).toBeGreaterThan(0);
+    expect(panel.getAllByText('SSI fixture').length).toBeGreaterThan(0);
     fireEvent.click(panel.getByText('Show diagnostics'));
-    expect(panel.getByText('fixture_mode true')).toBeInTheDocument();
-    expect(panel.getByText('Fixture mode is active; Mozyfin rows are sample data.')).toBeInTheDocument();
+    expect(panel.getByText(/fixture_mode true/)).toBeInTheDocument();
+    expect(panel.getByText('Fixture mode is active; rows are sample data.')).toBeInTheDocument();
   });
 
   it('shows KBS ok status when snapshot rows are fresh', async () => {
@@ -1902,7 +2046,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistCalls);
   });
 
-  it('changing KBS intervals does not call Mozyfin endpoints', async () => {
+  it('changing KBS intervals does not call watchlist endpoints', async () => {
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));

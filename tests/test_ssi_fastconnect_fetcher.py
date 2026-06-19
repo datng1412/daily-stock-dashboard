@@ -713,20 +713,155 @@ def test_index_list_maps_index_codes_safely():
         {
             "index_id": "VNINDEX",
             "index_code": "VNINDEX",
-            "name": "VN Index",
+            "index_name": "VN Index",
             "exchange": "HOSE",
+            "market": "HOSE",
             "source": "SSI",
         },
         {
             "index_id": "VN30",
             "index_code": "VN30",
-            "name": "VN30 Index",
+            "index_name": "VN30 Index",
             "exchange": "HOSE",
+            "market": "HOSE",
             "source": "SSI",
         },
     ]
     _, _, kwargs = session.calls[-1]
     assert kwargs["params"] == {"market": "HOSE"}
+
+
+def test_index_components_maps_component_rows_safely():
+    session = _FakeSession(
+        post_items=[_token_response()],
+        get_items=[
+            _FakeResponse(
+                payload={
+                    "Data": [
+                        {
+                            "IndexID": "VN30",
+                            "Symbol": "FPT",
+                            "Market": "HOSE",
+                            "Weight": "7.25",
+                            "Name": "FPT Corp",
+                        },
+                        {
+                            "IndexCode": "VN30",
+                            "StockSymbol": "ACB",
+                            "Exchange": "HOSE",
+                            "Ratio": "4.10",
+                            "StockName": "ACB",
+                        },
+                    ]
+                }
+            )
+        ],
+    )
+    fetcher = _fetcher(session=session)
+
+    payload = fetcher.get_index_components("vn30")
+
+    assert payload["status"] == "ok"
+    assert payload["source"] == "SSI"
+    assert payload["index_code"] == "VN30"
+    assert payload["rows"] == [
+        {
+            "index_code": "VN30",
+            "symbol": "FPT",
+            "exchange": "HOSE",
+            "market": "HOSE",
+            "weight": 7.25,
+            "name": "FPT Corp",
+            "source": "SSI",
+        },
+        {
+            "index_code": "VN30",
+            "symbol": "ACB",
+            "exchange": "HOSE",
+            "market": "HOSE",
+            "weight": 4.10,
+            "name": "ACB",
+            "source": "SSI",
+        },
+    ]
+    _, _, kwargs = session.calls[-1]
+    assert kwargs["params"] == {"indexID": "VN30", "pageIndex": 1, "pageSize": 1000}
+
+
+def test_index_components_retries_index_code_variant_when_first_shape_has_no_rows():
+    session = _FakeSession(
+        post_items=[_token_response()],
+        get_items=[
+            _FakeResponse(payload={"status": "ok", "message": "No data"}),
+            _FakeResponse(payload={"Data": [{"IndexCode": "VN30", "Symbol": "FPT"}]}),
+        ],
+    )
+    fetcher = _fetcher(session=session)
+
+    payload = fetcher.get_index_components("VN30")
+
+    assert payload["status"] == "ok"
+    assert payload["rows"][0]["symbol"] == "FPT"
+    assert session.calls[1][2]["params"] == {"indexID": "VN30", "pageIndex": 1, "pageSize": 1000}
+    assert session.calls[2][2]["params"] == {"pageIndex": 1, "pageSize": 1000, "indexCode": "VN30"}
+
+
+def test_index_components_retries_variant_after_provider_error_shape():
+    session = _FakeSession(
+        post_items=[_token_response()],
+        get_items=[
+            _FakeResponse(status_code=400, payload={"message": "bad params"}),
+            _FakeResponse(payload={"Data": [{"IndexCode": "VN30", "Symbol": "FPT"}]}),
+        ],
+    )
+    fetcher = _fetcher(session=session)
+
+    payload = fetcher.get_index_components("VN30")
+
+    assert payload["status"] == "ok"
+    assert payload["rows"][0]["symbol"] == "FPT"
+    assert session.calls[2][2]["params"] == {"pageIndex": 1, "pageSize": 1000, "indexCode": "VN30"}
+
+
+def test_index_metadata_status_message_only_body_returns_clean_unavailable():
+    session = _FakeSession(
+        post_items=[_token_response()],
+        get_items=[
+            _FakeResponse(payload={"status": "ok", "message": "No data"}),
+            _FakeResponse(payload={"status": "ok", "message": "No data"}),
+        ],
+    )
+    fetcher = _fetcher(session=session)
+
+    payload = fetcher.get_index_list("HOSE")
+
+    assert payload["status"] == "unavailable"
+    assert payload["source"] == "SSI"
+    assert payload["reason"] == REQUEST_FAILED_REASON
+    assert payload["rows"] == []
+    assert payload["count"] == 0
+
+
+def test_index_components_status_message_only_body_returns_clean_unavailable():
+    session = _FakeSession(
+        post_items=[_token_response()],
+        get_items=[
+            _FakeResponse(payload={"status": "ok", "message": "No data"}),
+            _FakeResponse(payload={"status": "ok", "message": "No data"}),
+            _FakeResponse(payload={"status": "ok", "message": "No data"}),
+            _FakeResponse(payload={"status": "ok", "message": "No data"}),
+            _FakeResponse(payload={"status": "ok", "message": "No data"}),
+        ],
+    )
+    fetcher = _fetcher(session=session)
+
+    payload = fetcher.get_index_components("VN30")
+
+    assert payload["status"] == "unavailable"
+    assert payload["source"] == "SSI"
+    assert payload["reason"] == REQUEST_FAILED_REASON
+    assert payload["rows"] == []
+    assert payload["count"] == 0
 
 
 def test_securities_maps_symbol_metadata():

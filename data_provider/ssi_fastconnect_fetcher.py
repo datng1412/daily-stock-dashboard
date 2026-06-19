@@ -502,7 +502,7 @@ class SsiFastConnectFetcher:
 
     def get_index_list(self, market: Optional[str] = None) -> Dict[str, Any]:
         params = {"market": market.strip().upper()} if market else {}
-        return self._cached_normalized(
+        payload = self._cached_normalized(
             "IndexList",
             params,
             0,
@@ -511,6 +511,35 @@ class SsiFastConnectFetcher:
             param_variants=[self._alternate_param_case(params)] if params else None,
             required_any=("index_id", "index_code"),
         )
+        return self._empty_as_unavailable(payload)
+
+    def get_index_components(self, index_code: str, market: Optional[str] = None) -> Dict[str, Any]:
+        normalized_index = index_code.strip().upper()
+        params: Dict[str, Any] = {
+            "indexID": normalized_index,
+            "pageIndex": 1,
+            "pageSize": 1000,
+        }
+        if market:
+            params["market"] = market.strip().upper()
+        common_params = {key: value for key, value in params.items() if key != "indexID"}
+        variants = [
+            {**common_params, "indexCode": normalized_index},
+            {**common_params, "IndexId": normalized_index},
+            {**common_params, "IndexCode": normalized_index},
+            self._alternate_param_case(params),
+        ]
+        payload = self._cached_normalized(
+            "IndexComponents",
+            params,
+            0,
+            lambda row: self._map_index_component(row, normalized_index),
+            extra={"index_code": normalized_index, "market": params.get("market")},
+            param_variants=variants,
+            required_any=("symbol",),
+            retry_unavailable_variants=True,
+        )
+        return self._empty_as_unavailable(payload)
 
     def get_securities(self, market: Optional[str] = None) -> Dict[str, Any]:
         params: Dict[str, Any] = {"pageIndex": 1, "pageSize": 1000}
@@ -659,6 +688,7 @@ class SsiFastConnectFetcher:
         extra: Optional[Dict[str, Any]] = None,
         param_variants: Optional[List[Dict[str, Any]]] = None,
         required_any: Tuple[str, ...] = (),
+        retry_unavailable_variants: bool = False,
     ) -> Dict[str, Any]:
         cache_key = (endpoint, tuple(sorted((params or {}).items())))
         if self.cache_ttl_seconds > 0:
@@ -667,10 +697,11 @@ class SsiFastConnectFetcher:
                 return dict(entry.value)
 
         payload = self._request(endpoint, params=params)
-        if isinstance(payload, dict) and payload.get("status") == "unavailable":
+        first_unavailable = payload if isinstance(payload, dict) and payload.get("status") == "unavailable" else None
+        if first_unavailable and not retry_unavailable_variants:
             return payload
 
-        rows = [mapper(row) for row in _extract_rows(payload)]
+        rows = [] if first_unavailable else [mapper(row) for row in _extract_rows(payload)]
         rows = [row for row in rows if row and _has_required_field(row, required_any)]
         if not rows:
             for variant_params in param_variants or []:
@@ -683,6 +714,8 @@ class SsiFastConnectFetcher:
                 rows = [row for row in rows if row and _has_required_field(row, required_any)]
                 if rows:
                     break
+        if not rows and first_unavailable:
+            return first_unavailable
         if rows and "date" in rows[0]:
             rows.sort(key=lambda item: (item.get("date") is None, item.get("date") or ""))
         if limit and len(rows) > limit:
@@ -701,6 +734,20 @@ class SsiFastConnectFetcher:
                 expires_at=time.time() + self.cache_ttl_seconds,
             )
         return result
+
+    @staticmethod
+    def _empty_as_unavailable(payload: Dict[str, Any]) -> Dict[str, Any]:
+        if payload.get("status") != "ok":
+            return payload
+        if payload.get("count", 0) == 0:
+            return {
+                **payload,
+                "status": "unavailable",
+                "reason": REQUEST_FAILED_REASON,
+                "rows": [],
+                "count": 0,
+            }
+        return payload
 
     def _cached_chunked_normalized(
         self,
@@ -933,8 +980,22 @@ class SsiFastConnectFetcher:
         return {
             "index_id": str(index_id).upper() if index_id not in (None, "") else None,
             "index_code": str(index_code).upper() if index_code not in (None, "") else None,
-            "name": _first_value(row, "IndexName", "Name", "indexName", "name"),
+            "index_name": _first_value(row, "IndexName", "Name", "indexName", "name"),
             "exchange": _first_value(row, "Exchange", "Market", "exchange", "market"),
+            "market": _first_value(row, "Market", "Exchange", "market", "exchange"),
+            "source": SSI_SOURCE,
+        }
+
+    def _map_index_component(self, row: Dict[str, Any], index_code: str) -> Dict[str, Any]:
+        component_index = _first_value(row, "IndexID", "IndexId", "IndexCode", "indexID", "indexId", "indexCode", "index_code")
+        symbol = _first_value(row, "Symbol", "Ticker", "StockSymbol", "StockCode", "SecurityCode", "ComponentCode", "Code", "symbol", "ticker", "stockSymbol", "stockCode", "securityCode", "componentCode", "code")
+        return {
+            "index_code": str(component_index or index_code).upper(),
+            "symbol": str(symbol).upper() if symbol not in (None, "") else None,
+            "exchange": _first_value(row, "Exchange", "Market", "StockExchange", "ExchangeCode", "exchange", "market", "stockExchange", "exchangeCode"),
+            "market": _first_value(row, "Market", "Exchange", "StockExchange", "market", "exchange", "stockExchange"),
+            "weight": _to_float(_first_value(row, "Weight", "WeightPct", "WeightPercent", "Ratio", "Rate", "Percentage", "Proportion", "weight", "weightPct", "weightPercent", "ratio", "rate", "percentage", "proportion")),
+            "name": _first_value(row, "Name", "CompanyName", "SecurityName", "StockName", "TickerName", "name", "companyName", "securityName", "stockName", "tickerName"),
             "source": SSI_SOURCE,
         }
 

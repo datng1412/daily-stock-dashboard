@@ -27,7 +27,10 @@ from api.v1.schemas.stocks import (
     StockHistoryResponse,
     StockQuote,
     VietnamChartResponse,
+    VietnamCompanyResearchResponse,
     VietnamCorporateActionsResponse,
+    VietnamIndexComponentsResponse,
+    VietnamIndexListResponse,
     VietnamObservabilityResponse,
     VietnamRealtimeResponse,
     VietnamRealtimeTradesResponse,
@@ -48,6 +51,7 @@ from src.services.import_parser import (
 )
 from src.services.stock_service import StockService
 from src.services.system_config_service import SystemConfigService
+from src.services.vietnam_company_research_service import VietnamCompanyResearchService
 from src.services.vietnam_market_service import VietnamMarketService
 from src.services.vietnam_observability import vietnam_observability_snapshot
 from data_provider.base import normalize_stock_code
@@ -459,6 +463,30 @@ def get_vietnam_watchlist(
 
 
 @router.get(
+    "/vn/company/{ticker}",
+    response_model=VietnamCompanyResearchResponse,
+    summary="Vietnam company research snapshot",
+    description="Return a source-aware company research page skeleton for one VN ticker using SSI market data and explicit not-implemented placeholders.",
+)
+def get_vietnam_company_research(
+    ticker: str,
+    force_refresh: bool = Query(False, description="Bypass VN in-memory cache and refresh configured VN provider data"),
+) -> VietnamCompanyResearchResponse:
+    try:
+        payload = VietnamCompanyResearchService().get_company_research_snapshot(
+            ticker,
+            force_refresh=force_refresh,
+        )
+        return VietnamCompanyResearchResponse(**payload)
+    except Exception as e:
+        logger.error("Vietnam company research failed: %s", e, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={"error": "vn_company_research_failed", "message": str(e)},
+        )
+
+
+@router.get(
     "/vn/chart",
     response_model=VietnamChartResponse,
     summary="Vietnam selected ticker daily chart",
@@ -478,6 +506,47 @@ def get_vietnam_chart(
         raise HTTPException(
             status_code=500,
             detail={"error": "vn_chart_failed", "message": str(e)},
+        )
+
+
+@router.get(
+    "/vn/index-list",
+    response_model=VietnamIndexListResponse,
+    summary="Vietnam SSI index list",
+    description="Return SSI FastConnect index identifiers for Vietnam index metadata discovery.",
+)
+def get_vietnam_index_list(
+    market: Optional[str] = Query(None, description="Optional market/exchange filter such as HOSE, HNX, or UPCOM"),
+) -> VietnamIndexListResponse:
+    try:
+        payload = VietnamMarketService().build_index_list(market=market)
+        return VietnamIndexListResponse(**payload)
+    except Exception as e:
+        logger.error("Vietnam index list failed: %s", e, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={"error": "vn_index_list_failed", "message": str(e)},
+        )
+
+
+@router.get(
+    "/vn/index-components",
+    response_model=VietnamIndexComponentsResponse,
+    summary="Vietnam SSI index components",
+    description="Return SSI FastConnect component rows for one Vietnam index code.",
+)
+def get_vietnam_index_components(
+    index_code: str = Query(..., description="SSI index code returned by /vn/index-list, for example VN30"),
+    market: Optional[str] = Query(None, description="Optional market/exchange filter such as HOSE, HNX, or UPCOM"),
+) -> VietnamIndexComponentsResponse:
+    try:
+        payload = VietnamMarketService().build_index_components(index_code=index_code, market=market)
+        return VietnamIndexComponentsResponse(**payload)
+    except Exception as e:
+        logger.error("Vietnam index components failed: %s", e, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={"error": "vn_index_components_failed", "message": str(e)},
         )
 
 

@@ -19,6 +19,9 @@ logger = logging.getLogger(__name__)
 _LOCK = Lock()
 
 _MOZYFIN_DEFAULTS: Dict[str, Any] = {
+    "status": "disabled",
+    "source": "legacy",
+    "reason": "Mozyfin is disabled for VN dashboard runtime.",
     "watchlist_requests_total": 0,
     "watchlist_cache_hits_total": 0,
     "watchlist_cache_misses_total": 0,

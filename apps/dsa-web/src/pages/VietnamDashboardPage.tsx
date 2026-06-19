@@ -7,6 +7,8 @@ import {
   type VietnamChartResponse,
   type VietnamCorporateActionEvent,
   type VietnamCorporateActionsResponse,
+  type VietnamIndexComponentsResponse,
+  type VietnamIndexListResponse,
   type VietnamObservabilityResponse,
   type VietnamRealtimeQuote,
   type VietnamRealtimeTrade,
@@ -22,7 +24,6 @@ import {
   formatAbsoluteDateTime,
   formatRelativeAge,
   formatRelativeTime,
-  formatVietnamDateTime,
   formatVietnamTime,
   parseMozyTimestamp,
 } from '../utils/vietnamTime';
@@ -506,13 +507,22 @@ const WatchCard: React.FC<{ item: VietnamWatchItem; realtimeQuote?: VietnamRealt
   const lastFetched = latestFetchedValue(item);
   const kbsState = kbsSnapshotState(realtimeQuote, marketPhase.code);
   const sessionVolumeRatioText = sessionVolumeToAvgDailyVolume(item, realtimeQuote, kbsState);
+  const newsItems = item.news ?? [];
 
   return (
     <article className="rounded-lg border border-border/70 bg-card p-4 shadow-soft-card">
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-xl font-semibold text-foreground">{item.ticker}</h2>
+            <h2 className="text-xl font-semibold text-foreground">
+              <a
+                href={`/vietnam/company/${item.ticker}`}
+                className="text-foreground hover:text-cyan"
+                aria-label={`Open ${item.ticker} company research`}
+              >
+                {item.ticker}
+              </a>
+            </h2>
             <Badge variant="info">{item.exchange ?? 'VN'}</Badge>
             <Badge variant="default">{item.marketIndex ?? 'VNINDEX.VN'}</Badge>
           </div>
@@ -652,10 +662,10 @@ const WatchCard: React.FC<{ item: VietnamWatchItem; realtimeQuote?: VietnamRealt
         </div>
       </details>
 
-      {item.news.length > 0 ? (
+      {newsItems.length > 0 ? (
         <div className="mt-3 border-t border-border/60 pt-3">
           <p className="mb-2 text-xs font-medium text-secondary-text">Latest news</p>
-          {item.news.slice(0, 2).map((news, index) => {
+          {newsItems.slice(0, 2).map((news, index) => {
             const timestamp = newsTimestamp(news);
             const absoluteTime = parseMozyTimestamp(timestamp) ? formatAbsoluteDateTime(timestamp) : undefined;
             return (
@@ -680,9 +690,66 @@ const WatchCard: React.FC<{ item: VietnamWatchItem; realtimeQuote?: VietnamRealt
   );
 };
 
+const IndexCoveragePanel: React.FC<{
+  indexList?: VietnamIndexListResponse | null;
+  indexComponents?: VietnamIndexComponentsResponse | null;
+  error?: string | null;
+}> = ({ indexList, indexComponents, error }) => {
+  const sampleCodes = (indexList?.rows ?? [])
+    .map((row) => row.indexCode)
+    .filter((code): code is string => Boolean(code))
+    .slice(0, 8);
+  const listStatus = indexList?.status ?? (error ? 'unavailable' : 'loading');
+  const componentStatus = indexComponents?.status ?? (error ? 'unavailable' : 'loading');
+  const componentCount = indexComponents?.count ?? indexComponents?.rows?.length ?? 0;
+  const componentUnavailable = componentStatus !== 'ok' || componentCount === 0;
+
+  return (
+    <div className="mt-3 rounded-lg border border-border/60 bg-elevated/30 p-3 text-xs text-secondary-text">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-sm font-semibold text-foreground">SSI index coverage</p>
+          <p className="mt-1">SSI IndexList and IndexComponents diagnostics. No Mozyfin or KBS fallback is used for index data.</p>
+        </div>
+        <Badge variant="default">SSI</Badge>
+      </div>
+      <div className="mt-3 grid gap-3 md:grid-cols-2">
+        <div className="rounded-lg bg-card/60 p-3">
+          <dt className="text-xs text-secondary-text">IndexList source/status/count</dt>
+          <dd className="mt-1 font-medium text-foreground">
+            {indexList?.source ?? 'SSI'} / {listStatus} / {formatNumber(indexList?.count ?? indexList?.rows?.length ?? 0)}
+          </dd>
+          <dd className="mt-2 flex flex-wrap gap-1">
+            {sampleCodes.length ? sampleCodes.map((code) => (
+              <Badge key={code} variant="default">{code}</Badge>
+            )) : (
+              <span>Sample index codes unavailable</span>
+            )}
+          </dd>
+        </div>
+        <div className="rounded-lg bg-card/60 p-3">
+          <dt className="text-xs text-secondary-text">VN30 components source/status/count</dt>
+          <dd className="mt-1 font-medium text-foreground">
+            {indexComponents?.source ?? 'SSI'} / {componentStatus} / {formatNumber(componentCount)}
+          </dd>
+          <dd className="mt-2">
+            {componentUnavailable
+              ? 'VN30 components unavailable from SSI'
+              : `${formatNumber(componentCount)} component rows returned by SSI`}
+          </dd>
+        </div>
+      </div>
+      {error ? <p className="mt-2 text-warning">{error}</p> : null}
+    </div>
+  );
+};
+
 const DataStatusPanel: React.FC<{
   data?: VietnamWatchlistResponse | null;
   selectedItem?: VietnamWatchItem | null;
+  indexList?: VietnamIndexListResponse | null;
+  indexComponents?: VietnamIndexComponentsResponse | null;
+  indexCoverageError?: string | null;
   realtimeQuotes: Record<string, VietnamRealtimeQuote | undefined>;
   realtimeTrades: VietnamRealtimeTrade[];
   watchlist: string[];
@@ -699,6 +766,9 @@ const DataStatusPanel: React.FC<{
 }> = ({
   data,
   selectedItem,
+  indexList,
+  indexComponents,
+  indexCoverageError,
   realtimeQuotes,
   realtimeTrades,
   watchlist,
@@ -746,12 +816,12 @@ const DataStatusPanel: React.FC<{
             <Badge variant={dataStatusVariant}>Data status: {dataStatusLabel}</Badge>
           </div>
           <p className="mt-1 text-xs text-secondary-text">
-            {marketPhase.phase} | {data?.dataQuality.source ?? 'Mozyfin pending'} | selected {selectedItem?.ticker ?? '-'}
+            {marketPhase.phase} | {data?.dataQuality.source ?? 'SSI pending'} | selected {selectedItem?.ticker ?? '-'}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Badge variant={data?.fixtureMode ? 'warning' : data ? 'success' : 'default'}>
-            {data?.dataQuality.source ?? 'Mozyfin pending'}
+            {data?.dataQuality.source ?? 'SSI pending'}
           </Badge>
           <Badge variant={kbsStateVariant(selectedKbsState)}>{selectedKbsState.label}</Badge>
           <Badge variant="default">{marketPhase.holidayAware ? 'Holiday calendar enabled' : 'holidayAware=false'}</Badge>
@@ -759,7 +829,7 @@ const DataStatusPanel: React.FC<{
       </div>
       {data?.fixtureMode ? (
         <div className="mt-3 rounded-lg border border-warning/20 bg-warning/10 p-2 text-xs text-warning">
-          Fixture mode is active; Mozyfin rows are sample data.
+          Fixture mode is active; rows are sample data.
         </div>
       ) : null}
       {marketPhase.isAuction ? (
@@ -772,6 +842,11 @@ const DataStatusPanel: React.FC<{
           KBS issue: {kbsErrorMessage(realtimeError ?? tradesError) ?? 'KBS unavailable'}
         </div>
       ) : null}
+      <IndexCoveragePanel
+        indexList={indexList}
+        indexComponents={indexComponents}
+        error={indexCoverageError}
+      />
       <details className="mt-3 rounded-lg border border-border/60 bg-elevated/30 p-3 text-xs text-secondary-text">
         <summary className="cursor-pointer font-medium text-foreground">Show diagnostics</summary>
         <dl className="mt-4 grid gap-3 text-sm md:grid-cols-3 xl:grid-cols-7">
@@ -783,8 +858,8 @@ const DataStatusPanel: React.FC<{
             </dd>
           </div>
           <div className="rounded-lg bg-card/60 p-3">
-            <dt className="text-xs text-secondary-text">Mozyfin mode</dt>
-            <dd className="mt-1 font-medium text-foreground">{data ? `fixture_mode ${String(data.fixtureMode)}` : '-'}</dd>
+            <dt className="text-xs text-secondary-text">Market-data mode</dt>
+            <dd className="mt-1 font-medium text-foreground">{data ? `SSI strict | fixture_mode ${String(data.fixtureMode)}` : '-'}</dd>
             <dd className="mt-1 text-xs text-secondary-text">{data?.dataQuality.source ?? '-'}</dd>
           </div>
           <div className="rounded-lg bg-card/60 p-3">
@@ -834,7 +909,7 @@ const DataStatusPanel: React.FC<{
         </div>
         <div className="mt-3 grid gap-2 rounded-lg border border-border/60 bg-card/50 p-3 md:grid-cols-3 xl:grid-cols-6">
           <div>
-            <span className="font-medium text-foreground">Mozyfin req</span> {observability?.mozyfin.watchlistRequestsTotal ?? '-'}
+            <span className="font-medium text-foreground">VN data req</span> {observability?.mozyfin.watchlistRequestsTotal ?? '-'}
           </div>
           <div>
             <span className="font-medium text-foreground">Cache hit/miss</span> {observability ? `${observability.mozyfin.watchlistCacheHitsTotal}/${observability.mozyfin.watchlistCacheMissesTotal}` : '-'}
@@ -1119,7 +1194,16 @@ const IndicatorTable: React.FC<{
                 )}
                 onClick={() => onSelect(item.ticker)}
               >
-                <td className="py-3 pr-3 font-semibold text-foreground">{item.ticker}</td>
+                <td className="py-3 pr-3 font-semibold text-foreground">
+                  <a
+                    href={`/vietnam/company/${item.ticker}`}
+                    className="text-foreground hover:text-cyan"
+                    aria-label={`Open ${item.ticker} company research`}
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    {item.ticker}
+                  </a>
+                </td>
                 <td className="px-3 py-3">
                   <Badge variant={scanState.variant} data-testid={`scan-state-${item.ticker}`}>{scanState.label}</Badge>
                   <div className="mt-1 max-w-[180px] text-xs text-secondary-text">{scanState.reason}</div>
@@ -1937,6 +2021,7 @@ const StockDetailView: React.FC<{
   const foreignNet5dLatestAvailable = indicators.foreignNet5dLatestAvailable;
   const foreignNet20dLatestAvailable = indicators.foreignNet20dLatestAvailable;
   const foreignHistoryCount = indicators.foreignNetHistoryCount ?? 0;
+  const detailNewsItems = item.news ?? [];
   const ssiDailyStockPrice = item.dailyStockPrice ?? {};
   const ssiReferencePrice = ssiDailyStockPrice.referencePrice ?? item.ssiReferencePrice ?? item.priceLimit?.referencePrice ?? null;
   const ssiCeilingPrice = ssiDailyStockPrice.ceilingPrice ?? item.ssiCeilingPrice ?? item.priceLimit?.ceilingPrice ?? null;
@@ -2044,7 +2129,7 @@ const StockDetailView: React.FC<{
           </dd>
           <dd className="mt-2 text-xs text-secondary-text">
             {item.latestPriceSource === 'ohlcv'
-              ? 'Mozyfin quote has no reliable latest matched price, so daily OHLCV close is used.'
+              ? 'No reliable latest matched quote field is present, so daily OHLCV close is used.'
               : isSsiDailyPriceSource(item.latestPriceSource)
                 ? 'SSI DailyOhlc close is used because no reliable latest matched quote field is present.'
               : 'Latest price comes from quote data when a reliable field is present.'}
@@ -2205,7 +2290,7 @@ const StockDetailView: React.FC<{
           <div>
             <h3 className="text-sm font-semibold text-foreground">Intraday Pulse</h3>
             <p className="mt-1 text-xs text-secondary-text">
-              {item.intradaySource ?? 'Mozyfin OHLCV'} {item.intradayTimeframe?.toUpperCase() ?? '1H'} candles, separate from daily latest price. Latest candle {formatVietnamDateTime(latestIntradayCandle?.dateTime ?? latestIntradayCandle?.timestamp)}.
+              {item.intradaySource ?? item.intradayStatus?.source ?? 'SSI IntradayOhlc'} {item.intradayTimeframe?.toUpperCase() ?? '1H'} status: {item.intradayStatus?.status ?? 'not_implemented'}.
             </p>
           </div>
           <div className="flex flex-wrap gap-1">
@@ -2256,7 +2341,7 @@ const StockDetailView: React.FC<{
             </dd>
           </div>
           <div className="rounded-lg bg-card/60 p-3">
-            <dt className="text-xs text-secondary-text">Mozyfin session 1H volume</dt>
+            <dt className="text-xs text-secondary-text">Session 1H volume</dt>
             <dd className="mt-1 font-medium text-foreground" title={hasSessionVolumeFrom1H ? undefined : missingSessionVolumeTitle}>
               {hasSessionVolumeFrom1H ? formatNumber(item.intradayPulse?.sessionVolumeFrom1H) : missingSessionMetricText}
             </dd>
@@ -2297,7 +2382,7 @@ const StockDetailView: React.FC<{
           </div>
         ) : null}
         <p className="mt-3 text-xs text-secondary-text">
-          Mozyfin session 1H volume is calculated from filtered 1H candles; KBS session volume comes from the realtime board and may differ.
+          Intraday OHLCV is disabled until SSI IntradayOhlc is implemented. KBS session volume remains separate realtime board context.
         </p>
       </div>
       <div className="mt-4 rounded-lg border border-border/60 bg-elevated/30 p-4">
@@ -2397,11 +2482,11 @@ const StockDetailView: React.FC<{
       <div className="mt-4 rounded-lg border border-border/60 bg-elevated/30 p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-sm font-semibold text-foreground">Latest news</h3>
-          <Badge variant="default">{Math.min(item.news.length, DETAIL_NEWS_LIMIT)} shown</Badge>
+          <Badge variant="default">{Math.min(detailNewsItems.length, DETAIL_NEWS_LIMIT)} shown</Badge>
         </div>
-        {item.news.length ? (
+        {detailNewsItems.length ? (
           <div className="mt-3 grid gap-3">
-            {item.news.slice(0, DETAIL_NEWS_LIMIT).map((news, index) => {
+            {detailNewsItems.slice(0, DETAIL_NEWS_LIMIT).map((news, index) => {
               const summaryHasArtifacts = hasEncodingArtifacts(news.summary);
               const titleHasArtifacts = hasEncodingArtifacts(news.title);
               const timestamp = newsTimestamp(news);
@@ -2434,7 +2519,9 @@ const StockDetailView: React.FC<{
             })}
           </div>
         ) : (
-          <p className="mt-3 text-sm text-secondary-text">No recent news returned for this ticker.</p>
+          <p className="mt-3 text-sm text-secondary-text">
+            {item.newsStatus?.message ?? (item.newsStatus?.status === 'disabled' ? 'News provider disabled.' : 'News not implemented.')}
+          </p>
         )}
       </div>
       <details className="mt-4 rounded-lg border border-border/60 bg-elevated/30 p-3 text-xs text-secondary-text">
@@ -2495,6 +2582,9 @@ const VietnamDashboardPage: React.FC = () => {
   const [corporateActions, setCorporateActions] = useState<VietnamCorporateActionsResponse | null>(null);
   const [corporateActionsLoading, setCorporateActionsLoading] = useState(false);
   const [corporateActionsError, setCorporateActionsError] = useState<string | null>(null);
+  const [indexList, setIndexList] = useState<VietnamIndexListResponse | null>(null);
+  const [indexComponents, setIndexComponents] = useState<VietnamIndexComponentsResponse | null>(null);
+  const [indexCoverageError, setIndexCoverageError] = useState<string | null>(null);
   const [lastKbsQuoteRefreshAt, setLastKbsQuoteRefreshAt] = useState<string | null>(null);
   const [lastKbsTradeRefreshAt, setLastKbsTradeRefreshAt] = useState<string | null>(null);
   const [lastKbsErrorAt, setLastKbsErrorAt] = useState<string | null>(null);
@@ -2662,6 +2752,46 @@ const VietnamDashboardPage: React.FC = () => {
     }
   }, []);
 
+  const loadIndexCoverage = useCallback(async () => {
+    setIndexCoverageError(null);
+    const [listResult, componentResult] = await Promise.allSettled([
+      stocksApi.getVietnamIndexList('HOSE'),
+      stocksApi.getVietnamIndexComponents('VN30'),
+    ]);
+
+    if (listResult.status === 'fulfilled') {
+      setIndexList(listResult.value);
+    } else {
+      setIndexList({
+        status: 'unavailable',
+        source: 'SSI',
+        reason: 'IndexList unavailable',
+        market: 'HOSE',
+        rows: [],
+        count: 0,
+        fallbackUsed: false,
+      });
+    }
+
+    if (componentResult.status === 'fulfilled') {
+      setIndexComponents(componentResult.value);
+    } else {
+      setIndexComponents({
+        status: 'unavailable',
+        source: 'SSI',
+        reason: 'IndexComponents unavailable',
+        indexCode: 'VN30',
+        rows: [],
+        count: 0,
+        fallbackUsed: false,
+      });
+    }
+
+    if (listResult.status === 'rejected' || componentResult.status === 'rejected') {
+      setIndexCoverageError('SSI index coverage request unavailable.');
+    }
+  }, []);
+
   const refreshKbsQuotes = useCallback(async (tickersOverride?: string[]) => {
     const targetTickers = tickersOverride ?? logicalWatchlistRef.current;
     if (kbsQuoteRefreshInFlightRef.current) {
@@ -2806,6 +2936,10 @@ const VietnamDashboardPage: React.FC = () => {
     }, 60_000);
     return () => window.clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    void loadIndexCoverage();
+  }, [loadIndexCoverage]);
 
   useEffect(() => {
     const queuedLoad = nextWatchlistLoadRef.current;
@@ -3263,6 +3397,9 @@ const VietnamDashboardPage: React.FC = () => {
       <DataStatusPanel
         data={data}
         selectedItem={selectedItem}
+        indexList={indexList}
+        indexComponents={indexComponents}
+        indexCoverageError={indexCoverageError}
         realtimeQuotes={realtimeQuotes}
         realtimeTrades={realtimeTrades}
         watchlist={watchlist}
