@@ -36,6 +36,7 @@ TODO:
 * Confirm whether the mismatch is caused by provisional/final timing, cache windows, endpoint semantics, or field meaning.
 * Decide whether DailyOhlc close or DailyStockPrice close should own canonical latest daily price after finality semantics are understood.
 * Define `final_close_status` values and when they can be assigned.
+* Align company detail price labels with the chosen canonical source, or expose a separate DailyStockPrice-specific field so `latest_price` does not carry two source meanings across watchlist and company views.
 
 ### Normalize Unavailable Trade Tape Contract
 
@@ -56,6 +57,7 @@ TODO:
 * Keep status/source/message in `trade_tape_status`.
 * Move attempted endpoint, HTTP status, retryability, and raw provider error summary to `diagnostics.trade_tape`.
 * Do not render placeholder trade metric rows when `trade_tape` is empty.
+* Apply the same shape to watchlist and company responses; a wrapper object with inner `trades: []` should remain a compatibility cleanup item only.
 
 ### Split Public Live-Section Status From Diagnostics
 
@@ -67,6 +69,30 @@ Desired public contract:
 
 * Public `status.message` is short and user-safe.
 * `diagnostics.realtime` and `diagnostics.trade_tape` hold attempted endpoints, last endpoint, HTTP status, raw provider error summary, and retryable flag.
+
+### Separate Profile Provider Status From Completeness
+
+Current issue:
+
+* Company profile may have `status = ok` while optional fields such as `name` and `industry` are `null`.
+
+Desired public contract:
+
+* Provider response status can remain `ok` when the provider call succeeds.
+* Data completeness should be exposed separately as `profile_quality`, `profile_completeness`, or an equivalent `partial` classification.
+* Primary UI should hide absent optional metadata rows and show a concise partial-data state only in the data-quality summary.
+
+### Normalize Future Module Statuses
+
+Current issue:
+
+* Company future modules may use `not_implemented`, while live-provider status docs historically allowed only `ok`, `unavailable`, and `disabled`.
+
+Desired public contract:
+
+* Live provider sections use `ok`, `unavailable`, or `disabled`.
+* Placeholder future modules may use `not_implemented` until Phase 2 either implements them or removes the placeholder section.
+* `not_implemented` should not be used for attempted SSI realtime, trade-tape, or intraday probes.
 
 ## P1 - Live-Section Semantics
 
@@ -86,6 +112,7 @@ Latest smoke context:
 * `intraday_status = unavailable`.
 * `intraday_candles = []`.
 * `intraday_pulse = null`.
+* Company endpoint may still expose nested `intraday.pulse = {}` when unavailable.
 * `intraday_latest_date = 2026-06-15`.
 * `daily_price_date = 2026-06-22`.
 * `date_match = mismatched`.
@@ -93,6 +120,7 @@ Latest smoke context:
 TODO:
 
 * Keep stale intraday out of primary metric rows.
+* Normalize company nested `intraday.pulse` to `null` when `intraday.status = unavailable`.
 * Put latest intraday date, daily price date, and date-match details in status or diagnostics when no usable intraday data exists.
 
 ### Add Backoff For Non-Retryable SSI Live 404s

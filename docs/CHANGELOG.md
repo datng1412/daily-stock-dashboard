@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [documentation] Complete VN dashboard documentation system with UI states, API catalog, data dictionary, test strategy, release checklist, observability, and security guidance.
 - [documentation] Expand VN dashboard roadmap with full post-SSI phase plan from data-quality summary through news, financials, persistence, and watchlist workflow.
 - [fix] Render unavailable VN SSI intraday, realtime, and trade-tape sections as concise status states instead of placeholder metric rows.
 - [documentation] Redesign VN dashboard docs around a data-quality-first SSI market-data product boundary, including product spec, data contract, roadmap, runbook, and ADR-style decisions.

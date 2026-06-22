@@ -1,42 +1,43 @@
-# Error and Status Taxonomy
+# VN Error And Status Taxonomy
 
-## ok
+## Purpose
 
-Provider returned usable data.
+The VN dashboard uses two related vocabularies:
 
-## unavailable
+- Provider/public statuses: whether a data block is usable, unavailable, or intentionally disabled.
+- Data-quality classifications: whether returned data is partial, stale, mismatched, insufficient, unknown, or erroneous.
 
-Provider is enabled but usable data is not available.
+Do not mix them into a single UI badge without source context.
 
-Examples:
-- endpoint 404
-- empty response
-- stale intraday
-- permission unavailable
+## Provider/Public Statuses
 
-## disabled
+| Status | Meaning | Use for | UI rule |
+| --- | --- | --- | --- |
+| `ok` | Provider/section returned usable data for its purpose | Daily row, DailyStockPrice, intraday, realtime, trade tape, index components, profile provider response | Render actual fields that exist. |
+| `unavailable` | Provider/section is enabled but no usable data is available | SSI realtime 404, trade tape no rows, stale intraday, IndexComponents failure | Render concise unavailable state; keep daily data visible if daily is valid. |
+| `disabled` | Section is intentionally off | News disabled, legacy providers disabled, configured-off live section | Render disabled state; do not treat as failure. |
+| `not_implemented` | Future module has no provider/implementation yet | News/financials/events placeholders in company response | Allowed for future modules; not a live-provider status. Phase 2 may normalize or preserve this explicitly. |
 
-Feature/provider intentionally disabled.
+## Data-Quality Classifications
 
-Examples:
-- news disabled
-- Mozyfin disabled
+| Classification | Meaning | Example | UI rule |
+| --- | --- | --- | --- |
+| `partial` | Provider responded, but important optional fields are missing | Profile provider status is `ok` but `name` or `industry` is null | Show profile partial/completeness badge; do not fail daily data. |
+| `stale` | Data exists but is too old for the current section | Intraday latest date is older than daily price date | Hide live metrics; put stale dates in status/diagnostics. |
+| `mismatched` | Two same-ticker/date sources disagree | DailyOhlc close differs from DailyStockPrice close | Surface in Data Quality Summary with both source labels. |
+| `insufficient_history` | Not enough historical rows to compute a rolling field | `foreign_net_5d` or `foreign_net_20d` cannot be computed | Show insufficient history, not zero. |
+| `unknown` | System cannot determine a semantic status | `final_close_status = unknown` or `adjusted_price_status = unknown` | Show conservative caveat; do not infer. |
+| `error` | Unexpected processing or provider error | Parser failure, schema mismatch, unhandled provider response | Prefer sanitized unavailable public status plus detailed diagnostics/logs. |
 
-## partial
+## Current Handoff Findings To Preserve
 
-Provider responded but key optional fields are missing.
+- Company intraday can currently expose `pulse = {}` while unavailable; target classification/status is unavailable with `pulse = null`.
+- Trade tape can currently expose a wrapper object with inner `trades: []`; target public contract is `trade_tape = []`.
+- Realtime/trade-tape public messages can include endpoint dumps; target is short message plus diagnostics.
+- Profile provider status can be `ok` while profile completeness is `partial`.
 
-Example:
-- profile endpoint ok but company name/industry missing
+## Diagnostics Rules
 
-## stale
-
-Data exists but is not current enough to use.
-
-## mismatched
-
-Two sources disagree for same ticker/date.
-
-## insufficient_history
-
-Not enough rows to compute rolling fields.
+- Public message: short, user-safe, no endpoint dump.
+- Diagnostics: attempted endpoint, last endpoint, HTTP status, retryable flag, stale-date mismatch, sanitized provider error summary.
+- Forbidden everywhere: credentials, tokens, auth headers, account IDs, raw auth responses.

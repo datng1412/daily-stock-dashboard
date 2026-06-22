@@ -20,6 +20,8 @@ Technical sub-statuses, provider codes, HTTP status, retryability, and endpoint 
 
 Profile completeness labels such as `partial` are data-quality classifications, not provider status enum values. Provider/live-section statuses should remain `ok`, `unavailable`, or `disabled`.
 
+Future modules that are already exposed in placeholder API sections may use `not_implemented` until Phase 2 normalizes or removes those sections. Do not use `not_implemented` for live provider probes that were attempted; those remain `unavailable` when enabled but no usable data exists.
+
 ## Missing Data Rules
 
 Use these rules consistently across backend responses and frontend rendering:
@@ -52,6 +54,8 @@ Daily finality must stay explicit:
 
 If daily SSI data is unavailable, the row should expose an unavailable status and null daily metrics rather than borrowing live, intraday, or legacy-provider values.
 
+Company detail currently has a source-alignment decision point: broader dashboard docs make `latest_price` canonical from SSI DailyOhlc close, while the company endpoint may still report a DailyStockPrice-specific `source`. Phase 1 must either align company `latest_price` with DailyOhlc or explicitly document a company-only DailyStockPrice field so the same label does not carry two meanings.
+
 ## Live Section Contract
 
 This is the Phase 2 public contract target. Missing live objects and lists must not be represented by placeholder objects or fake metric rows.
@@ -77,6 +81,8 @@ intraday_pulse = null
 ```
 
 Stale latest-date metadata and date-match details should move to `intraday_status` or diagnostics when there is no usable intraday section.
+
+The company endpoint must follow the same missing-object rule. When nested company `intraday.status = unavailable`, `intraday.candles = []` and `intraday.pulse = null`. A placeholder `{}` pulse is a cleanup bug, not the desired contract.
 
 ### Realtime Snapshot
 
@@ -150,6 +156,22 @@ news_status.source = disabled
 ```
 
 News disabled state must not be treated as a daily market-data failure. Mozyfin is not a VN runtime news fallback.
+
+## Future Module Contract
+
+Future enrichment modules such as financials, corporate actions, events, ownership, and richer profile details may appear as placeholder sections while implementation is pending. If they are exposed before implementation, their status may be:
+
+```text
+not_implemented
+```
+
+Rules:
+
+* `not_implemented` means no provider integration exists yet.
+* `disabled` means the feature exists but is intentionally off.
+* `unavailable` means the feature is enabled or attempted but no usable data was returned.
+* Placeholder future sections must use `null` for missing objects and `[]` for missing lists.
+* Future-module placeholders must not be rendered as provider failures or daily-data failures.
 
 ## Source Ownership
 
