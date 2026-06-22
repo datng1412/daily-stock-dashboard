@@ -267,8 +267,10 @@ def test_company_research_uses_ssi_and_not_implemented_placeholders():
     assert snapshot["news"]["status"] == "not_implemented"
     assert snapshot["financials"]["status"] == "not_implemented"
     assert snapshot["events"]["status"] == "not_implemented"
+    assert snapshot["data_quality_summary"]["canonical_price_source"] == "SSI DailyOhlc"
+    assert snapshot["data_quality_summary"]["checks"]["daily_ohlc"] == "ok"
+    assert snapshot["data_quality_summary"]["checks"]["daily_stock_price"] == "ok"
     assert snapshot["status"] != "unavailable"
-
 
 def test_default_vn_service_does_not_construct_mozyfin_manager_when_disabled(monkeypatch):
     def fail_manager(*args, **kwargs):  # pragma: no cover - failure path

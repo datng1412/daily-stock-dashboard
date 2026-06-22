@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [new feature] Render VN company data quality summary on the company detail page with source mismatch, profile completeness, and live-section availability states.
+- [new feature] Add VN backend data quality summary to watchlist and company responses for source mismatches, profile completeness, live-section availability, and finality checks.
 - [documentation] Add foreign-stock tracker product strategy docs based on Vietnamese user research, covering personas, onboarding, compliance boundaries, competitor notes, KPIs, and roadmap.
 - [documentation] Complete VN dashboard documentation system with UI states, API catalog, data dictionary, test strategy, release checklist, observability, and security guidance.
 - [documentation] Expand VN dashboard roadmap with full post-SSI phase plan from data-quality summary through news, financials, persistence, and watchlist workflow.

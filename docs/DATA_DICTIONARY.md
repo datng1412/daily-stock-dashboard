@@ -44,6 +44,12 @@ Conventions:
 | `foreign_net_5d` | Five-session net foreign flow | Future DailyStockPrice history | VND or shares, depending field | yes | no | Data Quality Summary/Foreign flow | Use `insufficient_history` when rows are not enough. |
 | `foreign_net_20d` | Twenty-session net foreign flow | Future DailyStockPrice history | VND or shares, depending field | yes | no | Foreign flow | Compute only from matched-date historical rows. |
 
+## Data Quality Summary Field
+
+| Field | Meaning | Source | Unit | Nullable | Canonical | UI placement | Known caveat |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `data_quality_summary` | Additive summary of source mismatches, section checks, partial metadata, stale intraday, unavailable optional live sections, and finality/adjustment uncertainty | Service-derived from existing watchlist/company fields | object | no, defaults to `{}` at schema boundary | yes for quality summary, no for price | Data Quality Summary | Must not change `latest_price`; messages are short and must not include endpoint dumps or raw provider errors. |
+
 ## Status And Quality Fields
 
 | Field | Meaning | Source | Unit | Nullable | Canonical | UI placement | Known caveat |

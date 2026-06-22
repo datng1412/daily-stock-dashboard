@@ -416,6 +416,149 @@ def _date_match_status(left: Optional[str], right: Optional[str]) -> str:
     return "matched" if left == right else "mismatched"
 
 
+def _status_from_block(block: Any, default: str = "unavailable") -> str:
+    if not isinstance(block, dict):
+        return default
+    value = block.get("status")
+    return str(value) if value else default
+
+
+def build_vietnam_data_quality_summary(row: Dict[str, Any]) -> Dict[str, Any]:
+    """Build a user-safe data-quality summary without changing source semantics."""
+    daily_close = _safe_float(row.get("ohlcv_close") if row.get("ohlcv_close") is not None else row.get("daily_close"))
+    daily_date = _valid_date_string(row.get("ohlcv_date") or row.get("latest_price_date") or row.get("date"))
+    daily_stock_price = row.get("daily_stock_price") if isinstance(row.get("daily_stock_price"), dict) else {}
+    daily_stock_close = _safe_float(daily_stock_price.get("close"))
+    daily_stock_date = _valid_date_string(daily_stock_price.get("date"))
+    intraday_status = _status_from_block(row.get("intraday_status"))
+    realtime_status = _status_from_block(row.get("realtime_status"))
+    trade_tape_status = _status_from_block(row.get("trade_tape_status"))
+    news_status = _status_from_block(row.get("news_status"), default="disabled")
+    final_close_status = str(row.get("final_close_status") or "unknown")
+    adjusted_price_status = str(row.get("adjusted_price_status") or row.get("price_adjustment_status") or "unknown")
+
+    daily_ohlc_check = "ok" if row.get("status") == "ok" and daily_close is not None and daily_date else "unavailable"
+    daily_stock_price_check = "ok" if daily_stock_price.get("status") == "ok" and daily_stock_close is not None else "unavailable"
+    date_match = str(row.get("date_match") or "")
+    intraday_check = "stale" if intraday_status == "unavailable" and date_match == "mismatched" else intraday_status
+
+    profile_status = "unavailable"
+    missing_profile_fields: List[str] = []
+    metadata = row.get("symbol_metadata") if isinstance(row.get("symbol_metadata"), dict) else {}
+    if metadata.get("status") == "ok" or row.get("company_name") or row.get("name"):
+        if not (row.get("company_name") or row.get("name") or metadata.get("name") or metadata.get("name_en")):
+            missing_profile_fields.append("name")
+        if not row.get("industry"):
+            missing_profile_fields.append("industry")
+        profile_status = "partial" if missing_profile_fields else "ok"
+
+    issues: List[Dict[str, Any]] = []
+    if daily_date and daily_stock_date and daily_date == daily_stock_date and daily_close is not None and daily_stock_close is not None and daily_close != daily_stock_close:
+        issues.append(
+            {
+                "code": "daily_ohlc_vs_daily_stock_price_mismatch",
+                "severity": "warning",
+                "message": "SSI DailyOhlc close differs from SSI DailyStockPrice close for the same trading date.",
+                "fields": {
+                    "daily_ohlc_close": daily_close,
+                    "daily_stock_price_close": daily_stock_close,
+                    "date": daily_date,
+                },
+            }
+        )
+    if final_close_status == "unknown":
+        issues.append(
+            {
+                "code": "final_close_status_unknown",
+                "severity": "info",
+                "message": "Final close status is unknown.",
+                "fields": {"final_close_status": final_close_status},
+            }
+        )
+    if adjusted_price_status == "unknown":
+        issues.append(
+            {
+                "code": "adjusted_price_status_unknown",
+                "severity": "info",
+                "message": "Adjusted price status is unknown.",
+                "fields": {"adjusted_price_status": adjusted_price_status},
+            }
+        )
+    if intraday_check == "stale":
+        issues.append(
+            {
+                "code": "intraday_stale_or_mismatched",
+                "severity": "warning",
+                "message": "SSI IntradayOhlc latest candle date does not match the daily trading date.",
+                "fields": {
+                    "intraday_latest_date": row.get("intraday_latest_date"),
+                    "daily_price_date": row.get("daily_price_date") or daily_date,
+                    "date_match": row.get("date_match"),
+                },
+            }
+        )
+    elif intraday_check in {"unavailable", "disabled"}:
+        issues.append(
+            {
+                "code": f"intraday_{intraday_check}",
+                "severity": "info",
+                "message": f"SSI intraday is {intraday_check}.",
+                "fields": {"status": intraday_check},
+            }
+        )
+    if realtime_status in {"unavailable", "disabled"}:
+        issues.append(
+            {
+                "code": f"realtime_{realtime_status}",
+                "severity": "info",
+                "message": f"SSI realtime is {realtime_status}.",
+                "fields": {"status": realtime_status},
+            }
+        )
+    if trade_tape_status in {"unavailable", "disabled"}:
+        issues.append(
+            {
+                "code": f"trade_tape_{trade_tape_status}",
+                "severity": "info",
+                "message": f"SSI trade tape is {trade_tape_status}.",
+                "fields": {"status": trade_tape_status},
+            }
+        )
+    if profile_status == "partial":
+        issues.append(
+            {
+                "code": "profile_partial",
+                "severity": "warning",
+                "message": "Profile metadata is partial.",
+                "fields": {"missing_fields": missing_profile_fields},
+            }
+        )
+
+    if daily_ohlc_check != "ok":
+        overall_status = "unavailable"
+    elif any(issue.get("severity") == "warning" for issue in issues):
+        overall_status = "partial"
+    else:
+        overall_status = "ok"
+
+    return {
+        "overall_status": overall_status,
+        "canonical_price_source": "SSI DailyOhlc",
+        "issues": issues,
+        "checks": {
+            "daily_ohlc": daily_ohlc_check,
+            "daily_stock_price": daily_stock_price_check,
+            "final_close_status": final_close_status,
+            "adjusted_price_status": adjusted_price_status,
+            "intraday": intraday_check,
+            "realtime": realtime_status,
+            "trade_tape": trade_tape_status,
+            "profile": profile_status,
+            "news": news_status,
+        },
+    }
+
+
 def _is_fixture_mode(manager: Optional[DataFetcherManager]) -> bool:
     return False
 
@@ -2755,6 +2898,29 @@ class VietnamMarketService:
                 **self._disabled_intraday_payload(intraday_timeframe),
                 **self._disabled_realtime_payload(symbol),
                 **self._disabled_trade_tape_payload(symbol),
+                "data_quality_summary": {
+                    "overall_status": "unavailable",
+                    "canonical_price_source": "SSI DailyOhlc",
+                    "issues": [
+                        {
+                            "code": "daily_ohlc_unavailable",
+                            "severity": "warning",
+                            "message": "SSI DailyOhlc data is unavailable.",
+                            "fields": {},
+                        }
+                    ],
+                    "checks": {
+                        "daily_ohlc": "unavailable",
+                        "daily_stock_price": "unavailable",
+                        "final_close_status": "unknown",
+                        "adjusted_price_status": "unknown",
+                        "intraday": "disabled",
+                        "realtime": "disabled",
+                        "trade_tape": "disabled",
+                        "profile": "unavailable",
+                        "news": "disabled",
+                    },
+                },
                 "cache_status": cache_status,
                 "cache_last_fetched_at": cache_last_fetched_at,
                 "cache_next_refresh_at": cache_next_refresh_at,
@@ -2997,7 +3163,7 @@ class VietnamMarketService:
             elif intraday_message:
                 warnings.append(str(intraday_message))
 
-        return {
+        row_payload = {
             "ticker": symbol,
             "status": "ok",
             "reason": None,
@@ -3098,3 +3264,5 @@ class VietnamMarketService:
             "cache_next_refresh_at": cache_next_refresh_at,
             "cache_errors": cache_errors,
         }
+        row_payload["data_quality_summary"] = build_vietnam_data_quality_summary(row_payload)
+        return row_payload

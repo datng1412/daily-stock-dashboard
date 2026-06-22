@@ -243,3 +243,75 @@ def test_realtime_and_trade_tape_can_be_disabled_without_kbs_fallback():
     assert item["trade_tape_status"]["status"] == "disabled"
     assert fetcher.realtime_calls == 0
     assert fetcher.trade_calls == 0
+
+
+class MismatchedDailyStockPriceFetcher(FakeSsiFetcher):
+    def get_daily_stock_price(self, symbol: str, **kwargs):
+        payload = super().get_daily_stock_price(symbol, **kwargs)
+        payload["rows"][0]["close"] = 131.0
+        return payload
+
+
+def _issue_codes(summary):
+    return {issue["code"] for issue in summary.get("issues", [])}
+
+
+def test_data_quality_summary_has_no_mismatch_when_daily_sources_match():
+    item = _service(FakeSsiFetcher()).build_watchlist(["FPT"], force_refresh=True)["watchlist"][0]
+
+    summary = item["data_quality_summary"]
+
+    assert summary["canonical_price_source"] == "SSI DailyOhlc"
+    assert summary["checks"]["daily_ohlc"] == "ok"
+    assert summary["checks"]["daily_stock_price"] == "ok"
+    assert "daily_ohlc_vs_daily_stock_price_mismatch" not in _issue_codes(summary)
+    assert item["latest_price"] == 130.0
+    assert item["latest_price_source"] == "SSI"
+
+
+def test_data_quality_summary_warns_on_same_date_daily_source_mismatch():
+    item = _service(MismatchedDailyStockPriceFetcher()).build_watchlist(["FPT"], force_refresh=True)["watchlist"][0]
+
+    summary = item["data_quality_summary"]
+    mismatch = next(issue for issue in summary["issues"] if issue["code"] == "daily_ohlc_vs_daily_stock_price_mismatch")
+
+    assert summary["overall_status"] == "partial"
+    assert mismatch["severity"] == "warning"
+    assert mismatch["fields"] == {
+        "daily_ohlc_close": 130.0,
+        "daily_stock_price_close": 131.0,
+        "date": "2026-06-30",
+    }
+    assert item["latest_price"] == 130.0
+    assert item["latest_price_source"] == "SSI"
+
+
+def test_data_quality_summary_marks_profile_partial_without_failing_daily_row():
+    item = _service(FakeSsiFetcher()).build_watchlist(["FPT"], force_refresh=True)["watchlist"][0]
+
+    summary = item["data_quality_summary"]
+    profile_issue = next(issue for issue in summary["issues"] if issue["code"] == "profile_partial")
+
+    assert item["status"] == "ok"
+    assert summary["checks"]["profile"] == "partial"
+    assert profile_issue["severity"] == "warning"
+    assert "name" in profile_issue["fields"]["missing_fields"]
+    assert "industry" in profile_issue["fields"]["missing_fields"]
+
+
+def test_data_quality_summary_keeps_optional_live_unavailable_out_of_daily_status():
+    fetcher = FakeSsiFetcher(
+        realtime_payload={"status": "unavailable", "source": "SSI", "reason": "attempted endpoint dump must stay out", "quotes": []},
+        trade_payload={"status": "unavailable", "source": "SSI", "symbol": "FPT", "reason": "TradeTape endpoint dump must stay out", "trades": []},
+    )
+
+    item = _service(fetcher).build_watchlist(["FPT"], force_refresh=True)["watchlist"][0]
+    summary = item["data_quality_summary"]
+
+    assert item["status"] == "ok"
+    assert summary["checks"]["daily_ohlc"] == "ok"
+    assert summary["checks"]["realtime"] == "unavailable"
+    assert summary["checks"]["trade_tape"] == "unavailable"
+    summary_text = str(summary)
+    assert "endpoint dump" not in summary_text
+    assert "TradeTape" not in summary_text

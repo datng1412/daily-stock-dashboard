@@ -4,6 +4,7 @@ import { ArrowLeft, RefreshCw } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
 import { stocksApi, type VietnamCompanyResearchResponse } from '../api/stocks';
 import { AppPage, Badge, Button, Loading } from '../components/common';
+import { DataQualitySummary } from '../components/dashboard';
 import { cn } from '../utils/cn';
 
 type StatusVariant = React.ComponentProps<typeof Badge>['variant'];
@@ -301,6 +302,7 @@ const VietnamCompanyResearchPage: React.FC = () => {
     <AppPage className="space-y-4">
       <CompanyHeader snapshot={snapshot} onRefresh={() => void loadSnapshot(true)} refreshing={refreshing} />
       {error ? <section className="rounded-lg border border-warning/30 bg-warning/10 p-3 text-sm text-warning">{error}</section> : null}
+      <DataQualitySummary summary={snapshot.dataQualitySummary} />
       <section className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
         <SectionShell title="Company profile" source={snapshot.profile.source} status={snapshot.profile.status}>
           <MetricGrid rows={[

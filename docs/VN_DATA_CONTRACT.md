@@ -56,6 +56,19 @@ If daily SSI data is unavailable, the row should expose an unavailable status an
 
 Company detail currently has a source-alignment decision point: broader dashboard docs make `latest_price` canonical from SSI DailyOhlc close, while the company endpoint may still report a DailyStockPrice-specific `source`. Phase 1 must either align company `latest_price` with DailyOhlc or explicitly document a company-only DailyStockPrice field so the same label does not carry two meanings.
 
+## Data Quality Summary Contract
+
+Watchlist rows and company detail responses expose `data_quality_summary` as a Phase 1 summary layer. This field is additive and must not change canonical price behavior.
+
+Required rules:
+
+* `canonical_price_source` remains `SSI DailyOhlc` while the DailyOhlc versus DailyStockPrice decision is unresolved.
+* `overall_status` uses `ok`, `partial`, or `unavailable` for summary quality only.
+* `issues` contains short user-safe messages and source-labeled fields.
+* `issues` must not contain endpoint names, HTTP status, attempted endpoints, raw provider errors, credentials, tokens, account IDs, or raw auth responses.
+* `checks` records section quality for daily OHLCV, DailyStockPrice, final close, adjusted price, intraday, realtime, trade tape, profile, and news.
+* Optional live-section unavailable states may make the summary `partial`, but they must not make valid daily SSI data unavailable.
+
 ## Live Section Contract
 
 This is the Phase 2 public contract target. Missing live objects and lists must not be represented by placeholder objects or fake metric rows.

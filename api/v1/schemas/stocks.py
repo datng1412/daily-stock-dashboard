@@ -283,6 +283,7 @@ class VietnamWatchItem(BaseModel):
     cache_last_fetched_at: Dict[str, Any] = Field(default_factory=dict)
     cache_next_refresh_at: Dict[str, Any] = Field(default_factory=dict)
     cache_errors: Dict[str, Any] = Field(default_factory=dict)
+    data_quality_summary: Dict[str, Any] = Field(default_factory=dict)
     error: Optional[str] = None
 
 
@@ -501,6 +502,7 @@ class VietnamCompanyResearchResponse(BaseModel):
     news: VietnamCompanyPlaceholderBlock
     financials: VietnamCompanyPlaceholderBlock
     events: VietnamCompanyPlaceholderBlock
+    data_quality_summary: Dict[str, Any] = Field(default_factory=dict)
     warnings: List[str] = Field(default_factory=list)
     errors: Dict[str, Any] = Field(default_factory=dict)
 

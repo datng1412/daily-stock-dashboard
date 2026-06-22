@@ -59,6 +59,7 @@ Response sections:
 - Trade tape status/list.
 - News status/list.
 - Source/cache/diagnostics metadata.
+- data_quality_summary with canonical price source, checks, and user-safe issues.
 
 Source ownership:
 
@@ -139,6 +140,7 @@ Response sections:
 - Trade tape.
 - News/financials/events future modules.
 - Source coverage and diagnostics.
+- data_quality_summary reused from the SSI-backed watchlist row.
 
 Source ownership:
 

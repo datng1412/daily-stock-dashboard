@@ -106,6 +106,22 @@ const makeCompanySnapshot = (): VietnamCompanyResearchResponse => ({
       },
     ],
   },
+  dataQualitySummary: {
+    overallStatus: 'ok',
+    canonicalPriceSource: 'SSI DailyOhlc',
+    issues: [],
+    checks: {
+      dailyOhlc: 'ok',
+      dailyStockPrice: 'ok',
+      finalCloseStatus: 'final',
+      adjustedPriceStatus: 'unadjusted',
+      intraday: 'ok',
+      realtime: 'ok',
+      tradeTape: 'ok',
+      profile: 'ok',
+      news: 'not_implemented',
+    },
+  },
   sourceCoverage: [
     { block: 'Daily OHLCV', source: 'SSI DailyOhlc', status: 'ok' },
     { block: 'Daily stock price', source: 'SSI DailyStockPrice', status: 'ok' },
@@ -155,6 +171,10 @@ describe('VietnamCompanyResearchPage', () => {
 
     expect(await screen.findByRole('heading', { name: 'FPT' })).toBeInTheDocument();
     expect(screen.getByText('FPT Corporation | HOSE')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Data Quality Summary' })).toBeInTheDocument();
+    expect(screen.getByText('Data quality: ok')).toBeInTheDocument();
+    expect(screen.getByText('Canonical price source: SSI DailyOhlc')).toBeInTheDocument();
+    expect(screen.getByText('No data quality issues detected.')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Source coverage' })).toBeInTheDocument();
     expect(screen.getByText('Daily OHLCV')).toBeInTheDocument();
     expect(screen.getAllByText('SSI DailyStockPrice').length).toBeGreaterThan(0);
@@ -207,5 +227,135 @@ describe('VietnamCompanyResearchPage', () => {
     expect(screen.queryByText('Snapshot price')).not.toBeInTheDocument();
     expect(screen.queryByText('Trades loaded')).not.toBeInTheDocument();
     expect(screen.queryByText(/attempted endpoints/i)).not.toBeInTheDocument();
+  });
+
+  it('renders DailyOhlc versus DailyStockPrice mismatch in the data quality summary', async () => {
+    const snapshot = makeCompanySnapshot();
+    snapshot.dataQualitySummary = {
+      overallStatus: 'partial',
+      canonicalPriceSource: 'SSI DailyOhlc',
+      issues: [
+        {
+          code: 'daily_ohlc_vs_daily_stock_price_mismatch',
+          severity: 'warning',
+          message: 'SSI DailyOhlc close differs from SSI DailyStockPrice close for the same trading date.',
+          fields: {
+            dailyOhlcClose: 70_700,
+            dailyStockPriceClose: 70_800,
+            date: '2026-06-22',
+          },
+        },
+      ],
+      checks: {
+        dailyOhlc: 'ok',
+        dailyStockPrice: 'ok',
+        finalCloseStatus: 'unknown',
+        adjustedPriceStatus: 'unknown',
+        intraday: 'unavailable',
+        realtime: 'unavailable',
+        tradeTape: 'unavailable',
+        profile: 'ok',
+        news: 'not_implemented',
+      },
+    };
+    vi.mocked(stocksApi.getVietnamCompanyResearch).mockResolvedValue(snapshot);
+
+    renderPage();
+
+    const summary = await screen.findByLabelText('Data Quality Summary');
+    expect(summary).toHaveTextContent('Data quality: partial');
+    expect(summary).toHaveTextContent('DailyOhlc differs from DailyStockPrice for the same date.');
+    expect(summary).toHaveTextContent('DailyOhlc 70,700');
+    expect(summary).toHaveTextContent('DailyStockPrice 70,800');
+    expect(summary).toHaveTextContent('Realtime: unavailable');
+    expect(screen.getByRole('heading', { name: 'Price summary' })).toBeInTheDocument();
+  });
+
+  it('renders profile partial in the data quality summary', async () => {
+    const snapshot = makeCompanySnapshot();
+    snapshot.profile.name = null;
+    snapshot.dataQualitySummary = {
+      overallStatus: 'partial',
+      canonicalPriceSource: 'SSI DailyOhlc',
+      issues: [
+        {
+          code: 'profile_partial',
+          severity: 'warning',
+          message: 'Profile metadata is partial.',
+          fields: { missingFields: ['name', 'industry'] },
+        },
+      ],
+      checks: {
+        dailyOhlc: 'ok',
+        dailyStockPrice: 'ok',
+        finalCloseStatus: 'unknown',
+        adjustedPriceStatus: 'unknown',
+        intraday: 'ok',
+        realtime: 'ok',
+        tradeTape: 'ok',
+        profile: 'partial',
+        news: 'not_implemented',
+      },
+    };
+    vi.mocked(stocksApi.getVietnamCompanyResearch).mockResolvedValue(snapshot);
+
+    renderPage();
+
+    const summary = await screen.findByLabelText('Data Quality Summary');
+    expect(summary).toHaveTextContent('Profile metadata partial.');
+    expect(summary).toHaveTextContent('Profile: partial');
+  });
+
+  it('handles a missing data quality summary without blocking existing cards', async () => {
+    const snapshot = makeCompanySnapshot();
+    snapshot.dataQualitySummary = undefined;
+    vi.mocked(stocksApi.getVietnamCompanyResearch).mockResolvedValue(snapshot);
+
+    renderPage();
+
+    expect(await screen.findByRole('heading', { name: 'FPT' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('Data Quality Summary')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Price summary' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Trading stats' })).toBeInTheDocument();
+  });
+
+  it('does not render endpoint diagnostics in the data quality summary', async () => {
+    const snapshot = makeCompanySnapshot();
+    snapshot.dataQualitySummary = {
+      overallStatus: 'partial',
+      canonicalPriceSource: 'SSI DailyOhlc',
+      issues: [
+        {
+          code: 'provider_diagnostic_detail',
+          severity: 'warning',
+          message: 'SSI realtime unavailable; attempted endpoints: RealtimeQuote; HTTP status 404; raw provider error.',
+          fields: {
+            endpoint: 'RealtimeQuote',
+            httpStatus: 404,
+            rawProviderError: 'Not found',
+          },
+        },
+      ],
+      checks: {
+        dailyOhlc: 'ok',
+        dailyStockPrice: 'ok',
+        realtime: 'HTTP status 404 from RealtimeQuote',
+        tradeTape: 'unavailable',
+      },
+    };
+    vi.mocked(stocksApi.getVietnamCompanyResearch).mockResolvedValue(snapshot);
+
+    renderPage();
+
+    const summary = await screen.findByLabelText('Data Quality Summary');
+    expect(summary).toHaveTextContent('Data quality issue detected.');
+    expect(summary).not.toHaveTextContent(/RealtimeQuote|HTTP status|raw provider|attempted endpoints/i);
+  });
+
+  it('does not use recommendation wording in the data quality summary', async () => {
+    renderPage();
+
+    const summary = await screen.findByLabelText('Data Quality Summary');
+    expect(summary.textContent).not.toMatch(/\b(buy|sell|hold)\b|target[- ]price|recommendation/i);
   });
 });

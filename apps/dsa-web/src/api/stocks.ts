@@ -596,6 +596,32 @@ export type VietnamCompanyTradeTape = {
   message?: string | null;
 };
 
+export type VietnamDataQualityIssue = {
+  code?: string | null;
+  severity?: 'info' | 'warning' | 'error' | string | null;
+  message?: string | null;
+  fields?: Record<string, unknown>;
+};
+
+export type VietnamDataQualityChecks = {
+  dailyOhlc?: string | null;
+  dailyStockPrice?: string | null;
+  finalCloseStatus?: string | null;
+  adjustedPriceStatus?: string | null;
+  intraday?: string | null;
+  realtime?: string | null;
+  tradeTape?: string | null;
+  profile?: string | null;
+  news?: string | null;
+};
+
+export type VietnamDataQualitySummary = {
+  overallStatus?: 'ok' | 'partial' | 'unavailable' | string | null;
+  canonicalPriceSource?: string | null;
+  issues?: VietnamDataQualityIssue[];
+  checks?: VietnamDataQualityChecks;
+};
+
 export type VietnamCompanySourceCoverageItem = {
   block: string;
   source?: string | null;
@@ -620,6 +646,7 @@ export type VietnamCompanyResearchResponse = {
   intraday?: VietnamCompanyIntraday;
   realtime?: VietnamCompanyRealtime;
   tradeTape?: VietnamCompanyTradeTape;
+  dataQualitySummary?: VietnamDataQualitySummary;
   sourceCoverage: VietnamCompanySourceCoverageItem[];
   news: VietnamCompanyPlaceholderBlock;
   financials: VietnamCompanyPlaceholderBlock;

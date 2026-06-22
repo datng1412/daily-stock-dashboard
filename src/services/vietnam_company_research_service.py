@@ -198,6 +198,7 @@ class VietnamCompanyResearchService:
             "news": self._placeholder("not_implemented", "NewsProvider", NOT_IMPLEMENTED_MESSAGE),
             "financials": self._placeholder("not_implemented", "TBD"),
             "events": self._placeholder("not_implemented", "TBD"),
+            "data_quality_summary": _dict(row.get("data_quality_summary")),
             "warnings": list(row.get("warnings") or []),
             "errors": errors,
         }
@@ -318,6 +319,29 @@ class VietnamCompanyResearchService:
             "news": self._placeholder("not_implemented", "RSS provider", NOT_IMPLEMENTED_MESSAGE),
             "financials": self._placeholder("not_implemented", "TBD"),
             "events": self._placeholder("not_implemented", "TBD"),
+            "data_quality_summary": {
+                "overall_status": "unavailable",
+                "canonical_price_source": "SSI DailyOhlc",
+                "issues": [
+                    {
+                        "code": "daily_ohlc_unavailable",
+                        "severity": "warning",
+                        "message": "SSI DailyOhlc data is unavailable.",
+                        "fields": {},
+                    }
+                ],
+                "checks": {
+                    "daily_ohlc": "unavailable",
+                    "daily_stock_price": "unavailable",
+                    "final_close_status": "unknown",
+                    "adjusted_price_status": "unknown",
+                    "intraday": "unavailable",
+                    "realtime": "unavailable",
+                    "trade_tape": "unavailable",
+                    "profile": "unavailable",
+                    "news": "not_implemented",
+                },
+            },
             "warnings": [],
             "errors": errors or {},
         }
