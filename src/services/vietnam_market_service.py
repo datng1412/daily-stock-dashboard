@@ -6,6 +6,7 @@ from __future__ import annotations
 import math
 import logging
 import os
+import statistics
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -54,9 +55,10 @@ VN_CHART_RANGES = {
 VN_TIMEZONE = ZoneInfo("Asia/Ho_Chi_Minh")
 VN_CACHE_TTL_SECONDS = {
     "ohlcv": 300,
-    # Quote/realtime is handled outside SSI REST until SSI streaming is implemented.
     "quote": 60,
     "intraday_ohlcv": 60,
+    "realtime_snapshot": 10,
+    "trade_tape": 5,
     "news": 1800,
     "symbol_metadata": 3600,
 }
@@ -67,8 +69,13 @@ VN_SOURCE_MOZYFIN = "Mozyfin"
 VN_SOURCE_SSI = "SSI"
 SSI_DAILY_STOCK_PRICE_SOURCE = "SSI DailyStockPrice"
 SSI_UNAVAILABLE_REASON = "SSI FastConnect unavailable"
-VN_INTRADAY_WARNING = "Intraday 1H candle data is not a realtime matched quote."
-VN_INTRADAY_DISABLED_REASON = "SSI IntradayOhlc is not implemented yet."
+VN_INTRADAY_WARNING = "SSI IntradayOhlc candle data is not a realtime matched quote."
+VN_INTRADAY_DISABLED_REASON = "SSI IntradayOhlc is disabled."
+VN_INTRADAY_UNAVAILABLE_REASON = "SSI intraday unavailable."
+VN_REALTIME_DISABLED_REASON = "SSI realtime is disabled."
+VN_REALTIME_UNAVAILABLE_REASON = "SSI realtime unavailable."
+VN_TRADE_TAPE_DISABLED_REASON = "SSI trade tape is disabled."
+VN_TRADE_TAPE_UNAVAILABLE_REASON = "SSI trade tape unavailable."
 VN_NEWS_DISABLED_REASON = "News provider disabled."
 STALE_CACHE_WARNING = "Live refresh failed; showing stale cached data."
 VN_STATUS_RULE_METADATA = {
@@ -152,8 +159,10 @@ VN_DASHBOARD_UNITS = {
     "foreign_net_20d": "row-specific",
     "foreign_net_5d_latest_available": "row-specific",
     "foreign_net_20d_latest_available": "row-specific",
-    "intraday_1h_price": "VND",
-    "intraday_1h_volume": "shares",
+    "intraday_price": "VND",
+    "intraday_volume": "shares",
+    "latest_intraday_price": "VND",
+    "latest_intraday_volume": "shares",
     "corporate_action_cash_dividend": "VND/share",
     "adjusted_reference_price": "VND",
 }
@@ -328,6 +337,14 @@ class VietnamDashboardConfig:
     chart_data_provider: str = VN_PROVIDER_SSI
     daily_stock_price_provider: str = VN_PROVIDER_SSI
     index_data_provider: str = VN_PROVIDER_SSI
+    intraday_data_provider: str = VN_PROVIDER_SSI
+    ssi_intraday_enabled: bool = True
+    realtime_data_provider: str = VN_PROVIDER_SSI
+    trade_tape_provider: str = VN_PROVIDER_SSI
+    ssi_realtime_enabled: bool = True
+    ssi_trade_tape_enabled: bool = True
+    kbs_enabled: bool = False
+    allow_legacy_kbs_provider: bool = False
     provider_comparison_enabled: bool = False
 
 
@@ -338,6 +355,14 @@ def _default_dashboard_config() -> VietnamDashboardConfig:
         chart_data_provider=getattr(app_config, "vn_chart_data_provider", VN_PROVIDER_SSI),
         daily_stock_price_provider=getattr(app_config, "vn_daily_stock_price_provider", VN_PROVIDER_SSI),
         index_data_provider=getattr(app_config, "vn_index_data_provider", VN_PROVIDER_SSI),
+        intraday_data_provider=getattr(app_config, "vn_intraday_data_provider", VN_PROVIDER_SSI),
+        ssi_intraday_enabled=getattr(app_config, "ssi_fastconnect_intraday_enabled", True),
+        realtime_data_provider=getattr(app_config, "vn_realtime_data_provider", VN_PROVIDER_SSI),
+        trade_tape_provider=getattr(app_config, "vn_trade_tape_provider", VN_PROVIDER_SSI),
+        ssi_realtime_enabled=getattr(app_config, "ssi_fastconnect_realtime_enabled", True),
+        ssi_trade_tape_enabled=getattr(app_config, "ssi_fastconnect_trade_tape_enabled", True),
+        kbs_enabled=getattr(app_config, "kbs_enabled", False),
+        allow_legacy_kbs_provider=getattr(app_config, "vn_allow_legacy_kbs_provider", False),
         provider_comparison_enabled=getattr(app_config, "vn_provider_comparison_enabled", False),
         news_provider=getattr(app_config, "vn_news_provider", "disabled"),
         mozyfin_enabled=getattr(app_config, "mozyfin_enabled", False),
@@ -391,7 +416,7 @@ def _date_match_status(left: Optional[str], right: Optional[str]) -> str:
     return "matched" if left == right else "mismatched"
 
 
-def _is_fixture_mode(manager: DataFetcherManager) -> bool:
+def _is_fixture_mode(manager: Optional[DataFetcherManager]) -> bool:
     return False
 
 
@@ -707,6 +732,7 @@ def normalize_intraday_candles(df: Optional[pd.DataFrame], limit: int = 8) -> Li
                 "low": _safe_float(raw.get("low")),
                 "close": _safe_float(raw.get("close")),
                 "volume": _safe_float(raw.get("volume")),
+                "ticker": raw.get("ticker"),
             }
         )
     return rows
@@ -730,6 +756,56 @@ def _intraday_candle_vn_date(candle: Dict[str, Any]) -> Optional[str]:
     return timestamp.astimezone(VN_TIMEZONE).date().isoformat()
 
 
+def _intraday_candle_vn_datetime(candle: Dict[str, Any]) -> Optional[datetime]:
+    value = candle.get("date_time") or candle.get("timestamp")
+    if value in (None, ""):
+        return None
+    numeric = _safe_float(value)
+    if numeric is not None and numeric > 1_000_000_000:
+        return datetime.fromtimestamp(numeric, tz=timezone.utc).astimezone(VN_TIMEZONE)
+    parsed = pd.to_datetime(value, errors="coerce")
+    if pd.isna(parsed):
+        return None
+    timestamp = parsed.to_pydatetime()
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=VN_TIMEZONE)
+    return timestamp.astimezone(VN_TIMEZONE)
+
+
+def _detect_intraday_granularity(candles: List[Dict[str, Any]]) -> Dict[str, Any]:
+    datetimes = [_intraday_candle_vn_datetime(candle) for candle in candles]
+    datetimes = sorted(value for value in datetimes if value is not None)
+    deltas = [
+        int((right - left).total_seconds())
+        for left, right in zip(datetimes, datetimes[1:])
+        if int((right - left).total_seconds()) > 0
+    ]
+    if not deltas:
+        return {
+            "intraday_granularity": "unknown",
+            "intraday_granularity_seconds": None,
+            "intraday_granularity_label": "provider-returned",
+        }
+    seconds = int(statistics.median(deltas))
+    if 45 <= seconds <= 90:
+        granularity = "1m"
+    elif 240 <= seconds <= 360:
+        granularity = "5m"
+    elif 840 <= seconds <= 960:
+        granularity = "15m"
+    elif 1740 <= seconds <= 1860:
+        granularity = "30m"
+    elif 3300 <= seconds <= 3900:
+        granularity = "1h"
+    else:
+        granularity = f"{max(1, round(seconds / 60))}m"
+    return {
+        "intraday_granularity": granularity,
+        "intraday_granularity_seconds": seconds,
+        "intraday_granularity_label": granularity,
+    }
+
+
 def _latest_vn_session_candles(candles: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     dated = [(candle, _intraday_candle_vn_date(candle)) for candle in candles]
     dates = [date for _, date in dated if date]
@@ -740,7 +816,7 @@ def _latest_vn_session_candles(candles: List[Dict[str, Any]]) -> List[Dict[str, 
 
 
 def calculate_intraday_pulse(candles: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Calculate neutral intraday pulse metrics from available 1H candles."""
+    """Calculate neutral intraday pulse metrics from provider-returned candles."""
     if not candles:
         return {
             "latest_1h_close": None,
@@ -760,6 +836,18 @@ def calculate_intraday_pulse(candles: List[Dict[str, Any]]) -> Dict[str, Any]:
             "direction": "unknown",
             "range_percent": None,
             "volume_vs_avg_1h": None,
+            "latest_intraday_close": None,
+            "latest_intraday_open": None,
+            "latest_intraday_high": None,
+            "latest_intraday_low": None,
+            "latest_intraday_volume": None,
+            "intraday_change": None,
+            "intraday_change_percent": None,
+            "session_high_from_intraday": None,
+            "session_low_from_intraday": None,
+            "session_range_pct_from_intraday": None,
+            "session_volume_from_intraday": None,
+            "intraday_volume_vs_average": None,
         }
 
     latest = candles[-1]
@@ -792,7 +880,7 @@ def calculate_intraday_pulse(candles: List[Dict[str, Any]]) -> Dict[str, Any]:
     else:
         direction = "flat"
 
-    return {
+    pulse = {
         "latest_1h_close": _round_optional(latest_close),
         "latest_1h_open": _round_optional(latest_open),
         "latest_1h_high": _round_optional(latest_high),
@@ -811,6 +899,23 @@ def calculate_intraday_pulse(candles: List[Dict[str, Any]]) -> Dict[str, Any]:
         "range_percent": _round_optional((latest_high - latest_low) / latest_open * 100, 2) if latest_high is not None and latest_low is not None and latest_open else None,
         "volume_vs_avg_1h": _round_optional(latest_volume / avg_previous_volume, 2) if latest_volume is not None and avg_previous_volume else None,
     }
+    pulse.update(
+        {
+            "latest_intraday_close": pulse["latest_1h_close"],
+            "latest_intraday_open": pulse["latest_1h_open"],
+            "latest_intraday_high": pulse["latest_1h_high"],
+            "latest_intraday_low": pulse["latest_1h_low"],
+            "latest_intraday_volume": pulse["latest_1h_volume"],
+            "intraday_change": pulse["latest_1h_change"],
+            "intraday_change_percent": pulse["latest_1h_change_percent"],
+            "session_high_from_intraday": pulse["session_high_from_1h"],
+            "session_low_from_intraday": pulse["session_low_from_1h"],
+            "session_range_pct_from_intraday": pulse["session_range_pct_from_1h"],
+            "session_volume_from_intraday": pulse["session_volume_from_1h"],
+            "intraday_volume_vs_average": pulse["volume_vs_avg_1h"],
+        }
+    )
+    return pulse
 
 
 def derive_intraday_details(candles: List[Dict[str, Any]], pulse: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -819,8 +924,8 @@ def derive_intraday_details(candles: List[Dict[str, Any]], pulse: Dict[str, Any]
         _intraday_detail(
             "Not realtime quote",
             "caution",
-            "Intraday 1H candle data is separate from a realtime matched quote.",
-            {"source": "SSI IntradayOhlc", "status": "not_implemented", "is_realtime_quote": False},
+            "Intraday candle data is separate from a realtime matched quote.",
+            {"source": "SSI IntradayOhlc", "is_realtime_quote": False},
         )
     ]
     if len(candles) < 3:
@@ -839,7 +944,7 @@ def derive_intraday_details(candles: List[Dict[str, Any]], pulse: Dict[str, Any]
             _intraday_detail(
                 "Intraday up",
                 "info",
-                "Latest 1H candle close is above its open.",
+                "Latest provider-returned intraday candle close is above its open.",
                 {"latest_1h_open": pulse.get("latest_1h_open"), "latest_1h_close": pulse.get("latest_1h_close")},
             )
         )
@@ -848,7 +953,7 @@ def derive_intraday_details(candles: List[Dict[str, Any]], pulse: Dict[str, Any]
             _intraday_detail(
                 "Intraday down",
                 "info",
-                "Latest 1H candle close is below its open.",
+                "Latest provider-returned intraday candle close is below its open.",
                 {"latest_1h_open": pulse.get("latest_1h_open"), "latest_1h_close": pulse.get("latest_1h_close")},
             )
         )
@@ -857,7 +962,7 @@ def derive_intraday_details(candles: List[Dict[str, Any]], pulse: Dict[str, Any]
             _intraday_detail(
                 "Intraday flat",
                 "info",
-                "Latest 1H candle close equals its open.",
+                "Latest provider-returned intraday candle close equals its open.",
                 {"latest_1h_open": pulse.get("latest_1h_open"), "latest_1h_close": pulse.get("latest_1h_close")},
             )
         )
@@ -868,7 +973,7 @@ def derive_intraday_details(candles: List[Dict[str, Any]], pulse: Dict[str, Any]
             _intraday_detail(
                 "Intraday volume expansion",
                 "info",
-                "Latest 1H volume is at least 1.5 times the average of previous available 1H candles.",
+                "Latest provider-returned intraday volume is at least 1.5 times the average of previous available intraday candles.",
                 {"volume_vs_avg_1h": volume_ratio},
             )
         )
@@ -879,7 +984,7 @@ def derive_intraday_details(candles: List[Dict[str, Any]], pulse: Dict[str, Any]
             _intraday_detail(
                 "Intraday wide range",
                 "caution",
-                "Latest 1H candle range is at least 1.5% of its open.",
+                "Latest provider-returned intraday candle range is at least 1.5% of its open.",
                 {"range_percent": range_percent},
             )
         )
@@ -1251,8 +1356,13 @@ class VietnamMarketService:
         config: Optional[VietnamDashboardConfig] = None,
         ssi_fetcher: Optional[SsiFastConnectFetcher] = None,
     ):
-        self.manager = manager or DataFetcherManager()
         self.config = config or _default_dashboard_config()
+        if manager is not None:
+            self.manager = manager
+        elif self.config.allow_legacy_mozyfin_provider and self.config.mozyfin_enabled:
+            self.manager = DataFetcherManager()
+        else:
+            self.manager = None
         self._ssi_fetcher = ssi_fetcher
 
     def _get_ssi_fetcher(self) -> SsiFastConnectFetcher:
@@ -1314,7 +1424,7 @@ class VietnamMarketService:
         return df, VN_SOURCE_SSI
 
     def _load_mozyfin_daily_ohlcv(self, symbol: str, days: int) -> Tuple[pd.DataFrame, str]:
-        if not self.config.allow_legacy_mozyfin_provider:
+        if not self.config.allow_legacy_mozyfin_provider or self.manager is None:
             raise RuntimeError("Mozyfin is disabled for VN dashboard runtime.")
         return self.manager.get_daily_data(normalize_vn_symbol(symbol), days=days)
 
@@ -1378,11 +1488,260 @@ class VietnamMarketService:
 
         return load
 
-    def _disabled_intraday_payload(self, intraday_timeframe: str) -> Dict[str, Any]:
-        pulse = calculate_intraday_pulse([])
+    def _intraday_payload_from_rows(
+        self,
+        symbol: str,
+        rows: List[Dict[str, Any]],
+        intraday_timeframe: str,
+        intraday_limit: int,
+    ) -> Dict[str, Any]:
+        df = pd.DataFrame(rows or [])
+        if not df.empty and "date_time" in df.columns:
+            df = df.sort_values("date_time").reset_index(drop=True)
+        candles = normalize_intraday_candles(df, intraday_limit)
+        granularity = _detect_intraday_granularity(candles)
+        intraday_latest_date = _intraday_candle_vn_date(candles[-1]) if candles else None
+        pulse = calculate_intraday_pulse(candles)
+        pulse.update(granularity)
+        pulse["intraday_latest_date"] = intraday_latest_date
+        pulse["intraday_requested_timeframe"] = intraday_timeframe
+        pulse["intraday_actual_granularity"] = granularity["intraday_granularity"]
+        pulse["intraday_actual_granularity_seconds"] = granularity["intraday_granularity_seconds"]
+        details = derive_intraday_details(candles, pulse)
+        labels = [detail["label"] for detail in details]
         return {
             "intraday_timeframe": intraday_timeframe,
-            "intraday_source": None,
+            "intraday_requested_timeframe": intraday_timeframe,
+            **granularity,
+            "intraday_actual_granularity": granularity["intraday_granularity"],
+            "intraday_actual_granularity_seconds": granularity["intraday_granularity_seconds"],
+            "intraday_latest_date": intraday_latest_date,
+            "daily_price_date": None,
+            "date_match": "unknown",
+            "intraday_source": VN_SOURCE_SSI,
+            "intraday_is_realtime_quote": False,
+            "intraday_warning": "SSI IntradayOhlc granularity is provider-returned; use the returned timestamps for cadence.",
+            "intraday_candles": candles,
+            "intraday_pulse": pulse,
+            "intraday_labels": labels,
+            "intraday_details": details,
+            "intraday_status": {
+                "status": "ok",
+                "source": VN_SOURCE_SSI,
+                "message": None,
+                "count": len(candles),
+                "ticker": symbol,
+                "intraday_latest_date": intraday_latest_date,
+                "daily_price_date": None,
+                "date_match": "unknown",
+                **granularity,
+                "intraday_requested_timeframe": intraday_timeframe,
+                "intraday_actual_granularity": granularity["intraday_granularity"],
+                "intraday_actual_granularity_seconds": granularity["intraday_granularity_seconds"],
+            },
+        }
+
+    def _ssi_intraday_unavailable_payload(
+        self,
+        intraday_timeframe: str,
+        *,
+        status: str = "unavailable",
+        reason: Optional[str] = None,
+        diagnostics: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        reason_text = reason or VN_INTRADAY_UNAVAILABLE_REASON
+        diagnostics = dict(diagnostics or {})
+        pulse = calculate_intraday_pulse([])
+        pulse.update(
+            {
+                "intraday_latest_date": diagnostics.get("intraday_latest_date"),
+                "daily_price_date": diagnostics.get("daily_price_date"),
+                "date_match": diagnostics.get("date_match") or "unknown",
+                "intraday_granularity": diagnostics.get("intraday_granularity") or "unknown",
+                "intraday_granularity_seconds": diagnostics.get("intraday_granularity_seconds"),
+                "intraday_granularity_label": diagnostics.get("intraday_granularity_label") or "provider-returned",
+                "intraday_requested_timeframe": intraday_timeframe,
+                "intraday_actual_granularity": diagnostics.get("intraday_granularity") or "unknown",
+                "intraday_actual_granularity_seconds": diagnostics.get("intraday_granularity_seconds"),
+            }
+        )
+        return {
+            "intraday_timeframe": intraday_timeframe,
+            "intraday_requested_timeframe": intraday_timeframe,
+            "intraday_granularity": pulse["intraday_granularity"],
+            "intraday_actual_granularity": pulse["intraday_granularity"],
+            "intraday_granularity_seconds": pulse["intraday_granularity_seconds"],
+            "intraday_actual_granularity_seconds": pulse["intraday_granularity_seconds"],
+            "intraday_granularity_label": pulse["intraday_granularity_label"],
+            "intraday_latest_date": diagnostics.get("intraday_latest_date"),
+            "daily_price_date": diagnostics.get("daily_price_date"),
+            "date_match": diagnostics.get("date_match") or "unknown",
+            "intraday_source": VN_SOURCE_SSI,
+            "intraday_is_realtime_quote": False,
+            "intraday_warning": reason_text,
+            "intraday_candles": [],
+            "intraday_pulse": pulse,
+            "intraday_labels": ["Intraday data limited"],
+            "intraday_details": [
+                _intraday_detail(
+                    "Intraday data limited",
+                    "info",
+                    reason_text,
+                    {"source": "SSI IntradayOhlc", "status": status},
+                )
+            ],
+            "intraday_status": {
+                "status": status,
+                "source": VN_SOURCE_SSI,
+                "message": reason_text,
+                "intraday_requested_timeframe": intraday_timeframe,
+                "intraday_actual_granularity": pulse["intraday_granularity"],
+                "intraday_actual_granularity_seconds": pulse["intraday_granularity_seconds"],
+                **diagnostics,
+            },
+        }
+
+    def _load_ssi_intraday_payload(self, symbol: str, intraday_timeframe: str, intraday_limit: int) -> Dict[str, Any]:
+        if self.config.intraday_data_provider != VN_PROVIDER_SSI:
+            return self._ssi_intraday_unavailable_payload(
+                intraday_timeframe,
+                status="disabled",
+                reason=VN_INTRADAY_DISABLED_REASON,
+            )
+        if not self.config.ssi_intraday_enabled:
+            return self._ssi_intraday_unavailable_payload(
+                intraday_timeframe,
+                status="disabled",
+                reason=VN_INTRADAY_DISABLED_REASON,
+            )
+
+        to_date = datetime.now(VN_TIMEZONE).date()
+        from_date = to_date - timedelta(days=7)
+        payload = self._get_ssi_fetcher().get_intraday_ohlcv(
+            symbol,
+            from_date=from_date.isoformat(),
+            to_date=to_date.isoformat(),
+            limit=max(int(intraday_limit or 8), 8),
+            interval=intraday_timeframe,
+        )
+        status = str(payload.get("status") or "").lower() if isinstance(payload, dict) else ""
+        if status == "ok":
+            rows = payload.get("rows") if isinstance(payload, dict) else []
+            normalized_rows = [dict(row) for row in rows if isinstance(row, dict)]
+            if normalized_rows:
+                return self._intraday_payload_from_rows(symbol, normalized_rows, intraday_timeframe, intraday_limit)
+            return self._ssi_intraday_unavailable_payload(
+                intraday_timeframe,
+                status="unavailable",
+                reason="SSI IntradayOhlc returned no candles.",
+            )
+        if status == "disabled":
+            disabled_reason = payload.get("reason") if isinstance(payload, dict) else None
+            return self._ssi_intraday_unavailable_payload(
+                intraday_timeframe,
+                status="disabled",
+                reason=disabled_reason or VN_INTRADAY_DISABLED_REASON,
+            )
+        unavailable_reason = None
+        if isinstance(payload, dict):
+            unavailable_reason = payload.get("reason") or payload.get("message")
+        return self._ssi_intraday_unavailable_payload(
+            intraday_timeframe,
+            status=status or "unavailable",
+            reason=unavailable_reason or VN_INTRADAY_UNAVAILABLE_REASON,
+        )
+
+    def _validate_intraday_freshness(
+        self,
+        intraday_payload: Dict[str, Any],
+        *,
+        daily_price_date: Optional[str],
+    ) -> Dict[str, Any]:
+        status = str((intraday_payload.get("intraday_status") or {}).get("status") or "").lower()
+        if status != "ok":
+            return intraday_payload
+
+        candles = [row for row in (intraday_payload.get("intraday_candles") or []) if isinstance(row, dict)]
+        intraday_latest_date = intraday_payload.get("intraday_latest_date")
+        if not intraday_latest_date and candles:
+            intraday_latest_date = _intraday_candle_vn_date(candles[-1])
+        daily_date = _valid_date_string(daily_price_date)
+        diagnostics = {
+            "intraday_latest_date": intraday_latest_date,
+            "daily_price_date": daily_date,
+            "date_match": "unknown",
+            "intraday_granularity": intraday_payload.get("intraday_granularity") or "unknown",
+            "intraday_granularity_seconds": intraday_payload.get("intraday_granularity_seconds"),
+            "intraday_granularity_label": intraday_payload.get("intraday_granularity_label") or "provider-returned",
+        }
+        if intraday_latest_date and daily_date:
+            diagnostics["date_match"] = "matched" if intraday_latest_date == daily_date else "mismatched"
+        if diagnostics["date_match"] == "mismatched":
+            return self._ssi_intraday_unavailable_payload(
+                str(intraday_payload.get("intraday_timeframe") or self.config.intraday_timeframe or "provider"),
+                status="unavailable",
+                reason="SSI IntradayOhlc latest candle date does not match latest daily trading date.",
+                diagnostics=diagnostics,
+            )
+
+        updated = dict(intraday_payload)
+        updated.update(
+            {
+                "intraday_latest_date": intraday_latest_date,
+                "daily_price_date": daily_date,
+                "date_match": diagnostics["date_match"],
+                "intraday_requested_timeframe": updated.get("intraday_requested_timeframe") or updated.get("intraday_timeframe"),
+                "intraday_actual_granularity": updated.get("intraday_actual_granularity") or diagnostics["intraday_granularity"],
+                "intraday_actual_granularity_seconds": updated.get("intraday_actual_granularity_seconds") or diagnostics["intraday_granularity_seconds"],
+            }
+        )
+        status_payload = dict(updated.get("intraday_status") or {})
+        status_payload.update(
+            {
+                "intraday_latest_date": intraday_latest_date,
+                "daily_price_date": daily_date,
+                "date_match": diagnostics["date_match"],
+                "intraday_requested_timeframe": updated.get("intraday_requested_timeframe") or updated.get("intraday_timeframe"),
+                "intraday_actual_granularity": updated.get("intraday_actual_granularity") or diagnostics["intraday_granularity"],
+                "intraday_actual_granularity_seconds": updated.get("intraday_actual_granularity_seconds") or diagnostics["intraday_granularity_seconds"],
+            }
+        )
+        updated["intraday_status"] = status_payload
+        pulse = dict(updated.get("intraday_pulse") or {})
+        pulse.update(
+            {
+                "intraday_latest_date": intraday_latest_date,
+                "daily_price_date": daily_date,
+                "date_match": diagnostics["date_match"],
+                "intraday_requested_timeframe": updated.get("intraday_requested_timeframe") or updated.get("intraday_timeframe"),
+                "intraday_actual_granularity": updated.get("intraday_actual_granularity") or diagnostics["intraday_granularity"],
+                "intraday_actual_granularity_seconds": updated.get("intraday_actual_granularity_seconds") or diagnostics["intraday_granularity_seconds"],
+            }
+        )
+        updated["intraday_pulse"] = pulse
+        return updated
+
+    def _disabled_intraday_payload(self, intraday_timeframe: str) -> Dict[str, Any]:
+        pulse = calculate_intraday_pulse([])
+        pulse.update(
+            {
+                "intraday_requested_timeframe": intraday_timeframe,
+                "intraday_actual_granularity": "unknown",
+                "intraday_actual_granularity_seconds": None,
+            }
+        )
+        return {
+            "intraday_timeframe": intraday_timeframe,
+            "intraday_requested_timeframe": intraday_timeframe,
+            "intraday_granularity": "unknown",
+            "intraday_actual_granularity": "unknown",
+            "intraday_granularity_seconds": None,
+            "intraday_actual_granularity_seconds": None,
+            "intraday_granularity_label": "provider-returned",
+            "intraday_latest_date": None,
+            "daily_price_date": None,
+            "date_match": "unknown",
+            "intraday_source": VN_SOURCE_SSI,
             "intraday_is_realtime_quote": False,
             "intraday_warning": VN_INTRADAY_DISABLED_REASON,
             "intraday_candles": [],
@@ -1393,13 +1752,16 @@ class VietnamMarketService:
                     "Intraday data limited",
                     "info",
                     VN_INTRADAY_DISABLED_REASON,
-                    {"source": "SSI IntradayOhlc", "status": "not_implemented"},
+                    {"source": "SSI IntradayOhlc", "status": "disabled"},
                 )
             ],
             "intraday_status": {
-                "status": "not_implemented",
-                "source": None,
+                "status": "disabled",
+                "source": VN_SOURCE_SSI,
                 "message": VN_INTRADAY_DISABLED_REASON,
+                "intraday_requested_timeframe": intraday_timeframe,
+                "intraday_actual_granularity": "unknown",
+                "intraday_actual_granularity_seconds": None,
             },
         }
 
@@ -1408,6 +1770,8 @@ class VietnamMarketService:
         return {
             "quote_cache": "disabled",
             "intraday_cache": "disabled",
+            "realtime_cache": "disabled",
+            "trade_tape_cache": "disabled",
             "news_cache": "disabled",
         }
 
@@ -1416,6 +1780,8 @@ class VietnamMarketService:
         return {
             "quote": None,
             "intraday_ohlcv": None,
+            "realtime_snapshot": None,
+            "trade_tape": None,
             "news": None,
         }
 
@@ -1427,6 +1793,221 @@ class VietnamMarketService:
             "items": [],
             "message": VN_NEWS_DISABLED_REASON,
         }
+
+    @staticmethod
+    def _disabled_realtime_payload(symbol: str) -> Dict[str, Any]:
+        return {
+            "realtime_source": None,
+            "realtime_snapshot": None,
+            "realtime_status": {
+                "status": "disabled",
+                "source": None,
+                "message": VN_REALTIME_DISABLED_REASON,
+                "ticker": symbol,
+            },
+        }
+
+    @staticmethod
+    def _disabled_trade_tape_payload(symbol: str) -> Dict[str, Any]:
+        return {
+            "trade_tape_source": None,
+            "trade_tape": {
+                "ticker": symbol,
+                "source": None,
+                "trades": [],
+                "status": "disabled",
+            },
+            "trade_tape_status": {
+                "status": "disabled",
+                "source": None,
+                "message": VN_TRADE_TAPE_DISABLED_REASON,
+                "ticker": symbol,
+            },
+        }
+
+    @staticmethod
+    def _ssi_realtime_unavailable_payload(
+        symbol: str,
+        *,
+        status: str = "unavailable",
+        reason: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        reason_text = reason or VN_REALTIME_UNAVAILABLE_REASON
+        return {
+            "realtime_source": VN_SOURCE_SSI,
+            "realtime_snapshot": {
+                "ticker": symbol,
+                "symbol": symbol,
+                "source": VN_SOURCE_SSI,
+                "status": status,
+                "error": reason_text if status == "error" else None,
+                "error_detail": reason_text,
+            },
+            "realtime_status": {
+                "status": status,
+                "source": VN_SOURCE_SSI,
+                "message": reason_text,
+                "ticker": symbol,
+            },
+        }
+
+    @staticmethod
+    def _ssi_trade_tape_unavailable_payload(
+        symbol: str,
+        *,
+        status: str = "unavailable",
+        reason: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        reason_text = reason or VN_TRADE_TAPE_UNAVAILABLE_REASON
+        return {
+            "trade_tape_source": VN_SOURCE_SSI,
+            "trade_tape": {
+                "ticker": symbol,
+                "symbol": symbol,
+                "source": VN_SOURCE_SSI,
+                "trades": [],
+                "status": status,
+                "error": reason_text if status == "error" else None,
+                "error_detail": reason_text,
+            },
+            "trade_tape_status": {
+                "status": status,
+                "source": VN_SOURCE_SSI,
+                "message": reason_text,
+                "ticker": symbol,
+            },
+        }
+
+    @staticmethod
+    def _realtime_quote_from_snapshot(row: Dict[str, Any], symbol: str) -> Dict[str, Any]:
+        price = _safe_float(row.get("price") or row.get("realtime_price") or row.get("snapshot_price"))
+        change = _safe_float(row.get("change") or row.get("price_change"))
+        change_pct = _safe_float(row.get("change_pct") or row.get("percent_change"))
+        bid_levels = list(row.get("bid_levels") or [])
+        ask_levels = list(row.get("ask_levels") or [])
+        first_bid = bid_levels[0] if bid_levels and isinstance(bid_levels[0], dict) else {}
+        first_ask = ask_levels[0] if ask_levels and isinstance(ask_levels[0], dict) else {}
+        fetched_at = row.get("fetched_at")
+        return {
+            "symbol": symbol,
+            "ticker": symbol,
+            "source": VN_SOURCE_SSI,
+            "fetched_at": fetched_at,
+            "price": price,
+            "change": change,
+            "change_pct": change_pct,
+            "reference_price": _safe_float(row.get("reference_price")),
+            "ceiling_price": _safe_float(row.get("ceiling_price")),
+            "floor_price": _safe_float(row.get("floor_price")),
+            "open": _safe_float(row.get("open")),
+            "high": _safe_float(row.get("high")),
+            "low": _safe_float(row.get("low")),
+            "volume": _safe_float(row.get("volume")),
+            "value": _safe_float(row.get("value")),
+            "bid_levels": bid_levels,
+            "ask_levels": ask_levels,
+            "status": row.get("status") or "ok",
+            # Compatibility fields for the existing UI/API contract.
+            "realtime_price": price,
+            "snapshot_price": price,
+            "realtime_time": fetched_at,
+            "snapshot_time": fetched_at,
+            "snapshot_note": "SSI realtime snapshot; separate from official daily close.",
+            "reference_price_source": "SSI",
+            "open_price": _safe_float(row.get("open")),
+            "high_price": _safe_float(row.get("high")),
+            "low_price": _safe_float(row.get("low")),
+            "price_change": change,
+            "percent_change": change_pct,
+            "volume_accumulated": _safe_float(row.get("volume")),
+            "total_value": _safe_float(row.get("value")),
+            "bid_price_1": _safe_float(first_bid.get("price")),
+            "bid_vol_1": _safe_float(first_bid.get("volume")),
+            "ask_price_1": _safe_float(first_ask.get("price")),
+            "ask_vol_1": _safe_float(first_ask.get("volume")),
+        }
+
+    @staticmethod
+    def _trade_row_from_ssi(row: Dict[str, Any]) -> Dict[str, Any]:
+        side = row.get("side_if_available")
+        sequence = row.get("sequence_if_available")
+        return {
+            "time": row.get("time"),
+            "price": _safe_float(row.get("price")),
+            "volume": _safe_float(row.get("volume")),
+            "value": _safe_float(row.get("value")),
+            "side_if_available": side,
+            "sequence_if_available": sequence,
+            "match_type": side,
+            "id": sequence,
+            "source": VN_SOURCE_SSI,
+        }
+
+    def _load_ssi_realtime_payload(self, symbol: str) -> Dict[str, Any]:
+        if self.config.realtime_data_provider != VN_PROVIDER_SSI or not self.config.ssi_realtime_enabled:
+            return self._disabled_realtime_payload(symbol)
+
+        payload = self._get_ssi_fetcher().get_realtime_snapshot([symbol])
+        status = str(payload.get("status") or "").lower() if isinstance(payload, dict) else ""
+        if status == "ok":
+            quotes = payload.get("quotes") if isinstance(payload, dict) else []
+            quote = next((row for row in quotes if isinstance(row, dict) and str(row.get("ticker") or row.get("symbol") or "").upper() == symbol), None)
+            if quote:
+                normalized = self._realtime_quote_from_snapshot(quote, symbol)
+                return {
+                    "realtime_source": VN_SOURCE_SSI,
+                    "realtime_snapshot": normalized,
+                    "realtime_status": {
+                        "status": "ok",
+                        "source": VN_SOURCE_SSI,
+                        "message": None,
+                        "ticker": symbol,
+                    },
+                }
+            return self._ssi_realtime_unavailable_payload(symbol, reason="SSI realtime returned no quote row.")
+        if status == "disabled":
+            return self._disabled_realtime_payload(symbol)
+        return self._ssi_realtime_unavailable_payload(
+            symbol,
+            status=status or "unavailable",
+            reason=(payload.get("reason") or payload.get("message")) if isinstance(payload, dict) else None,
+        )
+
+    def _load_ssi_trade_tape_payload(self, symbol: str, limit: int = 100) -> Dict[str, Any]:
+        if self.config.trade_tape_provider != VN_PROVIDER_SSI or not self.config.ssi_trade_tape_enabled:
+            return self._disabled_trade_tape_payload(symbol)
+
+        payload = self._get_ssi_fetcher().get_trade_tape(symbol, limit=limit)
+        status = str(payload.get("status") or "").lower() if isinstance(payload, dict) else ""
+        if status == "ok":
+            trades = [self._trade_row_from_ssi(row) for row in (payload.get("trades") or []) if isinstance(row, dict)]
+            if trades:
+                return {
+                    "trade_tape_source": VN_SOURCE_SSI,
+                    "trade_tape": {
+                        "ticker": symbol,
+                        "symbol": symbol,
+                        "source": VN_SOURCE_SSI,
+                        "fetched_at": _utc_now().isoformat(),
+                        "trades": trades,
+                        "status": "ok",
+                    },
+                    "trade_tape_status": {
+                        "status": "ok",
+                        "source": VN_SOURCE_SSI,
+                        "message": None,
+                        "ticker": symbol,
+                        "count": len(trades),
+                    },
+                }
+            return self._ssi_trade_tape_unavailable_payload(symbol, reason="SSI trade tape returned no trade rows.")
+        if status == "disabled":
+            return self._disabled_trade_tape_payload(symbol)
+        return self._ssi_trade_tape_unavailable_payload(
+            symbol,
+            status=status or "unavailable",
+            reason=(payload.get("reason") or payload.get("message")) if isinstance(payload, dict) else None,
+        )
 
     def _unpack_daily_ohlcv_value(
         self,
@@ -1764,10 +2345,10 @@ class VietnamMarketService:
                 "distance_to_20d_low_pct": "(close - low_20d) / low_20d * 100",
                 "foreign_net_sums": "sum(foreign_net) over the latest 5 or 20 rows when foreign_net history is available",
                 "neutral_status_labels": "Rule-based neutral condition labels only; no trading recommendations are generated",
-                "intraday_1h_change": "latest_1h_close - latest_1h_open",
-                "intraday_1h_change_percent": "(latest_1h_close - latest_1h_open) / latest_1h_open * 100",
-                "intraday_range_percent": "(latest_1h_high - latest_1h_low) / latest_1h_open * 100",
-                "intraday_volume_vs_avg_1h": "latest_1h_volume / average(previous available 1H candle volumes), when at least 2 previous candles exist",
+                "intraday_change": "latest_intraday_close - latest_intraday_open using provider-returned intraday candles",
+                "intraday_change_percent": "(latest_intraday_close - latest_intraday_open) / latest_intraday_open * 100",
+                "intraday_range_percent": "(latest_intraday_high - latest_intraday_low) / latest_intraday_open * 100",
+                "intraday_volume_vs_average": "latest_intraday_volume / average(previous available provider-returned intraday candle volumes), when at least 2 previous candles exist",
             },
         }
 
@@ -1977,6 +2558,158 @@ class VietnamMarketService:
             "units": VN_DASHBOARD_UNITS,
         }
 
+    def build_realtime_snapshot(
+        self,
+        symbols: Optional[Iterable[str]],
+        *,
+        force_refresh: bool = False,
+    ) -> Dict[str, Any]:
+        tickers = normalize_vietnam_tickers(symbols)
+        if not tickers:
+            return {
+                "market": "VN",
+                "source": VN_SOURCE_SSI,
+                "status": "unavailable",
+                "error": "No symbol requested",
+                "error_detail": "No Vietnam ticker was requested.",
+                "requested_tickers": [],
+                "quotes": [],
+                "cache": {"cache_status": "unavailable"},
+            }
+
+        if self.config.realtime_data_provider != VN_PROVIDER_SSI or not self.config.ssi_realtime_enabled:
+            return {
+                "market": "VN",
+                "source": VN_SOURCE_SSI,
+                "status": "disabled",
+                "error": None,
+                "error_detail": VN_REALTIME_DISABLED_REASON,
+                "requested_tickers": tickers,
+                "quotes": [],
+                "cache": {"cache_status": "disabled"},
+            }
+
+        cache_key = _cache_key(
+            "realtime_snapshot",
+            ",".join(tickers),
+            provider=self.config.realtime_data_provider,
+            enabled=self.config.ssi_realtime_enabled,
+        )
+        result = _read_cache(
+            cache_key,
+            "realtime_snapshot",
+            lambda: self._get_ssi_fetcher().get_realtime_snapshot(tickers),
+            force_refresh=force_refresh,
+        )
+        payload = result["value"] if isinstance(result.get("value"), dict) else {}
+        status = str(payload.get("status") or "unavailable").lower()
+        quotes = [
+            self._realtime_quote_from_snapshot(row, str(row.get("ticker") or row.get("symbol") or "").upper())
+            for row in payload.get("quotes", [])
+            if isinstance(row, dict)
+        ]
+        response = {
+            "market": "VN",
+            "source": VN_SOURCE_SSI,
+            "status": "ok" if status == "ok" and quotes else status,
+            "error": None if status == "ok" else payload.get("reason") or VN_REALTIME_UNAVAILABLE_REASON,
+            "error_detail": None if status == "ok" else payload.get("reason") or payload.get("message") or VN_REALTIME_UNAVAILABLE_REASON,
+            "requested_tickers": tickers,
+            "quotes": quotes,
+            "cache": {
+                "cache_status": result["status"],
+                "last_fetched_at": _iso(result["entry"].fetched_at),
+                "next_refresh_at": _iso(result["entry"].expires_at),
+                "ttl_seconds": VN_CACHE_TTL_SECONDS["realtime_snapshot"],
+            },
+        }
+        if status == "ok" and not quotes:
+            response["status"] = "unavailable"
+            response["error"] = VN_REALTIME_UNAVAILABLE_REASON
+            response["error_detail"] = "SSI realtime returned no quote rows."
+        if result.get("error"):
+            response["status"] = "unavailable"
+            response["error"] = VN_REALTIME_UNAVAILABLE_REASON
+            response["error_detail"] = str(result["error"])
+        return response
+
+    def build_trade_tape(
+        self,
+        symbol: str,
+        *,
+        limit: int = 100,
+        force_refresh: bool = False,
+    ) -> Dict[str, Any]:
+        ticker = vn_ticker(symbol)
+        safe_limit = max(1, min(int(limit or 100), 500))
+        if not ticker:
+            return {
+                "market": "VN",
+                "source": VN_SOURCE_SSI,
+                "symbol": "",
+                "status": "unavailable",
+                "error": "No symbol requested",
+                "error_detail": "No Vietnam ticker was requested.",
+                "trades": [],
+                "note": "SSI trade tape is separate from official daily OHLCV.",
+                "cache": {"cache_status": "unavailable"},
+            }
+
+        if self.config.trade_tape_provider != VN_PROVIDER_SSI or not self.config.ssi_trade_tape_enabled:
+            return {
+                "market": "VN",
+                "source": VN_SOURCE_SSI,
+                "symbol": ticker,
+                "status": "disabled",
+                "error": None,
+                "error_detail": VN_TRADE_TAPE_DISABLED_REASON,
+                "trades": [],
+                "note": "SSI trade tape is disabled.",
+                "cache": {"cache_status": "disabled"},
+            }
+
+        cache_key = _cache_key(
+            "trade_tape",
+            ticker,
+            provider=self.config.trade_tape_provider,
+            enabled=self.config.ssi_trade_tape_enabled,
+            limit=safe_limit,
+        )
+        result = _read_cache(
+            cache_key,
+            "trade_tape",
+            lambda: self._get_ssi_fetcher().get_trade_tape(ticker, limit=safe_limit),
+            force_refresh=force_refresh,
+        )
+        payload = result["value"] if isinstance(result.get("value"), dict) else {}
+        status = str(payload.get("status") or "unavailable").lower()
+        trades = [self._trade_row_from_ssi(row) for row in payload.get("trades", []) if isinstance(row, dict)]
+        response = {
+            "market": "VN",
+            "source": VN_SOURCE_SSI,
+            "symbol": ticker,
+            "status": "ok" if status == "ok" and trades else status,
+            "error": None if status == "ok" else payload.get("reason") or VN_TRADE_TAPE_UNAVAILABLE_REASON,
+            "error_detail": None if status == "ok" else payload.get("reason") or payload.get("message") or VN_TRADE_TAPE_UNAVAILABLE_REASON,
+            "trades": trades,
+            "note": "SSI trade tape is separate from official daily OHLCV.",
+            "cache": {
+                "cache_status": result["status"],
+                "last_fetched_at": _iso(result["entry"].fetched_at),
+                "next_refresh_at": _iso(result["entry"].expires_at),
+                "ttl_seconds": VN_CACHE_TTL_SECONDS["trade_tape"],
+            },
+        }
+        if status == "ok" and not trades:
+            response["status"] = "unavailable"
+            response["error"] = VN_TRADE_TAPE_UNAVAILABLE_REASON
+            response["error_detail"] = "SSI trade tape returned no trade rows."
+        if result.get("error"):
+            response["status"] = "unavailable"
+            response["error"] = VN_TRADE_TAPE_UNAVAILABLE_REASON
+            response["error_detail"] = str(result["error"])
+        return response
+
     def _build_symbol(
         self,
         symbol: str,
@@ -2060,6 +2793,8 @@ class VietnamMarketService:
                 "news": [],
                 "news_status": self._news_status_block(),
                 **self._disabled_intraday_payload(intraday_timeframe),
+                **self._disabled_realtime_payload(symbol),
+                **self._disabled_trade_tape_payload(symbol),
                 "cache_status": cache_status,
                 "cache_last_fetched_at": cache_last_fetched_at,
                 "cache_next_refresh_at": cache_next_refresh_at,
@@ -2182,6 +2917,71 @@ class VietnamMarketService:
             current_price=latest_price,
         )
         intraday_payload = self._disabled_intraday_payload(intraday_timeframe)
+        if include_intraday:
+            intraday_key = _cache_key(
+                "intraday_ohlcv",
+                symbol,
+                provider=self.config.intraday_data_provider,
+                timeframe=intraday_timeframe,
+                limit=intraday_limit,
+                enabled=self.config.ssi_intraday_enabled,
+            )
+            intraday_result = _read_cache(
+                intraday_key,
+                "intraday_ohlcv",
+                lambda: self._load_ssi_intraday_payload(symbol, intraday_timeframe, intraday_limit),
+                force_refresh=force_refresh,
+            )
+            intraday_payload = intraday_result["value"]
+            intraday_payload = self._validate_intraday_freshness(
+                intraday_payload,
+                daily_price_date=latest_price_date or ohlcv_date,
+            )
+            cache_status["intraday_cache"] = intraday_result["status"]
+            cache_last_fetched_at["intraday_ohlcv"] = _iso(intraday_result["entry"].fetched_at)
+            cache_next_refresh_at["intraday_ohlcv"] = _iso(intraday_result["entry"].expires_at)
+            if intraday_result["error"]:
+                cache_errors["intraday_ohlcv"] = intraday_result["error"]
+        realtime_payload = self._disabled_realtime_payload(symbol)
+        realtime_key = _cache_key(
+            "realtime_snapshot",
+            symbol,
+            provider=self.config.realtime_data_provider,
+            enabled=self.config.ssi_realtime_enabled,
+        )
+        realtime_result = _read_cache(
+            realtime_key,
+            "realtime_snapshot",
+            lambda: self._load_ssi_realtime_payload(symbol),
+            force_refresh=force_refresh,
+        )
+        realtime_payload = realtime_result["value"]
+        cache_status["realtime_cache"] = realtime_result["status"]
+        cache_last_fetched_at["realtime_snapshot"] = _iso(realtime_result["entry"].fetched_at)
+        cache_next_refresh_at["realtime_snapshot"] = _iso(realtime_result["entry"].expires_at)
+        if realtime_result["error"]:
+            cache_errors["realtime_snapshot"] = realtime_result["error"]
+
+        trade_tape_payload = self._disabled_trade_tape_payload(symbol)
+        trade_tape_key = _cache_key(
+            "trade_tape",
+            symbol,
+            provider=self.config.trade_tape_provider,
+            enabled=self.config.ssi_trade_tape_enabled,
+            limit=100,
+        )
+        trade_tape_result = _read_cache(
+            trade_tape_key,
+            "trade_tape",
+            lambda: self._load_ssi_trade_tape_payload(symbol, limit=100),
+            force_refresh=force_refresh,
+        )
+        trade_tape_payload = trade_tape_result["value"]
+        cache_status["trade_tape_cache"] = trade_tape_result["status"]
+        cache_last_fetched_at["trade_tape"] = _iso(trade_tape_result["entry"].fetched_at)
+        cache_next_refresh_at["trade_tape"] = _iso(trade_tape_result["entry"].expires_at)
+        if trade_tape_result["error"]:
+            cache_errors["trade_tape"] = trade_tape_result["error"]
         validation = validate_vietnam_row(latest, foreign)
         indicators = calculate_vietnam_indicators(df, foreign, foreign_history)
         candle_status = "unknown"
@@ -2230,7 +3030,12 @@ class VietnamMarketService:
             else:
                 warnings.append("Foreign trading signal is unavailable.")
         if include_intraday:
-            warnings.append(VN_INTRADAY_DISABLED_REASON)
+            intraday_status = str((intraday_payload.get("intraday_status") or {}).get("status") or "")
+            intraday_message = (intraday_payload.get("intraday_status") or {}).get("message")
+            if intraday_status == "ok":
+                warnings.append(VN_INTRADAY_WARNING)
+            elif intraday_message:
+                warnings.append(str(intraday_message))
 
         return {
             "ticker": symbol,
@@ -2326,6 +3131,8 @@ class VietnamMarketService:
             "news": news,
             "news_status": self._news_status_block(),
             **intraday_payload,
+            **realtime_payload,
+            **trade_tape_payload,
             "cache_status": cache_status,
             "cache_last_fetched_at": cache_last_fetched_at,
             "cache_next_refresh_at": cache_next_refresh_at,

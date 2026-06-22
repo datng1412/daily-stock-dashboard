@@ -18,12 +18,11 @@ These rules must not be broken.
 
 * SSI DailyOhlc is the strict daily OHLCV source for supported VN REST market data.
 * `latest_price` comes from SSI DailyOhlc close when SSI daily data is available.
-* KBS snapshot is realtime board state only.
-* KBS trade tape is separate from daily OHLCV.
-* Do not replace daily close with KBS snapshot.
-* Do not use KBS trade tape as official daily close.
-* KBS reference price is a comparison base only.
-* Do not label KBS reference price as dividend-adjusted unless a corporate action source confirms it.
+* SSI realtime snapshot is realtime board state only.
+* SSI trade tape is separate from daily OHLCV.
+* Do not replace daily close with SSI realtime snapshot.
+* Do not use SSI trade tape as official daily close.
+* KBS is legacy-only and disabled by default; it must require `VN_ALLOW_LEGACY_KBS_PROVIDER=true` and `KBS_ENABLED=true`.
 * Do not infer corporate actions from price/reference gaps.
 * Do not mutate raw OHLCV close for dividends.
 * Corporate actions must come from an explicit event/history source.
@@ -32,7 +31,7 @@ These rules must not be broken.
 
 ## Provider strategy
 
-This roadmap is the source of truth for Vietnam dashboard provider ownership. SSI FastConnect Data is the strict official market-data source for supported Vietnam REST market data. Mozyfin is disabled for VN dashboard runtime because the free tier no longer supports the news/social API paths the dashboard previously used. KBS remains only as the temporary realtime board/trade-tape layer until SSI streaming is implemented.
+This roadmap is the source of truth for Vietnam dashboard provider ownership. SSI FastConnect Data is the strict official market-data source for supported Vietnam market data, including realtime snapshot and trade-tape contracts where SSI endpoints are available. Mozyfin is disabled for VN dashboard runtime because the free tier no longer supports the news/social API paths the dashboard previously used. KBS is disabled by default and is legacy-only behind explicit development flags.
 
 ### Current provider ownership
 
@@ -43,30 +42,30 @@ This roadmap is the source of truth for Vietnam dashboard provider ownership. SS
 | IndexList | SSI FastConnect Data REST | Implemented and exposed through backend API | Discover official index identifiers instead of hardcoded assumptions |
 | IndexComponents | SSI FastConnect Data REST | Provider, service, and API coverage added; live availability needs SSI endpoint/permission confirmation | Use for index membership and VN30 diagnostics only when SSI returns rows |
 | DailyOhlc | SSI FastConnect Data REST | Implemented and wired for daily data/chart | Use for daily OHLCV, chart candles, and internal indicators |
-| IntradayOhlc | SSI FastConnect Data REST | Later phase | Return not implemented/disabled state until implemented; do not fallback to Mozyfin |
+| IntradayOhlc | SSI FastConnect Data REST | Implemented and wired for watchlist/company intraday pulse | Use for compact intraday candles; keep separate from daily close and SSI realtime |
 | DailyStockPrice | SSI FastConnect Data REST | Implemented and wired for selected-ticker enrichment | Use for reference, ceiling/floor, adjusted close if provided, matched volume/value, put-through volume/value, and foreign buy/sell/net volume/value |
 | DailyIndex | SSI FastConnect Data REST | Implemented provider method with chunking; dashboard consumption is next | Use for daily index value, change, breadth, and liquidity |
-| Streaming market data | SSI streaming later | Not implemented | Use for realtime market data only after standalone validation and stability checks |
-| Realtime snapshot | KBS | Active temporary realtime layer | Keep separate from daily close and SSI REST data |
-| Trade tape | KBS | Active temporary realtime layer | Keep separate from official daily OHLCV |
+| Realtime snapshot | SSI FastConnect Data/streaming | Provider, service, API, and UI contract added; live endpoint names/permissions need confirmation | Keep separate from daily close and official daily OHLCV |
+| Trade tape | SSI FastConnect Data/streaming | Provider, service, API, and UI contract added; live endpoint names/permissions need confirmation | Keep separate from official daily OHLCV |
+| Legacy realtime snapshot/trade tape | KBS | Disabled by default; only available behind explicit legacy flags | Do not silently fallback from SSI to KBS |
 | News | Future NewsProvider | Disabled/not implemented | Do not call Mozyfin; return explicit disabled/not_implemented state |
 | Unsupported fundamentals | External provider required | Not implemented | Keep explicitly labeled; do not mix with SSI market-data fields |
 | BCTC/KQKD, financial statements, financial ratios | External provider required | Not implemented | Investigate separately |
 | Corporate actions, dividends, rights, splits | External provider required | Stub/unavailable | Events must come from explicit source data |
 | Macro/Fed/oil/USD/gold | External provider required | Not implemented | Keep outside SSI market-data ownership |
 
-SSI should be used for symbol metadata, exchange/security type/listed info when available, index list/components, daily OHLCV, chart candles, internal indicators from SSI OHLCV, reference/ceiling/floor, adjusted close if provided, matched volume/value, put-through volume/value, foreign buy/sell/net volume/value, daily index value/change/breadth/liquidity, intraday OHLCV later, and realtime streaming later.
+SSI should be used for symbol metadata, exchange/security type/listed info when available, index list/components, daily OHLCV, chart candles, internal indicators from SSI OHLCV, reference/ceiling/floor, adjusted close if provided, matched volume/value, put-through volume/value, foreign buy/sell/net volume/value, daily index value/change/breadth/liquidity, intraday OHLCV, realtime snapshot, and trade tape.
 
 Mozyfin owns no VN dashboard runtime path. It must not be used for VN backend or UI news/social, OHLCV, chart, reference, foreign-flow, index, metadata, intraday, or fallback behavior. Future news should be implemented through a separate NewsProvider contract.
 
-KBS owns realtime snapshot and trade tape as a temporary realtime layer until SSI streaming is implemented and stable. It is not a daily close, reference, index, chart, or daily market-data fallback provider.
+KBS owns no default VN dashboard runtime path. It is retained as an explicit legacy development provider for realtime snapshot/trade tape only and must not be used as silent fallback for SSI-owned data.
 
 ### Strict source rules
 
 ```text
 If data is official market price/volume/index/symbol and SSI has an endpoint, use SSI.
 If data is a technical indicator from price/volume, calculate internally from SSI data.
-If data is realtime and SSI streaming is not ready, use KBS and label it clearly.
+If data is realtime snapshot or trade tape and SSI is unavailable, show unavailable. Do not silently fallback.
 If data is news/fundamentals/corporate actions/macro, use an external provider.
 If SSI-owned data is unavailable, show unavailable. Do not silently fallback.
 ```
@@ -79,11 +78,15 @@ If SSI-owned data is unavailable, show unavailable. Do not silently fallback.
 * DailyIndex works but requires 29-day provider-level chunking because SSI rejects broad ranges.
 * IndexList is exposed through `/api/v1/stocks/vn/index-list` and should be used to discover SSI-returned index codes.
 * IndexComponents is exposed through `/api/v1/stocks/vn/index-components?index_code=...`, but the current local SSI environment returned a clean unavailable state for `VN30`; do not hardcode components or fallback to another provider.
+* SSI IntradayOhlc is implemented for the watchlist/company intraday pulse through the same SSI auth/cache path. If SSI returns no candles or the endpoint is disabled, expose a clean SSI `disabled`/`unavailable` intraday status and keep daily rows OK.
 * `/api/v1/stocks/vn/chart` should be SSI-backed and should return SSI source metadata.
 * `/api/v1/stocks/vn/watchlist` must remain SSI-backed for SSI-owned fields, including daily close, reference, ceiling/floor, matched value, put-through value, foreign flow, and source metadata.
 * `/api/v1/stocks/vn/company/{ticker}` is a Phase 1 company research contract/page shell that reuses the SSI-backed watchlist row for market-data blocks.
 * Mozyfin fallback for SSI-owned fields is not allowed.
-* KBS remains separate for realtime snapshot and trade tape.
+* SSI realtime snapshot and trade tape are exposed through the existing realtime endpoints and dashboard/company UI blocks.
+* SSI realtime/trade-tape live endpoint names and entitlements may return unavailable. Unavailable states should include sanitized attempted-endpoint diagnostics without tokens, credentials, auth headers, or raw provider bodies.
+* Dashboard provider-status UI must keep core daily SSI availability separate from optional SSI realtime, SSI trade tape, SSI index components, and disabled news states. A `Partial` dashboard status can mean optional sections are unavailable; it must not imply daily SSI data failed when daily rows are OK.
+* KBS legacy realtime/trade-tape paths are disabled by default and require explicit legacy flags.
 * News/social are disabled/not implemented until a separate NewsProvider is added.
 * Local DB market-data storage is deferred; current mode is SSI live API plus backend cache/TTL.
 
@@ -134,6 +137,8 @@ The same live check showed that `market=HOSE` can still return cross-market-look
 
 Live IndexComponents validation for `VN30`, with and without `market=HOSE`, returned a clean unavailable SSI state in the current environment. This may be endpoint permission, endpoint path, SSI data availability, or undocumented parameter shape. Do not hardcode VN30 components and do not use Mozyfin/KBS fallback for SSI-owned index membership. Keep the UI and diagnostics tolerant of unavailable component rows.
 
+Audit blocker fixed before Phase 3 commit: SSI `IndexComponents` provider error/status payloads must parse case-insensitive fields such as `code`, `errorCode`, `status`, and `Status` into a clean SSI unavailable response. They must not raise backend 500s from parser helper errors.
+
 Frontend follow-up after Priority 2: backend API coverage alone was not enough for dashboard visibility. The web UI must explicitly call `/api/v1/stocks/vn/index-list` and `/api/v1/stocks/vn/index-components`, and it must render the SSI index coverage section even when VN30 components return zero rows or `status=unavailable`.
 
 ### Quote fields are intentionally missing in strict SSI daily mode
@@ -145,30 +150,38 @@ Observed live watchlist payload can include:
 * `quote_price_date = null`
 * `quote_price_raw_field = null`
 
-This is not fatal because the current design uses SSI DailyOhlc close for `latest_price`. Keep the warning that quote does not provide a reliable latest price and latest price uses SSI DailyOhlc close. Future realtime/quote work should come from KBS snapshot now or SSI streaming later, not a forced REST quote fallback.
+This is not fatal because the current design uses SSI DailyOhlc close for `latest_price`. Keep the warning that quote does not provide a reliable latest price and latest price uses SSI DailyOhlc close. Realtime/quote work should use the SSI realtime contract when available and must not force a REST quote fallback into the daily close path.
 
 ### Row-level status must not mix optional source caveats with SSI daily validity
 
-Confirmed UI issue after strict SSI migration: rows could show valid SSI DailyOhlc close/date/volume, valid SSI DailyStockPrice reference/foreign/matched fields, and valid KBS snapshot values while the scan badge still showed `Data unavailable` or `Data source error`.
+Confirmed UI issue after strict SSI migration: rows could show valid SSI DailyOhlc close/date/volume, valid SSI DailyStockPrice reference/foreign/matched fields, and valid realtime snapshot values while the scan badge still showed `Data unavailable` or `Data source error`.
 
-Root cause: the frontend primary scan state was using broad validation/cache/KBS state. Optional quote cache, limited metadata, unavailable corporate actions, final/adjusted unknown statuses, disabled intraday, disabled news/cache state, or KBS snapshot context could be elevated into a row-level data error.
+Root cause: the frontend primary scan state was using broad validation/cache/realtime state. Optional quote cache, limited metadata, unavailable corporate actions, final/adjusted unknown statuses, disabled intraday, disabled news/cache state, or realtime snapshot context could be elevated into a row-level data error.
 
 Fixed status taxonomy:
 
 * Row-level `Data unavailable` is reserved for missing/invalid required SSI DailyOhlc fields, explicit row unavailable state, row error, or SSI DailyOhlc cache error.
-* Quote missing, limited metadata, unavailable corporate actions, final/adjusted unknown statuses, disabled intraday, disabled news/cache states, and KBS snapshot issues remain caveats or separate source states.
+* Quote missing, limited metadata, unavailable corporate actions, final/adjusted unknown statuses, disabled intraday, disabled news/cache states, and SSI realtime issues remain caveats or separate source states.
 * Cache labels shown in the primary watchlist/table should refer to SSI DailyOhlc. Broader source refresh/cache details belong in diagnostics.
-* Source labels should stay explicit: daily close/chart = `SSI DailyOhlc`, reference/limits/foreign/matched/put-through = `SSI DailyStockPrice`, realtime snapshot/trade tape = `KBS`, intraday = `not_implemented` until SSI IntradayOhlc is implemented.
+* Source labels should stay explicit: daily close/chart = `SSI DailyOhlc`, reference/limits/foreign/matched/put-through = `SSI DailyStockPrice`, realtime snapshot/trade tape = `SSI`, intraday = `SSI IntradayOhlc`.
 
 ### VN news provider disabled
 
 Mozyfin free-tier news/social API paths are no longer available for the dashboard, so VN news is disabled/not implemented by default. Watchlist and company research responses should return a stable disabled or `not_implemented` news block instead of a Mozyfin plan/auth error. Future work should add a separate NewsProvider contract and then normalize/decode Vietnamese text before rendering.
 
-News rendering must remain independent from optional SSI/KBS caveats. Missing quote fields, limited symbol metadata, unavailable index components, final/adjusted unknown statuses, disabled intraday, or KBS realtime issues must not hide selected ticker news if a future NewsProvider supplies rows.
+News rendering must remain independent from optional SSI realtime caveats. Missing quote fields, limited symbol metadata, unavailable index components, final/adjusted unknown statuses, disabled intraday, or SSI realtime issues must not hide selected ticker news if a future NewsProvider supplies rows.
 
-### Intraday is disabled until SSI IntradayOhlc
+### SSI IntradayOhlc operational notes
 
-Current `intraday_source` should be null/disabled with `intraday_status.status = not_implemented` until the SSI IntradayOhlc priority is implemented. The UI must clearly label intraday data as unavailable/not implemented and not a realtime quote or official SSI daily close. Do not mix intraday candle data with official daily close.
+SSI IntradayOhlc is now the strict VN intraday candle source. Watchlist and company research payloads should expose `intraday_source=SSI` with `intraday_status.status=ok` when candles exist. If SSI returns no candles, the endpoint fails, or `SSI_FASTCONNECT_INTRADAY_ENABLED=false`, the intraday block should show `unavailable` or `disabled` without changing the row-level SSI DailyOhlc status.
+
+Intraday candles are not realtime matched quotes and are not the official daily close. SSI realtime snapshot and trade tape remain separate from SSI IntradayOhlc until endpoint semantics are fully verified. Do not mix intraday candle data with official SSI DailyOhlc close.
+
+Live Phase 3 smoke found SSI IntradayOhlc can return an older latest candle date than SSI DailyOhlc, for example daily date `2026-06-19` with latest intraday candle date `2026-06-12`. The service must compare latest intraday candle date with latest daily trading date. If they differ, keep the daily SSI row `ok`, but mark intraday unavailable with a sanitized date-mismatch message and do not derive intraday pulse labels from stale candles.
+
+The same smoke found the requested dashboard timeframe label may not describe actual returned candle cadence; returned timestamps can be minute-like. Treat intraday cadence as provider-returned and detect it from timestamps when possible. UI labels should use neutral names such as latest intraday close, intraday change, and session intraday volume instead of claiming a fixed candle interval.
+
+Contract cleanup before Phase 3 commit: `intraday_requested_timeframe` is the SSI request hint, while `intraday_actual_granularity` and `intraday_actual_granularity_seconds` describe detected returned cadence. The compatibility `intraday_timeframe` field remains for existing clients but must not be presented as actual candle granularity.
 
 ### Final close / adjusted price status remains conservative
 
@@ -215,7 +228,11 @@ Current design remains SSI live API plus backend cache/TTL. Local market-data DB
 
 ### Strict provider boundaries remain mandatory
 
-SSI-owned market data must not silently fallback to Mozyfin/KBS. Mozyfin is news/unsupported domains only. KBS is realtime snapshot/trade tape only.
+SSI-owned market data must not silently fallback to Mozyfin/KBS. Mozyfin owns no VN dashboard runtime path. KBS is legacy-only for explicit development diagnostics and is disabled by default.
+
+Normal VN watchlist, company, realtime, index, corporate-action, and observability paths must not construct `MozyfinFetcher` or require Mozyfin CLI/key/fixture configuration when `MOZYFIN_ENABLED=false`, `MOZYFIN_NEWS_ENABLED=false`, and `VN_ALLOW_LEGACY_MOZYFIN_PROVIDER=false`. Corporate actions should return explicit unavailable/manual-unavailable state until a verified external event provider exists.
+
+Observability cleanup before Phase 3 commit: the `mozyfin` block is minimal when disabled (`status`, `source`, `reason`). Generic VN request/cache/single-flight counters belong under `dashboard_runtime` so SSI runtime activity is not shown as Mozyfin activity. SSI health is split into `ssi_core`, `ssi_intraday`, `ssi_realtime`, and `ssi_trade_tape` so daily/intraday/realtime/tape availability can be read separately.
 
 External providers are required for:
 
@@ -248,6 +265,7 @@ External providers are required for:
 * KBS realtime snapshot
 * KBS trade tape
 * SSI DailyStockPrice reference/limit/foreign/matched detail block
+* SSI IntradayOhlc intraday pulse
 * Daily close / realtime snapshot / trade tape separation
 * Phase-aware KBS snapshot state
 * KBS unavailable/error normalization
@@ -334,8 +352,8 @@ Status: partial in first roadmap batch.
 Implemented so far:
 
 * Added a compact selected ticker header.
-* Shows symbol/company label, Daily close, KBS snapshot, Vs SSI reference, Session volume, 20D avg volume, Latest news, and SSI/KBS source badges.
-* Keeps SSI daily and KBS realtime labels visually separate.
+* Shows symbol/company label, Daily close, SSI realtime, Vs SSI reference, Session volume, 20D avg volume, Latest news, and SSI source badges.
+* Keeps SSI daily, SSI DailyStockPrice, SSI intraday, and SSI realtime labels visually separate.
 
 Goal:
 
@@ -345,7 +363,7 @@ Suggested header content:
 
 * Symbol and company name
 * SSI daily close
-* KBS snapshot price
+* SSI realtime snapshot price
 * Price vs SSI reference
 * Session volume
 * 20D average volume
@@ -357,10 +375,10 @@ Example:
 ```text
 ACB — Asia Commercial Bank
 Daily close: 22.65
-KBS snapshot: 22.65
+SSI realtime: 22.65
 Price vs SSI reference: -0.88%
 Volume: 14.64M / 20D avg 31.43M
-Sources: SSI daily · KBS realtime
+Sources: SSI daily · SSI realtime
 ```
 
 Design rules:
@@ -483,7 +501,7 @@ Implemented so far:
 * Expanded tolerant mappings for SSI DailyOhlc, DailyStockPrice, DailyIndex, and SecuritiesDetails field-name variants.
 * Added 29-day provider-level chunking for SSI DailyStockPrice and DailyIndex, which reject broad ranges even though DailyOhlc supports direct 1Y chart queries.
 * Added mocked provider tests and a local safe smoke script.
-* Preserved KBS realtime/trade tape behavior and replaced Mozyfin news with a disabled/not_implemented VN news state.
+* Replaced KBS realtime/trade tape behavior with SSI realtime/trade-tape contracts and replaced Mozyfin news with a disabled/not_implemented VN news state.
 
 Goal:
 
@@ -494,13 +512,13 @@ Scope:
 * Provider skeleton and secure configuration placeholders.
 * Authentication and connection smoke tests.
 * Clean unavailable states when SSI-owned data is unavailable.
-* Explicit source labels for SSI, Mozyfin, and KBS values.
+* Explicit source labels for SSI values and disabled/not_implemented unsupported domains.
 
 Rules:
 
 * SSI-owned data must not fall back to Mozyfin or KBS.
 * `latest_price` uses SSI DailyOhlc close when SSI daily rows are available.
-* Do not remove KBS realtime/trade tape paths; VN news remains disabled until a separate NewsProvider is implemented.
+* KBS realtime/trade-tape paths remain legacy-only behind explicit development flags; VN news remains disabled until a separate NewsProvider is implemented.
 * If SSI is unavailable, show unavailable rather than silently replacing values.
 
 ### 7. Improve news structure
@@ -630,7 +648,7 @@ Rules:
 * Confirm chart and watchlist use SSI consistently.
 * Confirm the DailyStockPrice panel displays reference, ceiling/floor, foreign, matched, and put-through fields when SSI returns them.
 * Confirm news is disabled/not_implemented and does not show Mozyfin plan/auth errors.
-* Confirm KBS realtime snapshot and trade tape remain separate.
+* Confirm SSI realtime snapshot and trade tape remain separate from daily close and intraday candles.
 * Run a secret scan before committing.
 * Commit the current SSI phase after validation.
 
@@ -667,17 +685,31 @@ Status: implemented in the current working tree as a data contract and page skel
 
 ### Priority 3 - IntradayOhlc
 
-* Add SSI intraday OHLCV as a separate chart mode.
-* Keep rate-limit and cache protection.
-* Do not confuse intraday data with official daily close.
+Status: implemented in the current working tree for compact watchlist/company intraday pulse.
 
-### Priority 4 - SSI streaming prototype
+* Added SSI IntradayOhlc provider support using existing SSI auth, base URL, cache, and secret-safe error handling.
+* Wired SSI intraday candles into `/api/v1/stocks/vn/watchlist` and `/api/v1/stocks/vn/company/{ticker}`.
+* Preserved `intraday_source=SSI`, `intraday_status.status=ok|unavailable|disabled`, and no Mozyfin/KBS candle fallback.
+* Kept intraday candles separate from official SSI DailyOhlc close and SSI realtime snapshot/trade tape.
+
+### Phase 3 - SSI realtime snapshot and trade tape
+
+Status: provider, service, API, and UI contract added in the current working tree.
+
+* Added SSI FastConnect realtime snapshot and trade-tape provider methods using existing SSI auth, cache, timeout, and secret-safe error handling.
+* Wired `/api/v1/stocks/vn/realtime` and `/api/v1/stocks/vn/realtime/trades` to SSI by default.
+* Added watchlist and company research fields for `realtime_snapshot`, `realtime_status`, `trade_tape`, and `trade_tape_status`.
+* Updated dashboard/company UI labels to show SSI realtime and SSI trade tape, with neutral unavailable states when SSI returns no usable rows.
+* Disabled KBS by default; KBS is legacy-only behind `VN_ALLOW_LEGACY_KBS_PROVIDER=true` and `KBS_ENABLED=true`.
+* Live SSI realtime/trade-tape endpoint names, permissions, and row shapes still require validation in an environment with the relevant SSI data entitlements.
+
+### Priority 4 - SSI streaming/protocol hardening
 
 * Build a standalone streaming client.
 * Support safe subscriptions for market data, foreign room, index data, and realtime bars.
 * Add heartbeat, reconnect, and cache behavior.
-* Compare with KBS.
-* Switch realtime only after SSI streaming is stable.
+* Compare live SSI stream/probe behavior against dashboard REST expectations.
+* Keep unavailable states explicit until SSI realtime/trade-tape endpoints are proven stable.
 
 ### Priority 5 - External fundamentals, corporate actions, and news
 
@@ -696,11 +728,11 @@ Local DB market-data storage is deferred because current dashboard call volume i
 * Never print tokens, private keys, account IDs, or secrets.
 * Add `.env.example` placeholders only.
 * Do not add FC Trading or account/order/cash/stock-transfer actions.
-* Do not use Mozyfin or KBS fallback for SSI-owned REST data.
+* Do not use Mozyfin or KBS fallback for SSI-owned data.
 * If SSI-owned data is unavailable, return unavailable.
 * Keep VN news disabled until a separate NewsProvider is implemented.
-* Do not remove KBS realtime until SSI streaming is stable.
-* Keep source labels explicit: `SSI`, `Mozyfin`, `KBS`.
+* Keep KBS legacy realtime disabled by default unless explicitly enabled for development diagnostics.
+* Keep source labels explicit: `SSI` for market data and realtime/trade tape; `disabled`/`not_implemented` for unsupported news/fundamentals/events.
 
 ## Later backlog
 
@@ -807,7 +839,7 @@ Manual browser validation:
 4. Confirm chart uses SSI DailyOhlc.
 5. Confirm watchlist uses SSI for SSI-owned fields.
 6. Confirm DailyStockPrice fields populate when SSI returns them.
-7. Confirm KBS snapshot and trade tape remain separate realtime blocks.
+7. Confirm SSI realtime snapshot and trade tape remain separate realtime blocks.
 8. Confirm news is disabled/not_implemented or supplied by a future separate NewsProvider.
 9. Confirm diagnostics do not dominate the page.
 
@@ -819,5 +851,5 @@ Guardrail checks:
 * Confirm no FC Trading, order placement, account actions, cash transfer, stock transfer, or portfolio trading actions were added.
 * Confirm no buy/sell/hold/recommendation wording appears.
 * Confirm no Mozyfin fallback exists for SSI-owned market data.
-* Confirm KBS is only realtime snapshot and trade tape.
+* Confirm KBS is disabled by default and only available behind explicit legacy diagnostics flags.
 * Confirm VN news is disabled/not_implemented until a separate NewsProvider exists, and unsupported domains remain separate from SSI market data.

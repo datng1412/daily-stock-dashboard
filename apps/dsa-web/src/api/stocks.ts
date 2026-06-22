@@ -171,6 +171,15 @@ export type VietnamWatchItem = {
     items?: unknown[];
   };
   intradayTimeframe?: string | null;
+  intradayRequestedTimeframe?: string | null;
+  intradayGranularity?: string | null;
+  intradayActualGranularity?: string | null;
+  intradayGranularitySeconds?: number | null;
+  intradayActualGranularitySeconds?: number | null;
+  intradayGranularityLabel?: string | null;
+  intradayLatestDate?: string | null;
+  dailyPriceDate?: string | null;
+  dateMatch?: string | null;
   intradaySource?: string | null;
   intradayIsRealtimeQuote?: boolean;
   intradayWarning?: string | null;
@@ -182,6 +191,7 @@ export type VietnamWatchItem = {
     low?: number | null;
     close?: number | null;
     volume?: number | null;
+    ticker?: string | null;
   }>;
   intradayPulse?: {
     latest1hClose?: number | null;
@@ -191,16 +201,37 @@ export type VietnamWatchItem = {
     latest1hVolume?: number | null;
     latest1hChange?: number | null;
     latest1hChangePercent?: number | null;
+    latestIntradayClose?: number | null;
+    latestIntradayOpen?: number | null;
+    latestIntradayHigh?: number | null;
+    latestIntradayLow?: number | null;
+    latestIntradayVolume?: number | null;
+    intradayChange?: number | null;
+    intradayChangePercent?: number | null;
     sessionHighFrom1H?: number | null;
     sessionLowFrom1H?: number | null;
     sessionRangePctFrom1H?: number | null;
     sessionVolumeFrom1H?: number | null;
+    sessionHighFromIntraday?: number | null;
+    sessionLowFromIntraday?: number | null;
+    sessionRangePctFromIntraday?: number | null;
+    sessionVolumeFromIntraday?: number | null;
     sessionCandlesCount?: number | null;
     cumulative1hVolume?: number | null;
     loadedCandlesTotalVolume?: number | null;
     direction?: 'up' | 'down' | 'flat' | 'unknown' | null;
     rangePercent?: number | null;
     volumeVsAvg1h?: number | null;
+    intradayVolumeVsAverage?: number | null;
+    intradayGranularity?: string | null;
+    intradayRequestedTimeframe?: string | null;
+    intradayActualGranularity?: string | null;
+    intradayGranularitySeconds?: number | null;
+    intradayActualGranularitySeconds?: number | null;
+    intradayGranularityLabel?: string | null;
+    intradayLatestDate?: string | null;
+    dailyPriceDate?: string | null;
+    dateMatch?: string | null;
   };
   intradayLabels?: string[];
   intradayDetails?: Array<{
@@ -213,6 +244,41 @@ export type VietnamWatchItem = {
     status?: string | null;
     source?: string | null;
     message?: string | null;
+    count?: number | null;
+    ticker?: string | null;
+    intradayLatestDate?: string | null;
+    dailyPriceDate?: string | null;
+    dateMatch?: string | null;
+    intradayGranularity?: string | null;
+    intradayRequestedTimeframe?: string | null;
+    intradayActualGranularity?: string | null;
+    intradayGranularitySeconds?: number | null;
+    intradayActualGranularitySeconds?: number | null;
+    intradayGranularityLabel?: string | null;
+  };
+  realtimeSource?: string | null;
+  realtimeSnapshot?: VietnamRealtimeQuote | null;
+  realtimeStatus?: {
+    status?: string | null;
+    source?: string | null;
+    message?: string | null;
+  };
+  tradeTapeSource?: string | null;
+  tradeTape?: {
+    ticker?: string | null;
+    symbol?: string | null;
+    source?: string | null;
+    fetchedAt?: string | null;
+    trades?: VietnamRealtimeTrade[];
+    status?: string | null;
+    error?: string | null;
+    errorDetail?: string | null;
+  };
+  tradeTapeStatus?: {
+    status?: string | null;
+    source?: string | null;
+    message?: string | null;
+    count?: number | null;
   };
   cacheStatus: Record<string, string>;
   cacheLastFetchedAt: Record<string, string | null>;
@@ -300,7 +366,21 @@ export type VietnamWatchlistResponse = {
 };
 
 export type VietnamRealtimeQuote = {
-  symbol: string;
+  symbol?: string | null;
+  ticker?: string | null;
+  fetchedAt?: string | null;
+  price?: number | null;
+  change?: number | null;
+  changePct?: number | null;
+  ceilingPrice?: number | null;
+  floorPrice?: number | null;
+  open?: number | null;
+  high?: number | null;
+  low?: number | null;
+  volume?: number | null;
+  value?: number | null;
+  bidLevels?: Array<{ price?: number | null; volume?: number | null }>;
+  askLevels?: Array<{ price?: number | null; volume?: number | null }>;
   realtimePrice?: number | null;
   realtimeTime?: string | null;
   realtimeTimeDisplay?: string | null;
@@ -330,8 +410,8 @@ export type VietnamRealtimeQuote = {
   foreignBuyVolume?: number | null;
   foreignSellVolume?: number | null;
   foreignRoom?: number | null;
-  source: 'vnstock_kbs';
-  status: 'ok' | 'unavailable' | 'error' | 'stale';
+  source: string;
+  status: 'ok' | 'disabled' | 'not_implemented' | 'unavailable' | 'error' | 'stale' | string;
   error?: string | null;
   errorDetail?: string | null;
   rawError?: string | null;
@@ -339,8 +419,8 @@ export type VietnamRealtimeQuote = {
 
 export type VietnamRealtimeResponse = {
   market: 'VN';
-  source: 'vnstock_kbs';
-  status: 'ok' | 'unavailable' | 'error' | 'stale';
+  source: string;
+  status: 'ok' | 'disabled' | 'not_implemented' | 'unavailable' | 'error' | 'stale' | string;
   error?: string | null;
   errorDetail?: string | null;
   rawError?: string | null;
@@ -353,16 +433,19 @@ export type VietnamRealtimeTrade = {
   time?: string | null;
   price?: number | null;
   volume?: number | null;
+  value?: number | null;
+  sideIfAvailable?: string | null;
+  sequenceIfAvailable?: string | null;
   matchType?: string | null;
   id?: string | null;
-  source: 'vnstock_kbs';
+  source: string;
 };
 
 export type VietnamRealtimeTradesResponse = {
   market: 'VN';
-  source: 'vnstock_kbs';
+  source: string;
   symbol: string;
-  status: 'ok' | 'unavailable' | 'error' | 'stale';
+  status: 'ok' | 'disabled' | 'not_implemented' | 'unavailable' | 'error' | 'stale' | string;
   error?: string | null;
   errorDetail?: string | null;
   rawError?: string | null;
@@ -458,6 +541,61 @@ export type VietnamCompanyTechnical = {
   status: 'ok' | 'missing' | string;
 };
 
+export type VietnamCompanyIntraday = {
+  candles?: Array<{
+    timestamp?: number | null;
+    dateTime?: string | null;
+    open?: number | null;
+    high?: number | null;
+    low?: number | null;
+    close?: number | null;
+    volume?: number | null;
+    ticker?: string | null;
+  }>;
+  pulse?: {
+    latest1hClose?: number | null;
+    latest1hChange?: number | null;
+    latest1hChangePercent?: number | null;
+    latest1hVolume?: number | null;
+    sessionVolumeFrom1H?: number | null;
+    latestIntradayClose?: number | null;
+    intradayChange?: number | null;
+    intradayChangePercent?: number | null;
+    latestIntradayVolume?: number | null;
+    sessionVolumeFromIntraday?: number | null;
+    intradayRequestedTimeframe?: string | null;
+    intradayActualGranularity?: string | null;
+    intradayActualGranularitySeconds?: number | null;
+    direction?: 'up' | 'down' | 'flat' | 'unknown' | null;
+  };
+  requestedTimeframe?: string | null;
+  granularity?: string | null;
+  actualGranularity?: string | null;
+  granularitySeconds?: number | null;
+  actualGranularitySeconds?: number | null;
+  granularityLabel?: string | null;
+  latestDate?: string | null;
+  dailyPriceDate?: string | null;
+  dateMatch?: string | null;
+  source?: string | null;
+  status: 'ok' | 'disabled' | 'unavailable' | 'error' | string;
+  message?: string | null;
+};
+
+export type VietnamCompanyRealtime = {
+  snapshot?: VietnamRealtimeQuote | null;
+  source?: string | null;
+  status: 'ok' | 'disabled' | 'not_implemented' | 'unavailable' | 'error' | string;
+  message?: string | null;
+};
+
+export type VietnamCompanyTradeTape = {
+  trades?: VietnamRealtimeTrade[];
+  source?: string | null;
+  status: 'ok' | 'disabled' | 'not_implemented' | 'unavailable' | 'error' | string;
+  message?: string | null;
+};
+
 export type VietnamCompanySourceCoverageItem = {
   block: string;
   source?: string | null;
@@ -479,6 +617,9 @@ export type VietnamCompanyResearchResponse = {
   tradingStats: VietnamCompanyTradingStats;
   foreignFlow: VietnamCompanyForeignFlow;
   technical: VietnamCompanyTechnical;
+  intraday?: VietnamCompanyIntraday;
+  realtime?: VietnamCompanyRealtime;
+  tradeTape?: VietnamCompanyTradeTape;
   sourceCoverage: VietnamCompanySourceCoverageItem[];
   news: VietnamCompanyPlaceholderBlock;
   financials: VietnamCompanyPlaceholderBlock;
@@ -562,6 +703,8 @@ export type VietnamObservabilityResponse = {
     status?: string | null;
     source?: string | null;
     reason?: string | null;
+  };
+  dashboardRuntime: {
     watchlistRequestsTotal: number;
     watchlistCacheHitsTotal: number;
     watchlistCacheMissesTotal: number;
@@ -573,6 +716,11 @@ export type VietnamObservabilityResponse = {
     lastFetchDurationMs?: number | null;
   };
   kbs: {
+    status?: string | null;
+    source?: string | null;
+    reason?: string | null;
+    legacyAllowed?: boolean;
+    enabled?: boolean;
     quoteRequestsTotal: number;
     quoteSuccessTotal: number;
     quoteUnavailableTotal: number;
@@ -585,6 +733,30 @@ export type VietnamObservabilityResponse = {
     lastTradeSymbol?: string | null;
     lastError?: string | null;
     lastRawErrorPresent: boolean;
+  };
+  ssiRealtime?: {
+    status?: string | null;
+    source?: string | null;
+    reason?: string | null;
+    enabled?: boolean | null;
+  };
+  ssiCore?: {
+    status?: string | null;
+    source?: string | null;
+    reason?: string | null;
+    enabled?: boolean | null;
+  };
+  ssiIntraday?: {
+    status?: string | null;
+    source?: string | null;
+    reason?: string | null;
+    enabled?: boolean | null;
+  };
+  ssiTradeTape?: {
+    status?: string | null;
+    source?: string | null;
+    reason?: string | null;
+    enabled?: boolean | null;
   };
 };
 

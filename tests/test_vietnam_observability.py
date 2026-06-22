@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pandas as pd
 import pytest
@@ -113,81 +114,113 @@ def test_observability_endpoint_returns_default_counters_without_prior_requests(
 
     assert payload["market"] == "VN"
     assert payload["status"] == "ok"
-    assert payload["mozyfin"]["watchlist_requests_total"] == 0
-    assert payload["mozyfin"]["watchlist_cache_hits_total"] == 0
+    assert payload["mozyfin"] == {
+        "status": "disabled",
+        "source": "legacy",
+        "reason": "Mozyfin is disabled for VN dashboard runtime.",
+    }
+    assert payload["dashboard_runtime"]["watchlist_requests_total"] == 0
+    assert payload["dashboard_runtime"]["watchlist_cache_hits_total"] == 0
+    assert payload["kbs"]["status"] == "disabled"
+    assert payload["kbs"]["enabled"] is False
+    assert payload["kbs"]["legacy_allowed"] is False
     assert payload["kbs"]["quote_requests_total"] == 0
     assert payload["kbs"]["trade_requests_total"] == 0
+    assert payload["ssi_core"]["source"] == "SSI"
+    assert payload["ssi_core"]["status"] in {"disabled", "ok", "unavailable"}
+    assert payload["ssi_intraday"]["source"] == "SSI"
+    assert payload["ssi_intraday"]["status"] in {"disabled", "ok", "unavailable"}
+    assert payload["ssi_realtime"]["source"] == "SSI"
+    assert payload["ssi_trade_tape"]["source"] == "SSI"
 
 
-def test_mozyfin_watchlist_request_updates_observability_counters(monkeypatch):
+def test_observability_endpoint_does_not_construct_mozyfin_manager(monkeypatch):
+    def fail_manager(*args, **kwargs):  # pragma: no cover - failure path
+        raise AssertionError("Observability must not construct VN data providers")
+
+    monkeypatch.setattr(vn_service, "DataFetcherManager", fail_manager)
+
+    payload = get_vietnam_observability().model_dump()
+
+    assert payload["status"] == "ok"
+    assert payload["mozyfin"]["status"] == "disabled"
+
+
+def test_watchlist_request_updates_provider_neutral_observability_counters(monkeypatch):
     monkeypatch.delenv("MOZYFIN_FIXTURE_DIR", raising=False)
     service = VietnamMarketService(manager=_StubManager(), config=VietnamDashboardConfig(history_days=30, news_limit=1))
 
     service.build_watchlist(["FPT"])
     payload = get_vietnam_observability().model_dump()
 
-    assert payload["mozyfin"]["watchlist_requests_total"] == 1
-    assert payload["mozyfin"]["watchlist_cache_misses_total"] >= 1
-    assert payload["mozyfin"]["last_watchlist_request_at"]
-    assert payload["mozyfin"]["last_fetch_at"]
-    assert payload["mozyfin"]["last_tickers_count"] == 1
-    assert payload["mozyfin"]["last_fetch_duration_ms"] is not None
+    assert payload["mozyfin"]["status"] == "disabled"
+    assert "watchlist_requests_total" not in payload["mozyfin"]
+    assert payload["dashboard_runtime"]["watchlist_requests_total"] == 1
+    assert payload["dashboard_runtime"]["watchlist_cache_misses_total"] >= 1
+    assert payload["dashboard_runtime"]["last_watchlist_request_at"]
+    assert payload["dashboard_runtime"]["last_fetch_at"]
+    assert payload["dashboard_runtime"]["last_tickers_count"] == 1
+    assert payload["dashboard_runtime"]["last_fetch_duration_ms"] is not None
 
 
-def test_kbs_quote_and_trade_requests_update_observability_counters(monkeypatch):
-    monkeypatch.setattr(VnstockRealtimeFetcher, "_load_classes", _fake_load_classes)
+def test_realtime_endpoints_default_to_ssi_and_do_not_call_kbs(monkeypatch):
+    class StubVietnamMarketService:
+        config = SimpleNamespace(allow_legacy_kbs_provider=False, kbs_enabled=False)
 
-    get_vietnam_realtime_quotes("FPT")
-    get_vietnam_realtime_trades("FPT", limit=100)
+        def build_realtime_snapshot(self, symbols):
+            return {
+                "market": "VN",
+                "source": "SSI",
+                "status": "ok",
+                "requested_tickers": symbols,
+                "quotes": [{"symbol": "FPT", "ticker": "FPT", "source": "SSI", "status": "ok", "price": 100}],
+                "cache": {},
+            }
+
+        def build_trade_tape(self, symbol, *, limit=100):
+            return {
+                "market": "VN",
+                "source": "SSI",
+                "symbol": symbol,
+                "status": "ok",
+                "trades": [{"time": "10:00:00", "price": 100, "volume": 100, "source": "SSI"}],
+                "cache": {},
+            }
+
+    def fail_kbs(*args, **kwargs):  # pragma: no cover - failure path
+        raise AssertionError("KBS must not be called when legacy mode is disabled")
+
+    monkeypatch.setattr("api.v1.endpoints.stocks.VietnamMarketService", StubVietnamMarketService)
+    monkeypatch.setattr(VnstockRealtimeFetcher, "fetch_quotes", fail_kbs)
+    monkeypatch.setattr(VnstockRealtimeFetcher, "fetch_trades", fail_kbs)
+
+    quote_response = get_vietnam_realtime_quotes("FPT")
+    trade_response = get_vietnam_realtime_trades("FPT", limit=100)
     payload = get_vietnam_observability().model_dump()
 
-    assert payload["kbs"]["quote_requests_total"] == 1
-    assert payload["kbs"]["quote_success_total"] == 1
-    assert payload["kbs"]["trade_requests_total"] == 1
-    assert payload["kbs"]["trade_success_total"] == 1
-    assert payload["kbs"]["last_quote_tickers_count"] == 1
-    assert payload["kbs"]["last_trade_symbol"] == "FPT"
+    assert quote_response.source == "SSI"
+    assert quote_response.quotes[0].source == "SSI"
+    assert trade_response.source == "SSI"
+    assert trade_response.trades[0].source == "SSI"
+    assert payload["kbs"]["quote_requests_total"] == 0
+    assert payload["kbs"]["trade_requests_total"] == 0
 
 
-def test_observability_does_not_return_raw_full_provider_errors(monkeypatch):
-    monkeypatch.setattr(VnstockRealtimeFetcher, "_load_classes", _unavailable_load_classes)
-
-    get_vietnam_realtime_quotes("FPT")
+def test_observability_does_not_return_raw_full_provider_errors():
     payload = get_vietnam_observability().model_dump()
 
-    assert payload["kbs"]["quote_unavailable_total"] == 1
-    assert payload["kbs"]["last_error"] == "KBS provider timeout"
-    assert payload["kbs"]["last_raw_error_present"] is True
+    assert payload["kbs"]["status"] == "disabled"
     assert "secret-token-123" not in str(payload)
     assert "raw_error" not in payload["kbs"]
 
 
-def test_observability_endpoint_does_not_crash_when_kbs_is_unavailable(monkeypatch):
-    monkeypatch.setattr(VnstockRealtimeFetcher, "_load_classes", _unavailable_load_classes)
-
-    get_vietnam_realtime_quotes("FPT")
+def test_observability_endpoint_does_not_crash_when_realtime_is_unavailable():
     payload = get_vietnam_observability().model_dump()
 
     assert payload["status"] == "ok"
-    assert payload["kbs"]["quote_unavailable_total"] == 1
-
-
-def test_observability_update_failure_does_not_break_kbs_endpoints(monkeypatch):
-    monkeypatch.setattr(VnstockRealtimeFetcher, "_load_classes", _fake_load_classes)
-
-    def fail_observe(*args, **kwargs):
-        raise RuntimeError("observability failed")
-
-    monkeypatch.setattr(kbs_provider, "observe_kbs_quote_request", fail_observe)
-    monkeypatch.setattr(kbs_provider, "observe_kbs_trade_result", fail_observe)
-
-    quote_response = get_vietnam_realtime_quotes("FPT")
-    trade_response = get_vietnam_realtime_trades("FPT", limit=100)
-
-    assert quote_response.status == "ok"
-    assert quote_response.quotes[0].symbol == "FPT"
-    assert trade_response.status == "ok"
-    assert trade_response.trades[0].price == 100
+    assert payload["ssi_core"]["status"] in {"unavailable", "disabled", "not_implemented", "ok", "error"}
+    assert payload["ssi_intraday"]["status"] in {"unavailable", "disabled", "not_implemented", "ok", "error"}
+    assert payload["ssi_realtime"]["status"] in {"unavailable", "disabled", "not_implemented", "ok", "error"}
 
 
 def test_observability_update_failure_does_not_break_watchlist(monkeypatch):

@@ -7,7 +7,7 @@ def test_vietnam_company_research_endpoint_returns_phase_one_contract(monkeypatc
     class StubVietnamMarketService:
         def build_watchlist(self, symbols=None, **kwargs):
             assert symbols == ["FPT"]
-            assert kwargs["include_intraday"] is False
+            assert kwargs["include_intraday"] is True
             return {
                 "market": "VN",
                 "source": "SSI",
@@ -66,6 +66,51 @@ def test_vietnam_company_research_endpoint_returns_phase_one_contract(monkeypatc
                                 "lower": 110.0,
                             },
                         },
+                        "intraday_source": "SSI",
+                        "intraday_status": {"status": "ok", "source": "SSI", "message": None},
+                        "intraday_candles": [
+                            {
+                                "date_time": "2026-06-17T10:00:00+07:00",
+                                "open": 123.0,
+                                "high": 125.0,
+                                "low": 122.0,
+                                "close": 124.0,
+                                "volume": 1000,
+                            }
+                        ],
+                        "intraday_pulse": {
+                            "latest_1h_close": 124.0,
+                            "latest_1h_change": 1.0,
+                            "latest_1h_change_percent": 0.81,
+                            "latest_1h_volume": 1000,
+                        },
+                        "realtime_source": "SSI",
+                        "realtime_status": {"status": "ok", "source": "SSI", "message": None},
+                        "realtime_snapshot": {
+                            "ticker": "FPT",
+                            "price": 124.8,
+                            "change": 0.2,
+                            "change_pct": 0.16,
+                            "reference_price": 123.0,
+                            "volume": 10_000,
+                            "source": "SSI",
+                            "status": "ok",
+                        },
+                        "trade_tape_source": "SSI",
+                        "trade_tape_status": {"status": "ok", "source": "SSI", "message": None},
+                        "trade_tape": {
+                            "status": "ok",
+                            "source": "SSI",
+                            "trades": [
+                                {
+                                    "time": "10:16:00",
+                                    "price": 124.8,
+                                    "volume": 1000,
+                                    "value": 124_800_000,
+                                    "source": "SSI",
+                                }
+                            ],
+                        },
                         "warnings": [],
                         "news": [],
                     }
@@ -91,6 +136,16 @@ def test_vietnam_company_research_endpoint_returns_phase_one_contract(monkeypatc
     coverage = {item["block"]: item for item in payload["source_coverage"]}
     assert coverage["Daily OHLCV"]["source"] == "SSI DailyOhlc"
     assert coverage["Daily stock price"]["source"] == "SSI DailyStockPrice"
+    assert coverage["Intraday OHLCV"]["source"] == "SSI IntradayOhlc"
+    assert coverage["Realtime snapshot"]["source"] == "SSI"
+    assert coverage["Realtime snapshot"]["status"] == "ok"
+    assert coverage["Trade tape"]["source"] == "SSI"
+    assert coverage["Trade tape"]["status"] == "ok"
+    assert payload["intraday"]["status"] == "ok"
+    assert payload["realtime"]["status"] == "ok"
+    assert payload["realtime"]["snapshot"]["price"] == 124.8
+    assert payload["trade_tape"]["status"] == "ok"
+    assert payload["trade_tape"]["trades"][0]["price"] == 124.8
     assert coverage["News"]["status"] == "not_implemented"
     assert coverage["Financials"]["status"] == "not_implemented"
     assert payload["news"]["items"] == []

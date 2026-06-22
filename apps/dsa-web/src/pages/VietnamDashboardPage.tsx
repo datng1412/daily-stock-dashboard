@@ -192,12 +192,6 @@ const cacheLabel = (status?: string | null) => status ?? 'missing';
 
 const rawDateLabel = (value?: string | number | null) => (value === null || value === undefined || value === '' ? '—' : String(value));
 
-const officialDailySourceLabel = (item: VietnamWatchItem) => (
-  item.actualSource === 'SSI' || item.primarySource === 'SSI' || isSsiDailyPriceSource(item.latestPriceSource)
-    ? 'SSI DailyOhlc'
-    : item.actualSource ?? item.primarySource ?? item.latestPriceSource ?? 'unknown'
-);
-
 const compactLabels = (labels?: string[], max = 4) => (labels ?? ['Watch']).slice(0, max);
 
 const RECOMMENDATION_WORD_RE = /\b(buy|sell|hold|recommendation)\b/gi;
@@ -313,12 +307,34 @@ const sessionVolumeToAvgDailyVolume = (
   state?: KbsSnapshotDisplayResult,
 ) => {
   const avgVolume20D = item.indicators.avgVolume20D ?? item.liquidity?.avgVolume20D;
-  const sessionVolume = usableKbsSessionVolume(realtimeQuote, state) ?? item.intradayPulse?.sessionVolumeFrom1H ?? null;
+  const sessionVolume = usableKbsSessionVolume(realtimeQuote, state) ?? intradaySessionVolume(item) ?? null;
   if (avgVolume20D === null || avgVolume20D === undefined) return '20D avg unavailable';
   if (sessionVolume === null || sessionVolume === undefined) return 'Session volume unavailable';
   if (avgVolume20D <= 0) return '20D avg unavailable';
   return formatRatio(sessionVolume / avgVolume20D);
 };
+
+const intradayGranularityText = (item?: VietnamWatchItem | null) => (
+  item?.intradayGranularityLabel
+  ?? item?.intradayActualGranularity
+  ?? item?.intradayGranularity
+  ?? item?.intradayPulse?.intradayGranularityLabel
+  ?? item?.intradayPulse?.intradayActualGranularity
+  ?? item?.intradayPulse?.intradayGranularity
+  ?? 'provider-returned'
+);
+
+const intradayLatestClose = (item: VietnamWatchItem) => item.intradayPulse?.latestIntradayClose ?? item.intradayPulse?.latest1hClose ?? null;
+const intradayLatestHigh = (item: VietnamWatchItem) => item.intradayPulse?.latestIntradayHigh ?? item.intradayPulse?.latest1hHigh ?? null;
+const intradayLatestLow = (item: VietnamWatchItem) => item.intradayPulse?.latestIntradayLow ?? item.intradayPulse?.latest1hLow ?? null;
+const intradayLatestVolume = (item: VietnamWatchItem) => item.intradayPulse?.latestIntradayVolume ?? item.intradayPulse?.latest1hVolume ?? null;
+const intradayChange = (item: VietnamWatchItem) => item.intradayPulse?.intradayChange ?? item.intradayPulse?.latest1hChange ?? null;
+const intradayChangePercent = (item: VietnamWatchItem) => item.intradayPulse?.intradayChangePercent ?? item.intradayPulse?.latest1hChangePercent ?? null;
+const intradaySessionHigh = (item: VietnamWatchItem) => item.intradayPulse?.sessionHighFromIntraday ?? item.intradayPulse?.sessionHighFrom1H ?? null;
+const intradaySessionLow = (item: VietnamWatchItem) => item.intradayPulse?.sessionLowFromIntraday ?? item.intradayPulse?.sessionLowFrom1H ?? null;
+const intradaySessionRange = (item: VietnamWatchItem) => item.intradayPulse?.sessionRangePctFromIntraday ?? item.intradayPulse?.sessionRangePctFrom1H ?? null;
+const intradaySessionVolume = (item: VietnamWatchItem) => item.intradayPulse?.sessionVolumeFromIntraday ?? item.intradayPulse?.sessionVolumeFrom1H ?? null;
+const intradayVolumeVsAverage = (item: VietnamWatchItem) => item.intradayPulse?.intradayVolumeVsAverage ?? item.intradayPulse?.volumeVsAvg1h ?? null;
 
 const rawKbsFreshnessText = (quote?: VietnamRealtimeQuote | null) => (
   `raw age ${quote?.ageSeconds ?? '-'}s | raw stale ${quote?.isStale === null || quote?.isStale === undefined ? '-' : String(quote.isStale)} | reason ${quote?.staleReason ?? '-'}`
@@ -351,25 +367,46 @@ const hasSsiSymbolMetadata = (item: VietnamWatchItem) => (
 );
 
 const latestNewsAge = (item?: VietnamWatchItem | null) => {
+  if (item?.newsStatus?.status === 'disabled') return 'News disabled';
   const timestamp = item?.news?.map(newsTimestamp).find(Boolean);
   return timestamp ? formatRelativeTime(timestamp) : 'Unavailable';
 };
 
+const newsUnavailableText = (item: VietnamWatchItem) => (
+  item.newsStatus?.status === 'disabled'
+    ? 'News disabled'
+    : item.newsStatus?.message ?? 'News not implemented.'
+);
+
 const kbsErrorMessage = (error?: string | null) => {
   if (!error) return null;
   const lower = error.toLowerCase();
-  if (lower.includes('timeout') || lower.includes('timed out') || error.includes('è¶…æ—¶')) return 'KBS provider timeout';
+  if (lower.includes('timeout') || lower.includes('timed out') || error.includes('è¶…æ—¶')) return 'SSI realtime provider timeout';
   if (lower.includes('network') || lower.includes('proxy') || error.includes('ç½‘ç»œ') || error.includes('ä»£ç†')) {
-    return 'KBS network/proxy issue';
+    return 'SSI realtime network/proxy issue';
   }
   return error;
 };
+
+const realtimeIssueSummary = (realtimeError?: string | null, tradesError?: string | null) => {
+  if (realtimeError) return 'SSI realtime unavailable. Daily SSI data is still available.';
+  if (tradesError) return 'SSI trade tape unavailable. Daily SSI data is still available.';
+  return null;
+};
+
+const realtimeStatusBadgeText = (status?: string | null) => (
+  status === 'unavailable' || status === 'error' ? 'SSI realtime unavailable' : 'SSI realtime'
+);
+
+const tradeTapeStatusBadgeText = (status?: string | null) => (
+  status === 'unavailable' || status === 'error' ? 'SSI trade tape unavailable' : 'SSI trade tape'
+);
 
 const kbsSnapshotSummaryText = (quote: VietnamRealtimeQuote | null | undefined, state: KbsSnapshotDisplayResult) => {
   const cleanError = kbsErrorMessage(quote?.error);
   if (cleanError) return cleanError;
   const time = quote?.snapshotTimeDisplay ?? quote?.realtimeTimeDisplay ?? quote?.snapshotTime ?? quote?.realtimeTime;
-  if (state.label === 'Last available KBS snapshot' && time) return `Last available · ${formatVietnamTime(time)}`;
+  if (state.label === 'Last available SSI realtime' && time) return `Last available · ${formatVietnamTime(time)}`;
   if (time) return `${state.label} · ${formatVietnamTime(time)}`;
   return state.label;
 };
@@ -407,7 +444,7 @@ const importantWarnings = (item: VietnamWatchItem) => {
       'Foreign net date does not match',
       'Final close status is unknown',
       'Adjusted/unadjusted price status is unknown',
-      'Intraday 1H candle data is not a realtime matched quote',
+      'Intraday candle data is not a realtime matched quote',
       'stale cached data',
     ].some((needle) => warning.includes(needle)),
   ).filter((warning) => !(
@@ -441,7 +478,7 @@ const watchlistScanState = (
       ['weak', 'risk', 'caution', 'negative', 'low liquidity', 'overextended'].some((needle) => label.includes(needle)),
     )
   ) {
-    return { label: 'Weakening', variant: 'warning', reason: kbsState.severity === 'warning' || kbsState.severity === 'error' ? 'KBS snapshot needs context' : 'Neutral labels show caution' };
+    return { label: 'Weakening', variant: 'warning', reason: kbsState.severity === 'warning' || kbsState.severity === 'error' ? 'SSI realtime needs context' : 'Neutral labels show caution' };
   }
 
   const constructiveLabelCount = labels.filter((label) =>
@@ -552,7 +589,7 @@ const WatchCard: React.FC<{ item: VietnamWatchItem; realtimeQuote?: VietnamRealt
           <p className="text-xs text-secondary-text">OHLCV close {formatPrice(item.ohlcvClose ?? item.close)}</p>
         </div>
         <div>
-          <p className="text-xs text-secondary-text">KBS snapshot</p>
+          <p className="text-xs text-secondary-text">SSI realtime</p>
           <div className="mt-1 flex flex-wrap items-center gap-2">
             <p className="text-lg font-semibold text-foreground">{formatPrice(realtimeQuote?.realtimePrice)}</p>
             <Badge variant={kbsStateVariant(kbsState)}>{kbsState.label}</Badge>
@@ -631,7 +668,7 @@ const WatchCard: React.FC<{ item: VietnamWatchItem; realtimeQuote?: VietnamRealt
       {item.intradayPulse ? (
         <div className="mt-3 rounded-lg border border-border/60 bg-elevated/40 p-3 text-xs">
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-            <span className="font-medium text-foreground">Intraday Pulse {item.intradayTimeframe?.toUpperCase() ?? '1H'}</span>
+            <span className="font-medium text-foreground">Intraday pulse ({intradayGranularityText(item)})</span>
             <div className="flex flex-wrap gap-1">
               {(item.intradayLabels ?? []).slice(0, 2).map((label) => (
                 <Badge key={`${item.ticker}-${label}`} variant={intradayVariant(label)}>{label}</Badge>
@@ -639,11 +676,11 @@ const WatchCard: React.FC<{ item: VietnamWatchItem; realtimeQuote?: VietnamRealt
             </div>
           </div>
           <div className="grid grid-cols-2 gap-2 text-secondary-text">
-            <span>1H close {formatPrice(item.intradayPulse.latest1hClose)}</span>
-            <span className={signalTone(item.intradayPulse.latest1hChange)}>Change {formatPrice(item.intradayPulse.latest1hChange)} ({formatNumber(item.intradayPulse.latest1hChangePercent, 2)}%)</span>
+            <span>Intraday close {formatPrice(intradayLatestClose(item))}</span>
+            <span className={signalTone(intradayChange(item))}>Change {formatPrice(intradayChange(item))} ({formatNumber(intradayChangePercent(item), 2)}%)</span>
             <span>Time {formatVietnamTime(item.intradayCandles?.at(-1)?.dateTime ?? item.intradayCandles?.at(-1)?.timestamp)}</span>
             <span>Range {formatNumber(item.intradayPulse.rangePercent, 2)}%</span>
-            <span>Volume {formatNumber(item.intradayPulse.latest1hVolume)}</span>
+            <span>Volume {formatNumber(intradayLatestVolume(item))}</span>
           </div>
         </div>
       ) : null}
@@ -709,7 +746,7 @@ const IndexCoveragePanel: React.FC<{
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <p className="text-sm font-semibold text-foreground">SSI index coverage</p>
-          <p className="mt-1">SSI IndexList and IndexComponents diagnostics. No Mozyfin or KBS fallback is used for index data.</p>
+          <p className="mt-1">SSI IndexList and IndexComponents diagnostics. No alternate provider fallback is used for index data.</p>
         </div>
         <Badge variant="default">SSI</Badge>
       </div>
@@ -734,7 +771,7 @@ const IndexCoveragePanel: React.FC<{
           </dd>
           <dd className="mt-2">
             {componentUnavailable
-              ? 'VN30 components unavailable from SSI'
+              ? 'VN30 components unavailable from SSI.'
               : `${formatNumber(componentCount)} component rows returned by SSI`}
           </dd>
         </div>
@@ -791,7 +828,7 @@ const DataStatusPanel: React.FC<{
   const selectedCacheStatus = selectedItem?.cacheStatus
     ? [
         `OHLCV ${cacheLabel(selectedItem.cacheStatus.ohlcvCache)}`,
-        `1H ${cacheLabel(selectedItem.cacheStatus.intradayCache)}`,
+        `Intraday ${cacheLabel(selectedItem.cacheStatus.intradayCache)}`,
         `news ${cacheLabel(selectedItem.cacheStatus.newsCache)}`,
       ].join(' | ')
     : '-';
@@ -805,6 +842,7 @@ const DataStatusPanel: React.FC<{
       : 'OK';
   const dataStatusVariant = dataStatusLabel === 'OK' ? 'success' : dataStatusLabel === 'Partial' ? 'warning' : 'danger';
   const metadata = data?.cacheMetadata;
+  const issueSummary = realtimeIssueSummary(realtimeError, tradesError);
 
   return (
     <section className="rounded-lg border border-border/70 bg-card p-4">
@@ -816,7 +854,7 @@ const DataStatusPanel: React.FC<{
             <Badge variant={dataStatusVariant}>Data status: {dataStatusLabel}</Badge>
           </div>
           <p className="mt-1 text-xs text-secondary-text">
-            {marketPhase.phase} | {data?.dataQuality.source ?? 'SSI pending'} | selected {selectedItem?.ticker ?? '-'}
+            {marketPhase.phase} | core daily SSI data {data ? 'available' : 'pending'} | selected {selectedItem?.ticker ?? '-'}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -837,9 +875,10 @@ const DataStatusPanel: React.FC<{
           Trade tape may differ during auction phases.
         </div>
       ) : null}
-      {realtimeError || tradesError ? (
+      {issueSummary ? (
         <div className="mt-3 rounded-lg border border-warning/20 bg-warning/10 p-2 text-xs text-warning">
-          KBS issue: {kbsErrorMessage(realtimeError ?? tradesError) ?? 'KBS unavailable'}
+          {issueSummary}
+          <span className="ml-1 text-secondary-text">Optional realtime/index-component sections may be unavailable.</span>
         </div>
       ) : null}
       <IndexCoveragePanel
@@ -873,19 +912,19 @@ const DataStatusPanel: React.FC<{
             <dd className="mt-1 text-xs text-secondary-text">{formatVietnamTime(selectedLastFetched)}</dd>
           </div>
           <div className="rounded-lg bg-card/60 p-3">
-            <dt className="text-xs text-secondary-text">KBS quotes</dt>
+            <dt className="text-xs text-secondary-text">SSI realtime</dt>
             <dd className="mt-1 font-medium text-foreground">{formatVietnamTime(lastKbsQuoteRefreshAt)}</dd>
             <dd className="mt-1 text-xs text-secondary-text">
               raw stale {status.staleCount} | unavailable {status.unavailableCount}
             </dd>
           </div>
           <div className="rounded-lg bg-card/60 p-3">
-            <dt className="text-xs text-secondary-text">KBS trades</dt>
+            <dt className="text-xs text-secondary-text">SSI trade tape</dt>
             <dd className="mt-1 font-medium text-foreground">{formatVietnamTime(lastKbsTradeRefreshAt)}</dd>
             <dd className="mt-1 text-xs text-secondary-text">latest {latestTrade?.time ?? '-'}</dd>
           </div>
           <div className="rounded-lg bg-card/60 p-3">
-            <dt className="text-xs text-secondary-text">KBS auto-refresh</dt>
+            <dt className="text-xs text-secondary-text">Realtime auto-refresh</dt>
             <dd className="mt-1 font-medium text-foreground">{kbsAutoRefreshEnabled ? 'on' : 'off'}</dd>
             <dd className="mt-1 text-xs text-secondary-text">quotes {kbsQuoteRefreshInterval}s | trades {kbsTradeRefreshInterval}s</dd>
             <dd className="mt-1 text-xs text-secondary-text">{lastKbsErrorAt ? `last error ${formatVietnamTime(lastKbsErrorAt)}` : 'last error -'}</dd>
@@ -896,7 +935,7 @@ const DataStatusPanel: React.FC<{
             <span className="font-medium text-foreground">Selected symbol</span> {selectedItem?.ticker ?? '-'} | daily close date {selectedItem?.latestPriceDate ?? selectedItem?.priceDate ?? '-'}
           </div>
           <div className="rounded-lg border border-border/60 bg-card/50 p-3">
-            <span className="font-medium text-foreground">KBS snapshot time</span> {selectedQuote?.realtimeTimeDisplay ?? selectedQuote?.realtimeTime ?? '-'}
+            <span className="font-medium text-foreground">SSI realtime time</span> {selectedQuote?.realtimeTimeDisplay ?? selectedQuote?.realtimeTime ?? '-'}
             <div className="mt-1">
               <Badge variant={kbsStateVariant(selectedKbsState)}>{selectedKbsState.label}</Badge>
             </div>
@@ -907,24 +946,38 @@ const DataStatusPanel: React.FC<{
             <span className="font-medium text-foreground">Cache status</span> {selectedCacheStatus}
           </div>
         </div>
-        <div className="mt-3 grid gap-2 rounded-lg border border-border/60 bg-card/50 p-3 md:grid-cols-3 xl:grid-cols-6">
+        <div className="mt-3 grid gap-2 rounded-lg border border-border/60 bg-card/50 p-3 md:grid-cols-2">
           <div>
-            <span className="font-medium text-foreground">VN data req</span> {observability?.mozyfin.watchlistRequestsTotal ?? '-'}
+            <span className="font-medium text-foreground">SSI realtime diagnostic</span> {realtimeError ?? '-'}
           </div>
           <div>
-            <span className="font-medium text-foreground">Cache hit/miss</span> {observability ? `${observability.mozyfin.watchlistCacheHitsTotal}/${observability.mozyfin.watchlistCacheMissesTotal}` : '-'}
+            <span className="font-medium text-foreground">SSI trade tape diagnostic</span> {tradesError ?? '-'}
+          </div>
+        </div>
+        <div className="mt-3 grid gap-2 rounded-lg border border-border/60 bg-card/50 p-3 md:grid-cols-4 xl:grid-cols-8">
+          <div>
+            <span className="font-medium text-foreground">VN data req</span> {observability?.dashboardRuntime?.watchlistRequestsTotal ?? '-'}
           </div>
           <div>
-            <span className="font-medium text-foreground">Single-flight waits</span> {observability?.mozyfin.singleflightWaitsTotal ?? '-'}
+            <span className="font-medium text-foreground">Cache hit/miss</span> {observability?.dashboardRuntime ? `${observability.dashboardRuntime.watchlistCacheHitsTotal}/${observability.dashboardRuntime.watchlistCacheMissesTotal}` : '-'}
           </div>
           <div>
-            <span className="font-medium text-foreground">KBS quote unavailable</span> {observability ? `${observability.kbs.quoteUnavailableTotal}/${observability.kbs.quoteRequestsTotal}` : '-'}
+            <span className="font-medium text-foreground">Single-flight waits</span> {observability?.dashboardRuntime?.singleflightWaitsTotal ?? '-'}
           </div>
           <div>
-            <span className="font-medium text-foreground">KBS trade unavailable</span> {observability ? `${observability.kbs.tradeUnavailableTotal}/${observability.kbs.tradeRequestsTotal}` : '-'}
+            <span className="font-medium text-foreground">SSI core status</span> {observability?.ssiCore?.status ?? '-'}
+          </div>
+          <div>
+            <span className="font-medium text-foreground">SSI intraday status</span> {observability?.ssiIntraday?.status ?? '-'}
+          </div>
+          <div>
+            <span className="font-medium text-foreground">SSI realtime status</span> {observability?.ssiRealtime?.status ?? '-'}
+          </div>
+          <div>
+            <span className="font-medium text-foreground">SSI trade tape status</span> {observability?.ssiTradeTape?.status ?? '-'}
           </div>
           <div className="truncate">
-            <span className="font-medium text-foreground">Last KBS error</span> {observability?.kbs.lastError ?? '-'}
+            <span className="font-medium text-foreground">Legacy provider</span> {observability?.kbs.status ?? 'disabled'}
           </div>
         </div>
         {data ? (
@@ -954,7 +1007,7 @@ const DataStatusPanel: React.FC<{
                 </div>
               </dl>
               <p className="mt-3">
-                Units: latest price and OHLCV fields are VND, volume is shares, and foreign net is labeled shares when SSI DailyStockPrice provides quantity fields. KBS snapshot is separate and does not replace daily close.
+                Units: latest price and OHLCV fields are VND, volume is shares, and foreign net is labeled shares when SSI DailyStockPrice provides quantity fields. SSI realtime is separate and does not replace daily close.
               </p>
             </div>
             {Object.keys(data.dataQuality.missingFields).length || Object.keys(data.dataQuality.errors).length ? (
@@ -982,7 +1035,7 @@ const DataStatusPanel: React.FC<{
               <Badge variant={metadata.staleCacheUsedCount ? 'warning' : 'default'}>stale used {formatNumber(metadata.staleCacheUsedCount)}</Badge>
               <Badge variant="default">OHLCV TTL {formatNumber(metadata.cacheTtlSeconds.ohlcv)}s</Badge>
               <Badge variant="default">Quote TTL {formatNumber(metadata.cacheTtlSeconds.quote)}s</Badge>
-              <Badge variant="default">Intraday 1H TTL {formatNumber(metadata.cacheTtlSeconds.intradayOhlcv)}s</Badge>
+              <Badge variant="default">Intraday TTL {formatNumber(metadata.cacheTtlSeconds.intradayOhlcv)}s</Badge>
               <Badge variant="default">News TTL {formatNumber(metadata.cacheTtlSeconds.news)}s</Badge>
             </div>
           </div>
@@ -1000,7 +1053,7 @@ const SelectedTickerHeader: React.FC<{
   if (!item) return null;
   const kbsState = kbsSnapshotState(realtimeQuote, marketPhase.code);
   const avgVolume20D = item.indicators.avgVolume20D ?? item.liquidity?.avgVolume20D;
-  const sessionVolume = usableKbsSessionVolume(realtimeQuote, kbsState) ?? item.intradayPulse?.sessionVolumeFrom1H ?? null;
+  const sessionVolume = usableKbsSessionVolume(realtimeQuote, kbsState) ?? intradaySessionVolume(item) ?? null;
   const kbsPrice = realtimeQuote?.snapshotPrice ?? realtimeQuote?.realtimePrice;
   const ssiReferencePrice = item.dailyStockPrice?.referencePrice ?? item.ssiReferencePrice ?? item.priceLimit?.referencePrice ?? null;
   const ssiDailyClose = item.dailyClose ?? item.latestPrice ?? item.close ?? null;
@@ -1010,8 +1063,8 @@ const SelectedTickerHeader: React.FC<{
   const metadataSecurityType = metadataValue(item, 'securityType');
   const metadataSource = item.symbolMetadata?.source ?? item.metadataSource;
   const dailySourceLabel = item.status === 'unavailable'
-    ? 'SSI unavailable'
-    : officialDailySourceLabel(item);
+    ? 'Daily source unavailable'
+    : 'Daily source SSI';
 
   return (
     <section className="rounded-lg border border-cyan/25 bg-card p-4 shadow-soft-card">
@@ -1029,8 +1082,11 @@ const SelectedTickerHeader: React.FC<{
           </div>
           <div className="mt-3 flex flex-wrap gap-2">
             <Badge variant="info">{dailySourceLabel}</Badge>
-            <Badge variant={kbsStateVariant(kbsState)}>KBS realtime</Badge>
-            <Badge variant={priceSourceVariant(item.latestPriceSource)}>Daily source {(item.latestPriceSource ?? 'unknown').toUpperCase()}</Badge>
+            <Badge variant={kbsStateVariant(kbsState)}>{realtimeStatusBadgeText(realtimeQuote?.status ?? item.realtimeStatus?.status)}</Badge>
+            <Badge variant={item.tradeTapeStatus?.status === 'unavailable' || item.tradeTapeStatus?.status === 'error' ? 'warning' : 'default'}>
+              {tradeTapeStatusBadgeText(item.tradeTapeStatus?.status)}
+            </Badge>
+            {item.newsStatus?.status === 'disabled' ? <Badge variant="default">News disabled</Badge> : null}
           </div>
         </div>
         <dl className="grid flex-1 gap-2 text-sm sm:grid-cols-2 xl:max-w-4xl xl:grid-cols-6">
@@ -1040,7 +1096,7 @@ const SelectedTickerHeader: React.FC<{
             <dd className="mt-1 text-xs text-secondary-text">{item.latestPriceDate ?? item.priceDate ?? '-'}</dd>
           </div>
           <div className="rounded-lg bg-elevated/50 p-3">
-            <dt className="text-xs text-secondary-text">KBS snapshot</dt>
+            <dt className="text-xs text-secondary-text">SSI realtime</dt>
             <dd className="mt-1 font-semibold text-foreground">{formatPrice(kbsPrice)}</dd>
             <dd className="mt-1 text-xs text-secondary-text">{kbsState.label}</dd>
           </div>
@@ -1092,7 +1148,7 @@ const WatchlistScanSummary: React.FC<{
         <div>
           <h2 className="text-base font-semibold text-foreground">Watchlist scan</h2>
           <p className="mt-1 text-xs text-secondary-text">
-            Neutral ticker-level states derived from existing labels, SSI DailyOhlc cache freshness, and KBS snapshot state. Warning counts remain secondary context in the table.
+            Neutral ticker-level states derived from existing labels, SSI DailyOhlc cache freshness, and SSI realtime state. Warning counts remain secondary context in the table.
           </p>
         </div>
         <Badge variant="default">Sector grouping unavailable</Badge>
@@ -1148,12 +1204,12 @@ const IndicatorTable: React.FC<{
     <div className="mb-3 flex items-center justify-between gap-3">
       <h2 className="text-base font-semibold text-foreground">Indicator table</h2>
       <span className="text-xs text-secondary-text">
-        Neutral status labels only{realtimeLoading ? ' | loading KBS snapshot' : ''}
+        Neutral status labels only{realtimeLoading ? ' | loading SSI realtime' : ''}
       </span>
     </div>
     {realtimeError ? (
       <div className="mb-3 rounded-lg border border-warning/20 bg-warning/10 p-2 text-xs text-warning">
-        KBS snapshot unavailable: {kbsErrorMessage(realtimeError) ?? 'KBS unavailable'}
+        SSI realtime unavailable. Daily SSI data is still available.
       </div>
     ) : null}
     <div className="overflow-x-auto">
@@ -1166,10 +1222,10 @@ const IndicatorTable: React.FC<{
             <th className="px-3 py-2 text-right">Daily close</th>
             <th className="px-3 py-2">Source</th>
             <th className="px-3 py-2">Price date</th>
-            <th className="px-3 py-2 text-right">KBS snapshot</th>
-            <th className="px-3 py-2 text-right">KBS change</th>
-            <th className="px-3 py-2">KBS time</th>
-            <th className="px-3 py-2 text-right">1H change</th>
+            <th className="px-3 py-2 text-right">SSI realtime</th>
+            <th className="px-3 py-2 text-right">SSI change</th>
+            <th className="px-3 py-2">SSI time</th>
+            <th className="px-3 py-2 text-right">Intraday change</th>
             <th className="px-3 py-2">Final close</th>
             <th className="px-3 py-2 text-right">MA20</th>
             <th className="px-3 py-2 text-right">RSI14 Wilder/RMA</th>
@@ -1229,8 +1285,8 @@ const IndicatorTable: React.FC<{
                   {formatPrice(quote?.priceChange)} / {formatNumber(quote?.percentChange, 2)}%
                 </td>
                 <td className="px-3 py-3">{quote?.realtimeTimeDisplay ?? quote?.realtimeTime ?? '-'}</td>
-                <td className={cn('px-3 py-3 text-right', signalTone(item.intradayPulse?.latest1hChange))}>
-                  {formatNumber(item.intradayPulse?.latest1hChangePercent, 2)}%
+                <td className={cn('px-3 py-3 text-right', signalTone(intradayChange(item)))}>
+                  {formatNumber(intradayChangePercent(item), 2)}%
                 </td>
                 <td className="px-3 py-3">
                   <Badge variant={item.finalCloseStatus === 'final' ? 'success' : item.finalCloseStatus === 'not_final' ? 'warning' : 'default'}>
@@ -1775,7 +1831,7 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 className="text-sm font-semibold text-foreground">Inspect chart</h3>
-          <p className="mt-1 text-xs text-secondary-text">Daily OHLCV from {chartSourceLabel}. KBS snapshot remains separate.</p>
+          <p className="mt-1 text-xs text-secondary-text">Daily OHLCV from {chartSourceLabel}. SSI realtime remains separate.</p>
         </div>
         <ChartRangeControls rangeLabel={rangeLabel} onRangeChange={setRangeLabel} />
       </div>
@@ -1830,7 +1886,7 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
 
       <div className="mt-3 space-y-1 text-xs text-secondary-text">
         <p>Daily OHLCV source: {chartSourceLabel}</p>
-        <p>KBS snapshot is separate and not used as daily close.</p>
+        <p>SSI realtime is separate and not used as daily close.</p>
         {chart?.latestDate ? <p>Latest chart date: {chart.latestDate}</p> : null}
       </div>
       {isExpanded && points.length ? (
@@ -1844,7 +1900,7 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <h3 id="inspect-chart-expanded-title" className="text-base font-semibold text-foreground">Expanded inspect chart</h3>
-                <p className="mt-1 text-xs text-secondary-text">Daily OHLCV from {chartSourceLabel}. KBS snapshot remains separate.</p>
+                <p className="mt-1 text-xs text-secondary-text">Daily OHLCV from {chartSourceLabel}. SSI realtime remains separate.</p>
               </div>
               <button
                 type="button"
@@ -1904,7 +1960,7 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
               <div className="mt-3 space-y-1 text-xs text-secondary-text">
                 <p>RSI14 numeric guides: 30 and 70.</p>
                 <p>Daily OHLCV source: {chartSourceLabel}</p>
-                <p>KBS snapshot is separate and not used as daily close.</p>
+                <p>SSI realtime is separate and not used as daily close.</p>
                 {chart?.latestDate ? <p>Latest chart date: {chart.latestDate}</p> : null}
               </div>
             </div>
@@ -2001,20 +2057,20 @@ const StockDetailView: React.FC<{
   const kbsState = kbsSnapshotState(realtimeQuote, marketPhase.code);
   const sessionCandlesCount = item.intradayPulse?.sessionCandlesCount ?? 0;
   const hasSessionCandles = sessionCandlesCount > 0;
-  const hasSessionHighLowFrom1H = item.intradayPulse?.sessionHighFrom1H != null && item.intradayPulse?.sessionLowFrom1H != null;
-  const hasSessionRangeFrom1H = item.intradayPulse?.sessionRangePctFrom1H != null;
-  const hasSessionVolumeFrom1H = item.intradayPulse?.sessionVolumeFrom1H != null;
+  const hasSessionHighLowFromIntraday = intradaySessionHigh(item) != null && intradaySessionLow(item) != null;
+  const hasSessionRangeFromIntraday = intradaySessionRange(item) != null;
+  const hasSessionVolumeFromIntraday = intradaySessionVolume(item) != null;
   const missingSessionMetricText = hasSessionCandles ? 'Session value unavailable' : 'Not enough session candles';
   const missingSessionHighLowTitle = hasSessionCandles
-    ? 'Session high/low is unavailable from current 1H candles.'
+    ? 'Session high/low is unavailable from current provider-returned intraday candles.'
     : 'Session high/low requires current-session intraday candles.';
   const missingSessionRangeTitle = hasSessionCandles
-    ? 'Session range is unavailable from current 1H candles.'
+    ? 'Session range is unavailable from current provider-returned intraday candles.'
     : 'Session range requires current-session intraday candles.';
   const missingSessionVolumeTitle = hasSessionCandles
-    ? 'Session volume is unavailable from current 1H candles.'
+    ? 'Session volume is unavailable from current provider-returned intraday candles.'
     : 'Session volume requires current-session intraday candles.';
-  const hasVolumeVsAvg1h = item.intradayPulse?.volumeVsAvg1h != null;
+  const hasVolumeVsAverage = intradayVolumeVsAverage(item) != null;
   const avgVolume20D = indicators.avgVolume20D ?? item.liquidity?.avgVolume20D;
   const sessionVolumeRatioText = sessionVolumeToAvgDailyVolume(item, realtimeQuote, kbsState);
   const finalCloseLabel = finalCloseDisplayLabel(item.finalCloseStatus);
@@ -2290,11 +2346,12 @@ const StockDetailView: React.FC<{
           <div>
             <h3 className="text-sm font-semibold text-foreground">Intraday Pulse</h3>
             <p className="mt-1 text-xs text-secondary-text">
-              {item.intradaySource ?? item.intradayStatus?.source ?? 'SSI IntradayOhlc'} {item.intradayTimeframe?.toUpperCase() ?? '1H'} status: {item.intradayStatus?.status ?? 'not_implemented'}.
+              {item.intradaySource ?? item.intradayStatus?.source ?? 'SSI IntradayOhlc'} provider-returned candles ({intradayGranularityText(item)}) status: {item.intradayStatus?.status ?? 'disabled'}.
             </p>
           </div>
           <div className="flex flex-wrap gap-1">
-            <Badge variant="default">{item.intradayTimeframe?.toUpperCase() ?? '1H'}</Badge>
+            <Badge variant="default">{item.intradaySource ?? item.intradayStatus?.source ?? 'SSI'}</Badge>
+            <Badge variant="default">{intradayGranularityText(item)}</Badge>
             <Badge variant={item.intradayIsRealtimeQuote ? 'success' : 'warning'}>
               {item.intradayIsRealtimeQuote ? 'Realtime quote' : 'Not realtime quote'}
             </Badge>
@@ -2307,50 +2364,50 @@ const StockDetailView: React.FC<{
         ) : null}
         <dl className="mt-3 grid gap-3 text-sm md:grid-cols-4">
           <div className="rounded-lg bg-card/60 p-3">
-            <dt className="text-xs text-secondary-text">Latest 1H close (VND)</dt>
-            <dd className="mt-1 font-medium text-foreground">{formatPrice(item.intradayPulse?.latest1hClose)}</dd>
+            <dt className="text-xs text-secondary-text">Latest intraday close (VND)</dt>
+            <dd className="mt-1 font-medium text-foreground">{formatPrice(intradayLatestClose(item))}</dd>
           </div>
           <div className="rounded-lg bg-card/60 p-3">
-            <dt className="text-xs text-secondary-text">1H change</dt>
-            <dd className={cn('mt-1 font-medium', signalTone(item.intradayPulse?.latest1hChange))}>
-              {formatPrice(item.intradayPulse?.latest1hChange)} / {formatNumber(item.intradayPulse?.latest1hChangePercent, 2)}%
+            <dt className="text-xs text-secondary-text">Intraday change</dt>
+            <dd className={cn('mt-1 font-medium', signalTone(intradayChange(item)))}>
+              {formatPrice(intradayChange(item))} / {formatNumber(intradayChangePercent(item), 2)}%
             </dd>
           </div>
           <div className="rounded-lg bg-card/60 p-3">
-            <dt className="text-xs text-secondary-text">1H high / low / range</dt>
+            <dt className="text-xs text-secondary-text">Intraday high / low / range</dt>
             <dd className="mt-1 font-medium text-foreground">
-              {formatPrice(item.intradayPulse?.latest1hHigh)} / {formatPrice(item.intradayPulse?.latest1hLow)} / {formatNumber(item.intradayPulse?.rangePercent, 2)}%
+              {formatPrice(intradayLatestHigh(item))} / {formatPrice(intradayLatestLow(item))} / {formatNumber(item.intradayPulse?.rangePercent, 2)}%
             </dd>
           </div>
           <div className="rounded-lg bg-card/60 p-3">
-            <dt className="text-xs text-secondary-text">Latest 1H candle volume</dt>
-            <dd className="mt-1 font-medium text-foreground">{formatNumber(item.intradayPulse?.latest1hVolume)}</dd>
+            <dt className="text-xs text-secondary-text">Latest intraday volume</dt>
+            <dd className="mt-1 font-medium text-foreground">{formatNumber(intradayLatestVolume(item))}</dd>
           </div>
           <div className="rounded-lg bg-card/60 p-3">
-            <dt className="text-xs text-secondary-text">Session high / low from 1H</dt>
-            <dd className="mt-1 font-medium text-foreground" title={hasSessionHighLowFrom1H ? undefined : missingSessionHighLowTitle}>
-              {hasSessionHighLowFrom1H
-                ? `${formatPrice(item.intradayPulse?.sessionHighFrom1H)} / ${formatPrice(item.intradayPulse?.sessionLowFrom1H)}`
+            <dt className="text-xs text-secondary-text">Session high / low from intraday</dt>
+            <dd className="mt-1 font-medium text-foreground" title={hasSessionHighLowFromIntraday ? undefined : missingSessionHighLowTitle}>
+              {hasSessionHighLowFromIntraday
+                ? `${formatPrice(intradaySessionHigh(item))} / ${formatPrice(intradaySessionLow(item))}`
                 : missingSessionMetricText}
             </dd>
           </div>
           <div className="rounded-lg bg-card/60 p-3">
-            <dt className="text-xs text-secondary-text">Session range from 1H</dt>
-            <dd className="mt-1 font-medium text-foreground" title={hasSessionRangeFrom1H ? undefined : missingSessionRangeTitle}>
-              {hasSessionRangeFrom1H ? `${formatNumber(item.intradayPulse?.sessionRangePctFrom1H, 2)}%` : missingSessionMetricText}
+            <dt className="text-xs text-secondary-text">Session range from intraday</dt>
+            <dd className="mt-1 font-medium text-foreground" title={hasSessionRangeFromIntraday ? undefined : missingSessionRangeTitle}>
+              {hasSessionRangeFromIntraday ? `${formatNumber(intradaySessionRange(item), 2)}%` : missingSessionMetricText}
             </dd>
           </div>
           <div className="rounded-lg bg-card/60 p-3">
-            <dt className="text-xs text-secondary-text">Session 1H volume</dt>
-            <dd className="mt-1 font-medium text-foreground" title={hasSessionVolumeFrom1H ? undefined : missingSessionVolumeTitle}>
-              {hasSessionVolumeFrom1H ? formatNumber(item.intradayPulse?.sessionVolumeFrom1H) : missingSessionMetricText}
+            <dt className="text-xs text-secondary-text">Session intraday volume</dt>
+            <dd className="mt-1 font-medium text-foreground" title={hasSessionVolumeFromIntraday ? undefined : missingSessionVolumeTitle}>
+              {hasSessionVolumeFromIntraday ? formatNumber(intradaySessionVolume(item)) : missingSessionMetricText}
             </dd>
           </div>
-          {hasVolumeVsAvg1h ? (
+          {hasVolumeVsAverage ? (
             <div className="rounded-lg bg-card/60 p-3">
-              <dt className="text-xs text-secondary-text">Latest 1H volume vs avg 1H</dt>
+              <dt className="text-xs text-secondary-text">Latest intraday volume vs average</dt>
               <dd className="mt-1 font-medium text-foreground">
-                {formatRatio(item.intradayPulse?.volumeVsAvg1h)}
+                {formatRatio(intradayVolumeVsAverage(item))}
               </dd>
             </div>
           ) : null}
@@ -2359,8 +2416,13 @@ const StockDetailView: React.FC<{
             <dd className="mt-1 font-medium text-foreground">{formatNumber(item.intradayCandles?.length ?? 0)}</dd>
           </div>
           <div className="rounded-lg bg-card/60 p-3">
-            <dt className="text-xs text-secondary-text">Session 1H candles</dt>
+            <dt className="text-xs text-secondary-text">Session intraday candles</dt>
             <dd className="mt-1 font-medium text-foreground">{formatNumber(sessionCandlesCount)}</dd>
+          </div>
+          <div className="rounded-lg bg-card/60 p-3">
+            <dt className="text-xs text-secondary-text">Intraday / daily date</dt>
+            <dd className="mt-1 font-medium text-foreground">{item.intradayLatestDate ?? '-'} / {item.dailyPriceDate ?? '-'}</dd>
+            <dd className="mt-1 text-xs text-secondary-text">{item.dateMatch ?? 'unknown'}</dd>
           </div>
         </dl>
         <div className="mt-3 flex flex-wrap gap-1">
@@ -2382,12 +2444,14 @@ const StockDetailView: React.FC<{
           </div>
         ) : null}
         <p className="mt-3 text-xs text-secondary-text">
-          Intraday OHLCV is disabled until SSI IntradayOhlc is implemented. KBS session volume remains separate realtime board context.
+          {item.intradayStatus?.status === 'ok'
+            ? 'SSI IntradayOhlc candles are separate from SSI realtime board and trade tape context.'
+            : 'SSI intraday is unavailable or disabled; SSI realtime board and trade tape context remain separate.'}
         </p>
       </div>
       <div className="mt-4 rounded-lg border border-border/60 bg-elevated/30 p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-sm font-semibold text-foreground">KBS snapshot</h3>
+          <h3 className="text-sm font-semibold text-foreground">SSI realtime</h3>
           <Badge variant={kbsStateVariant(kbsState)}>{kbsState.label}</Badge>
         </div>
         <dl className="mt-3 grid gap-3 text-sm md:grid-cols-4">
@@ -2400,13 +2464,13 @@ const StockDetailView: React.FC<{
             <dd className="mt-1 font-medium text-foreground">{realtimeQuote?.snapshotTimeDisplay ?? realtimeQuote?.realtimeTimeDisplay ?? realtimeQuote?.snapshotTime ?? realtimeQuote?.realtimeTime ?? '-'}</dd>
           </div>
           <div>
-            <dt className="text-xs text-secondary-text">KBS change</dt>
+            <dt className="text-xs text-secondary-text">SSI change</dt>
             <dd className={cn('mt-1 font-medium', signalTone(realtimeQuote?.priceChange))}>
               {formatPrice(realtimeQuote?.priceChange)} / {formatNumber(realtimeQuote?.percentChange, 2)}%
             </dd>
           </div>
           <div>
-            <dt className="text-xs text-secondary-text">KBS session accumulated volume</dt>
+            <dt className="text-xs text-secondary-text">SSI session accumulated volume</dt>
             <dd className="mt-1 font-medium text-foreground">{formatNumber(realtimeQuote?.volumeAccumulated)}</dd>
           </div>
         </dl>
@@ -2417,20 +2481,20 @@ const StockDetailView: React.FC<{
           <p className="mt-1 text-xs text-secondary-text">{kbsErrorMessage(realtimeQuote.error)}</p>
         ) : null}
         <p className="mt-3 text-xs text-secondary-text">
-          {realtimeQuote?.snapshotNote ?? 'KBS board snapshot; may differ from trade tape'}
+          {realtimeQuote?.snapshotNote ?? 'SSI realtime snapshot; may differ from trade tape'}
         </p>
       </div>
       <div className="mt-4 rounded-lg border border-border/60 bg-elevated/30 p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-sm font-semibold text-foreground">Latest trade tape</h3>
-          <Badge variant={tradesError ? 'warning' : 'info'}>{tradesLoading ? 'Loading' : 'KBS snapshot'}</Badge>
+          <Badge variant={tradesError ? 'warning' : 'info'}>{tradesLoading ? 'Loading' : 'SSI trade tape'}</Badge>
         </div>
         <p className="mt-2 text-xs text-secondary-text">
           Trade tape may not include auction/ATC prints.
         </p>
         {tradesError ? (
           <div className="mt-3 rounded-lg border border-warning/20 bg-warning/10 p-2 text-xs text-warning">
-            Latest trade tape unavailable: {kbsErrorMessage(tradesError) ?? 'KBS unavailable'}
+            Latest trade tape unavailable: {kbsErrorMessage(tradesError) ?? 'SSI trade tape unavailable'}
           </div>
         ) : null}
         {!tradesError && !tradesLoading && realtimeTrades.length === 0 ? (
@@ -2520,7 +2584,7 @@ const StockDetailView: React.FC<{
           </div>
         ) : (
           <p className="mt-3 text-sm text-secondary-text">
-            {item.newsStatus?.message ?? (item.newsStatus?.status === 'disabled' ? 'News provider disabled.' : 'News not implemented.')}
+            {newsUnavailableText(item)}
           </p>
         )}
       </div>
@@ -2676,7 +2740,7 @@ const VietnamDashboardPage: React.FC = () => {
       if (requestId !== realtimeRequestIdRef.current) return;
       setRealtimeQuotes(Object.fromEntries(response.quotes.map((quote) => [quote.symbol, quote])));
       setLastKbsQuoteRefreshAt(new Date().toISOString());
-      setRealtimeError(response.status === 'ok' ? null : kbsErrorMessage(response.error) ?? 'KBS snapshot unavailable');
+      setRealtimeError(response.status === 'ok' ? null : kbsErrorMessage(response.error) ?? 'SSI realtime unavailable');
       if (response.status !== 'ok') {
         setLastKbsErrorAt(new Date().toISOString());
       }
@@ -2684,7 +2748,7 @@ const VietnamDashboardPage: React.FC = () => {
     } catch (err) {
       if (requestId !== realtimeRequestIdRef.current) return;
       setLastKbsErrorAt(new Date().toISOString());
-      setRealtimeError(kbsErrorMessage(err instanceof Error ? err.message : null) ?? (err instanceof Error ? err.message : 'KBS snapshot unavailable'));
+      setRealtimeError(kbsErrorMessage(err instanceof Error ? err.message : null) ?? (err instanceof Error ? err.message : 'SSI realtime unavailable'));
       void loadObservability();
     } finally {
       if (requestId === realtimeRequestIdRef.current) {
@@ -3139,9 +3203,9 @@ const VietnamDashboardPage: React.FC = () => {
             <DatabaseZap className="h-4 w-4" />
             Force live refresh
           </Button>
-          <Button variant="secondary" onClick={handleRefreshKbs} isLoading={realtimeLoading || tradesLoading} loadingText="Refreshing KBS">
+          <Button variant="secondary" onClick={handleRefreshKbs} isLoading={realtimeLoading || tradesLoading} loadingText="Refreshing realtime">
             <Activity className="h-4 w-4" />
-            Refresh KBS
+            Refresh realtime
           </Button>
         </div>
       </header>
@@ -3155,10 +3219,10 @@ const VietnamDashboardPage: React.FC = () => {
                 Auto-refresh {autoRefreshEnabled ? 'ON' : 'OFF'}
               </Badge>
               <Badge variant={kbsAutoRefreshEnabled ? 'success' : 'default'}>
-                Auto-refresh KBS {kbsAutoRefreshEnabled ? 'ON' : 'OFF'}
+                Auto-refresh realtime {kbsAutoRefreshEnabled ? 'ON' : 'OFF'}
               </Badge>
               {isTabHidden && (autoRefreshEnabled || kbsAutoRefreshEnabled) ? <Badge variant="warning">Paused while tab hidden</Badge> : null}
-              {(realtimeLoading || tradesLoading) ? <Badge variant="info">Refreshing KBS...</Badge> : null}
+              {(realtimeLoading || tradesLoading) ? <Badge variant="info">Refreshing realtime...</Badge> : null}
             </div>
             <p className="mt-1 text-xs text-secondary-text">
               Auto-refresh uses the normal cached watchlist request. Force live refresh remains manual.
@@ -3193,10 +3257,10 @@ const VietnamDashboardPage: React.FC = () => {
                 onChange={(event) => setKbsAutoRefreshEnabled(event.target.checked)}
                 className="h-4 w-4 rounded border-border bg-elevated"
               />
-              Auto-refresh KBS
+              Auto-refresh realtime
             </label>
             <label className="flex items-center gap-2 text-sm text-secondary-text">
-              KBS quotes
+              SSI realtime
               <select
                 value={kbsQuoteRefreshInterval}
                 onChange={(event) => setKbsQuoteRefreshInterval(Number(event.target.value))}
@@ -3245,7 +3309,7 @@ const VietnamDashboardPage: React.FC = () => {
             <dd className="mt-1 font-medium text-foreground">{lastRefreshKind}</dd>
           </div>
           <div className="rounded-lg bg-elevated/50 p-3">
-            <dt className="text-xs text-secondary-text">Next KBS quotes</dt>
+            <dt className="text-xs text-secondary-text">Next SSI realtime</dt>
             <dd className="mt-1 font-medium text-foreground">
               {kbsAutoRefreshEnabled && !isTabHidden ? formatCountdown(kbsQuoteCountdownSeconds) : 'Paused'}
             </dd>

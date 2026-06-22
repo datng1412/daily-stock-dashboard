@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [fix] Parse SSI IndexComponents provider error/status payloads without backend 500s.
+- [improvement] Clarify VN dashboard provider status copy so daily SSI availability, optional realtime/trade-tape unavailability, disabled news, and index-component diagnostics are shown separately.
+- [fix] Prevent strict VN dashboard runtime from constructing Mozyfin providers when legacy Mozyfin flags are disabled.
+- [fix] Validate SSI IntradayOhlc freshness against SSI DailyOhlc date before showing intraday pulse labels.
+- [improvement] Move VN runtime/cache observability counters out of the disabled Mozyfin block and expose explicit SSI core/intraday/realtime/trade-tape status plus intraday requested-versus-actual cadence fields.
+- [improvement] Label SSI intraday cadence from provider-returned timestamps and use neutral intraday field names in the VN dashboard UI.
+- [improvement] Add sanitized attempted-endpoint diagnostics for SSI realtime and trade-tape unavailable states.
+- [new feature] Add SSI FastConnect realtime snapshot and trade-tape contracts to the VN dashboard and company research page.
+- [improvement] Disable KBS by default for VN runtime and gate it behind explicit legacy provider flags.
+- [documentation] Document SSI realtime/trade-tape ownership, legacy KBS behavior, and live endpoint validation caveats.
+- [new feature] Add SSI FastConnect IntradayOhlc candles to the VN dashboard and company research intraday pulse.
+- [test] Add SSI intraday no-Mozyfin regression coverage for provider, watchlist, and company research paths.
+- [documentation] Document SSI IntradayOhlc ownership, configuration, and unavailable/disabled operational behavior.
 - [fix] Disabled Mozyfin in VN dashboard runtime paths and replaced news/intraday fallback behavior with explicit disabled or not-implemented states.
 - [improvement] Kept SSI FastConnect as the strict VN market-data source while preserving KBS only for realtime snapshot and trade tape.
 - [documentation] Documented that future VN news should use a separate NewsProvider instead of Mozyfin free-tier news/social APIs.

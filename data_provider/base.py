@@ -1061,9 +1061,20 @@ class DataFetcherManager:
         from .longbridge_fetcher import LongbridgeFetcher
         config = get_config()
         if (getattr(config, "market", "") or "").upper() == "VN":
+            self._ensure_concurrency_guards()
+            legacy_mozyfin_enabled = bool(
+                getattr(config, "vn_allow_legacy_mozyfin_provider", False)
+                and getattr(config, "mozyfin_enabled", False)
+            )
+            if not legacy_mozyfin_enabled:
+                with self._fetchers_lock:
+                    self._fetchers = []
+                    self._refresh_fetcher_indexes_locked()
+                logger.info("Initialized 0 Vietnam market data source(s): Mozyfin disabled for VN runtime")
+                return
+
             from .mozyfin_fetcher import MozyfinFetcher
 
-            self._ensure_concurrency_guards()
             with self._fetchers_lock:
                 self._fetchers = [MozyfinFetcher()]
                 self._fetchers.sort(key=lambda f: f.priority)

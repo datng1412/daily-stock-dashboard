@@ -403,6 +403,8 @@ def test_mozyfin_quote_history_derives_foreign_net_from_buy_sell(monkeypatch):
 def test_manager_uses_mozyfin_when_market_vn(monkeypatch):
     monkeypatch.setenv("MARKET", "VN")
     monkeypatch.setenv("MOZYFIN_FIXTURE_DIR", str(FIXTURE_DIR))
+    monkeypatch.setenv("MOZYFIN_ENABLED", "true")
+    monkeypatch.setenv("VN_ALLOW_LEGACY_MOZYFIN_PROVIDER", "true")
     Config.reset_instance()
 
     manager = DataFetcherManager()
@@ -411,6 +413,18 @@ def test_manager_uses_mozyfin_when_market_vn(monkeypatch):
     assert source == "MozyfinFetcher"
     assert not df.empty
     assert df.iloc[-1]["exchange"] == "HOSE"
+
+
+def test_manager_does_not_initialize_mozyfin_for_vn_without_legacy_opt_in(monkeypatch):
+    monkeypatch.setenv("MARKET", "VN")
+    monkeypatch.setenv("MOZYFIN_FIXTURE_DIR", str(FIXTURE_DIR))
+    monkeypatch.setenv("MOZYFIN_ENABLED", "false")
+    monkeypatch.setenv("VN_ALLOW_LEGACY_MOZYFIN_PROVIDER", "false")
+    Config.reset_instance()
+
+    manager = DataFetcherManager()
+
+    assert manager._get_fetcher_by_name("MozyfinFetcher") is None
 
 
 def test_vietnam_dashboard_formulas_and_warnings(monkeypatch):

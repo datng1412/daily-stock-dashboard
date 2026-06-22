@@ -125,6 +125,14 @@ def test_config_defaults_keep_ssi_disabled(monkeypatch):
     assert config.ssi_fastconnect_timeout_seconds == 10
     assert config.ssi_fastconnect_cache_ttl_seconds == 300
     assert config.ssi_fastconnect_token_ttl_seconds == 900
+    assert config.ssi_fastconnect_intraday_enabled is True
+    assert config.ssi_fastconnect_realtime_enabled is True
+    assert config.ssi_fastconnect_trade_tape_enabled is True
+    assert config.vn_intraday_data_provider == "ssi"
+    assert config.vn_realtime_data_provider == "ssi"
+    assert config.vn_trade_tape_provider == "ssi"
+    assert config.kbs_enabled is False
+    assert config.vn_allow_legacy_kbs_provider is False
 
 
 def test_access_token_success_stores_token_without_public_exposure():
@@ -146,11 +154,9 @@ def test_token_is_not_present_in_error_output():
 
     payload = fetcher.get_daily_ohlcv("FPT")
 
-    assert payload == {
-        "status": "unavailable",
-        "source": "SSI",
-        "reason": REQUEST_FAILED_REASON,
-    }
+    assert payload["status"] == "unavailable"
+    assert payload["source"] == "SSI"
+    assert payload["reason"] == REQUEST_FAILED_REASON
     assert SECRET_TOKEN not in str(payload)
 
 
@@ -233,6 +239,208 @@ def test_daily_index_sends_index_id_and_explicit_paged_date_params():
         "pageIndex": 1,
         "pageSize": 1000,
     }
+
+
+def test_intraday_ohlcv_sends_ssi_params_and_maps_sorted_candles():
+    session = _FakeSession(
+        post_items=[_token_response()],
+        get_items=[
+            _FakeResponse(
+                payload={
+                    "data": [
+                        {
+                            "TradingTime": "2026-06-17 10:00:00",
+                            "OpenPrice": "101",
+                            "HighPrice": "103",
+                            "LowPrice": "100",
+                            "ClosePrice": "102",
+                            "TotalVolume": "2000",
+                        },
+                        {
+                            "TradingTime": "2026-06-17 09:00:00",
+                            "OpenPrice": "100",
+                            "HighPrice": "102",
+                            "LowPrice": "99",
+                            "ClosePrice": "101",
+                            "TotalVolume": "1000",
+                        },
+                    ]
+                }
+            )
+        ],
+    )
+    fetcher = _fetcher(session=session)
+
+    payload = fetcher.get_intraday_ohlcv("fpt", from_date="2026-06-17", to_date="2026-06-17", limit=10, interval="1h")
+
+    _, _, kwargs = session.calls[-1]
+    assert kwargs["params"] == {
+        "symbol": "FPT",
+        "timeFrame": "1h",
+        "fromDate": "17/06/2026",
+        "toDate": "17/06/2026",
+        "pageIndex": 1,
+        "pageSize": 10,
+        "ascending": "true",
+    }
+    assert payload["status"] == "ok"
+    assert payload["source"] == "SSI"
+    assert [row["close"] for row in payload["rows"]] == [101.0, 102.0]
+    assert payload["rows"][0]["ticker"] == "FPT"
+
+
+def test_intraday_ohlcv_disabled_does_not_request_token():
+    session = _FakeSession()
+    fetcher = _fetcher(session=session, intraday_enabled=False)
+
+    payload = fetcher.get_intraday_ohlcv("FPT")
+
+    assert payload["status"] == "disabled"
+    assert payload["source"] == "SSI"
+    assert payload["rows"] == []
+    assert session.calls == []
+
+
+def test_realtime_snapshot_maps_ssi_like_quote_row():
+    session = _FakeSession(
+        post_items=[_token_response()],
+        get_items=[
+            _FakeResponse(
+                payload={
+                    "data": [
+                        {
+                            "Symbol": "FPT",
+                            "LastPrice": "130.5",
+                            "Change": "1.5",
+                            "ChangePercent": "1.16",
+                            "RefPrice": "129",
+                            "CeilingPrice": "138",
+                            "FloorPrice": "120",
+                            "OpenPrice": "129.5",
+                            "HighPrice": "132",
+                            "LowPrice": "128",
+                            "TotalVolume": "1234567",
+                            "TotalValue": "123456789000",
+                            "BidPrice1": "130.4",
+                            "BidVol1": "1000",
+                            "AskPrice1": "130.6",
+                            "AskVol1": "2000",
+                        }
+                    ]
+                }
+            )
+        ],
+    )
+    fetcher = _fetcher(session=session)
+
+    payload = fetcher.get_realtime_snapshot(["fpt"])
+
+    assert payload["status"] == "ok"
+    assert payload["source"] == "SSI"
+    assert payload["quotes"][0]["ticker"] == "FPT"
+    assert payload["quotes"][0]["price"] == 130.5
+    assert payload["quotes"][0]["reference_price"] == 129.0
+    assert payload["quotes"][0]["bid_levels"][0] == {"price": 130.4, "volume": 1000.0}
+    assert SECRET_TOKEN not in str(payload)
+
+
+def test_realtime_snapshot_failure_returns_clean_unavailable_without_secrets():
+    session = _FakeSession(
+        post_items=[_token_response()],
+        get_items=[requests.exceptions.Timeout(f"timeout {SECRET_TOKEN}") for _ in range(4)],
+    )
+    fetcher = _fetcher(session=session)
+
+    payload = fetcher.get_realtime_snapshot(["FPT"])
+
+    assert payload["status"] == "unavailable"
+    assert payload["source"] == "SSI"
+    assert payload["requested_tickers"] == ["FPT"]
+    assert "realtime snapshot unavailable" in payload["reason"]
+    assert "RealtimeQuote" in payload["reason"]
+    assert payload["attempted_endpoints"] == ["RealtimeQuote", "RealtimePrice", "RealtimeSnapshot", "SecuritiesRealtime"]
+    assert SECRET_TOKEN not in str(payload)
+
+
+def test_realtime_snapshot_disabled_does_not_request_token():
+    session = _FakeSession()
+    fetcher = _fetcher(session=session, realtime_enabled=False)
+
+    payload = fetcher.get_realtime_snapshot(["FPT"])
+
+    assert payload["status"] == "disabled"
+    assert payload["source"] == "SSI"
+    assert payload["quotes"] == []
+    assert session.calls == []
+
+
+def test_trade_tape_maps_ssi_like_rows():
+    session = _FakeSession(
+        post_items=[_token_response()],
+        get_items=[
+            _FakeResponse(
+                payload={
+                    "data": [
+                        {
+                            "MatchedTime": "10:00:00",
+                            "MatchedPrice": "130.5",
+                            "MatchedVolume": "1000",
+                            "MatchedValue": "130500000",
+                            "Side": "matched",
+                            "Sequence": "1",
+                        }
+                    ]
+                }
+            )
+        ],
+    )
+    fetcher = _fetcher(session=session)
+
+    payload = fetcher.get_trade_tape("fpt", limit=10)
+
+    assert payload["status"] == "ok"
+    assert payload["source"] == "SSI"
+    assert payload["symbol"] == "FPT"
+    assert payload["trades"][0] == {
+        "time": "10:00:00",
+        "price": 130.5,
+        "volume": 1000.0,
+        "value": 130500000.0,
+        "side_if_available": "matched",
+        "sequence_if_available": "1",
+        "source": "SSI",
+    }
+    assert SECRET_TOKEN not in str(payload)
+
+
+def test_trade_tape_disabled_does_not_request_token():
+    session = _FakeSession()
+    fetcher = _fetcher(session=session, trade_tape_enabled=False)
+
+    payload = fetcher.get_trade_tape("FPT")
+
+    assert payload["status"] == "disabled"
+    assert payload["source"] == "SSI"
+    assert payload["trades"] == []
+    assert session.calls == []
+
+
+def test_trade_tape_failure_returns_actionable_unavailable_without_secrets():
+    session = _FakeSession(
+        post_items=[_token_response()],
+        get_items=[requests.exceptions.Timeout(f"timeout {SECRET_TOKEN}") for _ in range(6)],
+    )
+    fetcher = _fetcher(session=session)
+
+    payload = fetcher.get_trade_tape("FPT", limit=10)
+
+    assert payload["status"] == "unavailable"
+    assert payload["source"] == "SSI"
+    assert payload["symbol"] == "FPT"
+    assert "trade tape unavailable" in payload["reason"]
+    assert "TradeTape" in payload["reason"]
+    assert payload["attempted_endpoints"] == ["TradeTape", "MatchedTrades", "SecuritiesTrades"]
+    assert SECRET_TOKEN not in str(payload)
 
 
 def test_empty_rows_retry_alternate_param_casing():
@@ -862,6 +1070,52 @@ def test_index_components_status_message_only_body_returns_clean_unavailable():
     assert payload["reason"] == REQUEST_FAILED_REASON
     assert payload["rows"] == []
     assert payload["count"] == 0
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected_code"),
+    [
+        ({"status": "Error", "message": "bad params"}, "Error"),
+        ({"Status": "Failed", "Message": "bad params"}, "Failed"),
+        ({"code": "E001", "message": "bad params"}, "E001"),
+        ({"errorCode": "E002", "message": "bad params"}, "E002"),
+    ],
+)
+def test_parse_response_handles_ssi_error_code_casing_without_name_error(payload, expected_code):
+    fetcher = _fetcher(session=_FakeSession())
+
+    parsed = fetcher._parse_response(_FakeResponse(payload=payload), endpoint="IndexComponents")
+
+    assert parsed["status"] == "unavailable"
+    assert parsed["source"] == "SSI"
+    assert parsed["reason"] == REQUEST_FAILED_REASON
+    assert parsed["endpoint"] == "IndexComponents"
+    assert parsed["error_type"] == "ssi_error"
+    assert parsed["code"] == expected_code
+    assert SECRET_TOKEN not in str(parsed)
+
+
+def test_index_components_provider_error_body_returns_clean_unavailable_without_name_error():
+    session = _FakeSession(
+        post_items=[_token_response()],
+        get_items=[
+            _FakeResponse(payload={"errorCode": "E_BAD_PARAMS", "message": "bad params"}),
+            _FakeResponse(payload={"errorCode": "E_BAD_PARAMS", "message": "bad params"}),
+            _FakeResponse(payload={"errorCode": "E_BAD_PARAMS", "message": "bad params"}),
+            _FakeResponse(payload={"errorCode": "E_BAD_PARAMS", "message": "bad params"}),
+            _FakeResponse(payload={"errorCode": "E_BAD_PARAMS", "message": "bad params"}),
+        ],
+    )
+    fetcher = _fetcher(session=session)
+
+    payload = fetcher.get_index_components("VN30")
+
+    assert payload["status"] == "unavailable"
+    assert payload["source"] == "SSI"
+    assert payload["reason"] == REQUEST_FAILED_REASON
+    assert payload["endpoint"] == "IndexComponents"
+    assert payload["error_type"] == "ssi_error"
+    assert payload["code"] == "E_BAD_PARAMS"
 
 
 def test_securities_maps_symbol_metadata():

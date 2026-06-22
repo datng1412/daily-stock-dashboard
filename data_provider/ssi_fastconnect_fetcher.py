@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """SSI FastConnect FC Data foundation provider.
 
-This adapter is intentionally standalone for the first transition phase. It
-does not replace Mozyfin daily data, KBS realtime snapshots, or dashboard
-``latest_price`` semantics.
+This adapter keeps SSI FastConnect market-data requests behind one auth,
+timeout, cache, and normalization layer. It never exposes tokens or request
+headers in returned payloads.
 """
 
 from __future__ import annotations
@@ -24,9 +24,33 @@ DEFAULT_BASE_URL = "https://fc-data.ssi.com.vn/api/v2/Market"
 DISABLED_REASON = "SSI FastConnect disabled"
 MISSING_CREDENTIALS_REASON = "SSI FastConnect credentials missing"
 REQUEST_FAILED_REASON = "SSI FastConnect request failed"
+INTRADAY_DISABLED_REASON = "SSI FastConnect IntradayOhlc disabled"
+REALTIME_DISABLED_REASON = "SSI FastConnect realtime disabled"
+TRADE_TAPE_DISABLED_REASON = "SSI FastConnect trade tape disabled"
 SSI_CHUNK_MAX_DAYS = 29
 SSI_PAGE_SIZE = 1000
 SSI_MAX_PAGES = 20
+
+
+def _endpoint_attempt_reason(
+    *,
+    kind: str,
+    endpoints: Tuple[str, ...],
+    first_unavailable: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Build a secret-free diagnostic for realtime/trade-tape probe failures."""
+    reason = str((first_unavailable or {}).get("reason") or REQUEST_FAILED_REASON)
+    endpoint = (first_unavailable or {}).get("endpoint")
+    http_status = (first_unavailable or {}).get("http_status")
+    code = (first_unavailable or {}).get("code")
+    details = [f"attempted endpoints: {', '.join(endpoints)}"]
+    if endpoint:
+        details.append(f"last endpoint: {endpoint}")
+    if http_status is not None:
+        details.append(f"http status: {http_status}")
+    if code is not None:
+        details.append(f"provider code: {code}")
+    return f"SSI FastConnect {kind} unavailable ({'; '.join(details)}). Last error: {reason}"
 
 
 def format_ssi_date(value: Any) -> Optional[str]:
@@ -137,6 +161,12 @@ def _to_int(value: Any) -> Optional[int]:
     return int(numeric) if numeric is not None else None
 
 
+def _safe_text(value: Any) -> Optional[str]:
+    if value in (None, ""):
+        return None
+    return str(value)
+
+
 def _net_value(row: Dict[str, Any], net_key: Tuple[str, ...], buy: Any, sell: Any) -> Optional[float]:
     direct = _to_float(_first_value(row, *net_key))
     if direct is not None:
@@ -190,6 +220,63 @@ def _parse_date(value: Any) -> Optional[str]:
     return None
 
 
+def _parse_datetime(value: Any) -> Optional[str]:
+    if value in (None, ""):
+        return None
+    if isinstance(value, datetime):
+        return value.isoformat()
+
+    text = str(value).strip()
+    if not text:
+        return None
+
+    try:
+        numeric = float(text)
+    except ValueError:
+        numeric = None
+    if numeric is not None:
+        if numeric > 1_000_000_000_000:
+            return datetime.fromtimestamp(numeric / 1000, tz=timezone.utc).isoformat()
+        if numeric > 1_000_000_000:
+            return datetime.fromtimestamp(numeric, tz=timezone.utc).isoformat()
+
+    normalized = text.replace("Z", "+00:00")
+    try:
+        return datetime.fromisoformat(normalized).isoformat()
+    except ValueError:
+        pass
+
+    for fmt in (
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%Y/%m/%d %H:%M:%S",
+        "%Y/%m/%d %H:%M",
+        "%d/%m/%Y %H:%M:%S",
+        "%d/%m/%Y %H:%M",
+        "%d-%m-%Y %H:%M:%S",
+        "%d-%m-%Y %H:%M",
+        "%Y-%m-%d",
+        "%d/%m/%Y",
+    ):
+        try:
+            return datetime.strptime(normalized, fmt).isoformat()
+        except ValueError:
+            continue
+    return None
+
+
+def _timestamp_from_datetime(value: Optional[str]) -> Optional[int]:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return int(parsed.timestamp())
+
+
 def _extract_rows(payload: Any) -> List[Dict[str, Any]]:
     if isinstance(payload, list):
         return [dict(row) for row in payload if isinstance(row, dict)]
@@ -205,6 +292,21 @@ def _extract_rows(payload: Any) -> List[Dict[str, Any]]:
             if nested:
                 return nested
     return [payload] if payload else []
+
+
+def _pick_ci(payload: Any, *keys: str) -> Any:
+    """Return a dictionary value by key using case-insensitive matching."""
+    if not isinstance(payload, dict):
+        return None
+    for key in keys:
+        if key in payload:
+            return payload.get(key)
+    lower_lookup = {str(key).lower(): value for key, value in payload.items()}
+    for key in keys:
+        lowered = str(key).lower()
+        if lowered in lower_lookup:
+            return lower_lookup[lowered]
+    return None
 
 
 def _total_record(payload: Any) -> Optional[int]:
@@ -226,23 +328,23 @@ def _total_record(payload: Any) -> Optional[int]:
 def _has_required_field(row: Dict[str, Any], fields: Tuple[str, ...]) -> bool:
     if not fields:
         return True
-    return any(row.get(field) not in (None, "") for field in fields)
+    return any(row.get(field) not in (None, "", [], {}) for field in fields)
 
 
 def _has_ssi_error(payload: Any) -> bool:
     if not isinstance(payload, dict):
         return False
-    status = str(payload.get("status") or payload.get("Status") or "").strip().lower()
-    message = str(payload.get("message") or payload.get("Message") or "").strip().lower()
-    success = payload.get("success", payload.get("Success"))
-    code = str(payload.get("code") or payload.get("Code") or "").strip()
+    status = str(_pick_ci(payload, "status", "Status") or "").strip().lower()
+    message = str(_pick_ci(payload, "message", "Message") or "").strip().lower()
+    success = _pick_ci(payload, "success", "Success")
+    code = str(_pick_ci(payload, "code", "Code", "errorCode", "ErrorCode", "error_code") or "").strip()
     if status in {"error", "failed", "fail", "unavailable"}:
         return True
     if status and status not in {"success", "ok", "0", "200"}:
         return True
     if isinstance(success, bool) and not success:
         return True
-    if code and code not in {"0", "200", "OK", "ok"} and any(token in message for token in ("error", "fail")):
+    if code and code not in {"0", "200", "OK", "ok"} and (message or status):
         return True
     return False
 
@@ -303,6 +405,9 @@ class SsiFastConnectFetcher:
         timeout_seconds: Optional[int] = None,
         cache_ttl_seconds: Optional[int] = None,
         token_ttl_seconds: Optional[int] = None,
+        intraday_enabled: Optional[bool] = None,
+        realtime_enabled: Optional[bool] = None,
+        trade_tape_enabled: Optional[bool] = None,
         request_delay_seconds: float = 0,
         session: Optional[requests.Session] = None,
         config: Any = None,
@@ -355,6 +460,21 @@ class SsiFastConnectFetcher:
             if token_ttl_seconds is not None
             else getattr(config, "ssi_fastconnect_token_ttl_seconds", None)
             or parse_env_int(os.getenv("SSI_FASTCONNECT_TOKEN_TTL_SECONDS"), 900, field_name="SSI_FASTCONNECT_TOKEN_TTL_SECONDS", minimum=1)
+        )
+        self.intraday_enabled = (
+            bool(intraday_enabled)
+            if intraday_enabled is not None
+            else bool(getattr(config, "ssi_fastconnect_intraday_enabled", parse_env_bool(os.getenv("SSI_FASTCONNECT_INTRADAY_ENABLED"), default=True)))
+        )
+        self.realtime_enabled = (
+            bool(realtime_enabled)
+            if realtime_enabled is not None
+            else bool(getattr(config, "ssi_fastconnect_realtime_enabled", parse_env_bool(os.getenv("SSI_FASTCONNECT_REALTIME_ENABLED"), default=True)))
+        )
+        self.trade_tape_enabled = (
+            bool(trade_tape_enabled)
+            if trade_tape_enabled is not None
+            else bool(getattr(config, "ssi_fastconnect_trade_tape_enabled", parse_env_bool(os.getenv("SSI_FASTCONNECT_TRADE_TAPE_ENABLED"), default=True)))
         )
         self.session = session or requests.Session()
         self.request_delay_seconds = max(0.0, float(request_delay_seconds or 0))
@@ -500,6 +620,204 @@ class SsiFastConnectFetcher:
             dedupe_fields=("index_code", "date"),
         )
 
+    def get_intraday_ohlcv(
+        self,
+        symbol: str,
+        from_date: Optional[str] = None,
+        to_date: Optional[str] = None,
+        limit: int = 64,
+        interval: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        if not self.intraday_enabled:
+            return {
+                "status": "disabled",
+                "source": SSI_SOURCE,
+                "reason": INTRADAY_DISABLED_REASON,
+                "rows": [],
+                "count": 0,
+            }
+
+        params: Dict[str, Any] = {"symbol": symbol.strip().upper()}
+        if interval:
+            params["timeFrame"] = str(interval).strip()
+        params = self._date_params(params, from_date, to_date, limit)
+        variants = [self._alternate_param_case(params)]
+        if interval:
+            for interval_key in ("interval", "resolution", "timeframe", "TimeFrame"):
+                variant = dict(params)
+                variant.pop("timeFrame", None)
+                variant[interval_key] = str(interval).strip()
+                variants.append(variant)
+                variants.append(self._alternate_param_case(variant))
+        payload = self._cached_normalized(
+            "IntradayOhlc",
+            params,
+            limit,
+            lambda row: self._map_intraday_ohlcv(row, symbol),
+            extra={"symbol": symbol.strip().upper(), "interval": interval},
+            param_variants=variants,
+            required_any=("date_time", "timestamp", "open", "high", "low", "close", "volume"),
+        )
+        return self._empty_as_unavailable(payload)
+
+    def get_realtime_snapshot(self, symbols: List[str]) -> Dict[str, Any]:
+        """Return SSI realtime snapshot rows when an account exposes them.
+
+        SSI realtime/streaming endpoint names vary by entitlement and
+        documentation set. This method tries a small set of FC Data-style
+        endpoint names and normalizes only meaningful quote rows. Unknown,
+        unentitled, or empty responses return clean unavailable payloads.
+        """
+        normalized_symbols = [str(symbol or "").strip().upper() for symbol in symbols or [] if str(symbol or "").strip()]
+        if not self.realtime_enabled:
+            return {
+                "status": "disabled",
+                "source": SSI_SOURCE,
+                "reason": REALTIME_DISABLED_REASON,
+                "requested_tickers": normalized_symbols,
+                "quotes": [],
+                "count": 0,
+            }
+        if not normalized_symbols:
+            return {
+                "status": "unavailable",
+                "source": SSI_SOURCE,
+                "reason": "No symbol requested",
+                "requested_tickers": [],
+                "quotes": [],
+                "count": 0,
+            }
+
+        cache_key = ("RealtimeSnapshot", (("symbols", ",".join(normalized_symbols)),))
+        if self.cache_ttl_seconds > 0:
+            entry = self._cache.get(cache_key)
+            if entry and entry.expires_at > time.time():
+                return dict(entry.value)
+
+        endpoint_candidates = ("RealtimeQuote", "RealtimePrice", "RealtimeSnapshot", "SecuritiesRealtime")
+        rows: List[Dict[str, Any]] = []
+        first_unavailable: Optional[Dict[str, Any]] = None
+        for endpoint in endpoint_candidates:
+            for symbol in normalized_symbols:
+                params = {"symbol": symbol}
+                payload = self._request(endpoint, params=params)
+                if isinstance(payload, dict) and payload.get("status") == "unavailable":
+                    if first_unavailable is None:
+                        first_unavailable = payload
+                    continue
+                mapped = [self._map_realtime_snapshot(row, fallback_symbol=symbol) for row in _extract_rows(payload)]
+                mapped = [
+                    row
+                    for row in mapped
+                    if row and _has_required_field(row, ("price", "reference_price", "volume", "value", "bid_levels", "ask_levels"))
+                ]
+                rows.extend(mapped)
+            if rows:
+                break
+
+        deduped: Dict[str, Dict[str, Any]] = {}
+        for row in rows:
+            ticker = str(row.get("ticker") or row.get("symbol") or "").upper()
+            if ticker:
+                deduped[ticker] = row
+        quotes = [deduped[symbol] for symbol in normalized_symbols if symbol in deduped]
+        if not quotes:
+            payload = {
+                "status": "unavailable",
+                "source": SSI_SOURCE,
+                "reason": _endpoint_attempt_reason(
+                    kind="realtime snapshot",
+                    endpoints=endpoint_candidates,
+                    first_unavailable=first_unavailable,
+                ),
+                "requested_tickers": normalized_symbols,
+                "quotes": [],
+                "count": 0,
+                "attempted_endpoints": list(endpoint_candidates),
+            }
+            if self.cache_ttl_seconds > 0:
+                self._cache[cache_key] = _CacheEntry(value=dict(payload), expires_at=time.time() + self.cache_ttl_seconds)
+            return payload
+
+        result = {
+            "status": "ok",
+            "source": SSI_SOURCE,
+            "requested_tickers": normalized_symbols,
+            "quotes": quotes,
+            "count": len(quotes),
+        }
+        if self.cache_ttl_seconds > 0:
+            self._cache[cache_key] = _CacheEntry(value=dict(result), expires_at=time.time() + self.cache_ttl_seconds)
+        return result
+
+    def get_trade_tape(self, symbol: str, limit: int = 100) -> Dict[str, Any]:
+        """Return SSI trade tape rows when an account exposes them."""
+        normalized_symbol = str(symbol or "").strip().upper()
+        safe_limit = max(1, min(int(limit or 100), 500))
+        if not self.trade_tape_enabled:
+            return {
+                "status": "disabled",
+                "source": SSI_SOURCE,
+                "symbol": normalized_symbol,
+                "reason": TRADE_TAPE_DISABLED_REASON,
+                "trades": [],
+                "count": 0,
+            }
+        if not normalized_symbol:
+            return {
+                "status": "unavailable",
+                "source": SSI_SOURCE,
+                "symbol": normalized_symbol,
+                "reason": "No symbol requested",
+                "trades": [],
+                "count": 0,
+            }
+
+        params = {"symbol": normalized_symbol, "pageIndex": 1, "pageSize": safe_limit}
+        endpoint_candidates = ("TradeTape", "MatchedTrades", "SecuritiesTrades")
+        first_unavailable: Optional[Dict[str, Any]] = None
+        trades: List[Dict[str, Any]] = []
+        for endpoint in endpoint_candidates:
+            payload = self._cached_normalized(
+                endpoint,
+                params,
+                safe_limit,
+                lambda row: self._map_trade_tape(row),
+                extra={"symbol": normalized_symbol},
+                param_variants=[self._alternate_param_case(params)],
+                required_any=("time", "price", "volume", "value"),
+                retry_unavailable_variants=True,
+            )
+            if payload.get("status") == "ok" and payload.get("rows"):
+                trades = list(payload.get("rows") or [])
+                break
+            if first_unavailable is None and payload.get("status") == "unavailable":
+                first_unavailable = payload
+
+        if not trades:
+            return {
+                "status": "unavailable",
+                "source": SSI_SOURCE,
+                "symbol": normalized_symbol,
+                "reason": _endpoint_attempt_reason(
+                    kind="trade tape",
+                    endpoints=endpoint_candidates,
+                    first_unavailable=first_unavailable,
+                ),
+                "trades": [],
+                "count": 0,
+                "attempted_endpoints": list(endpoint_candidates),
+            }
+
+        trades = trades[-safe_limit:]
+        return {
+            "status": "ok",
+            "source": SSI_SOURCE,
+            "symbol": normalized_symbol,
+            "trades": trades,
+            "count": len(trades),
+        }
+
     def get_index_list(self, market: Optional[str] = None) -> Dict[str, Any]:
         params = {"market": market.strip().upper()} if market else {}
         payload = self._cached_normalized(
@@ -613,6 +931,8 @@ class SsiFastConnectFetcher:
             "Fromdate": "fromDate",
             "Todate": "toDate",
             "indexID": "IndexId",
+            "pageIndex": "PageIndex",
+            "pageSize": "PageSize",
         }
         return {key_map.get(key, key): value for key, value in params.items()}
 
@@ -662,20 +982,35 @@ class SsiFastConnectFetcher:
                 headers=headers,
                 timeout=self.timeout_seconds,
             )
-        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.exceptions.RequestException):
-            return _unavailable(REQUEST_FAILED_REASON)
+        except requests.exceptions.Timeout:
+            return {**_unavailable(REQUEST_FAILED_REASON), "endpoint": endpoint, "error_type": "timeout"}
+        except requests.exceptions.ConnectionError:
+            return {**_unavailable(REQUEST_FAILED_REASON), "endpoint": endpoint, "error_type": "connection_error"}
+        except requests.exceptions.RequestException:
+            return {**_unavailable(REQUEST_FAILED_REASON), "endpoint": endpoint, "error_type": "request_error"}
 
-        return self._parse_response(response)
+        return self._parse_response(response, endpoint=endpoint)
 
-    def _parse_response(self, response: Any) -> Any:
-        if getattr(response, "status_code", 0) != 200:
-            return _unavailable(REQUEST_FAILED_REASON)
+    def _parse_response(self, response: Any, endpoint: Optional[str] = None) -> Any:
+        http_status = getattr(response, "status_code", 0)
+        if http_status != 200:
+            return {
+                **_unavailable(REQUEST_FAILED_REASON),
+                "endpoint": endpoint,
+                "http_status": http_status,
+                "error_type": "http_error",
+            }
         try:
             payload = response.json()
         except (TypeError, ValueError):
-            return _unavailable(REQUEST_FAILED_REASON)
+            return {**_unavailable(REQUEST_FAILED_REASON), "endpoint": endpoint, "http_status": http_status, "error_type": "invalid_json"}
         if _has_ssi_error(payload):
-            return _unavailable(REQUEST_FAILED_REASON)
+            result = {**_unavailable(REQUEST_FAILED_REASON), "endpoint": endpoint, "http_status": http_status, "error_type": "ssi_error"}
+            if isinstance(payload, dict):
+                code = _pick_ci(payload, "code", "errorCode", "status", "Status")
+                if code is not None:
+                    result["code"] = str(code)[:80]
+            return result
         return payload
 
     def _cached_normalized(
@@ -716,7 +1051,9 @@ class SsiFastConnectFetcher:
                     break
         if not rows and first_unavailable:
             return first_unavailable
-        if rows and "date" in rows[0]:
+        if rows and "date_time" in rows[0]:
+            rows.sort(key=lambda item: (item.get("date_time") is None, item.get("date_time") or ""))
+        elif rows and "date" in rows[0]:
             rows.sort(key=lambda item: (item.get("date") is None, item.get("date") or ""))
         if limit and len(rows) > limit:
             rows = rows[-limit:]
@@ -898,6 +1235,119 @@ class SsiFastConnectFetcher:
             "close": _to_float(_first_value(row, "Close", "ClosePrice", "close", "close_price")),
             "volume": _to_int(_first_value(row, "TotalVolume", "Volume", "totalVolume", "volume", "matchedVolume", "matchVolume")),
             "value": _to_float(_first_value(row, "TotalValue", "Value", "totalValue", "value", "matchedValue", "matchValue")),
+            "source": SSI_SOURCE,
+        }
+
+    def _map_intraday_ohlcv(self, row: Dict[str, Any], symbol: str) -> Dict[str, Any]:
+        explicit_datetime = _first_value(
+            row,
+            "DateTime",
+            "datetime",
+            "dateTime",
+            "TradingDateTime",
+            "tradingDateTime",
+        )
+        date_part = _first_value(row, "TradingDate", "Date", "date", "tradingDate")
+        time_part = _first_value(row, "TradingTime", "Time", "time", "tradingTime")
+        combined_datetime = None
+        if date_part and time_part and not any(separator in str(time_part) for separator in ("-", "/", "T")):
+            combined_datetime = f"{date_part} {time_part}"
+        date_time = _parse_datetime(
+            explicit_datetime
+            or combined_datetime
+            or time_part
+            or date_part
+        )
+        return {
+            "timestamp": _timestamp_from_datetime(date_time),
+            "date_time": date_time,
+            "open": _to_float(_first_value(row, "Open", "OpenPrice", "open", "open_price")),
+            "high": _to_float(_first_value(row, "Highest", "HighestPrice", "High", "HighPrice", "high", "high_price")),
+            "low": _to_float(_first_value(row, "Lowest", "LowestPrice", "Low", "LowPrice", "low", "low_price")),
+            "close": _to_float(_first_value(row, "Close", "ClosePrice", "close", "close_price")),
+            "volume": _to_int(_first_value(row, "TotalVolume", "Volume", "totalVolume", "volume", "matchedVolume", "matchVolume")),
+            "ticker": symbol.strip().upper(),
+            "source": SSI_SOURCE,
+        }
+
+    def _map_realtime_snapshot(self, row: Dict[str, Any], *, fallback_symbol: str) -> Dict[str, Any]:
+        ticker = _first_value(row, "Symbol", "Ticker", "StockCode", "SecurityCode", "Code", "symbol", "ticker", "stockCode", "securityCode", "code")
+        price = _to_float(
+            _first_value(
+                row,
+                "LastPrice",
+                "MatchedPrice",
+                "MatchPrice",
+                "Close",
+                "ClosePrice",
+                "Price",
+                "lastPrice",
+                "matchedPrice",
+                "matchPrice",
+                "close",
+                "price",
+            )
+        )
+        bid_levels = self._map_quote_levels(row, side="bid")
+        ask_levels = self._map_quote_levels(row, side="ask")
+        fetched_at = datetime.now(timezone.utc).isoformat()
+        return {
+            "ticker": str(ticker or fallback_symbol).upper(),
+            "symbol": str(ticker or fallback_symbol).upper(),
+            "source": SSI_SOURCE,
+            "fetched_at": fetched_at,
+            "price": price,
+            "realtime_price": price,
+            "snapshot_price": price,
+            "change": _to_float(_first_value(row, "Change", "PriceChange", "ChangeValue", "change", "priceChange", "changeValue")),
+            "change_pct": _to_float(_first_value(row, "ChangePercent", "PercentChange", "RatioChange", "changePercent", "percentChange", "ratioChange")),
+            "reference_price": _to_float(_first_value(row, "RefPrice", "ReferencePrice", "BasicPrice", "referencePrice", "reference_price")),
+            "ceiling_price": _to_float(_first_value(row, "Ceiling", "CeilingPrice", "ceilingPrice", "ceiling_price")),
+            "floor_price": _to_float(_first_value(row, "Floor", "FloorPrice", "floorPrice", "floor_price")),
+            "open": _to_float(_first_value(row, "Open", "OpenPrice", "open", "openPrice")),
+            "high": _to_float(_first_value(row, "High", "Highest", "HighPrice", "HighestPrice", "high", "highest", "highPrice")),
+            "low": _to_float(_first_value(row, "Low", "Lowest", "LowPrice", "LowestPrice", "low", "lowest", "lowPrice")),
+            "volume": _to_int(_first_value(row, "TotalVolume", "TotalVol", "Volume", "MatchedVolume", "MatchVolume", "totalVolume", "volume", "matchedVolume")),
+            "value": _to_float(_first_value(row, "TotalValue", "TotalVal", "Value", "MatchedValue", "MatchValue", "totalValue", "value", "matchedValue")),
+            "bid_levels": bid_levels,
+            "ask_levels": ask_levels,
+            "status": "ok",
+        }
+
+    @staticmethod
+    def _map_quote_levels(row: Dict[str, Any], *, side: str) -> List[Dict[str, Optional[float]]]:
+        nested_keys = ("BidLevels", "Bids", "bidLevels", "bids") if side == "bid" else ("AskLevels", "Asks", "askLevels", "asks")
+        nested = _first_value(row, *nested_keys)
+        if isinstance(nested, list):
+            levels = []
+            for level in nested[:5]:
+                if not isinstance(level, dict):
+                    continue
+                price = _to_float(_first_value(level, "Price", "price", "BidPrice", "AskPrice", "bidPrice", "askPrice"))
+                volume = _to_float(_first_value(level, "Volume", "Vol", "volume", "vol", "BidVol", "AskVol", "bidVol", "askVol"))
+                if price is not None or volume is not None:
+                    levels.append({"price": price, "volume": volume})
+            return levels
+
+        levels = []
+        prefixes = ("Bid", "bid") if side == "bid" else ("Ask", "ask")
+        for index in range(1, 6):
+            price_keys = tuple(f"{prefix}Price{index}" for prefix in prefixes) + tuple(f"{prefix}_price_{index}" for prefix in prefixes)
+            volume_keys = tuple(f"{prefix}Vol{index}" for prefix in prefixes) + tuple(f"{prefix}Volume{index}" for prefix in prefixes) + tuple(f"{prefix}_vol_{index}" for prefix in prefixes)
+            price = _to_float(_first_value(row, *price_keys))
+            volume = _to_float(_first_value(row, *volume_keys))
+            if price is not None or volume is not None:
+                levels.append({"price": price, "volume": volume})
+        return levels
+
+    def _map_trade_tape(self, row: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "time": _safe_text(_first_value(row, "Time", "TradingTime", "MatchedTime", "MatchTime", "time", "tradingTime", "matchedTime", "matchTime")),
+            "price": _to_float(_first_value(row, "Price", "MatchedPrice", "MatchPrice", "price", "matchedPrice", "matchPrice")),
+            "volume": _to_float(_first_value(row, "Volume", "MatchedVolume", "MatchVolume", "volume", "matchedVolume", "matchVolume")),
+            "value": _to_float(_first_value(row, "Value", "MatchedValue", "MatchValue", "value", "matchedValue", "matchValue")),
+            "side_if_available": _safe_text(_first_value(row, "Side", "MatchType", "BuySell", "side", "matchType", "buySell")),
+            "sequence_if_available": _safe_text(_first_value(row, "Sequence", "Seq", "Id", "ID", "sequence", "seq", "id")),
             "source": SSI_SOURCE,
         }
 

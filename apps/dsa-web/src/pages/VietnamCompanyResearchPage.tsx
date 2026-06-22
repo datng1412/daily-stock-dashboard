@@ -19,12 +19,13 @@ const statusVariant = (status?: string | null): StatusVariant => {
   if (status === 'ok') return 'success';
   if (status === 'partial') return 'warning';
   if (status === 'not_implemented') return 'info';
-  if (status === 'missing' || status === 'unavailable') return 'warning';
+  if (status === 'missing' || status === 'unavailable' || status === 'disabled') return 'warning';
   return 'default';
 };
 
 const statusLabel = (status?: string | null) => {
   if (status === 'not_implemented') return 'Not implemented yet';
+  if (status === 'disabled') return 'Disabled';
   if (!status) return 'Unknown';
   return status.replaceAll('_', ' ');
 };
@@ -240,6 +241,37 @@ const VietnamCompanyResearchPage: React.FC = () => {
     { label: 'Bollinger middle', value: snapshot.technical.bollingerMiddle, formatter: formatPrice },
     { label: 'Bollinger lower', value: snapshot.technical.bollingerLower, formatter: formatPrice },
   ];
+  const intradayPulse = snapshot.intraday?.pulse;
+  const latestIntradayChange = intradayPulse?.intradayChange ?? intradayPulse?.latest1hChange;
+  const intradayRows: MetricRow[] = [
+    { label: 'Latest intraday close', value: intradayPulse?.latestIntradayClose ?? intradayPulse?.latest1hClose, formatter: formatPrice },
+    {
+      label: 'Intraday change',
+      value: latestIntradayChange,
+      formatter: formatSignedNumber,
+      tone: typeof latestIntradayChange === 'number' && latestIntradayChange < 0 ? 'text-danger' : 'text-success',
+    },
+    { label: 'Intraday change %', value: intradayPulse?.intradayChangePercent ?? intradayPulse?.latest1hChangePercent, formatter: (value) => `${formatNumber(value, 2)}%` },
+    { label: 'Latest intraday volume', value: intradayPulse?.latestIntradayVolume ?? intradayPulse?.latest1hVolume },
+    { label: 'Session volume from intraday', value: intradayPulse?.sessionVolumeFromIntraday ?? intradayPulse?.sessionVolumeFrom1H },
+    { label: 'Candles loaded', value: snapshot.intraday?.candles?.length ?? 0 },
+  ];
+  const realtimeRows: MetricRow[] = [
+    { label: 'Snapshot price', value: snapshot.realtime?.snapshot?.price ?? snapshot.realtime?.snapshot?.realtimePrice, formatter: formatPrice },
+    { label: 'Change', value: snapshot.realtime?.snapshot?.change ?? snapshot.realtime?.snapshot?.priceChange, formatter: formatSignedNumber },
+    { label: 'Change %', value: snapshot.realtime?.snapshot?.changePct ?? snapshot.realtime?.snapshot?.percentChange, formatter: (value) => `${formatNumber(value, 2)}%` },
+    { label: 'Reference', value: snapshot.realtime?.snapshot?.referencePrice, formatter: formatPrice },
+    { label: 'Volume', value: snapshot.realtime?.snapshot?.volume ?? snapshot.realtime?.snapshot?.volumeAccumulated },
+    { label: 'Fetched at', value: snapshot.realtime?.snapshot?.fetchedAt, formatter: (value) => formatNumber(value) },
+  ];
+  const tradeTapeRows: MetricRow[] = [
+    { label: 'Trades loaded', value: snapshot.tradeTape?.trades?.length ?? 0 },
+    { label: 'Latest time', value: snapshot.tradeTape?.trades?.[0]?.time, formatter: (value) => formatNumber(value) },
+    { label: 'Latest price', value: snapshot.tradeTape?.trades?.[0]?.price, formatter: formatPrice },
+    { label: 'Latest volume', value: snapshot.tradeTape?.trades?.[0]?.volume },
+    { label: 'Latest value', value: snapshot.tradeTape?.trades?.[0]?.value },
+    { label: 'Source', value: snapshot.tradeTape?.source, formatter: (value) => formatNumber(value) },
+  ];
 
   return (
     <AppPage className="space-y-4">
@@ -268,6 +300,24 @@ const VietnamCompanyResearchPage: React.FC = () => {
         </SectionShell>
         <SectionShell title="Technical snapshot" source={snapshot.technical.source} status={snapshot.technical.status}>
           <MetricGrid rows={technicalRows} />
+        </SectionShell>
+        <SectionShell title="Intraday pulse" source={snapshot.intraday?.source ?? 'SSI'} status={snapshot.intraday?.status ?? 'unavailable'}>
+          {snapshot.intraday?.message && snapshot.intraday.status !== 'ok' ? (
+            <p className="mb-3 text-sm text-secondary-text">{snapshot.intraday.message}</p>
+          ) : null}
+          <MetricGrid rows={intradayRows} />
+        </SectionShell>
+        <SectionShell title="SSI realtime" source={snapshot.realtime?.source ?? 'SSI'} status={snapshot.realtime?.status ?? 'unavailable'}>
+          {snapshot.realtime?.message && snapshot.realtime.status !== 'ok' ? (
+            <p className="mb-3 text-sm text-secondary-text">{snapshot.realtime.message}</p>
+          ) : null}
+          <MetricGrid rows={realtimeRows} />
+        </SectionShell>
+        <SectionShell title="SSI trade tape" source={snapshot.tradeTape?.source ?? 'SSI'} status={snapshot.tradeTape?.status ?? 'unavailable'}>
+          {snapshot.tradeTape?.message && snapshot.tradeTape.status !== 'ok' ? (
+            <p className="mb-3 text-sm text-secondary-text">{snapshot.tradeTape.message}</p>
+          ) : null}
+          <MetricGrid rows={tradeTapeRows} />
         </SectionShell>
       </section>
       <section className="grid gap-4 lg:grid-cols-3">

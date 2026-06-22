@@ -48,8 +48,8 @@ export function getKbsSnapshotDisplayState(args: {
   if (quoteStatus && unavailableStatuses.has(quoteStatus)) {
     return result(
       'unavailable',
-      'KBS snapshot unavailable',
-      'KBS snapshot provider returned unavailable or error status.',
+      'SSI realtime unavailable',
+      'SSI realtime provider returned unavailable or error status.',
       'error',
     );
   }
@@ -57,8 +57,8 @@ export function getKbsSnapshotDisplayState(args: {
   if (!quoteStatus && !args.snapshotTimeDisplay) {
     return result(
       'unavailable',
-      'KBS snapshot unavailable',
-      'No KBS snapshot quote is available for this ticker.',
+      'SSI realtime unavailable',
+      'No SSI realtime quote is available for this ticker.',
       'error',
     );
   }
@@ -66,8 +66,8 @@ export function getKbsSnapshotDisplayState(args: {
   if (args.ageSeconds === null || args.ageSeconds === undefined || Number.isNaN(args.ageSeconds)) {
     return result(
       'unknown',
-      'KBS snapshot time unknown',
-      'KBS snapshot exists, but its timestamp could not be parsed.',
+      'SSI realtime time unknown',
+      'SSI realtime snapshot exists, but its timestamp could not be parsed.',
       'unknown',
     );
   }
@@ -81,7 +81,7 @@ export function getKbsSnapshotDisplayState(args: {
     if (args.isStale === true || age > 180) {
       return result(
         'stale_during_trading',
-        'KBS snapshot stale during trading',
+        'SSI realtime stale during trading',
         `Market is in an active trading phase and the snapshot is ${ageText}.${rawStaleReason}`,
         'warning',
       );
@@ -89,14 +89,14 @@ export function getKbsSnapshotDisplayState(args: {
     if (age > 60) {
       return result(
         'delayed',
-        'KBS snapshot delayed',
+        'SSI realtime delayed',
         `Market is in an active trading phase and the snapshot is ${ageText}.`,
         'info',
       );
     }
     return result(
       'live',
-      'KBS snapshot live',
+      'SSI realtime live',
       `Market is in an active trading phase and the snapshot is ${ageText}.`,
       'ok',
     );
@@ -106,7 +106,7 @@ export function getKbsSnapshotDisplayState(args: {
     if (age <= 60) {
       return result(
         'live',
-        'KBS snapshot live',
+        'SSI realtime live',
         `Market is at lunch break and the snapshot is ${ageText}.`,
         'ok',
       );
@@ -114,7 +114,7 @@ export function getKbsSnapshotDisplayState(args: {
     if (age <= 180) {
       return result(
         'delayed',
-        'KBS snapshot delayed',
+        'SSI realtime delayed',
         `Market is at lunch break and the snapshot is ${ageText}.`,
         'info',
       );
@@ -130,7 +130,7 @@ export function getKbsSnapshotDisplayState(args: {
   if (phaseCode === 'post_close') {
     return result(
       'last_available_post_close',
-      'Last available KBS snapshot',
+      'Last available SSI realtime',
       `Market is post-close; snapshot may stop updating. Raw age is ${ageText}.${rawStaleReason}`,
       'info',
     );
@@ -139,7 +139,7 @@ export function getKbsSnapshotDisplayState(args: {
   if (phaseCode === 'weekend_closed') {
     return result(
       'last_available_weekend',
-      'Last available KBS snapshot',
+      'Last available SSI realtime',
       `Weekend / closed; snapshot may stop updating. Raw age is ${ageText}.${rawStaleReason}`,
       'info',
     );
@@ -148,7 +148,7 @@ export function getKbsSnapshotDisplayState(args: {
   if (phaseCode === 'closed' || phaseCode === 'pre_open') {
     return result(
       'last_available_closed',
-      'Last available KBS snapshot',
+      'Last available SSI realtime',
       `Market closed; snapshot may stop updating. Raw age is ${ageText}.${rawStaleReason}`,
       'info',
     );
@@ -156,7 +156,7 @@ export function getKbsSnapshotDisplayState(args: {
 
   return result(
     'unknown',
-    'KBS snapshot state unknown',
+    'SSI realtime state unknown',
     `Market phase is unknown. Raw age is ${ageText}.${rawStaleReason}`,
     'unknown',
   );

@@ -222,9 +222,9 @@ const makeItem = (ticker: string): VietnamWatchItem => ({
   news: [],
   newsStatus: { status: 'disabled', source: null, message: 'News provider disabled.' },
   intradayTimeframe: '1h',
-  intradaySource: null,
+  intradaySource: 'SSI',
   intradayIsRealtimeQuote: false,
-  intradayWarning: 'SSI IntradayOhlc is not implemented yet.',
+  intradayWarning: 'SSI IntradayOhlc is disabled.',
   intradayCandles: [],
   intradayPulse: undefined,
   intradayLabels: ['Intraday data limited'],
@@ -232,10 +232,10 @@ const makeItem = (ticker: string): VietnamWatchItem => ({
     {
       label: 'Intraday data limited',
       severity: 'info',
-      reason: 'SSI IntradayOhlc is not implemented yet.',
+      reason: 'SSI IntradayOhlc is disabled.',
     },
   ],
-  intradayStatus: { status: 'not_implemented', source: null, message: 'SSI IntradayOhlc is not implemented yet.' },
+  intradayStatus: { status: 'disabled', source: 'SSI', message: 'SSI IntradayOhlc is disabled.' },
   cacheStatus: {
     ohlcvCache: 'miss',
     quoteCache: 'disabled',
@@ -322,6 +322,11 @@ const makeObservabilityResponse = (overrides: Partial<VietnamObservabilityRespon
   market: 'VN',
   status: 'ok',
   mozyfin: {
+    status: 'disabled',
+    source: 'legacy',
+    reason: 'Mozyfin is disabled for VN dashboard runtime.',
+  },
+  dashboardRuntime: {
     watchlistRequestsTotal: 3,
     watchlistCacheHitsTotal: 40,
     watchlistCacheMissesTotal: 8,
@@ -333,6 +338,11 @@ const makeObservabilityResponse = (overrides: Partial<VietnamObservabilityRespon
     lastFetchDurationMs: 120,
   },
   kbs: {
+    status: 'disabled',
+    source: 'legacy_optional',
+    reason: 'KBS legacy provider is disabled for normal VN dashboard runtime.',
+    legacyAllowed: false,
+    enabled: false,
     quoteRequestsTotal: 12,
     quoteSuccessTotal: 10,
     quoteUnavailableTotal: 2,
@@ -343,8 +353,32 @@ const makeObservabilityResponse = (overrides: Partial<VietnamObservabilityRespon
     lastTradeRequestAt: '2026-06-11T08:00:00Z',
     lastQuoteTickersCount: 6,
     lastTradeSymbol: 'FPT',
-    lastError: 'KBS provider timeout',
+    lastError: 'SSI realtime provider timeout',
     lastRawErrorPresent: true,
+  },
+  ssiCore: {
+    status: 'ok',
+    source: 'SSI',
+    reason: null,
+    enabled: true,
+  },
+  ssiIntraday: {
+    status: 'ok',
+    source: 'SSI',
+    reason: null,
+    enabled: true,
+  },
+  ssiRealtime: {
+    status: 'ok',
+    source: 'SSI',
+    reason: null,
+    enabled: true,
+  },
+  ssiTradeTape: {
+    status: 'ok',
+    source: 'SSI',
+    reason: null,
+    enabled: true,
   },
   ...overrides,
 });
@@ -362,9 +396,9 @@ const makeRealtimeResponse = (
   } = {},
 ): VietnamRealtimeResponse => ({
   market: 'VN',
-  source: 'vnstock_kbs',
+  source: 'SSI',
   status: options.unavailable || options.error ? 'unavailable' : 'ok',
-  error: options.error ?? (options.unavailable ? 'KBS unavailable' : null),
+  error: options.error ?? (options.unavailable ? 'SSI realtime unavailable' : null),
   errorDetail: options.errorDetail ?? (options.unavailable ? 'Provider returned an unavailable state.' : null),
   rawError: options.rawError ?? (options.unavailable ? 'vnstock is not installed' : null),
   requestedTickers: tickers,
@@ -379,12 +413,12 @@ const makeRealtimeResponse = (
     snapshotPrice: ticker === 'FPT' ? 101.5 : 100.5,
     snapshotTime: '10:15:00',
     snapshotTimeDisplay: '2026-06-11T10:15:00+07:00',
-    snapshotNote: 'KBS board snapshot; may differ from trade tape',
+    snapshotNote: 'SSI realtime snapshot; may differ from trade tape',
     ageSeconds,
     isStale: rawStale,
     staleReason: rawStale ? 'age_gt_60s' : null,
     referencePrice: 100,
-    referencePriceSource: 'kbs_board',
+    referencePriceSource: 'ssi_realtime',
     priceVsReference: ticker === 'FPT' ? 1.5 : 0.5,
     priceVsReferencePct: ticker === 'FPT' ? 1.5 : 0.5,
     openPrice: 100,
@@ -402,9 +436,9 @@ const makeRealtimeResponse = (
     foreignBuyVolume: 10,
     foreignSellVolume: 5,
     foreignRoom: 100000,
-    source: 'vnstock_kbs',
+    source: 'SSI',
     status: options.unavailable || options.error ? 'unavailable' : 'ok',
-    error: options.error ?? (options.unavailable ? 'KBS unavailable' : null),
+    error: options.error ?? (options.unavailable ? 'SSI realtime unavailable' : null),
     errorDetail: options.errorDetail ?? (options.unavailable ? 'Provider returned an unavailable state.' : null),
     rawError: options.rawError ?? (options.unavailable ? 'vnstock is not installed' : null),
   });
@@ -414,7 +448,7 @@ const makeRealtimeResponse = (
 
 const makeTradesResponse = (symbol: string): VietnamRealtimeTradesResponse => ({
   market: 'VN',
-  source: 'vnstock_kbs',
+  source: 'SSI',
   symbol,
   status: 'ok',
   error: null,
@@ -427,7 +461,7 @@ const makeTradesResponse = (symbol: string): VietnamRealtimeTradesResponse => ({
       volume: 300,
       matchType: 'buy',
       id: '1',
-      source: 'vnstock_kbs',
+      source: 'SSI',
     },
   ],
   note: 'Trade tape may exclude auction/ATC prints depending on provider output',
@@ -550,16 +584,16 @@ describe('VietnamDashboardPage watchlist loading', () => {
     });
   });
 
-  it('keeps SSI daily close, KBS snapshot, and trade tape separate', async () => {
+  it('keeps SSI daily close, SSI realtime, and trade tape separate', async () => {
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledWith(defaultTickers));
 
     expect(screen.getAllByText(/Daily close/i).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/KBS snapshot/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/SSI realtime/i).length).toBeGreaterThan(0);
     expect(await screen.findByRole('heading', { name: 'Latest trade tape' })).toBeInTheDocument();
     expect(screen.getByText('Trade tape may not include auction/ATC prints.')).toBeInTheDocument();
-    expect(screen.getByText('KBS board snapshot; may differ from trade tape')).toBeInTheDocument();
+    expect(screen.getByText('SSI realtime snapshot; may differ from trade tape')).toBeInTheDocument();
     expect(screen.getAllByText(/OHLCV close 100/).length).toBeGreaterThan(0);
     expect(screen.getAllByText('101.5').length).toBeGreaterThan(0);
   });
@@ -573,13 +607,15 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(header.getByRole('heading', { name: 'FPT' })).toBeInTheDocument();
     expect(header.getByText('FPT Listed Company')).toBeInTheDocument();
     expect(header.getByText('Daily close')).toBeInTheDocument();
-    expect(header.getByText('KBS snapshot')).toBeInTheDocument();
+    expect(header.getAllByText('SSI realtime').length).toBeGreaterThan(0);
     expect(header.getByText('Vs SSI reference')).toBeInTheDocument();
     expect(header.getByText('Session volume')).toBeInTheDocument();
     expect(header.getByText('20D avg volume')).toBeInTheDocument();
     expect(header.getByText('Latest news')).toBeInTheDocument();
-    expect(header.getByText('SSI DailyOhlc')).toBeInTheDocument();
-    expect(header.getByText('KBS realtime')).toBeInTheDocument();
+    expect(header.getAllByText('News disabled').length).toBeGreaterThan(0);
+    expect(header.getByText('Daily source SSI')).toBeInTheDocument();
+    expect(header.getAllByText('SSI realtime').length).toBeGreaterThan(0);
+    expect(header.queryByText('SSI unavailable')).not.toBeInTheDocument();
   });
 
   it('links watchlist ticker symbols to the company research page', async () => {
@@ -711,7 +747,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
         'Quote does not provide a reliable latest price field; latest price uses SSI DailyOhlc close.',
         'Final close status is unknown; daily candle may still be in progress.',
         'Adjusted/unadjusted price status is unknown.',
-        'Intraday 1H candle data is not a realtime matched quote.',
+        'Intraday candle data is not a realtime matched quote.',
       ],
     };
     mockedGetVietnamWatchlist.mockResolvedValue(response);
@@ -772,7 +808,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(screen.getAllByText('VN30').length).toBeGreaterThan(0);
     expect(screen.getByText('VNINDEX')).toBeInTheDocument();
     expect(screen.getByText('HNX30')).toBeInTheDocument();
-    expect(screen.getByText('VN30 components unavailable from SSI')).toBeInTheDocument();
+    expect(screen.getByText('VN30 components unavailable from SSI.')).toBeInTheDocument();
 
     const indicatorTable = within(screen.getByRole('heading', { name: 'Indicator table' }).closest('section') as HTMLElement);
     expect(indicatorTable.getByTestId('scan-state-FPT')).not.toHaveTextContent('Data unavailable');
@@ -837,8 +873,70 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     render(<VietnamDashboardPage />);
 
-    expect(await screen.findByText('News provider disabled.')).toBeInTheDocument();
+    expect((await screen.findAllByText('News disabled')).length).toBeGreaterThan(0);
     expect(screen.queryByText(/Mozyfin.*error/i)).not.toBeInTheDocument();
+  });
+
+  it('renders neutral SSI intraday unavailable state without Mozyfin text', async () => {
+    const response = makeResponse(defaultTickers);
+    response.watchlist[0] = {
+      ...response.watchlist[0],
+      intradaySource: 'SSI',
+      intradayWarning: 'SSI intraday unavailable.',
+      intradayCandles: [],
+      intradayPulse: undefined,
+      intradayStatus: { status: 'unavailable', source: 'SSI', message: 'SSI intraday unavailable.' },
+    };
+    mockedGetVietnamWatchlist.mockResolvedValue(response);
+
+    render(<VietnamDashboardPage />);
+
+    expect(await screen.findByText('SSI intraday unavailable.')).toBeInTheDocument();
+    expect(screen.getByText('SSI intraday is unavailable or disabled; SSI realtime board and trade tape context remain separate.')).toBeInTheDocument();
+    expect(screen.queryByText(/Mozyfin/i)).not.toBeInTheDocument();
+  });
+
+  it('renders stale SSI intraday date mismatch as unavailable without 1H wording', async () => {
+    const response = makeResponse(defaultTickers);
+    response.watchlist[0] = {
+      ...response.watchlist[0],
+      latestPriceDate: '2026-06-19',
+      priceDate: '2026-06-19',
+      intradaySource: 'SSI',
+      intradayGranularity: '1m',
+      intradayGranularityLabel: '1m',
+      intradayLatestDate: '2026-06-12',
+      dailyPriceDate: '2026-06-19',
+      dateMatch: 'mismatched',
+      intradayWarning: 'SSI IntradayOhlc latest candle date does not match latest daily trading date.',
+      intradayCandles: [],
+      intradayPulse: {
+        latestIntradayClose: null,
+        latestIntradayOpen: null,
+        latestIntradayHigh: null,
+        latestIntradayLow: null,
+        latestIntradayVolume: null,
+        intradayChange: null,
+        intradayChangePercent: null,
+        direction: 'unknown',
+        sessionCandlesCount: 0,
+      },
+      intradayLabels: ['Intraday data limited'],
+      intradayStatus: {
+        status: 'unavailable',
+        source: 'SSI',
+        message: 'SSI IntradayOhlc latest candle date does not match latest daily trading date.',
+      },
+    };
+    mockedGetVietnamWatchlist.mockResolvedValue(response);
+
+    render(<VietnamDashboardPage />);
+
+    expect((await screen.findAllByText('SSI IntradayOhlc latest candle date does not match latest daily trading date.')).length).toBeGreaterThan(0);
+    expect(screen.getByText('2026-06-12 / 2026-06-19')).toBeInTheDocument();
+    expect(screen.getByText('mismatched')).toBeInTheDocument();
+    expect(screen.getByText('Intraday pulse (1m)')).toBeInTheDocument();
+    expect(screen.queryByText(/1H close|Latest 1H|Session 1H/)).not.toBeInTheDocument();
   });
 
   it('shows SSI DailyStockPrice fields and corporate-action calendar unavailable state', async () => {
@@ -1084,7 +1182,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     const chartHeading = detail.getByRole('heading', { name: 'Inspect chart' });
     const chartCard = within(chartHeading.closest('div')?.parentElement?.parentElement as HTMLElement);
 
-    expect(chartCard.getByText('Daily OHLCV from SSI. KBS snapshot remains separate.')).toBeInTheDocument();
+    expect(chartCard.getByText('Daily OHLCV from SSI. SSI realtime remains separate.')).toBeInTheDocument();
     expect(chartCard.getByRole('button', { name: '1M' })).toBeInTheDocument();
     expect(chartCard.getByRole('button', { name: '3M' })).toBeInTheDocument();
     expect(chartCard.getByRole('button', { name: '6M' })).toHaveAttribute('aria-pressed', 'true');
@@ -1112,7 +1210,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(chartCard.getAllByText('RSI14').length).toBeGreaterThan(0);
     expect(chartCard.getByText('RSI14 numeric guides: 30 and 70.')).toBeInTheDocument();
     expect(chartCard.getByText('Daily OHLCV source: SSI')).toBeInTheDocument();
-    expect(chartCard.getByText('KBS snapshot is separate and not used as daily close.')).toBeInTheDocument();
+    expect(chartCard.getByText('SSI realtime is separate and not used as daily close.')).toBeInTheDocument();
     expect(chartCard.queryByText(/buy|sell|hold|recommendation/i)).not.toBeInTheDocument();
   });
 
@@ -1124,7 +1222,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('FPT', '6M'));
 
     const chartCard = inspectChartCard();
-    expect(chartCard.getByText('Daily OHLCV from SSI. KBS snapshot remains separate.')).toBeInTheDocument();
+    expect(chartCard.getByText('Daily OHLCV from SSI. SSI realtime remains separate.')).toBeInTheDocument();
     expect(chartCard.getByText('Daily OHLCV source: SSI')).toBeInTheDocument();
     expect(chartCard.queryByText(/buy|sell|hold|recommendation/i)).not.toBeInTheDocument();
   });
@@ -1139,7 +1237,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('FPT', '6M'));
 
     const chartCard = inspectChartCard();
-    expect(chartCard.getByText('Daily OHLCV from SSI unavailable. KBS snapshot remains separate.')).toBeInTheDocument();
+    expect(chartCard.getByText('Daily OHLCV from SSI unavailable. SSI realtime remains separate.')).toBeInTheDocument();
     expect(chartCard.getByText('Daily OHLCV source: SSI unavailable')).toBeInTheDocument();
     expect(chartCard.getByText('Chart data unavailable')).toBeInTheDocument();
     expect(chartCard.queryByText(/buy|sell|hold|recommendation/i)).not.toBeInTheDocument();
@@ -1219,7 +1317,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     const dialogElement = screen.getByRole('dialog', { name: 'Expanded inspect chart' });
     const dialog = within(dialogElement);
-    expect(dialog.getByText('Daily OHLCV from SSI. KBS snapshot remains separate.')).toBeInTheDocument();
+    expect(dialog.getByText('Daily OHLCV from SSI. SSI realtime remains separate.')).toBeInTheDocument();
     expect(dialog.getByRole('button', { name: '6M' })).toHaveAttribute('aria-pressed', 'true');
     expect(dialog.getByLabelText('MA20')).toBeChecked();
     expect(dialog.getByLabelText('MA50')).toBeChecked();
@@ -1336,7 +1434,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(detail.getByText('Chart endpoint unavailable: chart failed')).toBeInTheDocument();
   });
 
-  it('clarifies intraday disabled state and KBS volume labels while preserving numeric values', async () => {
+  it('renders SSI intraday pulse and SSI realtime volume labels while preserving numeric values', async () => {
     const response = makeResponse(defaultTickers);
     response.watchlist[0] = {
       ...response.watchlist[0],
@@ -1375,6 +1473,8 @@ describe('VietnamDashboardPage watchlist loading', () => {
         rangePercent: 4,
         volumeVsAvg1h: 1.75,
       },
+      intradayStatus: { status: 'ok', source: 'SSI', message: null },
+      intradayWarning: 'SSI IntradayOhlc candle data is not a realtime matched quote.',
     };
     mockedGetVietnamWatchlist.mockResolvedValue(response);
     mockedGetVietnamRealtimeQuotes.mockImplementation(async (tickers) => ({
@@ -1389,27 +1489,27 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
 
-    expect(screen.getByText('Latest 1H candle volume')).toBeInTheDocument();
-    expect(screen.getByText('Session 1H volume')).toBeInTheDocument();
+    expect(screen.getByText('Latest intraday volume')).toBeInTheDocument();
+    expect(screen.getByText('Session intraday volume')).toBeInTheDocument();
     expect(screen.getAllByText('Session volume / 20D avg daily volume').length).toBeGreaterThan(0);
-    expect(screen.queryByText('Loaded 1H candles total volume (all loaded)')).not.toBeInTheDocument();
+    expect(screen.queryByText('Loaded intraday candles total volume (all loaded)')).not.toBeInTheDocument();
     expect(screen.queryByText('Volume ratio')).not.toBeInTheDocument();
     expect(screen.queryByText('Vol ratio')).not.toBeInTheDocument();
-    expect(screen.getByText('KBS session accumulated volume')).toBeInTheDocument();
-    expect(screen.getByText('Intraday OHLCV is disabled until SSI IntradayOhlc is implemented. KBS session volume remains separate realtime board context.')).toBeInTheDocument();
+    expect(screen.getByText('SSI session accumulated volume')).toBeInTheDocument();
+    expect(screen.getByText('SSI IntradayOhlc candles are separate from SSI realtime board and trade tape context.')).toBeInTheDocument();
     expect(screen.getAllByText('1,234,567').length).toBeGreaterThanOrEqual(2);
     expect(screen.getAllByText('3,456,000').length).toBeGreaterThan(0);
     expect(screen.getAllByText('0.72x').length).toBeGreaterThan(0);
     expect(screen.getByText('103 / 99')).toBeInTheDocument();
     expect(screen.getByText('4%')).toBeInTheDocument();
-    const sessionCandlesLabel = screen.getByText('Session 1H candles');
+    const sessionCandlesLabel = screen.getByText('Session intraday candles');
     expect(within(sessionCandlesLabel.closest('div') as HTMLElement).getByText('5')).toBeInTheDocument();
     expect(screen.queryByText('Not enough session candles')).not.toBeInTheDocument();
-    expect(screen.getByText('Latest 1H volume vs avg 1H')).toBeInTheDocument();
+    expect(screen.getByText('Latest intraday volume vs average')).toBeInTheDocument();
     expect(screen.getByText('1.75x')).toBeInTheDocument();
   });
 
-  it('falls back to intraday session 1H volume when KBS accumulated volume is stale', async () => {
+  it('falls back to intraday session volume when SSI realtime accumulated volume is stale', async () => {
     const response = makeResponse(defaultTickers);
     response.watchlist[0] = {
       ...response.watchlist[0],
@@ -1494,7 +1594,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(screen.getAllByText('20D avg unavailable').length).toBeGreaterThan(0);
   });
 
-  it('shows a session volume missing state when neither KBS nor intraday session volume is available', async () => {
+  it('shows a session volume missing state when neither SSI realtime nor intraday session volume is available', async () => {
     const response = makeResponse(defaultTickers);
     response.watchlist[0] = {
       ...response.watchlist[0],
@@ -1569,7 +1669,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
 
-    const sessionHighLowLabel = screen.getByText('Session high / low from 1H');
+    const sessionHighLowLabel = screen.getByText('Session high / low from intraday');
     const sessionHighLowCard = sessionHighLowLabel.closest('div');
     expect(within(sessionHighLowCard as HTMLElement).getByText('Not enough session candles')).toHaveAttribute(
       'title',
@@ -1577,14 +1677,14 @@ describe('VietnamDashboardPage watchlist loading', () => {
     );
     expect(within(sessionHighLowCard as HTMLElement).queryByText('- / -')).not.toBeInTheDocument();
 
-    const sessionVolumeLabel = screen.getByText('Session 1H volume');
+    const sessionVolumeLabel = screen.getByText('Session intraday volume');
     const sessionVolumeCard = sessionVolumeLabel.closest('div');
     expect(within(sessionVolumeCard as HTMLElement).getByText('Not enough session candles')).toHaveAttribute(
       'title',
       'Session volume requires current-session intraday candles.',
     );
 
-    expect(screen.queryByText('Latest 1H volume vs avg 1H')).not.toBeInTheDocument();
+    expect(screen.queryByText('Latest intraday volume vs average')).not.toBeInTheDocument();
     expect(screen.queryByText('Avg unavailable')).not.toBeInTheDocument();
   });
 
@@ -1618,7 +1718,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
 
-    expect(screen.getByText('Session 1H candles')).toBeInTheDocument();
+    expect(screen.getByText('Session intraday candles')).toBeInTheDocument();
     expect(screen.getAllByText('5').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Session value unavailable').length).toBeGreaterThanOrEqual(3);
     expect(screen.queryByText('Not enough session candles')).not.toBeInTheDocument();
@@ -1781,11 +1881,12 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(panel.getByText('40/8')).toBeInTheDocument();
     expect(panel.getByText('Single-flight waits')).toBeInTheDocument();
     expect(panel.getAllByText('1').length).toBeGreaterThan(0);
-    expect(panel.getByText('KBS quote unavailable')).toBeInTheDocument();
-    expect(panel.getByText('2/12')).toBeInTheDocument();
-    expect(panel.getByText('KBS trade unavailable')).toBeInTheDocument();
-    expect(panel.getByText('4/20')).toBeInTheDocument();
-    expect(panel.getByText('KBS provider timeout')).toBeInTheDocument();
+    expect(panel.getByText('SSI core status')).toBeInTheDocument();
+    expect(panel.getByText('SSI intraday status')).toBeInTheDocument();
+    expect(panel.getByText('SSI realtime status')).toBeInTheDocument();
+    expect(panel.getByText('SSI trade tape status')).toBeInTheDocument();
+    expect(panel.getByText('Legacy provider')).toBeInTheDocument();
+    expect(panel.getByText('disabled')).toBeInTheDocument();
   });
 
   it('fetching observability does not call watchlist, realtime, or trades by itself', async () => {
@@ -1829,61 +1930,67 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(panel.getByText('Fixture mode is active; rows are sample data.')).toBeInTheDocument();
   });
 
-  it('shows KBS ok status when snapshot rows are fresh', async () => {
+  it('shows SSI realtime ok status when snapshot rows are fresh', async () => {
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledWith(defaultTickers));
 
     const panel = dataStatusPanel();
-    expect(panel.getAllByText('KBS snapshot live').length).toBeGreaterThan(0);
+    expect(panel.getAllByText('SSI realtime live').length).toBeGreaterThan(0);
     fireEvent.click(panel.getByText('Show diagnostics'));
     expect(panel.getByText('raw stale 0 | unavailable 0')).toBeInTheDocument();
   });
 
   it('realtime failure does not erase overview rows', async () => {
-    mockedGetVietnamRealtimeQuotes.mockRejectedValueOnce(new Error('KBS down'));
+    mockedGetVietnamRealtimeQuotes.mockRejectedValueOnce(
+      new Error('SSI FastConnect request failed in Realtime: attempted endpoints /api/v1/Trading/PriceBoard, /api/v1/Market/Realtime; HTTP 403'),
+    );
 
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
 
-    expect(await screen.findByText(/KBS snapshot unavailable: KBS down/)).toBeInTheDocument();
+    expect(await screen.findAllByText('SSI realtime unavailable. Daily SSI data is still available.')).not.toHaveLength(0);
+    expect(screen.queryByText(/SSI realtime issue:.*attempted endpoints/)).not.toBeInTheDocument();
+    const panel = dataStatusPanel();
+    fireEvent.click(panel.getByText('Show diagnostics'));
+    expect(panel.getByText(/attempted endpoints \/api\/v1\/Trading\/PriceBoard/)).toBeInTheDocument();
     expect(screen.getAllByText('FPT').length).toBeGreaterThan(0);
     expect(screen.getAllByText('ACB').length).toBeGreaterThan(0);
+    expect(screen.queryByText('SSI unavailable')).not.toBeInTheDocument();
   });
 
-  it('shows normalized KBS timeout without raw provider text in warning banners', async () => {
+  it('shows normalized SSI realtime timeout without raw provider text in warning banners', async () => {
     const rawTimeout = 'è¿žæŽ¥ä¸Šæ¸¸æœåŠ¡è¶…æ—¶: upstream timeout';
     mockedGetVietnamRealtimeQuotes.mockImplementation(async (tickers) => makeRealtimeResponse(tickers, {
-      error: 'KBS provider timeout',
-      errorDetail: 'The upstream KBS provider did not respond in time.',
+      error: 'SSI realtime provider timeout',
+      errorDetail: 'The upstream SSI realtime provider did not respond in time.',
       rawError: rawTimeout,
     }));
     mockedGetVietnamRealtimeTrades.mockImplementation(async (symbol) => ({
       ...makeTradesResponse(symbol),
       status: 'unavailable',
-      error: 'KBS provider timeout',
-      errorDetail: 'The upstream KBS provider did not respond in time.',
+      error: 'SSI realtime provider timeout',
+      errorDetail: 'The upstream SSI realtime provider did not respond in time.',
       rawError: rawTimeout,
       trades: [],
     }));
 
     render(<VietnamDashboardPage />);
 
-    expect(await screen.findByText('KBS snapshot unavailable: KBS provider timeout')).toBeInTheDocument();
-    expect(screen.getByText('KBS issue: KBS provider timeout')).toBeInTheDocument();
-    expect(screen.getByText('Latest trade tape unavailable: KBS provider timeout')).toBeInTheDocument();
+    expect(await screen.findAllByText('SSI realtime unavailable. Daily SSI data is still available.')).not.toHaveLength(0);
+    expect(screen.getByText('Latest trade tape unavailable: SSI realtime provider timeout')).toBeInTheDocument();
     expect(screen.queryByText(/è¿žæŽ¥ä¸Šæ¸¸æœåŠ¡è¶…æ—¶/)).not.toBeInTheDocument();
   });
 
-  it('shows active-trading stale warning when KBS marks a snapshot stale during trading', async () => {
+  it('shows active-trading stale warning when SSI realtime marks a snapshot stale during trading', async () => {
     mockedGetVietnamRealtimeQuotes.mockImplementation(async (tickers) => makeRealtimeResponse(tickers, { stale: true }));
 
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledWith(defaultTickers));
 
-    expect(screen.getAllByText('KBS snapshot stale during trading').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('SSI realtime stale during trading').length).toBeGreaterThan(0);
     expect(screen.getAllByText('2026-06-11T10:15:00+07:00').length).toBeGreaterThan(0);
     const panel = dataStatusPanel();
     fireEvent.click(panel.getByText('Show diagnostics'));
@@ -1900,9 +2007,9 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     await waitFor(() => expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledWith(defaultTickers));
 
-    expect(screen.getAllByText('Last available KBS snapshot').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Last available SSI realtime').length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Market closed; snapshot may stop updating/).length).toBeGreaterThan(0);
-    expect(screen.queryByText('KBS snapshot stale during trading')).not.toBeInTheDocument();
+    expect(screen.queryByText('SSI realtime stale during trading')).not.toBeInTheDocument();
     const panel = dataStatusPanel();
     fireEvent.click(panel.getByText('Show diagnostics'));
     expect(panel.getByText(`raw stale ${defaultTickers.length} | unavailable 0`)).toBeInTheDocument();
@@ -1910,7 +2017,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(screen.getAllByText('raw age 1200s | raw stale true | reason age_gt_60s')).toHaveLength(1);
   });
 
-  it('shows KBS unavailable count when snapshot rows are unavailable', async () => {
+  it('shows SSI realtime unavailable count when snapshot rows are unavailable', async () => {
     mockedGetVietnamRealtimeQuotes.mockImplementation(async (tickers) => makeRealtimeResponse(tickers, { unavailable: true }));
 
     render(<VietnamDashboardPage />);
@@ -1918,12 +2025,12 @@ describe('VietnamDashboardPage watchlist loading', () => {
     await waitFor(() => expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledWith(defaultTickers));
 
     const panel = dataStatusPanel();
-    expect(panel.getAllByText('KBS snapshot unavailable').length).toBeGreaterThan(0);
+    expect(panel.getAllByText('SSI realtime unavailable').length).toBeGreaterThan(0);
     fireEvent.click(panel.getByText('Show diagnostics'));
     expect(panel.getByText(`raw stale 0 | unavailable ${defaultTickers.length}`)).toBeInTheDocument();
   });
 
-  it('refresh KBS calls realtime endpoints only', async () => {
+  it('refresh realtime calls realtime endpoints only', async () => {
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
@@ -1933,7 +2040,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     mockedGetVietnamRealtimeTrades.mockClear();
     mockedGetVietnamObservability.mockClear();
 
-    fireEvent.click(screen.getByRole('button', { name: /refresh kbs/i }));
+    fireEvent.click(screen.getByRole('button', { name: /refresh realtime/i }));
 
     await waitFor(() => {
       expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledWith(defaultTickers);
@@ -1943,7 +2050,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistCalls);
   });
 
-  it('manual Refresh KBS does not create overlapping duplicate requests', async () => {
+  it('manual Refresh realtime does not create overlapping duplicate requests', async () => {
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
@@ -1960,11 +2067,11 @@ describe('VietnamDashboardPage watchlist loading', () => {
       resolveTrades = resolve;
     }));
 
-    fireEvent.click(screen.getByRole('button', { name: /refresh kbs/i }));
+    fireEvent.click(screen.getByRole('button', { name: /refresh realtime/i }));
 
     expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledTimes(1);
     expect(mockedGetVietnamRealtimeTrades).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole('button', { name: /refreshing kbs/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /refreshing realtime/i })).toBeDisabled();
 
     await act(async () => {
       resolveQuotes?.(makeRealtimeResponse(defaultTickers));
@@ -1972,19 +2079,19 @@ describe('VietnamDashboardPage watchlist loading', () => {
     });
   });
 
-  it('shows KBS auto-refresh controls', async () => {
+  it('shows SSI realtime auto-refresh controls', async () => {
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
 
-    expect(screen.getByRole('checkbox', { name: 'Auto-refresh KBS' })).toBeInTheDocument();
-    expect(screen.getByLabelText('KBS quotes')).toHaveValue('15');
-    expect([...screen.getByLabelText('KBS quotes').querySelectorAll('option')].map((option) => option.value)).toEqual(['10', '15', '30']);
+    expect(screen.getByRole('checkbox', { name: 'Auto-refresh realtime' })).toBeInTheDocument();
+    expect(screen.getByLabelText('SSI realtime')).toHaveValue('15');
+    expect([...screen.getByLabelText('SSI realtime').querySelectorAll('option')].map((option) => option.value)).toEqual(['10', '15', '30']);
     expect(screen.getByLabelText('Latest trade tape')).toHaveValue('10');
     expect([...screen.getByLabelText('Latest trade tape').querySelectorAll('option')].map((option) => option.value)).toEqual(['5', '10', '15']);
   });
 
-  it('auto-refresh KBS calls trades and quotes on their own intervals only', async () => {
+  it('auto-refresh realtime calls trades and quotes on their own intervals only', async () => {
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
@@ -1995,7 +2102,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     mockedGetVietnamObservability.mockClear();
 
     vi.useFakeTimers();
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Auto-refresh KBS' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Auto-refresh realtime' }));
 
     await act(async () => {
       vi.advanceTimersByTime(10000);
@@ -2034,7 +2141,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     fireEvent.change(screen.getByLabelText('Latest trade tape'), { target: { value: '5' } });
     vi.useFakeTimers();
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Auto-refresh KBS' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Auto-refresh realtime' }));
 
     await act(async () => {
       vi.advanceTimersByTime(5000);
@@ -2046,7 +2153,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistCalls);
   });
 
-  it('changing KBS intervals does not call watchlist endpoints', async () => {
+  it('changing SSI realtime intervals does not call watchlist endpoints', async () => {
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
@@ -2054,7 +2161,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     mockedGetVietnamRealtimeQuotes.mockClear();
     mockedGetVietnamRealtimeTrades.mockClear();
 
-    fireEvent.change(screen.getByLabelText('KBS quotes'), { target: { value: '10' } });
+    fireEvent.change(screen.getByLabelText('SSI realtime'), { target: { value: '10' } });
     fireEvent.change(screen.getByLabelText('Latest trade tape'), { target: { value: '5' } });
 
     expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistCalls);
@@ -2062,7 +2169,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(mockedGetVietnamRealtimeTrades).not.toHaveBeenCalled();
   });
 
-  it('auto-refresh KBS skips quote ticks while quote refresh is in flight without blocking trades', async () => {
+  it('auto-refresh realtime skips quote ticks while quote refresh is in flight without blocking trades', async () => {
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
@@ -2076,7 +2183,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     }));
 
     vi.useFakeTimers();
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Auto-refresh KBS' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Auto-refresh realtime' }));
 
     await act(async () => {
       vi.advanceTimersByTime(15000);
@@ -2097,7 +2204,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     });
   });
 
-  it('auto-refresh KBS skips trade ticks while trade refresh is in flight without blocking quotes', async () => {
+  it('auto-refresh realtime skips trade ticks while trade refresh is in flight without blocking quotes', async () => {
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
@@ -2111,7 +2218,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     }));
 
     vi.useFakeTimers();
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Auto-refresh KBS' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Auto-refresh realtime' }));
 
     await act(async () => {
       vi.advanceTimersByTime(10000);
@@ -2132,7 +2239,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     });
   });
 
-  it('auto-refresh KBS pauses while the document is hidden', async () => {
+  it('auto-refresh realtime pauses while the document is hidden', async () => {
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
@@ -2142,7 +2249,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
     vi.useFakeTimers();
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Auto-refresh KBS' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Auto-refresh realtime' }));
 
     await act(async () => {
       vi.advanceTimersByTime(15000);
@@ -2163,7 +2270,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
     vi.useFakeTimers();
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Auto-refresh KBS' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Auto-refresh realtime' }));
 
     await act(async () => {
       vi.advanceTimersByTime(30000);
@@ -2211,7 +2318,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
       resolveFptTrades = resolve;
     }));
 
-    fireEvent.click(screen.getByRole('button', { name: /refresh kbs/i }));
+    fireEvent.click(screen.getByRole('button', { name: /refresh realtime/i }));
     await waitFor(() => expect(mockedGetVietnamRealtimeTrades).toHaveBeenCalledWith('FPT', 100));
 
     clickTickerRow('ACB');

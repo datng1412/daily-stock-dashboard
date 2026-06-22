@@ -435,13 +435,13 @@ def get_vietnam_watchlist_health(
     "/vn/watchlist",
     response_model=VietnamWatchlistResponse,
     summary="Vietnam watchlist dashboard",
-    description="Return Vietnam watchlist monitoring data from the configured SSI-backed daily provider, with Mozyfin news and KBS realtime data kept separate.",
+    description="Return Vietnam watchlist monitoring data from SSI-backed VN market data, with news disabled until a separate provider is implemented.",
 )
 def get_vietnam_watchlist(
     tickers: Optional[str] = Query(None, description="Comma-separated VN tickers. Defaults to FPT,VPB,MSB,SCS,ACV,ACB"),
     force_refresh: bool = Query(False, description="Bypass VN in-memory cache and refresh configured VN provider data"),
     include_intraday: bool = Query(True, description="Include current intraday candle pulse data when available"),
-    intraday_timeframe: str = Query("1h", description="Intraday OHLCV timeframe. Defaults to 1h"),
+    intraday_timeframe: str = Query("1h", description="Requested SSI IntradayOhlc timeframe hint. Actual returned granularity is reported separately."),
     intraday_limit: int = Query(8, ge=1, le=48, description="Number of latest intraday candles to load"),
 ) -> VietnamWatchlistResponse:
     try:
@@ -554,7 +554,7 @@ def get_vietnam_index_components(
     "/vn/observability",
     response_model=VietnamObservabilityResponse,
     summary="Vietnam dashboard fetch observability",
-    description="Return process-local Mozyfin and KBS fetch counters without triggering provider requests.",
+    description="Return process-local Vietnam provider counters without triggering provider requests.",
 )
 def get_vietnam_observability() -> VietnamObservabilityResponse:
     return VietnamObservabilityResponse(**vietnam_observability_snapshot())
@@ -586,25 +586,27 @@ def get_vietnam_corporate_actions(
     "/vn/realtime",
     response_model=VietnamRealtimeResponse,
     summary="Vietnam realtime snapshot quotes",
-    description="Return optional vnstock KBS realtime/snapshot quotes. Does not modify Mozyfin data or latest_price semantics.",
+    description="Return SSI realtime/snapshot quote rows or an explicit SSI unavailable/disabled state. Does not modify daily close semantics.",
 )
 def get_vietnam_realtime_quotes(
     tickers: str = Query(..., description="Comma-separated VN tickers, for example FPT,ACB,VCB"),
 ) -> VietnamRealtimeResponse:
+    symbols = [item.strip().upper() for item in tickers.split(",") if item.strip()]
+    service = VietnamMarketService()
     try:
-        symbols = [item.strip().upper() for item in tickers.split(",") if item.strip()]
-        payload = VnstockRealtimeFetcher().fetch_quotes(symbols)
+        if service.config.allow_legacy_kbs_provider and service.config.kbs_enabled:
+            payload = VnstockRealtimeFetcher().fetch_quotes(symbols)
+        else:
+            payload = service.build_realtime_snapshot(symbols)
         return VietnamRealtimeResponse(**payload)
     except asyncio.CancelledError as e:
         logger.info("Vietnam realtime quotes cancelled: %s", e)
-        symbols = [item.strip().upper() for item in tickers.split(",") if item.strip()]
         return VietnamRealtimeResponse(
             market="VN",
-            source="vnstock_kbs",
+            source="SSI",
             status="unavailable",
-            error="KBS request cancelled",
-            error_detail="The KBS request was cancelled before the provider response completed.",
-            raw_error=str(e) or "KBS request cancelled",
+            error="SSI realtime request cancelled",
+            error_detail="The SSI realtime request was cancelled before the provider response completed.",
             requested_tickers=symbols,
             quotes=[],
             cache={"cache_status": "unavailable"},
@@ -621,27 +623,30 @@ def get_vietnam_realtime_quotes(
     "/vn/realtime/trades",
     response_model=VietnamRealtimeTradesResponse,
     summary="Vietnam realtime trade tape",
-    description="Return optional vnstock KBS trade tape rows for one VN symbol.",
+    description="Return SSI trade tape rows or an explicit SSI unavailable/disabled state.",
 )
 def get_vietnam_realtime_trades(
     symbol: str = Query(..., description="VN ticker, for example FPT"),
     limit: int = Query(100, ge=1, le=500, description="Maximum trade rows to return"),
 ) -> VietnamRealtimeTradesResponse:
+    service = VietnamMarketService()
     try:
-        payload = VnstockRealtimeFetcher().fetch_trades(symbol.strip().upper(), limit=limit)
+        if service.config.allow_legacy_kbs_provider and service.config.kbs_enabled:
+            payload = VnstockRealtimeFetcher().fetch_trades(symbol.strip().upper(), limit=limit)
+        else:
+            payload = service.build_trade_tape(symbol.strip().upper(), limit=limit)
         return VietnamRealtimeTradesResponse(**payload)
     except asyncio.CancelledError as e:
         logger.info("Vietnam realtime trades cancelled: %s", e)
         return VietnamRealtimeTradesResponse(
             market="VN",
-            source="vnstock_kbs",
+            source="SSI",
             symbol=symbol.strip().upper(),
             status="unavailable",
-            error="KBS request cancelled",
-            error_detail="The KBS request was cancelled before the provider response completed.",
-            raw_error=str(e) or "KBS request cancelled",
+            error="SSI trade tape request cancelled",
+            error_detail="The SSI trade tape request was cancelled before the provider response completed.",
             trades=[],
-            note="Trade tape may exclude auction/ATC prints depending on provider output",
+            note="SSI trade tape is separate from official daily OHLCV.",
             cache={"cache_status": "unavailable"},
         )
     except Exception as e:

@@ -256,6 +256,15 @@ class VietnamWatchItem(BaseModel):
     news: List[Dict[str, Any]] = Field(default_factory=list)
     news_status: Dict[str, Any] = Field(default_factory=dict)
     intraday_timeframe: Optional[str] = None
+    intraday_requested_timeframe: Optional[str] = None
+    intraday_granularity: Optional[str] = None
+    intraday_actual_granularity: Optional[str] = None
+    intraday_granularity_seconds: Optional[float] = None
+    intraday_actual_granularity_seconds: Optional[float] = None
+    intraday_granularity_label: Optional[str] = None
+    intraday_latest_date: Optional[str] = None
+    daily_price_date: Optional[str] = None
+    date_match: Optional[str] = None
     intraday_source: Optional[str] = None
     intraday_is_realtime_quote: bool = False
     intraday_warning: Optional[str] = None
@@ -264,6 +273,12 @@ class VietnamWatchItem(BaseModel):
     intraday_labels: List[str] = Field(default_factory=list)
     intraday_details: List[Dict[str, Any]] = Field(default_factory=list)
     intraday_status: Dict[str, Any] = Field(default_factory=dict)
+    realtime_source: Optional[str] = None
+    realtime_snapshot: Optional[Dict[str, Any]] = None
+    realtime_status: Dict[str, Any] = Field(default_factory=dict)
+    trade_tape_source: Optional[str] = None
+    trade_tape: Dict[str, Any] = Field(default_factory=dict)
+    trade_tape_status: Dict[str, Any] = Field(default_factory=dict)
     cache_status: Dict[str, Any] = Field(default_factory=dict)
     cache_last_fetched_at: Dict[str, Any] = Field(default_factory=dict)
     cache_next_refresh_at: Dict[str, Any] = Field(default_factory=dict)
@@ -415,6 +430,43 @@ class VietnamCompanyTechnical(BaseModel):
     status: str = "missing"
 
 
+class VietnamCompanyIntraday(BaseModel):
+    """Intraday snapshot derived from SSI IntradayOhlc."""
+
+    candles: List[Dict[str, Any]] = Field(default_factory=list)
+    pulse: Dict[str, Any] = Field(default_factory=dict)
+    requested_timeframe: Optional[str] = None
+    granularity: Optional[str] = None
+    actual_granularity: Optional[str] = None
+    granularity_seconds: Optional[float] = None
+    actual_granularity_seconds: Optional[float] = None
+    granularity_label: Optional[str] = None
+    latest_date: Optional[str] = None
+    daily_price_date: Optional[str] = None
+    date_match: Optional[str] = None
+    source: Optional[str] = None
+    status: str = "unavailable"
+    message: Optional[str] = None
+
+
+class VietnamCompanyRealtime(BaseModel):
+    """Realtime snapshot block for the Vietnam company research page."""
+
+    snapshot: Optional[Dict[str, Any]] = None
+    source: Optional[str] = None
+    status: str = "unavailable"
+    message: Optional[str] = None
+
+
+class VietnamCompanyTradeTape(BaseModel):
+    """Trade tape block for the Vietnam company research page."""
+
+    trades: List[Dict[str, Any]] = Field(default_factory=list)
+    source: Optional[str] = None
+    status: str = "unavailable"
+    message: Optional[str] = None
+
+
 class VietnamCompanySourceCoverageItem(BaseModel):
     """Per-block source coverage row for Vietnam company research."""
 
@@ -442,6 +494,9 @@ class VietnamCompanyResearchResponse(BaseModel):
     trading_stats: VietnamCompanyTradingStats
     foreign_flow: VietnamCompanyForeignFlow
     technical: VietnamCompanyTechnical
+    intraday: VietnamCompanyIntraday = Field(default_factory=VietnamCompanyIntraday)
+    realtime: VietnamCompanyRealtime = Field(default_factory=VietnamCompanyRealtime)
+    trade_tape: VietnamCompanyTradeTape = Field(default_factory=VietnamCompanyTradeTape)
     source_coverage: List[VietnamCompanySourceCoverageItem] = Field(default_factory=list)
     news: VietnamCompanyPlaceholderBlock
     financials: VietnamCompanyPlaceholderBlock
@@ -500,6 +555,20 @@ class VietnamRealtimeQuote(BaseModel):
     """Vietnam optional realtime/snapshot quote row."""
 
     symbol: str
+    ticker: Optional[str] = None
+    fetched_at: Optional[str] = None
+    price: Optional[float] = None
+    change: Optional[float] = None
+    change_pct: Optional[float] = None
+    ceiling_price: Optional[float] = None
+    floor_price: Optional[float] = None
+    open: Optional[float] = None
+    high: Optional[float] = None
+    low: Optional[float] = None
+    volume: Optional[float] = None
+    value: Optional[float] = None
+    bid_levels: List[Dict[str, Any]] = Field(default_factory=list)
+    ask_levels: List[Dict[str, Any]] = Field(default_factory=list)
     realtime_price: Optional[float] = None
     realtime_time: Optional[str] = None
     realtime_time_display: Optional[str] = None
@@ -529,7 +598,7 @@ class VietnamRealtimeQuote(BaseModel):
     foreign_buy_volume: Optional[float] = None
     foreign_sell_volume: Optional[float] = None
     foreign_room: Optional[float] = None
-    source: str = "vnstock_kbs"
+    source: str = "SSI"
     status: str = "ok"
     error: Optional[str] = None
     error_detail: Optional[str] = None
@@ -540,7 +609,7 @@ class VietnamRealtimeResponse(BaseModel):
     """Vietnam optional realtime/snapshot quote response."""
 
     market: str = "VN"
-    source: str = "vnstock_kbs"
+    source: str = "SSI"
     status: str = "ok"
     error: Optional[str] = None
     error_detail: Optional[str] = None
@@ -556,16 +625,19 @@ class VietnamRealtimeTrade(BaseModel):
     time: Optional[str] = None
     price: Optional[float] = None
     volume: Optional[float] = None
+    value: Optional[float] = None
+    side_if_available: Optional[str] = None
+    sequence_if_available: Optional[str] = None
     match_type: Optional[str] = None
     id: Optional[str] = None
-    source: str = "vnstock_kbs"
+    source: str = "SSI"
 
 
 class VietnamRealtimeTradesResponse(BaseModel):
     """Vietnam optional realtime trade tape response."""
 
     market: str = "VN"
-    source: str = "vnstock_kbs"
+    source: str = "SSI"
     symbol: str
     status: str = "ok"
     error: Optional[str] = None
@@ -582,6 +654,11 @@ class VietnamMozyfinObservability(BaseModel):
     status: str = "disabled"
     source: str = "legacy"
     reason: Optional[str] = None
+
+
+class VietnamDashboardRuntimeObservability(BaseModel):
+    """Provider-neutral process-local VN dashboard runtime counters."""
+
     watchlist_requests_total: int = 0
     watchlist_cache_hits_total: int = 0
     watchlist_cache_misses_total: int = 0
@@ -596,6 +673,11 @@ class VietnamMozyfinObservability(BaseModel):
 class VietnamKbsObservability(BaseModel):
     """Process-local KBS fetch counters for the Vietnam dashboard."""
 
+    status: str = "disabled"
+    source: str = "legacy_optional"
+    reason: Optional[str] = None
+    legacy_allowed: bool = False
+    enabled: bool = False
     quote_requests_total: int = 0
     quote_success_total: int = 0
     quote_unavailable_total: int = 0
@@ -610,10 +692,24 @@ class VietnamKbsObservability(BaseModel):
     last_raw_error_present: bool = False
 
 
+class VietnamProviderRuntimeStatus(BaseModel):
+    """Runtime status for a VN provider-owned data block."""
+
+    status: str = "not_implemented"
+    source: Optional[str] = "SSI"
+    reason: Optional[str] = None
+    enabled: Optional[bool] = None
+
+
 class VietnamObservabilityResponse(BaseModel):
     """Vietnam dashboard in-memory observability response."""
 
     market: str = "VN"
     status: str = "ok"
     mozyfin: VietnamMozyfinObservability = Field(default_factory=VietnamMozyfinObservability)
+    dashboard_runtime: VietnamDashboardRuntimeObservability = Field(default_factory=VietnamDashboardRuntimeObservability)
     kbs: VietnamKbsObservability = Field(default_factory=VietnamKbsObservability)
+    ssi_core: VietnamProviderRuntimeStatus = Field(default_factory=VietnamProviderRuntimeStatus)
+    ssi_intraday: VietnamProviderRuntimeStatus = Field(default_factory=VietnamProviderRuntimeStatus)
+    ssi_realtime: VietnamProviderRuntimeStatus = Field(default_factory=VietnamProviderRuntimeStatus)
+    ssi_trade_tape: VietnamProviderRuntimeStatus = Field(default_factory=VietnamProviderRuntimeStatus)

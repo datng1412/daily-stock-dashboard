@@ -657,11 +657,19 @@ class Config:
     ssi_fastconnect_timeout_seconds: int = 10
     ssi_fastconnect_cache_ttl_seconds: int = 300
     ssi_fastconnect_token_ttl_seconds: int = 900
+    ssi_fastconnect_intraday_enabled: bool = True
+    ssi_fastconnect_realtime_enabled: bool = True
+    ssi_fastconnect_trade_tape_enabled: bool = True
     vn_daily_data_provider: str = "ssi"
     vn_chart_data_provider: str = "ssi"
     vn_daily_stock_price_provider: str = "ssi"
     vn_index_data_provider: str = "ssi"
+    vn_intraday_data_provider: str = "ssi"
+    vn_realtime_data_provider: str = "ssi"
+    vn_trade_tape_provider: str = "ssi"
     vn_provider_comparison_enabled: bool = False
+    kbs_enabled: bool = False
+    vn_allow_legacy_kbs_provider: bool = False
     mozyfin_enabled: bool = False
     mozyfin_news_enabled: bool = False
     vn_news_provider: str = "disabled"
@@ -1866,6 +1874,18 @@ class Config:
                 field_name='SSI_FASTCONNECT_TOKEN_TTL_SECONDS',
                 minimum=1,
             ),
+            ssi_fastconnect_intraday_enabled=parse_env_bool(
+                os.getenv('SSI_FASTCONNECT_INTRADAY_ENABLED'),
+                default=True,
+            ),
+            ssi_fastconnect_realtime_enabled=parse_env_bool(
+                os.getenv('SSI_FASTCONNECT_REALTIME_ENABLED'),
+                default=True,
+            ),
+            ssi_fastconnect_trade_tape_enabled=parse_env_bool(
+                os.getenv('SSI_FASTCONNECT_TRADE_TAPE_ENABLED'),
+                default=True,
+            ),
             vn_daily_data_provider=parse_env_choice(
                 os.getenv('VN_DAILY_DATA_PROVIDER'),
                 {'ssi'},
@@ -1890,8 +1910,34 @@ class Config:
                 'ssi',
                 field_name='VN_INDEX_DATA_PROVIDER',
             ),
+            vn_intraday_data_provider=parse_env_choice(
+                os.getenv('VN_INTRADAY_DATA_PROVIDER'),
+                {'ssi'},
+                'ssi',
+                field_name='VN_INTRADAY_DATA_PROVIDER',
+            ),
+            vn_realtime_data_provider=parse_env_choice(
+                os.getenv('VN_REALTIME_DATA_PROVIDER'),
+                {'ssi'},
+                'ssi',
+                field_name='VN_REALTIME_DATA_PROVIDER',
+            ),
+            vn_trade_tape_provider=parse_env_choice(
+                os.getenv('VN_TRADE_TAPE_PROVIDER'),
+                {'ssi'},
+                'ssi',
+                field_name='VN_TRADE_TAPE_PROVIDER',
+            ),
             vn_provider_comparison_enabled=parse_env_bool(
                 os.getenv('VN_PROVIDER_COMPARISON_ENABLED'),
+                default=False,
+            ),
+            kbs_enabled=parse_env_bool(
+                os.getenv('KBS_ENABLED'),
+                default=False,
+            ),
+            vn_allow_legacy_kbs_provider=parse_env_bool(
+                os.getenv('VN_ALLOW_LEGACY_KBS_PROVIDER'),
                 default=False,
             ),
             mozyfin_enabled=parse_env_bool(
