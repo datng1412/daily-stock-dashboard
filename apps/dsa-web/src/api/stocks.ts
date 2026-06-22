@@ -280,6 +280,7 @@ export type VietnamWatchItem = {
     message?: string | null;
     count?: number | null;
   };
+  dataQualitySummary?: VietnamDataQualitySummary;
   cacheStatus: Record<string, string>;
   cacheLastFetchedAt: Record<string, string | null>;
   cacheNextRefreshAt: Record<string, string | null>;

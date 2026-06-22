@@ -16,6 +16,7 @@ import {
   type VietnamWatchlistResponse,
 } from '../api/stocks';
 import { AppPage, Badge, Button, Input, Loading } from '../components/common';
+import { DataQualitySummary } from '../components/dashboard';
 import { cn } from '../utils/cn';
 import { buildVietnamConditionSummary, VIETNAM_CONDITION_SUMMARY_SUBTITLE } from '../utils/vietnamConditionSummary';
 import { getKbsSnapshotDisplayState, type KbsSnapshotDisplayResult } from '../utils/kbsSnapshotState';
@@ -274,6 +275,15 @@ const hasOfficialDailyData = (item: VietnamWatchItem) => {
   const close = item.dailyClose ?? item.ohlcvClose ?? item.latestPrice ?? item.close;
   const date = item.ohlcvDate ?? item.latestPriceDate ?? item.priceDate ?? item.date;
   return hasDisplayValue(close) && hasDisplayValue(date) && hasDisplayValue(item.volume);
+};
+
+const officialDailySourceLabel = (item: VietnamWatchItem) => {
+  if (!hasOfficialDailyData(item)) return 'Daily source unavailable';
+  const source = item.dataQualitySummary?.canonicalPriceSource
+    ?? (isSsiDailyPriceSource(item.latestPriceSource) || isSsiDailyPriceSource(item.actualSource) || isSsiDailyPriceSource(item.source)
+      ? 'SSI DailyOhlc'
+      : item.latestPriceSource ?? item.actualSource ?? item.source);
+  return source ? `Daily source: ${source}` : 'Daily OK';
 };
 
 const kbsStateVariant = (state: KbsSnapshotDisplayResult) => {
@@ -1093,9 +1103,8 @@ const SelectedTickerHeader: React.FC<{
   const metadataExchange = metadataValue(item, 'exchange');
   const metadataSecurityType = metadataValue(item, 'securityType');
   const metadataSource = item.symbolMetadata?.source ?? item.metadataSource;
-  const dailySourceLabel = item.status === 'unavailable'
-    ? 'Daily source unavailable'
-    : 'Daily source SSI';
+  const dailySourceLabel = officialDailySourceLabel(item);
+  const dataQualitySummary = item.dataQualitySummary;
 
   return (
     <section className="rounded-lg border border-cyan/25 bg-card p-4 shadow-soft-card">
@@ -1120,6 +1129,11 @@ const SelectedTickerHeader: React.FC<{
             {item.newsStatus?.status === 'disabled' ? <Badge variant="default">News disabled</Badge> : null}
           </div>
         </div>
+        <DataQualitySummary
+          compact
+          summary={dataQualitySummary}
+          className="w-full border-cyan/10 bg-elevated/20 xl:max-w-md"
+        />
         <dl className="grid flex-1 gap-2 text-sm sm:grid-cols-2 xl:max-w-4xl xl:grid-cols-6">
           <div className="rounded-lg bg-elevated/50 p-3">
             <dt className="text-xs text-secondary-text">Daily close</dt>

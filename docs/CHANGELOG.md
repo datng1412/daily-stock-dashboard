@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [new feature] Render compact VN data quality summary in the dashboard selected ticker area.
 - [new feature] Render VN company data quality summary on the company detail page with source mismatch, profile completeness, and live-section availability states.
 - [new feature] Add VN backend data quality summary to watchlist and company responses for source mismatches, profile completeness, live-section availability, and finality checks.
 - [documentation] Add foreign-stock tracker product strategy docs based on Vietnamese user research, covering personas, onboarding, compliance boundaries, competitor notes, KPIs, and roadmap.

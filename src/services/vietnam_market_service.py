@@ -425,8 +425,22 @@ def _status_from_block(block: Any, default: str = "unavailable") -> str:
 
 def build_vietnam_data_quality_summary(row: Dict[str, Any]) -> Dict[str, Any]:
     """Build a user-safe data-quality summary without changing source semantics."""
-    daily_close = _safe_float(row.get("ohlcv_close") if row.get("ohlcv_close") is not None else row.get("daily_close"))
+    daily_close = _safe_float(
+        row.get("ohlcv_close")
+        if row.get("ohlcv_close") is not None
+        else row.get("daily_close")
+        if row.get("daily_close") is not None
+        else row.get("latest_price")
+    )
     daily_date = _valid_date_string(row.get("ohlcv_date") or row.get("latest_price_date") or row.get("date"))
+    row_status = str(row.get("status") or "")
+    source_labels = [
+        str(row.get("latest_price_source") or ""),
+        str(row.get("actual_source") or ""),
+        str(row.get("source") or ""),
+        str(row.get("primary_source") or ""),
+    ]
+    daily_source_is_ssi = any("ssi" in label.lower() for label in source_labels)
     daily_stock_price = row.get("daily_stock_price") if isinstance(row.get("daily_stock_price"), dict) else {}
     daily_stock_close = _safe_float(daily_stock_price.get("close"))
     daily_stock_date = _valid_date_string(daily_stock_price.get("date"))
@@ -437,7 +451,14 @@ def build_vietnam_data_quality_summary(row: Dict[str, Any]) -> Dict[str, Any]:
     final_close_status = str(row.get("final_close_status") or "unknown")
     adjusted_price_status = str(row.get("adjusted_price_status") or row.get("price_adjustment_status") or "unknown")
 
-    daily_ohlc_check = "ok" if row.get("status") == "ok" and daily_close is not None and daily_date else "unavailable"
+    daily_ohlc_check = (
+        "ok"
+        if row_status not in {"unavailable", "error"}
+        and daily_close is not None
+        and daily_date
+        and daily_source_is_ssi
+        else "unavailable"
+    )
     daily_stock_price_check = "ok" if daily_stock_price.get("status") == "ok" and daily_stock_close is not None else "unavailable"
     date_match = str(row.get("date_match") or "")
     intraday_check = "stale" if intraday_status == "unavailable" and date_match == "mismatched" else intraday_status
@@ -453,6 +474,15 @@ def build_vietnam_data_quality_summary(row: Dict[str, Any]) -> Dict[str, Any]:
         profile_status = "partial" if missing_profile_fields else "ok"
 
     issues: List[Dict[str, Any]] = []
+    if daily_ohlc_check != "ok":
+        issues.append(
+            {
+                "code": "daily_ohlc_unavailable",
+                "severity": "warning",
+                "message": "SSI DailyOhlc data is unavailable.",
+                "fields": {},
+            }
+        )
     if daily_date and daily_stock_date and daily_date == daily_stock_date and daily_close is not None and daily_stock_close is not None and daily_close != daily_stock_close:
         issues.append(
             {
@@ -534,9 +564,20 @@ def build_vietnam_data_quality_summary(row: Dict[str, Any]) -> Dict[str, Any]:
             }
         )
 
+    optional_partial_checks = {
+        "intraday": intraday_check,
+        "realtime": realtime_status,
+        "trade_tape": trade_tape_status,
+        "profile": profile_status,
+        "news": news_status,
+        "final_close_status": final_close_status,
+        "adjusted_price_status": adjusted_price_status,
+    }
+    partial_values = {"unavailable", "disabled", "stale", "partial", "unknown", "provisional", "in_progress"}
+
     if daily_ohlc_check != "ok":
         overall_status = "unavailable"
-    elif any(issue.get("severity") == "warning" for issue in issues):
+    elif issues or any(value in partial_values for value in optional_partial_checks.values()):
         overall_status = "partial"
     else:
         overall_status = "ok"

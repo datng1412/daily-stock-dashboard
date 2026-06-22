@@ -5,6 +5,7 @@ from datetime import date, timedelta
 from src.services.vietnam_market_service import (
     VietnamDashboardConfig,
     VietnamMarketService,
+    build_vietnam_data_quality_summary,
     clear_vietnam_cache,
 )
 
@@ -269,6 +270,62 @@ def test_data_quality_summary_has_no_mismatch_when_daily_sources_match():
     assert item["latest_price_source"] == "SSI"
 
 
+def test_data_quality_summary_keeps_valid_ssi_daily_ok_when_optional_live_unavailable():
+    summary = build_vietnam_data_quality_summary(
+        {
+            "status": "partial",
+            "latest_price": 70_600.0,
+            "daily_close": 70_600.0,
+            "ohlcv_close": 70_600.0,
+            "latest_price_date": "2026-06-22",
+            "ohlcv_date": "2026-06-22",
+            "latest_price_source": "SSI",
+            "actual_source": "SSI",
+            "source": "SSI",
+            "daily_stock_price": {
+                "status": "ok",
+                "date": "2026-06-22",
+                "close": 70_600.0,
+            },
+            "intraday_status": {"status": "unavailable"},
+            "realtime_status": {"status": "unavailable"},
+            "trade_tape_status": {"status": "unavailable"},
+            "news_status": {"status": "disabled"},
+            "symbol_metadata": {"status": "ok", "exchange": "HOSE"},
+        }
+    )
+
+    assert summary["overall_status"] == "partial"
+    assert summary["checks"]["daily_ohlc"] == "ok"
+    assert summary["checks"]["daily_stock_price"] == "ok"
+    assert summary["checks"]["intraday"] == "unavailable"
+    assert summary["checks"]["realtime"] == "unavailable"
+    assert summary["checks"]["trade_tape"] == "unavailable"
+
+
+def test_data_quality_summary_marks_missing_daily_close_unavailable():
+    summary = build_vietnam_data_quality_summary(
+        {
+            "status": "ok",
+            "latest_price": None,
+            "daily_close": None,
+            "ohlcv_close": None,
+            "latest_price_date": "2026-06-22",
+            "latest_price_source": "SSI",
+            "actual_source": "SSI",
+            "source": "SSI",
+            "intraday_status": {"status": "disabled"},
+            "realtime_status": {"status": "disabled"},
+            "trade_tape_status": {"status": "disabled"},
+            "news_status": {"status": "disabled"},
+        }
+    )
+
+    assert summary["overall_status"] == "unavailable"
+    assert summary["checks"]["daily_ohlc"] == "unavailable"
+    assert "daily_ohlc_unavailable" in _issue_codes(summary)
+
+
 def test_data_quality_summary_warns_on_same_date_daily_source_mismatch():
     item = _service(MismatchedDailyStockPriceFetcher()).build_watchlist(["FPT"], force_refresh=True)["watchlist"][0]
 
@@ -276,6 +333,7 @@ def test_data_quality_summary_warns_on_same_date_daily_source_mismatch():
     mismatch = next(issue for issue in summary["issues"] if issue["code"] == "daily_ohlc_vs_daily_stock_price_mismatch")
 
     assert summary["overall_status"] == "partial"
+    assert summary["checks"]["daily_ohlc"] == "ok"
     assert mismatch["severity"] == "warning"
     assert mismatch["fields"] == {
         "daily_ohlc_close": 130.0,

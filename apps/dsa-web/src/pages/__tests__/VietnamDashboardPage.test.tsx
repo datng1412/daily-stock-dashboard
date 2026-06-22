@@ -236,6 +236,22 @@ const makeItem = (ticker: string): VietnamWatchItem => ({
     },
   ],
   intradayStatus: { status: 'disabled', source: 'SSI', message: 'SSI IntradayOhlc is disabled.' },
+  dataQualitySummary: {
+    overallStatus: 'ok',
+    canonicalPriceSource: 'SSI DailyOhlc',
+    issues: [],
+    checks: {
+      dailyOhlc: 'ok',
+      dailyStockPrice: 'ok',
+      finalCloseStatus: 'final',
+      adjustedPriceStatus: 'unadjusted',
+      intraday: 'disabled',
+      realtime: 'ok',
+      tradeTape: 'ok',
+      profile: 'ok',
+      news: 'disabled',
+    },
+  },
   cacheStatus: {
     ohlcvCache: 'miss',
     quoteCache: 'disabled',
@@ -251,7 +267,7 @@ const makeItem = (ticker: string): VietnamWatchItem => ({
   cacheNextRefreshAt: {},
   cacheErrors: {},
   error: null,
-});
+} as VietnamWatchItem);
 
 const makeResponse = (tickers: string[], options: { fixtureMode?: boolean } = {}): VietnamWatchlistResponse => ({
   market: 'VN',
@@ -625,9 +641,201 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(header.getByText('20D avg volume')).toBeInTheDocument();
     expect(header.getByText('Latest news')).toBeInTheDocument();
     expect(header.getAllByText('News disabled').length).toBeGreaterThan(0);
-    expect(header.getByText('Daily source SSI')).toBeInTheDocument();
+    expect(header.getByText('Daily source: SSI DailyOhlc')).toBeInTheDocument();
     expect(header.getAllByText('SSI realtime').length).toBeGreaterThan(0);
     expect(header.queryByText('SSI unavailable')).not.toBeInTheDocument();
+  });
+
+  it('renders selected ticker data quality summary when present', async () => {
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledWith(defaultTickers));
+
+    const header = selectedTickerHeader();
+    expect(header.getByRole('heading', { name: 'Data quality' })).toBeInTheDocument();
+    expect(header.getByText('Data quality: ok')).toBeInTheDocument();
+    expect(header.getByText('Canonical price source: SSI DailyOhlc')).toBeInTheDocument();
+    expect(header.getByText('Daily source: SSI DailyOhlc')).toBeInTheDocument();
+    expect(header.getByText('No issues detected.')).toBeInTheDocument();
+    expect(header.getByText('Daily OHLCV: OK')).toBeInTheDocument();
+    expect(header.getByText('Intraday: disabled')).toBeInTheDocument();
+    expect(header.getByText('Realtime: OK')).toBeInTheDocument();
+    expect(header.getByText('Trade tape: OK')).toBeInTheDocument();
+    expect(header.getByText('Profile: OK')).toBeInTheDocument();
+    expect(header.getByText('News: disabled')).toBeInTheDocument();
+    expect(screen.getByText('Stock detail')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Indicator table' })).toBeInTheDocument();
+  });
+
+  it('handles missing selected ticker data quality summary gracefully', async () => {
+    const response = makeResponse(defaultTickers);
+    delete (response.watchlist[0] as VietnamWatchItem & { dataQualitySummary?: unknown }).dataQualitySummary;
+    mockedGetVietnamWatchlist.mockResolvedValue(response);
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledWith(defaultTickers));
+
+    const header = selectedTickerHeader();
+    expect(header.queryByRole('heading', { name: 'Data quality' })).not.toBeInTheDocument();
+    expect(header.getByText('Daily close')).toBeInTheDocument();
+    expect(screen.getByText('Stock detail')).toBeInTheDocument();
+  });
+
+  it('shows selected ticker mismatch, profile partial, and unavailable live states neutrally', async () => {
+    const response = makeResponse(defaultTickers);
+    (response.watchlist[0] as VietnamWatchItem & { dataQualitySummary?: unknown }).dataQualitySummary = {
+      overallStatus: 'partial',
+      canonicalPriceSource: 'SSI DailyOhlc',
+      issues: [
+        {
+          code: 'daily_ohlc_vs_daily_stock_price_mismatch',
+          severity: 'warning',
+          message: 'SSI DailyOhlc close differs from SSI DailyStockPrice close for the same trading date.',
+          fields: {
+            dailyOhlcClose: 70_700,
+            dailyStockPriceClose: 70_800,
+            date: '2026-06-22',
+          },
+        },
+        {
+          code: 'profile_partial',
+          severity: 'warning',
+          message: 'Profile metadata is partial.',
+          fields: { missingFields: ['industry'] },
+        },
+        {
+          code: 'realtime_unavailable',
+          severity: 'info',
+          message: 'SSI realtime is unavailable.',
+          fields: { status: 'unavailable' },
+        },
+        {
+          code: 'trade_tape_unavailable',
+          severity: 'info',
+          message: 'SSI trade tape is unavailable.',
+          fields: { status: 'unavailable' },
+        },
+      ],
+      checks: {
+        dailyOhlc: 'ok',
+        dailyStockPrice: 'ok',
+        intraday: 'unavailable',
+        realtime: 'unavailable',
+        tradeTape: 'unavailable',
+        profile: 'partial',
+        news: 'disabled',
+      },
+    };
+    mockedGetVietnamWatchlist.mockResolvedValue(response);
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledWith(defaultTickers));
+
+    const header = selectedTickerHeader();
+    expect(header.getByText('Data quality: partial')).toBeInTheDocument();
+    expect(header.getByText('Daily source: SSI DailyOhlc')).toBeInTheDocument();
+    expect(header.queryByText('Daily source unavailable')).not.toBeInTheDocument();
+    expect(header.getByText('DailyOhlc differs from DailyStockPrice for the same date.')).toBeInTheDocument();
+    expect(header.getByText('Profile metadata partial.')).toBeInTheDocument();
+    expect(header.getByText('SSI realtime unavailable.')).toBeInTheDocument();
+    expect(header.getByText('1 more data-quality issue(s) hidden.')).toBeInTheDocument();
+    expect(header.getByText('Intraday: unavailable')).toBeInTheDocument();
+    expect(header.getByText('Realtime: unavailable')).toBeInTheDocument();
+    expect(header.getByText('Trade tape: unavailable')).toBeInTheDocument();
+    expect(header.getByText('Profile: partial')).toBeInTheDocument();
+  });
+
+  it('does not show selected ticker daily source unavailable when daily close is present', async () => {
+    const response = makeResponse(defaultTickers);
+    response.watchlist[0] = {
+      ...response.watchlist[0],
+      status: 'unavailable',
+      latestPrice: 70_600,
+      dailyClose: 70_600,
+      ohlcvClose: 70_600,
+      volume: 9_260_100,
+      latestPriceDate: '2026-06-22',
+      latestPriceSource: 'SSI',
+      dataQualitySummary: {
+        overallStatus: 'partial',
+        canonicalPriceSource: 'SSI DailyOhlc',
+        issues: [
+          {
+            code: 'realtime_unavailable',
+            severity: 'info',
+            message: 'SSI realtime is unavailable.',
+            fields: { status: 'unavailable' },
+          },
+        ],
+        checks: {
+          dailyOhlc: 'ok',
+          intraday: 'unavailable',
+          realtime: 'unavailable',
+          tradeTape: 'unavailable',
+          profile: 'partial',
+          news: 'disabled',
+        },
+      },
+    };
+    mockedGetVietnamWatchlist.mockResolvedValue(response);
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledWith(defaultTickers));
+
+    const header = selectedTickerHeader();
+    expect(header.getByText('Daily source: SSI DailyOhlc')).toBeInTheDocument();
+    expect(header.getByText('Data quality: partial')).toBeInTheDocument();
+    expect(header.getByText('Daily OHLCV: OK')).toBeInTheDocument();
+    expect(header.queryByText('Daily source unavailable')).not.toBeInTheDocument();
+  });
+
+  it('does not render endpoint diagnostics in selected ticker data quality summary', async () => {
+    const response = makeResponse(defaultTickers);
+    (response.watchlist[0] as VietnamWatchItem & { dataQualitySummary?: unknown }).dataQualitySummary = {
+      overallStatus: 'partial',
+      canonicalPriceSource: 'SSI DailyOhlc',
+      issues: [
+        {
+          code: 'provider_diagnostic_detail',
+          severity: 'warning',
+          message: 'attempted endpoints: RealtimeQuote; HTTP status 404; raw provider error.',
+          fields: {
+            endpoint: 'RealtimeQuote',
+            httpStatus: 404,
+            rawProviderError: 'Not found',
+          },
+        },
+      ],
+      checks: {
+        dailyOhlc: 'ok',
+        realtime: 'HTTP status 404 from RealtimeQuote',
+        tradeTape: 'unavailable',
+        profile: 'ok',
+        news: 'disabled',
+      },
+    };
+    mockedGetVietnamWatchlist.mockResolvedValue(response);
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledWith(defaultTickers));
+
+    const header = selectedTickerHeader();
+    expect(header.getByText('Data quality issue detected.')).toBeInTheDocument();
+    expect(header.queryByText(/RealtimeQuote|HTTP status|raw provider|attempted endpoints/i)).not.toBeInTheDocument();
+  });
+
+  it('does not use recommendation wording in selected ticker data quality summary', async () => {
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledWith(defaultTickers));
+
+    const header = selectedTickerHeader();
+    const summary = header.getByLabelText('Data Quality Summary');
+    expect(summary.textContent).not.toMatch(/\b(buy|sell|hold)\b|target[- ]price|recommendation/i);
   });
 
   it('links watchlist ticker symbols to the company research page', async () => {
