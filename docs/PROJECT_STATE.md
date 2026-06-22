@@ -1,10 +1,10 @@
 # Project State
 
-Last updated: 2026-06-11
+Last updated: 2026-06-22
 
 ## Purpose
 
-This document gives Codex and other agents enough context to resume project work without rediscovering the current Vietnam dashboard behavior.
+This document gives Codex and other agents enough context to resume project work without rediscovering the current Vietnam dashboard behavior. The detailed source-of-truth roadmap remains `docs/VN_DASHBOARD_ROADMAP.md`.
 
 ## Repository Shape
 
@@ -12,99 +12,101 @@ This document gives Codex and other agents enough context to resume project work
 - FastAPI app: `api/app.py`
 - Stock endpoints: `api/v1/endpoints/stocks.py`
 - Vietnam market service: `src/services/vietnam_market_service.py`
-- Vietnam data adapter: `data_provider/mozyfin_fetcher.py`
-- Vietnam KBS snapshot adapter: `data_provider/vnstock_realtime_fetcher.py`
+- SSI FastConnect provider: `data_provider/ssi_fastconnect_fetcher.py`
+- Legacy Mozyfin provider code: `data_provider/mozyfin_fetcher.py`
+- Legacy KBS/vnstock adapter: `data_provider/vnstock_realtime_fetcher.py`
 - Web frontend: `apps/dsa-web/`
 - Vietnam dashboard page: `apps/dsa-web/src/pages/VietnamDashboardPage.tsx`
+- Vietnam company research page: `apps/dsa-web/src/pages/VietnamCompanyResearchPage.tsx`
 - Vietnam time utilities: `apps/dsa-web/src/utils/vietnamTime.ts`
 - Vietnam market phase utilities: `apps/dsa-web/src/utils/vietnamMarketPhase.ts`
-- VN setup reference: `README_VN.md`
-- VN realtime quote architecture: `docs/VIETNAM_REALTIME_ARCHITECTURE.md`
+- VN roadmap: `docs/VN_DASHBOARD_ROADMAP.md`
+- SSI integration notes: `docs/SSI_FASTCONNECT_INTEGRATION.md`
 - Future provider reference docs:
   - `docs/resources/realtime-data/`
   - `docs/resources/news-sources/`
 
 ## Vietnam Dashboard Current State
 
-- The dashboard supports both Mozyfin live mode and fixture mode.
-- Live mode source label is `Mozyfin live`.
-- Fixture mode source label is `Mozyfin fixture`.
-- Fixture mode is active when `MOZYFIN_FIXTURE_DIR` is set or when the Mozyfin fetcher has a valid fixture directory.
+- SSI FastConnect is the strict primary VN market-data provider for supported fields.
+- SSI owns daily OHLCV, chart candles, DailyStockPrice, reference/ceiling/floor, latest foreign-flow row, index list, index components when available, symbol metadata when available, intraday candles, realtime snapshot contract, and trade-tape contract.
+- `latest_price` currently uses SSI DailyOhlc close as the canonical dashboard price when SSI daily rows are available.
+- Mozyfin is disabled for VN dashboard runtime. Do not use it for news, social, OHLCV, chart, reference, foreign flow, index, metadata, intraday, realtime, trade tape, or fallback behavior.
+- KBS is legacy optional only and disabled by default. It must require explicit legacy flags before any diagnostic use and must not silently replace SSI-owned data.
+- VN news is disabled until a separate NewsProvider is implemented.
 - The default VN watchlist is `FPT,VPB,MSB,SCS,ACV,ACB`.
-- The `/vietnam` page is served by the built frontend through the FastAPI backend when running `python main.py --webui-only`.
-- The dashboard does not generate buy or sell recommendations. It only displays neutral condition labels.
-- Current active daily/intraday provider remains Mozyfin.
-- Optional vnstock/KBS snapshot support is implemented as a separate layer through `/api/v1/stocks/vn/realtime`.
-- Optional vnstock/KBS trade tape support is implemented through `/api/v1/stocks/vn/realtime/trades`.
-- KBS snapshot and trade tape data must not replace `latest_price`, Mozyfin daily OHLCV, or Mozyfin 1H intraday semantics.
-- The dashboard displays Daily close, KBS snapshot, and Latest trade tape separately.
-- The dashboard has a compact Data status panel, manual `Refresh KBS`, an `Auto-refresh KBS` toggle, split KBS refresh intervals, and VN market phase labels.
-- News provider integration beyond current Mozyfin news behavior is not implemented.
-- Docs under `docs/resources/` are for future evaluation only and must not be treated as approved providers.
+- The `/vietnam` page is served by the built frontend through the FastAPI backend when running `python main.py --webui-only` or `python main.py --serve-only`.
+- The dashboard uses neutral condition labels only and must not add trading instruction wording.
+- Docs under `docs/resources/` are for future evaluation only and must not be treated as approved providers without explicit approval.
 
 ## Data Semantics
 
-- `latest_price` currently uses the latest daily OHLCV close when Mozyfin quote output does not expose a reliable realtime matched price.
-- Mozyfin quote output is currently useful for foreign flow fields, but not treated as a reliable latest matched price source.
-- Intraday pulse uses Mozyfin 1H OHLCV candles. It is not a realtime matched quote.
-- KBS/vnstock snapshot is displayed separately from daily close and carries source, timestamp, age, stale, and unavailable/error status.
-- KBS snapshot fields include `realtime_price`, `realtime_time`, `realtime_time_display`, `snapshot_price`, `snapshot_time`, `snapshot_time_display`, `snapshot_note`, `age_seconds`, `is_stale`, and `stale_reason`.
-- KBS trade tape is separate from KBS snapshot and may exclude auction/ATC prints depending on provider output. Trade fields include `time`, `price`, `volume`, `match_type`, `id`, and `source`.
-- Quote and foreign metadata rules remain unchanged.
-- The frontend displays warnings for quote reliability, final daily candle uncertainty, adjustment uncertainty, and intraday not being a realtime quote.
-- RSI14 uses Wilder/RMA smoothing, with a simple RSI debug comparison available in service output.
+- Daily close and chart candles come from SSI DailyOhlc.
+- Reference, ceiling/floor, adjusted close if provided, matched volume/value, put-through volume/value, and latest foreign buy/sell/net volume/value come from SSI DailyStockPrice.
+- Internal MA/RSI/Bollinger indicators are derived from SSI DailyOhlc data.
+- SSI IntradayOhlc is a compact intraday candle source. It is not a realtime matched quote and is separate from official daily close.
+- SSI realtime snapshot is a separate realtime contract. It must not overwrite `latest_price` or SSI DailyOhlc close.
+- SSI trade tape is a separate trade-list contract. It must not be used as official daily close.
+- Company metadata from SSI Securities/SecuritiesDetails may be limited to symbol/exchange/market/source; optional company name, issuer, security type, lot size, listed shares, and listed date can remain null.
+- Corporate actions, financial statements, ratios, dividends/rights/splits, and macro data require explicit external providers. Do not infer those events from price gaps.
 - Dates and times shown in the VN dashboard should use Vietnam time formatting.
-- VN market phase labels are frontend-derived for normal weekdays in `Asia/Ho_Chi_Minh`: `Pre-open`, `ATO opening auction`, `Continuous morning`, `Lunch break`, `Continuous afternoon`, `ATC closing auction`, `Post-close`, `Closed`, and `Weekend / closed`. Holiday calendar support is not implemented and reports `holidayAware=false`.
+- RSI14 uses Wilder/RMA smoothing.
+
+## Live Section Contract
+
+- Missing object data should be represented as `null`.
+- Missing list data should be represented as `[]`.
+- Public live-section statuses should stay simple: `ok`, `unavailable`, or `disabled`.
+- Technical provider details such as attempted endpoints, HTTP status, stale dates, retryability, and raw provider error summaries belong in diagnostics/logs, not primary metric fields.
+- When no usable SSI realtime snapshot exists, `realtime_snapshot` should be `null`.
+- When intraday is unavailable, stale, or mismatched, `intraday_pulse` should be `null` and `intraday_candles` should be `[]`.
+- When no trade rows exist, trade rows should be `[]`.
+- UI availability must depend on section status plus null/empty checks, not on units metadata or cached diagnostic fields.
+- The UI should not render fake metric rows with `-` or `Unavailable` as if they were values for unavailable live sections.
 
 ## Cache State
 
-Vietnam cache TTLs are process-local:
+Vietnam cache TTLs are process-local and should be interpreted per source block:
 
-| Data type | TTL |
-| --- | ---: |
-| OHLCV daily | 300 seconds |
-| Quote | 60 seconds |
-| Intraday OHLCV | 60 seconds |
-| News | 1800 seconds |
-| KBS snapshot quotes | 10-15 seconds |
-| KBS trade tape | 5 seconds |
+| Data type | Current behavior |
+| --- | --- |
+| SSI DailyOhlc | Backend cache/TTL, strict source for daily rows and chart |
+| SSI DailyStockPrice | Recent-window fetch for quick facts; chunking exists for wider validation |
+| SSI IntradayOhlc | Backend cache/TTL; unavailable/stale states should not affect daily row validity |
+| SSI realtime snapshot | Separate realtime contract; unavailable state should not affect daily row validity |
+| SSI trade tape | Separate trade-tape contract; unavailable state should not affect daily row validity |
+| News | Disabled until a separate provider is implemented |
 
-`force_refresh=true` bypasses normal cache freshness checks for the requested watchlist call.
-
-Frontend KBS auto-refresh is separate from Mozyfin refresh:
-
-- KBS quotes: 10s / 15s / 30s, default 15s.
-- Latest trade tape: 5s / 10s / 15s, default 10s.
-- KBS refresh does not reload `/watchlist` or `/watchlist/overview`.
+`force_refresh=true` bypasses normal cache freshness checks for the requested watchlist call. Provider 404/unavailable is not the same as cache failure.
 
 ## Runtime Notes
 
-- The Mozyfin CLI may be installed at `C:\Users\admin.DESKTOP-RFN8S67\AppData\Roaming\npm\mozyfin-cli.cmd`.
-- That directory may not be in `PATH`; use the full path or prepend it to `PATH` in the launch shell.
-- Do not print `MOZYFIN_API_KEY`. Report presence only.
-- If direct Mozyfin CLI fails with `Missing API key`, do not assume application code is stale. Fix auth/session config first.
-- If the dashboard shows `fixture_mode: true`, the first thing to check is whether an old backend process was started with `MOZYFIN_FIXTURE_DIR`.
-- `vnstock==4.0.4` is a runtime dependency for Docker/Render KBS snapshot and trade tape support.
-- vnstock/KBS requires no app credentials, but public deployment needs license, usage, and provider behavior review.
-- KBS snapshot is polling/snapshot data and should not be described as guaranteed official exchange realtime.
+- SSI credentials must come from local environment variables or a secret manager only.
+- Do not print SSI `consumerID`, `consumerSecret`, access tokens, account IDs, auth headers, or raw auth responses.
+- Do not print legacy Mozyfin secrets if present in a developer environment.
+- Do not add FC Trading, order placement, account actions, cash transfer, stock transfer, or portfolio trading actions.
+- Mozyfin CLI/key/fixture configuration is not required for normal VN dashboard runtime.
+- KBS/vnstock is not required for normal VN dashboard runtime.
+- News/social is disabled until a separate NewsProvider exists.
 
 ## Verification Endpoints
 
 - Health: `GET /api/v1/stocks/vn/watchlist/health`
 - Watchlist: `GET /api/v1/stocks/vn/watchlist?tickers=FPT,VPB,MSB&force_refresh=true&include_intraday=true`
-- KBS snapshot: `GET /api/v1/stocks/vn/realtime?tickers=FPT,ACB,VCB`
-- KBS trade tape: `GET /api/v1/stocks/vn/realtime/trades?symbol=FPT&limit=100`
+- Chart: `GET /api/v1/stocks/vn/chart?symbol=FPT&range=6M`
+- Realtime snapshot contract: `GET /api/v1/stocks/vn/realtime?tickers=FPT,ACB,VCB`
+- Trade tape contract: `GET /api/v1/stocks/vn/realtime/trades?symbol=FPT&limit=100`
+- Company snapshot: `GET /api/v1/stocks/vn/company/FPT?force_refresh=true`
+- Index list: `GET /api/v1/stocks/vn/index-list?market=HOSE`
+- Index components: `GET /api/v1/stocks/vn/index-components?index_code=VN30`
 
-Expected live health:
-
-```text
-source: Mozyfin live
-fixture_mode: false
-```
-
-Expected fixture health:
+Expected strict SSI watchlist behavior:
 
 ```text
-source: Mozyfin fixture
-fixture_mode: true
+source: SSI
+actual_source: SSI
+fallback_used: false
+news_status.status: disabled
 ```
+
+Optional SSI intraday/realtime/trade-tape sections may be unavailable while daily SSI rows remain OK.

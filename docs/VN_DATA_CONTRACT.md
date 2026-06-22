@@ -1,0 +1,231 @@
+# Vietnam Dashboard Data Contract
+
+## Purpose
+
+This document defines the public data contract for the VN dashboard and company research page. It is intentionally data-quality-first: valid daily SSI data should remain visible even when optional live or enrichment sections are unavailable.
+
+## Status Enum
+
+Public section statuses should use:
+
+```text
+ok
+unavailable
+disabled
+```
+
+Use `ok` only when the section has usable data for its purpose. Use `unavailable` when the source is enabled but no usable data is available. Use `disabled` when the section is intentionally off.
+
+Technical sub-statuses, provider codes, HTTP status, retryability, and endpoint attempts belong in diagnostics.
+
+## Missing Data Rules
+
+Use these rules consistently across backend responses and frontend rendering:
+
+* Missing object data: `null`.
+* Missing list data: `[]`.
+* Do not emit placeholder objects for unavailable sections.
+* Do not create metric rows from unavailable sections.
+* Do not show `-` or `Unavailable` as if it were a metric value.
+* Keep diagnostics separate from primary metric fields.
+
+## Daily Data Contract
+
+Daily data is the primary public contract for the VN dashboard.
+
+Required daily fields when the watchlist row is usable:
+
+* `latest_price`: sourced from SSI DailyOhlc close while the DailyOhlc versus DailyStockPrice mismatch is unresolved.
+* `latest_price_source`: identifies the source as SSI DailyOhlc or equivalent SSI daily source label.
+* OHLCV fields: `open`, `high`, `low`, `close`, `daily_close`, `ohlcv_close`, `volume`, and value/amount fields when SSI provides them.
+* Price date fields: `latest_price_date`, `ohlcv_date`, or the current normalized daily trading date.
+* Source fields: `source`, `actual_source`, `fallback_used`, and block-specific source labels.
+* Finality fields: `final_close_status` or equivalent final/provisional/unknown field when available.
+
+Daily finality must stay explicit:
+
+* `final` means the system has a defensible final-close signal.
+* `provisional` or `in_progress` means the daily candle may still change.
+* `unknown` means the dashboard has no reliable finality signal.
+
+If daily SSI data is unavailable, the row should expose an unavailable status and null daily metrics rather than borrowing live, intraday, or legacy-provider values.
+
+## Live Section Contract
+
+### Intraday
+
+When SSI IntradayOhlc is usable:
+
+```text
+intraday_status.status = ok
+intraday_source = SSI
+intraday_candles = [ ... ]
+intraday_pulse = { ... }
+```
+
+When intraday is unavailable, stale, disabled, or date-mismatched:
+
+```text
+intraday_status.status = unavailable or disabled
+intraday_source = SSI
+intraday_candles = []
+intraday_pulse = null
+```
+
+Stale latest-date metadata and date-match details should move to `intraday_status` or diagnostics when there is no usable intraday section.
+
+### Realtime Snapshot
+
+When SSI realtime snapshot is usable:
+
+```text
+realtime_status.status = ok
+realtime_snapshot = { ... }
+```
+
+When no usable SSI realtime snapshot exists:
+
+```text
+realtime_status.status = unavailable or disabled
+realtime_snapshot = null
+```
+
+The primary UI should not render snapshot price, snapshot time, change, or session-volume metric rows when `realtime_snapshot` is `null`.
+
+### Trade Tape
+
+When SSI trade tape has usable rows:
+
+```text
+trade_tape_status.status = ok
+trade_tape = [ ... ]
+```
+
+When no trade rows exist:
+
+```text
+trade_tape_status.status = unavailable or disabled
+trade_tape = []
+```
+
+The desired public contract is a list for `trade_tape`. A wrapper object with `trades: []` is a remaining cleanup item and should not become the long-term public shape.
+
+### Diagnostics
+
+Diagnostics may include:
+
+* Attempted endpoint names.
+* Last endpoint.
+* HTTP status.
+* Provider status code.
+* Retryable flag.
+* Stale-date details.
+* Row counts.
+* Normalized keys.
+* Sanitized provider error summaries.
+
+Diagnostics must not include:
+
+* SSI credentials.
+* Tokens.
+* Auth headers.
+* Account IDs.
+* Raw auth responses.
+* Full raw provider payloads.
+
+## News Contract
+
+News is disabled until a separate VN news provider is implemented.
+
+Current public shape:
+
+```text
+news = []
+news_status.status = disabled
+news_status.source = disabled
+```
+
+News disabled state must not be treated as a daily market-data failure. Mozyfin is not a VN runtime news fallback.
+
+## Source Ownership
+
+| Data block | Owner | Public rule |
+| --- | --- | --- |
+| Daily OHLCV | SSI DailyOhlc | Canonical daily close and chart candles |
+| `latest_price` | SSI DailyOhlc | Uses DailyOhlc close until canonical-source mismatch is resolved |
+| Reference/ceiling/floor | SSI DailyStockPrice | Use when available |
+| Matched volume/value | SSI DailyStockPrice | Use when available |
+| Put-through volume/value | SSI DailyStockPrice | Use when available |
+| Latest foreign flow | SSI DailyStockPrice | Use latest matched-date row when available |
+| Foreign 5D/20D flow | Future enhancement | Compute only from matched-date historical DailyStockPrice rows |
+| Index list | SSI IndexList | Use SSI-returned index codes |
+| Index components | SSI IndexComponents | Use only when SSI returns rows |
+| Symbol metadata | SSI Securities/SecuritiesDetails | Optional fields may remain null |
+| Intraday candles | SSI IntradayOhlc | Strict source; no fallback |
+| Realtime snapshot | SSI realtime contract | Contract exists; live endpoint not confirmed |
+| Trade tape | SSI trade-tape contract | Contract exists; live endpoint not confirmed |
+| News | Future NewsProvider | Disabled now |
+| Financials | Future external provider | Not implemented |
+| Corporate actions | Future external provider | Not implemented; no inference |
+| Mozyfin | Disabled for VN runtime | No fallback |
+| KBS | Legacy optional only | Disabled by default |
+
+## UI Rendering Rules
+
+### Daily Data
+
+Render daily data when the row has valid SSI DailyOhlc fields and daily status is OK. Optional section failures should not hide daily close, chart, or DailyStockPrice fields.
+
+### Optional Live Metrics
+
+Render optional live metrics only when actual data exists:
+
+* Intraday metrics require `intraday_status.status = ok`, non-empty `intraday_candles`, and non-null `intraday_pulse`.
+* Realtime metrics require `realtime_status.status = ok` and non-null `realtime_snapshot`.
+* Trade tape requires `trade_tape_status.status = ok` and non-empty `trade_tape`.
+
+Otherwise render concise states:
+
+```text
+SSI intraday unavailable.
+SSI realtime unavailable. Daily SSI data is still available.
+SSI trade tape unavailable.
+```
+
+### Diagnostics Panel
+
+The diagnostics/data-quality panel may show endpoint details, HTTP status, retryability, and stale-date metadata. Primary cards should not show raw endpoint attempts or provider error text.
+
+### Units Metadata
+
+Units metadata does not prove data availability. UI availability must depend on status plus null/empty checks.
+
+### Cache Errors
+
+Cache errors and provider unavailable states are separate concepts. A provider 404 or unavailable live endpoint should not be shown as a daily SSI cache failure.
+
+## Known Contract TODOs
+
+### P0
+
+* Investigate SSI DailyOhlc vs DailyStockPrice same-date mismatch. Latest smoke observed FPT on `2026-06-22` with DailyOhlc/dashboard close fields at `70,700`, DailyStockPrice close/adjusted close at `70,800`, DailyOhlc volume at `3,642,400`, and DailyStockPrice matched volume at `3,643,500`.
+* Normalize unavailable `trade_tape` to `[]` with status in `trade_tape_status` and diagnostics under `diagnostics.trade_tape`.
+* Split public realtime/trade-tape status messages from diagnostics.
+
+### P1
+
+* Deprecate top-level `intraday_timeframe`.
+* Move stale intraday latest-date/date-match metadata into status/diagnostics when no usable intraday data exists.
+* Add backoff or longer TTL for non-retryable SSI realtime/trade-tape 404 responses.
+
+### P2
+
+* Improve SSI metadata mapping for company name, issuer, security type, lot size, listed shares, and listed date.
+* Add historical SSI DailyStockPrice foreign-flow support if available.
+* Clean quote metadata semantics when quote is disabled or unreliable.
+* Improve `final_close_status` using VN session/calendar rules.
+
+### P3
+
+* Clarify cache errors versus provider unavailable.
+* Clarify units metadata versus data availability.

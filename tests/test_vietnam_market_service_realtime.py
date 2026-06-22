@@ -187,6 +187,7 @@ def test_ssi_realtime_failure_is_separate_from_daily_row():
     assert item["daily_stock_price"]["status"] == "ok"
     assert item["realtime_source"] == "SSI"
     assert item["realtime_status"]["status"] == "unavailable"
+    assert item["realtime_snapshot"] is None
     assert "realtime snapshot unavailable" in item["realtime_status"]["message"]
     assert "RealtimeQuote" in item["realtime_status"]["message"]
 

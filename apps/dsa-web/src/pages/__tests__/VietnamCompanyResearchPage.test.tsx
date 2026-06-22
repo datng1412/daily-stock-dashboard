@@ -172,4 +172,40 @@ describe('VietnamCompanyResearchPage', () => {
       expect(stocksApi.getVietnamCompanyResearch).toHaveBeenCalledWith('FPT', false);
     });
   });
+
+  it('renders concise unavailable live sections without fake metric rows', async () => {
+    const snapshot = makeCompanySnapshot();
+    snapshot.intraday = {
+      source: 'SSI',
+      status: 'unavailable',
+      message: 'SSI IntradayOhlc latest candle date does not match latest daily trading date.',
+      candles: [],
+      pulse: undefined,
+    };
+    snapshot.realtime = {
+      source: 'SSI',
+      status: 'unavailable',
+      message: 'SSI FastConnect realtime snapshot unavailable (attempted endpoints: RealtimeQuote).',
+      snapshot: null,
+    };
+    snapshot.tradeTape = {
+      source: 'SSI',
+      status: 'unavailable',
+      message: 'SSI FastConnect trade tape unavailable (attempted endpoints: TradeTape).',
+      trades: [],
+    };
+    vi.mocked(stocksApi.getVietnamCompanyResearch).mockResolvedValue(snapshot);
+
+    renderPage();
+
+    expect(await screen.findByRole('heading', { name: 'FPT' })).toBeInTheDocument();
+    expect(screen.getByText('SSI intraday unavailable.')).toBeInTheDocument();
+    expect(screen.getByText('SSI realtime unavailable. Daily SSI data is still available.')).toBeInTheDocument();
+    expect(screen.getByText('SSI trade tape unavailable.')).toBeInTheDocument();
+    expect(screen.queryByText('Latest intraday close')).not.toBeInTheDocument();
+    expect(screen.queryByText('Session volume from intraday')).not.toBeInTheDocument();
+    expect(screen.queryByText('Snapshot price')).not.toBeInTheDocument();
+    expect(screen.queryByText('Trades loaded')).not.toBeInTheDocument();
+    expect(screen.queryByText(/attempted endpoints/i)).not.toBeInTheDocument();
+  });
 });

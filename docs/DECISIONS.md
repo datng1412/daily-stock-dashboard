@@ -1,25 +1,41 @@
 # Decisions
 
-Last updated: 2026-06-11
+Last updated: 2026-06-22
 
 This file records current product and engineering decisions that should not be re-litigated without explicit user direction.
 
-## Vietnam Dashboard Data Source
+## Vietnam Dashboard Product Boundary
 
-Decision: use Mozyfin as the Vietnam daily OHLCV, overview, selected detail, news, and intraday 1H adapter, with a fixture mode for local deterministic testing.
+Decision: the VN dashboard is a data-quality-first market-data dashboard, not an AI stock advisor.
 
 Rationale:
 
-- Live market data requires authentication and network access.
-- Fixture mode makes local UI/API development deterministic.
-- The API must clearly expose whether it is using live or fixture data.
+- The product should help users inspect source coverage, daily data availability, stale or unavailable optional sections, and diagnostics.
+- Recommendation wording can blur source facts with investment advice and make missing-data states look more certain than they are.
 
 Operational rule:
 
-- `MOZYFIN_FIXTURE_DIR` must be unset for live mode.
-- `MOZYFIN_API_KEY` must be present or the Mozyfin CLI must have usable stored auth for live mode.
-- Do not mask fixture mode as live mode.
-- KBS/vnstock snapshot and trade tape endpoints are optional separate layers. They must not replace Mozyfin daily or intraday fields.
+- Do not add buy/sell/hold labels, target-price language, trading instructions, account actions, or portfolio actions.
+- Separate facts, source status, diagnostics, and neutral interpretation.
+- Prefer neutral labels such as `Strong`, `Improving`, `Neutral`, `Weakening`, `Risk elevated`, and `Data unavailable`.
+
+## Vietnam Dashboard Data Source
+
+Decision: SSI FastConnect is the strict primary VN market-data provider for supported dashboard fields.
+
+Rationale:
+
+- SSI is the official provider path for supported VN market data.
+- Current dashboard behavior must be source-auditable and must not silently replace SSI-owned data with legacy providers.
+- Unsupported domains should be disabled or explicitly marked as future external-provider work.
+
+Operational rule:
+
+- SSI owns VN daily OHLCV, chart candles, DailyStockPrice/reference/ceiling/floor, latest foreign-flow row, index list, index components when available, symbol metadata when available, intraday candles, realtime snapshot contract, and trade-tape contract.
+- `latest_price` uses SSI DailyOhlc close as the canonical dashboard price when SSI daily rows are available.
+- Mozyfin is disabled for VN runtime and must not be used as fallback for SSI-owned fields.
+- KBS is legacy optional only, disabled by default, and must require explicit legacy flags before diagnostic use.
+- News is disabled until a separate NewsProvider is implemented.
 
 ## External Realtime And News Resources
 
@@ -27,80 +43,85 @@ Decision: external realtime and news resource docs may exist under `docs/resourc
 
 Operational rule:
 
-- Mozyfin remains the active Vietnam dashboard provider unless changed by a decision record.
-- No provider replacement should happen implicitly.
 - Resource docs must not trigger implementation, new API calls, scraping, or dashboard behavior changes by themselves.
 - Any future provider implementation must first summarize auth, rate limits, timestamp semantics, and data/price semantics.
+- Future news should use a separate NewsProvider contract, not Mozyfin free-tier news/social paths or scraping.
 
-## Vietnam KBS Snapshot Layer
+## SSI Realtime And Trade Tape Semantics
 
-Decision: vnstock/KBS snapshot support is an implemented optional data layer, not a replacement for daily OHLCV close.
+Decision: SSI realtime snapshot and SSI trade tape are separate optional live contracts, not replacements for SSI DailyOhlc close.
 
 Rationale:
 
-- Current `latest_price` semantics are auditable because they use Mozyfin daily OHLCV close.
-- KBS snapshot data has different licensing, timestamp, delay, cache, and provider semantics.
-- Users must be able to distinguish daily close, 1H intraday pulse, KBS board snapshot, and trade tape at a glance.
+- Daily OHLCV, realtime snapshot, and trade tape have different timestamp, finality, and row-shape semantics.
+- Users must be able to distinguish daily close, intraday candles, realtime snapshot, and trade tape at a glance.
+- Live SSI realtime/trade-tape endpoint names, permissions, and row shapes still need environment-specific validation.
 
 Operational rule:
 
-- Do not overwrite `latest_price` with KBS snapshot price.
+- Do not overwrite `latest_price` with realtime snapshot price.
 - Do not label daily close as realtime.
-- Do not write KBS snapshot or trade tape data into OHLCV, Mozyfin quote/foreign, or intraday OHLCV caches.
-- KBS snapshot fields should remain separate, including `realtime_price`, `snapshot_price`, normalized timestamp display, age, stale, and error/unavailable state.
-- `GET /api/v1/stocks/vn/realtime?tickers=FPT,ACB,VCB` returns KBS board snapshot rows when vnstock is available.
-- `GET /api/v1/stocks/vn/realtime/trades?symbol=FPT&limit=100` returns KBS trade tape rows when vnstock is available.
-- Existing `/api/v1/stocks/vn/watchlist` and `/api/v1/stocks/vn/watchlist/overview` semantics must remain unchanged.
-- Architecture reference: `docs/VIETNAM_REALTIME_ARCHITECTURE.md`.
-
-## KBS Trade Tape Semantics
-
-Decision: KBS `trades()` output is shown as latest trade tape only.
-
-Rationale:
-
-- Trade tape output may exclude auction or ATC prints depending on provider behavior.
-- KBS `price_board()` is the better source for board snapshot or closing board state.
-- The dashboard should explain this difference without synthesizing missing auction rows.
-
-Operational rule:
-
-- Do not fake 14:45 ATC trade rows from snapshot data.
-- Do not use trade tape as Mozyfin daily OHLCV close.
-- Label the section `Latest trade tape` and keep it separate from Daily close and KBS snapshot.
+- Do not use trade tape as official daily close.
+- Do not use KBS fallback unless explicit legacy diagnostics flags are enabled.
+- If SSI realtime or trade tape is unavailable, show unavailable and keep valid daily SSI rows OK.
+- Public statuses should stay simple: `ok`, `unavailable`, or `disabled`.
+- Endpoint attempts, HTTP status, retryability, and provider-error details belong in diagnostics/logs, not primary metric fields.
 
 ## Latest Price Semantics
 
-Decision: `latest_price` uses the latest daily OHLCV close unless Mozyfin quote output provides a reliable latest matched price.
+Decision: `latest_price` uses SSI DailyOhlc close when SSI daily data is available.
 
 Rationale:
 
-- Current quote output does not expose a reliable realtime matched price field.
-- The daily OHLCV close is stable and auditable.
-- The UI should disclose that the displayed latest price may be an OHLCV close.
+- SSI DailyOhlc is the strict daily OHLCV source for the dashboard.
+- Current same-date DailyOhlc versus DailyStockPrice mismatches need investigation before changing canonical price semantics.
+- The UI should disclose finality/provisional uncertainty separately from the value itself.
 
 Implication:
 
 - During trading hours, the latest daily candle may still be in progress.
 - After market close, it may represent final close, but finality still depends on source metadata.
-
-## Quote Semantics
-
-Decision: quote output is not currently treated as the reliable latest matched price source.
-
-Rationale:
-
-- Current quote output is valuable for foreign flow quantities and related fields.
-- Price freshness and match semantics are not reliable enough to label it as realtime matched price.
+- DailyStockPrice supplies reference/limits, matched/put-through, and latest foreign-flow fields unless a future decision explicitly changes canonical close behavior.
 
 ## Intraday Semantics
 
-Decision: intraday pulse is based on 1H OHLCV candles, not realtime quote ticks.
+Decision: SSI IntradayOhlc is a compact intraday candle source, not a realtime matched quote.
 
 Rationale:
 
-- Mozyfin 1H candles provide a clear, reproducible pulse view.
-- The dashboard should not imply tick-level or matched realtime behavior.
+- Intraday candle cadence can differ from requested dashboard timeframe.
+- Intraday data may be stale relative to SSI DailyOhlc and must be freshness-checked.
+- Intraday must remain separate from official daily close and SSI realtime snapshot.
+
+Operational rule:
+
+- Use `intraday_requested_timeframe` for the request hint and `intraday_actual_granularity` for detected returned cadence.
+- Do not interpret compatibility `intraday_timeframe` as a guaranteed candle interval.
+- If intraday is unavailable, stale, or mismatched, keep `intraday_pulse = null` and `intraday_candles = []`.
+- Do not derive intraday labels or metric rows from stale candles.
+
+## Live Section Null/Empty Contract
+
+Decision: unavailable optional live sections use null or empty data, not placeholder metrics.
+
+Operational rule:
+
+- No object data: `null`.
+- No list data: `[]`.
+- `realtime_snapshot` is `null` when no usable SSI realtime snapshot exists.
+- `intraday_pulse` is `null` and `intraday_candles` is `[]` when intraday is unavailable, stale, or mismatched.
+- Trade rows are `[]` when no trade tape rows exist.
+- UI availability depends on status plus null/empty checks, not units metadata.
+- Diagnostics may retain endpoint attempts, HTTP status, stale-date details, retryability, and provider-error summaries.
+
+## Quote Semantics
+
+Decision: quote metadata is not currently treated as the reliable latest matched price source.
+
+Rationale:
+
+- Current responses can expose quote metadata while `quote_price_date` and `quote_price_raw_field` remain null or unreliable.
+- Actual dashboard price source is SSI DailyOhlc close when daily data is available.
 
 ## RSI Method
 
@@ -117,44 +138,29 @@ Decision: Vietnam dashboard labels are neutral condition tags only.
 
 Rationale:
 
-- The dashboard is a monitoring surface.
-- It must not emit buy/sell recommendations.
-
-Forbidden behavior:
-
-- Do not add labels such as `Buy`, `Sell`, `Accumulate`, `Take profit`, or equivalent recommendation language unless the product requirement explicitly changes.
-
-## Cache TTLs
-
-Decision: current Vietnam process-local TTLs are:
-
-| Data type | TTL |
-| --- | ---: |
-| OHLCV daily | 300 seconds |
-| Quote | 60 seconds |
-| Intraday OHLCV | 60 seconds |
-| News | 1800 seconds |
-| KBS snapshot quotes | 10-15 seconds |
-| KBS trade tape | 5 seconds |
-
-Rationale:
-
-- Daily OHLCV can be cached longer than quote or intraday data.
-- News changes less frequently.
-- Quote TTL can be revisited if quote becomes the reliable price source.
-- KBS quote and trade tape caches are separate from Mozyfin caches so KBS refresh does not reload overview/detail data.
-
-## KBS Refresh Behavior
-
-Decision: KBS UI refresh is independent from Mozyfin overview/detail refresh.
+- The dashboard is an inspect-only monitoring surface.
+- It must not emit recommendation wording.
 
 Operational rule:
 
-- Manual `Refresh KBS` refreshes only KBS quotes and selected ticker trade tape.
-- `Auto-refresh KBS` is off by default.
-- KBS quote interval options are 10s, 15s, and 30s, with default 15s.
-- Latest trade tape interval options are 5s, 10s, and 15s, with default 10s.
-- KBS refresh must not call `/watchlist` or `/watchlist/overview`.
+- Prefer neutral labels such as status, trend, momentum, liquidity, source, unavailable, and last updated.
+- Do not add trading instruction labels unless the product requirement explicitly changes.
+
+## Cache TTLs
+
+Decision: Vietnam process-local cache TTLs are source-specific and must not blur provider availability.
+
+Rationale:
+
+- Daily OHLCV can be cached differently from intraday, realtime, trade tape, and metadata.
+- Provider unavailable is not the same as cache failure.
+- Non-retryable SSI realtime/trade-tape errors should eventually use longer TTL/backoff to avoid repeated endpoint probes.
+
+Operational rule:
+
+- Keep cache labels scoped to the source block.
+- Do not turn optional live-section cache errors into daily SSI row failures.
+- Do not treat units metadata as proof that a data block is available.
 
 ## Time Formatting
 

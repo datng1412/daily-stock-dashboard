@@ -52,6 +52,27 @@ const formatSource = (source?: string | null) => source || 'Source pending';
 
 const normalizeTicker = (ticker?: string) => (ticker ?? '').trim().toUpperCase().replace(/\.VN$/i, '');
 
+const hasMetricValue = (value?: number | string | null) => (
+  value !== null && value !== undefined && value !== '' && !(typeof value === 'number' && Number.isNaN(value))
+);
+
+const hasCompanyIntradayData = (snapshot: VietnamCompanyResearchResponse) => (
+  snapshot.intraday?.status === 'ok'
+  && Boolean(snapshot.intraday.pulse)
+  && (snapshot.intraday.candles?.length ?? 0) > 0
+);
+
+const hasCompanyRealtimeData = (snapshot: VietnamCompanyResearchResponse) => (
+  snapshot.realtime?.status === 'ok'
+  && Boolean(snapshot.realtime.snapshot)
+  && hasMetricValue(snapshot.realtime.snapshot?.price ?? snapshot.realtime.snapshot?.realtimePrice)
+);
+
+const hasCompanyTradeTapeData = (snapshot: VietnamCompanyResearchResponse) => (
+  snapshot.tradeTape?.status === 'ok'
+  && (snapshot.tradeTape.trades?.length ?? 0) > 0
+);
+
 const SectionShell: React.FC<{
   title: string;
   source?: string | null;
@@ -241,6 +262,9 @@ const VietnamCompanyResearchPage: React.FC = () => {
     { label: 'Bollinger middle', value: snapshot.technical.bollingerMiddle, formatter: formatPrice },
     { label: 'Bollinger lower', value: snapshot.technical.bollingerLower, formatter: formatPrice },
   ];
+  const hasIntradayData = hasCompanyIntradayData(snapshot);
+  const hasRealtimeData = hasCompanyRealtimeData(snapshot);
+  const hasTradeTapeRows = hasCompanyTradeTapeData(snapshot);
   const intradayPulse = snapshot.intraday?.pulse;
   const latestIntradayChange = intradayPulse?.intradayChange ?? intradayPulse?.latest1hChange;
   const intradayRows: MetricRow[] = [
@@ -302,22 +326,25 @@ const VietnamCompanyResearchPage: React.FC = () => {
           <MetricGrid rows={technicalRows} />
         </SectionShell>
         <SectionShell title="Intraday pulse" source={snapshot.intraday?.source ?? 'SSI'} status={snapshot.intraday?.status ?? 'unavailable'}>
-          {snapshot.intraday?.message && snapshot.intraday.status !== 'ok' ? (
-            <p className="mb-3 text-sm text-secondary-text">{snapshot.intraday.message}</p>
-          ) : null}
-          <MetricGrid rows={intradayRows} />
+          {hasIntradayData ? (
+            <MetricGrid rows={intradayRows} />
+          ) : (
+            <p className="text-sm text-secondary-text">SSI intraday unavailable.</p>
+          )}
         </SectionShell>
         <SectionShell title="SSI realtime" source={snapshot.realtime?.source ?? 'SSI'} status={snapshot.realtime?.status ?? 'unavailable'}>
-          {snapshot.realtime?.message && snapshot.realtime.status !== 'ok' ? (
-            <p className="mb-3 text-sm text-secondary-text">{snapshot.realtime.message}</p>
-          ) : null}
-          <MetricGrid rows={realtimeRows} />
+          {hasRealtimeData ? (
+            <MetricGrid rows={realtimeRows} />
+          ) : (
+            <p className="text-sm text-secondary-text">SSI realtime unavailable. Daily SSI data is still available.</p>
+          )}
         </SectionShell>
         <SectionShell title="SSI trade tape" source={snapshot.tradeTape?.source ?? 'SSI'} status={snapshot.tradeTape?.status ?? 'unavailable'}>
-          {snapshot.tradeTape?.message && snapshot.tradeTape.status !== 'ok' ? (
-            <p className="mb-3 text-sm text-secondary-text">{snapshot.tradeTape.message}</p>
-          ) : null}
-          <MetricGrid rows={tradeTapeRows} />
+          {hasTradeTapeRows ? (
+            <MetricGrid rows={tradeTapeRows} />
+          ) : (
+            <p className="text-sm text-secondary-text">SSI trade tape unavailable.</p>
+          )}
         </SectionShell>
       </section>
       <section className="grid gap-4 lg:grid-cols-3">

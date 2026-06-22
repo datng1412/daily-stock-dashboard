@@ -1,145 +1,224 @@
 # Vietnam Dashboard Runbook
 
-Last updated: 2026-06-16
+Last updated: 2026-06-22
 
 ## Goal
 
-Run and debug the Vietnam dashboard in either live Mozyfin mode or fixture mode.
+Run and debug the Vietnam dashboard in strict SSI FastConnect mode. Mozyfin is disabled for VN runtime, KBS is legacy optional only, and news is disabled until a separate NewsProvider is implemented.
 
-## Live Mode
+## Live SSI Mode
 
-Use live mode when validating current market data.
+Use live SSI mode when validating current market data. Do not print SSI credentials, tokens, account IDs, or auth headers.
 
 ```powershell
-cd D:\daily-dashboard\daily-stock-dashboard
-
-Remove-Item Env:MOZYFIN_FIXTURE_DIR -ErrorAction SilentlyContinue
+cd D:\stock-dashboard
 
 $env:PYTHONUTF8 = "1"
 $env:MARKET = "VN"
 $env:STOCK_LIST = "FPT,VPB,MSB,SCS,ACV,ACB"
 
-# Do not print the key. Live mode requires either:
-# - mozyfin-cli login
-# - or MOZYFIN_API_KEY set from a secure local secret source.
-# $env:MOZYFIN_API_KEY = "<mozyfin-api-key>"
+$env:SSI_FASTCONNECT_ENABLED = "true"
+$env:SSI_FASTCONNECT_BASE_URL = "https://fc-data.ssi.com.vn/api/v2/Market"
+$env:VN_DAILY_DATA_PROVIDER = "ssi"
+$env:VN_CHART_DATA_PROVIDER = "ssi"
+$env:VN_DAILY_STOCK_PRICE_PROVIDER = "ssi"
+$env:VN_INDEX_DATA_PROVIDER = "ssi"
+$env:VN_INTRADAY_DATA_PROVIDER = "ssi"
+$env:VN_REALTIME_DATA_PROVIDER = "ssi"
+$env:VN_TRADE_TAPE_PROVIDER = "ssi"
+$env:VN_NEWS_PROVIDER = "disabled"
+$env:MOZYFIN_ENABLED = "false"
+$env:MOZYFIN_NEWS_ENABLED = "false"
+$env:VN_ALLOW_LEGACY_MOZYFIN_PROVIDER = "false"
+$env:KBS_ENABLED = "false"
+$env:VN_ALLOW_LEGACY_KBS_PROVIDER = "false"
 
-.\.venv\Scripts\python.exe main.py --webui-only
+# Set SSI_FASTCONNECT_CONSUMER_ID and SSI_FASTCONNECT_CONSUMER_SECRET
+# from a local secret source only. Do not echo them.
+
+python main.py --serve-only --host 127.0.0.1 --port 8000
 ```
+
+For local frontend development, run the web app separately after starting the backend:
+
+```powershell
+cd D:\stock-dashboard\apps\dsa-web
+npm.cmd ci
+npm.cmd run dev
+```
+
+Use the URL printed by Vite for frontend development. The built frontend is served by the backend when using `--serve-only` with current build artifacts.
 
 Open:
 
 ```text
 http://127.0.0.1:8000/vietnam
+http://127.0.0.1:8000/vietnam/company/FPT
 ```
 
-Expected health:
-
-```powershell
-Invoke-RestMethod "http://127.0.0.1:8000/api/v1/stocks/vn/watchlist/health" |
-  Select-Object source, fixture_mode, symbols_loaded, last_trading_date
-```
-
-Expected:
+Expected watchlist behavior:
 
 ```text
-source: Mozyfin live
-fixture_mode: False
+source: SSI
+actual_source: SSI
+fallback_used: false
+news_status.status: disabled
 ```
 
-## Fixture Mode
+## Safe SSI Smoke
 
-Use fixture mode only for deterministic local testing.
+Run the smoke script when local SSI credentials are configured. It prints safe status/count/key information only.
 
 ```powershell
-cd D:\daily-dashboard\daily-stock-dashboard
-
-$env:PYTHONUTF8 = "1"
-$env:MARKET = "VN"
-$env:STOCK_LIST = "FPT,VPB,MSB,SCS,ACV,ACB"
-$env:MOZYFIN_FIXTURE_DIR = "tests/fixtures/mozyfin"
-
-.\.venv\Scripts\python.exe main.py --webui-only
+python scripts\ssi_fastconnect_smoke.py
 ```
 
-Expected:
+Expected high-level result in a healthy SSI environment:
 
 ```text
-source: Mozyfin fixture
-fixture_mode: True
+SSI enabled: true
+AccessToken: OK
+DailyOhlc FPT rows: around 250
+DailyStockPrice FPT rows: around 250
+DailyIndex VN30 rows: around 250
 ```
 
-## Local Docker
-
-Build from the repository root with the Dockerfile under `docker/`:
+Use probe mode only for endpoint diagnostics. It must not print tokens, credentials, auth headers, or full provider bodies.
 
 ```powershell
-docker build -f docker/Dockerfile -t vietnam-dashboard:local .
+python scripts\ssi_fastconnect_smoke.py --probe
 ```
 
-Run live mode without printing secrets:
+## Force Refresh API
 
 ```powershell
-docker run --rm -p 8000:8000 `
-  --env PYTHONUTF8=1 `
-  --env MARKET=VN `
-  --env STOCK_LIST=FPT,VPB,MSB,SCS,ACV,ACB `
-  --env DATA_CACHE_DIR=/app/data/cache `
-  --env MOZYFIN_API_KEY `
-  -v "${PWD}\data:/app/data" `
-  -v "${PWD}\logs:/app/logs" `
-  -v "${PWD}\reports:/app/reports" `
-  vietnam-dashboard:local
+Invoke-RestMethod "http://127.0.0.1:8000/api/v1/stocks/vn/watchlist?tickers=FPT,VPB,MSB&force_refresh=true&include_intraday=true" |
+  ConvertTo-Json -Depth 12
 ```
 
-Run deterministic fixture mode only for local checks:
+For each ticker, inspect:
 
-```powershell
-docker run --rm -p 8000:8000 `
-  --env PYTHONUTF8=1 `
-  --env MARKET=VN `
-  --env STOCK_LIST=FPT,VPB,MSB,SCS,ACV,ACB `
-  --env DATA_CACHE_DIR=/app/data/cache `
-  --env MOZYFIN_FIXTURE_DIR=/app/tests/fixtures/mozyfin `
-  -v "${PWD}\data:/app/data" `
-  -v "${PWD}\logs:/app/logs" `
-  -v "${PWD}\reports:/app/reports" `
-  -v "${PWD}\tests\fixtures\mozyfin:/app/tests/fixtures/mozyfin:ro" `
-  vietnam-dashboard:local
-```
+- `source`
+- `actual_source`
+- `fallback_used`
+- `latest_price`
+- `latest_price_source`
+- `latest_price_date`
+- `ohlcv_date`
+- `daily_stock_price.status`
+- `reference_price`
+- `ceiling_price`
+- `floor_price`
+- `foreign_net_volume`
+- `foreign_net_value`
+- `intraday_status`
+- `intraday_candles`
+- `intraday_pulse`
+- `realtime_status`
+- `realtime_snapshot`
+- `trade_tape_status`
+- `trade_tape`
+- `news_status`
+- `cache_status`
 
-The image creates `/app/data/cache` during build and the entrypoint repairs write permissions for `/app/data`, `/app/data/cache`, `/app/logs`, and `/app/reports` before dropping to the non-root `dsa` user. If a host bind mount is read-only or cannot be repaired by the entrypoint, set `DATA_CACHE_DIR` to another writable path such as `/tmp/dsa-cache` for ephemeral cache.
+Use `ConvertTo-Json -Depth 12`; shallow JSON depth can stringify nested objects as `@{...}` and mislead debugging.
 
-## Render Deployment
+## Smoke Endpoints
 
-Use a Docker Web Service. There is no fixture mode on Render; do not set `MOZYFIN_FIXTURE_DIR`.
-
-Recommended settings:
-
-- Dockerfile path: `docker/Dockerfile`
-- Docker context: repository root
-- Health check path: `/api/v1/stocks/vn/watchlist/health`
-
-Required environment variables:
+Use these endpoints for a focused docs/runtime smoke. They should not print credentials or raw auth responses.
 
 ```text
-MOZYFIN_API_KEY=<set in Render secret env>
-PYTHONUTF8=1
-MARKET=VN
-STOCK_LIST=FPT,VPB,MSB,SCS,ACV,ACB
+GET http://127.0.0.1:8000/api/v1/stocks/vn/watchlist?tickers=FPT&force_refresh=true
+GET http://127.0.0.1:8000/api/v1/stocks/vn/index-components?index_code=VN30
+GET http://127.0.0.1:8000/api/v1/stocks/vn/observability
+GET http://127.0.0.1:8000/vietnam
+GET http://127.0.0.1:8000/vietnam/company/FPT
 ```
 
-Cache setting:
+Expected smoke behavior:
+
+* Daily SSI data is visible when credentials and DailyOhlc are available.
+* `news_status.status` is `disabled`.
+* Missing realtime and trade tape render unavailable states.
+* Intraday is unavailable if stale or date-mismatched.
+* Optional live sections do not render fake metric rows.
+* Mozyfin and KBS are not normal-mode fallbacks.
+
+## Live Section Contract Checks
+
+The live-section contract is strict:
+
+- No object data: `null`
+- No list data: `[]`
+- Public status: `ok`, `unavailable`, or `disabled`
+- Technical details: diagnostics/logs, not primary metric fields
+
+Expected unavailable examples:
 
 ```text
-DATA_CACHE_DIR=/tmp/dsa-cache
+realtime_snapshot: null
+intraday_pulse: null
+intraday_candles: []
+trade rows: []
 ```
 
-Use `/tmp/dsa-cache` when the Render service does not have a persistent disk. If a persistent disk is mounted at `/app/data`, set `DATA_CACHE_DIR=/app/data/cache`; the Docker entrypoint creates and repairs that directory before starting the app when it is allowed to run as root. The cache only stores the remote stock autocomplete index and does not change Mozyfin daily OHLCV, 1H intraday pulse, quote, foreign, or KBS snapshot semantics.
+The UI should show concise states such as:
 
-## Stop Old Backend Processes
+```text
+SSI intraday unavailable.
+SSI realtime unavailable. Daily SSI data is still available.
+SSI trade tape unavailable.
+News disabled.
+```
 
-Before debugging stale data, stop old project Python processes.
+Do not treat unavailable intraday, realtime, trade tape, index components, or news as daily SSI row failure when SSI DailyOhlc is valid.
+
+## Current Data-Quality Checks
+
+### DailyOhlc vs DailyStockPrice
+
+If SSI DailyOhlc and SSI DailyStockPrice disagree for the same ticker/date, do not silently overwrite one source with the other. First check:
+
+1. Same trading date.
+2. Cache freshness.
+3. Old backend process.
+4. Chart/watchlist TTL mismatch.
+5. Whether the provider has provisional versus final values.
+
+Current dashboard rule: `latest_price` uses SSI DailyOhlc close as canonical dashboard price. DailyStockPrice provides reference/limits/foreign/matched/put-through fields unless a future design explicitly changes canonical source semantics.
+
+### Intraday Freshness
+
+If latest SSI intraday candle date does not match latest SSI daily trading date:
+
+- Keep daily SSI row `ok` when DailyOhlc is valid.
+- Mark intraday unavailable.
+- Keep `intraday_pulse = null`.
+- Keep `intraday_candles = []` for the usable public section.
+- Put stale-date diagnostics in status/diagnostics.
+
+### Realtime And Trade Tape
+
+SSI realtime snapshot and SSI trade tape are separate optional live contracts. If live endpoints return unavailable or no usable rows:
+
+- Keep daily SSI row `ok` when DailyOhlc is valid.
+- Keep public status concise.
+- Put attempted endpoint, HTTP status, retryability, and provider-error details in diagnostics.
+- Do not use KBS unless explicit legacy diagnostics flags are enabled.
+
+## Stale Data Diagnosis
+
+Use this order:
+
+1. Multiple backend processes or old port listener.
+2. Wrong frontend/backend port.
+3. SSI credentials missing or provider disabled.
+4. SSI DailyOhlc cache returning stale data.
+5. SSI DailyStockPrice cache returning a different date/window.
+6. Browser or frontend build cache.
+7. Optional live-section endpoint unavailable; this is not a daily-data failure.
+
+Useful process check:
 
 ```powershell
 Get-CimInstance Win32_Process |
@@ -151,7 +230,7 @@ Get-CimInstance Win32_Process |
   Select-Object ProcessId, ParentProcessId, CreationDate, CommandLine
 ```
 
-Stop the matching PIDs:
+Stop a stale matching PID only after confirming it belongs to this workspace:
 
 ```powershell
 Stop-Process -Id <PID> -Force
@@ -163,101 +242,57 @@ Check port 8000:
 netstat -ano | findstr ":8000"
 ```
 
-## Check Mozyfin CLI
+## TEMP/TMP And npm Cache When C: Is Full
 
-The CLI may not be in PATH. Check PATH first:
+If Windows temporary storage or the npm cache on `C:` is full, redirect temporary paths for the current PowerShell session before running frontend install/build commands:
 
 ```powershell
-where.exe mozyfin-cli
-where.exe mozyfin
-where.exe mozyfin-cli.cmd
-where.exe mozyfin.cmd
+New-Item -ItemType Directory -Force D:\stock-dashboard\.tmp | Out-Null
+New-Item -ItemType Directory -Force D:\stock-dashboard\.npm-cache | Out-Null
+$env:TEMP = "D:\stock-dashboard\.tmp"
+$env:TMP = "D:\stock-dashboard\.tmp"
+$env:npm_config_cache = "D:\stock-dashboard\.npm-cache"
 ```
 
-If PATH lookup fails, use the full path from your npm global bin directory. Common Windows locations include:
+These settings only affect the current shell session. They do not change SSI provider ownership or dashboard data semantics.
+
+## Docker / Render Notes
+
+Docker and Render should use SSI environment variables and must not require Mozyfin API keys for VN dashboard runtime.
+
+Required secret values:
 
 ```text
-%APPDATA%\npm\mozyfin-cli.cmd
-%APPDATA%\npm\mozyfin.cmd
+SSI_FASTCONNECT_CONSUMER_ID=<set in secret env>
+SSI_FASTCONNECT_CONSUMER_SECRET=<set in secret env>
 ```
 
-Example full-path fallback:
+Required non-secret provider defaults:
 
-```powershell
-& "$env:APPDATA\npm\mozyfin-cli.cmd" --help
+```text
+SSI_FASTCONNECT_ENABLED=true
+VN_DAILY_DATA_PROVIDER=ssi
+VN_CHART_DATA_PROVIDER=ssi
+VN_DAILY_STOCK_PRICE_PROVIDER=ssi
+VN_INDEX_DATA_PROVIDER=ssi
+VN_INTRADAY_DATA_PROVIDER=ssi
+VN_REALTIME_DATA_PROVIDER=ssi
+VN_TRADE_TAPE_PROVIDER=ssi
+VN_NEWS_PROVIDER=disabled
+MOZYFIN_ENABLED=false
+MOZYFIN_NEWS_ENABLED=false
+KBS_ENABLED=false
 ```
 
-Run doctor without printing secrets, using either the PATH command or the full path fallback:
-
-```powershell
-mozyfin-cli.cmd doctor
-# or:
-& "$env:APPDATA\npm\mozyfin-cli.cmd" doctor
-```
-
-If doctor says `Missing API key`, set `MOZYFIN_API_KEY` or run login with a key supplied by the user. Never print the key.
-
-## Direct Live Checks
-
-```powershell
-mozyfin-cli.cmd ohlcv FPT.VN --timeframe 1d --limit 3 --csv fpt_check.csv
-mozyfin-cli.cmd ohlcv FPT.VN --timeframe 1h --limit 3 --csv fpt_1h_check.csv
-mozyfin-cli.cmd quote FPT.VN --limit 1 --csv fpt_quote_check.csv
-
-Get-Content fpt_check.csv
-Get-Content fpt_1h_check.csv
-Get-Content fpt_quote_check.csv
-```
-
-If PATH lookup fails, replace `mozyfin-cli.cmd` with the full path fallback, for example `& "$env:APPDATA\npm\mozyfin-cli.cmd"`.
-
-Compare these dates to API and UI dates.
-
-## Force Refresh API
-
-```powershell
-Invoke-RestMethod "http://127.0.0.1:8000/api/v1/stocks/vn/watchlist?tickers=FPT,VPB,MSB&force_refresh=true&include_intraday=true"
-```
-
-For FPT, inspect:
-
-- `latest_price`
-- `latest_price_source`
-- `latest_price_date`
-- `ohlcv_date`
-- `quote_date`
-- `foreign_net_date`
-- latest `intraday_candles[].date_time`
-- `source`
-- `fixture_mode`
-- `cache_status`
-- `warnings`
-
-## Stale Data Diagnosis
-
-Use this order:
-
-1. Multiple backend processes or old port 8000 listener.
-2. Wrong frontend/backend port.
-3. `MOZYFIN_FIXTURE_DIR` set.
-4. Mozyfin auth missing.
-5. Direct Mozyfin CLI returning old data.
-6. API cache returning stale data.
-7. Browser or frontend build cache.
-
-Interpretation:
-
-- CLI old, API old: Mozyfin source is stale.
-- CLI fresh, API old: backend/cache/process issue.
-- API fresh, UI old: frontend/browser/port issue.
-- `fixture_mode: true`: fixture mode issue.
-- Multiple backend processes: process/port issue.
+Use `/tmp/dsa-cache` when the deployment service does not have a persistent disk. Cache behavior must not change SSI/Mozyfin/KBS source ownership.
 
 ## Data Semantics Reminder
 
-- `latest_price` currently uses OHLCV daily close if quote has no reliable latest matched price.
-- Quote is not a reliable latest matched price source yet.
-- Intraday pulse uses 1H OHLCV candles, not realtime quote.
+- `latest_price` uses SSI DailyOhlc close when SSI daily data is available.
+- SSI DailyStockPrice supplies reference/limits, matched/put-through, and latest foreign-flow fields.
+- SSI IntradayOhlc is not a realtime matched quote.
+- SSI realtime snapshot and trade tape are separate optional live contracts.
+- News is disabled until a separate provider is implemented.
 - RSI14 uses Wilder/RMA.
-- Labels are neutral condition tags only, not recommendations.
+- Labels are neutral condition tags only.
 - VN dashboard visible times should use Vietnam time.

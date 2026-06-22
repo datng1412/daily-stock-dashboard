@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The Vietnam dashboard is a source-aware stock inspection workspace. It should help users inspect price, volume, news, realtime board state, and data freshness without turning the UI into trading advice.
+The Vietnam dashboard is a data-quality-first, source-aware stock inspection workspace. It should help users inspect price, volume, source coverage, unavailable states, and data freshness without turning the UI into trading advice.
 
 The dashboard must remain:
 
@@ -11,6 +11,12 @@ The dashboard must remain:
 * Source-aware
 * Clear about stale or unavailable data
 * Neutral in wording
+
+Companion product docs:
+
+* `docs/VN_PRODUCT_SPEC.md` defines the product goal, screens, UX principles, MVP scope, and milestones.
+* `docs/VN_DATA_CONTRACT.md` defines public statuses, null/empty missing-data rules, live-section contracts, source ownership, and UI rendering rules.
+* `docs/VN_DATA_QUALITY_TODOS.md` tracks prioritized data correctness, live-section semantics, enrichment, and cleanup work.
 
 ## Core data rules
 
@@ -26,7 +32,7 @@ These rules must not be broken.
 * Do not infer corporate actions from price/reference gaps.
 * Do not mutate raw OHLCV close for dividends.
 * Corporate actions must come from an explicit event/history source.
-* No buy/sell/hold/recommendation wording.
+* No trading-instruction, price-target, or recommendation wording.
 * Use neutral labels such as status, trend, momentum, liquidity, source, unavailable, last updated.
 
 ## Provider strategy
@@ -89,6 +95,103 @@ If SSI-owned data is unavailable, show unavailable. Do not silently fallback.
 * KBS legacy realtime/trade-tape paths are disabled by default and require explicit legacy flags.
 * News/social are disabled/not implemented until a separate NewsProvider is added.
 * Local DB market-data storage is deferred; current mode is SSI live API plus backend cache/TTL.
+
+## Product milestones
+
+### M1 - SSI daily MVP freeze
+
+Freeze current daily data semantics around SSI DailyOhlc as canonical `latest_price`. Do not change canonical source behavior until the DailyOhlc versus DailyStockPrice mismatch is investigated and final/provisional semantics are designed.
+
+Exit criteria:
+
+* Daily watchlist works from SSI DailyOhlc and SSI DailyStockPrice.
+* Source badges distinguish DailyOhlc from DailyStockPrice and optional live sections.
+* Missing live sections render unavailable states.
+* Mozyfin and KBS are not normal fallbacks.
+* Daily close is not presented as realtime.
+
+### M2 - Data-quality panel
+
+Separate primary user-facing source/status copy from diagnostics. Provider endpoint attempts, HTTP status, retryability, stale-date details, and raw provider error summaries should live in diagnostics/logs rather than metric cards.
+
+Scope:
+
+* Show DailyOhlc versus DailyStockPrice mismatches.
+* Show final/provisional/unknown close status.
+* Show stale intraday date mismatch.
+* Show realtime and trade-tape unavailable diagnostics.
+* Show metadata missingness without treating optional nulls as row failure.
+
+### M3 - Company research page expansion
+
+Expand the company research page with richer SSI metadata, clearer source coverage, and future external-provider blocks for financials and corporate-action events.
+
+Scope:
+
+* Header and profile summary.
+* Daily price block.
+* Technical snapshot.
+* Foreign-flow block.
+* Price-limit and liquidity block.
+* Live data availability block.
+* Diagnostics/data-quality panel.
+* Neutral wording only.
+
+### M4 - SSI realtime/trade-tape investigation
+
+Confirm SSI realtime and trade-tape endpoint names, permissions, row shapes, retry behavior, and final public contract. Until confirmed, keep these sections as explicit SSI unavailable states when no usable rows return.
+
+Rules:
+
+* Confirm endpoint and permission requirements before claiming live support.
+* Do not fake values from daily close, intraday candles, or stale snapshots.
+* If endpoints remain unavailable, document the unavailable state and diagnostics.
+
+### M5 - News provider
+
+Implement a separate VN NewsProvider. Mozyfin remains disabled for VN runtime.
+
+Rules:
+
+* News remains disabled until implemented.
+* Do not depend on Mozyfin news/social paths.
+* Keep news independent from SSI market-data availability.
+
+### M6 - Financials/corporate actions
+
+Add external provider coverage for financial statements, ratios, dividends, rights, splits, and corporate action event history. Do not infer these from price gaps.
+
+Rules:
+
+* Use only explicit structured sources.
+* Do not infer corporate actions from adjusted-price or reference gaps.
+* Keep unavailable placeholders until provider semantics are validated.
+
+## Known data-quality TODOs
+
+### P0 - contract/data correctness
+
+* Investigate SSI DailyOhlc vs DailyStockPrice mismatch on the same ticker/date. Latest smoke observed FPT on `2026-06-22` with SSI DailyOhlc/dashboard `latest_price`, `ohlcv_close`, and `daily_close` at `70,700`, while SSI DailyStockPrice `close` and `adjusted_close` were `70,800`. The same check showed DailyOhlc `volume = 3,642,400` and DailyStockPrice `matched_volume = 3,643,500`. The dashboard currently uses SSI DailyOhlc close as canonical `latest_price`; follow-up work must decide canonical source and final/provisional status semantics before changing this behavior.
+* Normalize unavailable trade tape contract. Current smoke can still show `trade_tape` as an object containing `trades: []` and `status: unavailable`. Desired contract: `trade_tape = []`, `trade_tape_status = { status: "unavailable", source: "SSI" }`, and endpoint/http details under `diagnostics.trade_tape`.
+* Split public status message from diagnostics. Current `realtime_status.message` and `trade_tape_status.message` can contain attempted endpoints, last endpoint, HTTP status such as 404, and raw error copy. Desired contract: short user-safe `status.message`; detailed attempted endpoints, last endpoint, HTTP status, retryable flag, and raw provider error summary under `diagnostics.realtime` or `diagnostics.trade_tape`.
+
+### P1 - live-section semantics
+
+* Deprecate top-level `intraday_timeframe`. Use `intraday_requested_timeframe` and `intraday_actual_granularity`; the UI must not interpret `intraday_timeframe` as usable candle interval when `intraday_status.status != ok`.
+* Move stale intraday `latest_date` and `date_match` metadata into status/diagnostics when no usable intraday data exists. Keep `intraday_candles = []` and `intraday_pulse = null` for unavailable/stale intraday sections.
+* Add backoff or longer TTL for non-retryable SSI realtime/trade-tape 404 responses. Desired future behavior: mark `retryable=false`, use a longer TTL/backoff, and avoid repeated endpoint probes that are known unavailable.
+
+### P2 - data enrichment
+
+* Improve SSI Securities/SecuritiesDetails metadata mapping for `company_name`/`name`, issuer, lot size, listed shares, listed date, and security type. Current smoke still shows many optional symbol metadata fields as null.
+* Add SSI DailyStockPrice foreign-flow history if available. Current response can have latest foreign net only and `foreign_net_history_count=1`, so `foreign_net_5d` and `foreign_net_20d` remain null. Compute 5D/20D only from matched-date historical DailyStockPrice rows; otherwise expose an insufficient-history state instead of silent nulls.
+* Clean quote metadata semantics. Current responses can have `quote_date` while `quote_price_date` and `quote_price_raw_field` are null/unreliable. Distinguish quote metadata from actual price source.
+* Improve `final_close_status`. Current response can say `final_close_status=unknown` and warn the daily candle may still be in progress. Desired follow-up: use VN trading calendar/session time when possible, expose `in_progress`/`provisional` during session, and use `final` or `unknown_after_close` after session if SSI does not confirm finality.
+
+### P3 - cleanup
+
+* Clarify `cache_errors` vs provider unavailable. Provider 404/unavailable is not the same as cache failure.
+* Clarify units metadata vs data availability. Units may list intraday/realtime fields even when data is unavailable; UI availability must depend on status plus null/empty checks, not units presence.
 
 ## Current known issues / follow-up notes
 
@@ -183,6 +286,8 @@ The same smoke found the requested dashboard timeframe label may not describe ac
 
 Contract cleanup before Phase 3 commit: `intraday_requested_timeframe` is the SSI request hint, while `intraday_actual_granularity` and `intraday_actual_granularity_seconds` describe detected returned cadence. The compatibility `intraday_timeframe` field remains for existing clients but must not be presented as actual candle granularity.
 
+Unavailable live-section data must stay empty instead of becoming fake metrics. If SSI intraday is disabled, unavailable, stale, or has no current candle rows, return `intraday_pulse = null`, `intraday_candles = []`, and render a concise `SSI intraday unavailable` state. If SSI realtime snapshot is unavailable, return `realtime_snapshot = null` and do not render snapshot price/time/change/session-volume rows. If SSI trade tape has no rows, return `trade_tape = []`, keep status in `trade_tape_status`, and render `SSI trade tape unavailable`; attempted endpoints, HTTP status, and sanitized diagnostics belong in details/logs, not primary metric rows.
+
 ### Final close / adjusted price status remains conservative
 
 `final_close_status = unknown` and `adjusted_price_status = unknown` should remain conservative unless SSI provides explicit finality/adjustment metadata. Do not infer corporate actions from adjusted close/reference gaps. Do not mutate raw OHLCV close.
@@ -262,13 +367,13 @@ External providers are required for:
 
 * Vietnam watchlist cards
 * SSI daily OHLCV source
-* KBS realtime snapshot
-* KBS trade tape
+* SSI realtime snapshot contract
+* SSI trade tape contract
 * SSI DailyStockPrice reference/limit/foreign/matched detail block
 * SSI IntradayOhlc intraday pulse
 * Daily close / realtime snapshot / trade tape separation
-* Phase-aware KBS snapshot state
-* KBS unavailable/error normalization
+* Legacy KBS snapshot state kept disabled by default
+* SSI unavailable/error normalization
 * Data freshness and status layer
 * Observability endpoint
 
@@ -466,7 +571,7 @@ Implemented:
 * Larger chart overlay using the existing loaded SSI daily OHLCV chart points.
 * Same range, MA20/MA50/Bollinger, zoom, pan, and reset controls.
 * Close button and Escape key support.
-* Daily OHLCV and KBS snapshot separation remains visible in expanded mode.
+* Daily OHLCV and SSI realtime separation remains visible in expanded mode.
 * Compact and expanded modes share the same chart control components to keep behavior aligned.
 
 Goal:
@@ -559,7 +664,7 @@ Status: partial in current scanability batch.
 Implemented:
 
 * Added a compact watchlist scan summary with neutral `Strong`, `Improving`, `Neutral`, `Weakening`, `Risk elevated`, and `Data unavailable` counts.
-* Added a table-level scan-state column derived from existing status labels, cache freshness, and KBS snapshot state.
+* Added a table-level scan-state column derived from existing status labels, cache freshness, and optional live-section state.
 * Kept normal warnings as secondary table context so warning-only rows do not dominate the scan summary.
 * Separated source/data caveats such as foreign-date mismatch, indicator-input caution, unconfirmed final close, and unknown adjusted-price metadata from primary market scan labels.
 * Kept caveats visible in compact row disclosures because existing response fields identify the limitations but do not provide enough confirmed source metadata to resolve them automatically.
@@ -573,7 +678,7 @@ Suggested columns:
 
 * Symbol
 * Daily close
-* KBS snapshot
+* SSI realtime snapshot status
 * Change vs reference
 * RSI14
 * MA trend
@@ -849,7 +954,7 @@ Guardrail checks:
 * Run a secret scan before commit.
 * Confirm no SSI credentials, tokens, auth headers, consumer IDs, consumer secrets, private keys, account IDs, or raw auth responses appear in docs, tests, fixtures, logs, or output.
 * Confirm no FC Trading, order placement, account actions, cash transfer, stock transfer, or portfolio trading actions were added.
-* Confirm no buy/sell/hold/recommendation wording appears.
+* Confirm no trading-instruction, price-target, or recommendation wording appears.
 * Confirm no Mozyfin fallback exists for SSI-owned market data.
 * Confirm KBS is disabled by default and only available behind explicit legacy diagnostics flags.
 * Confirm VN news is disabled/not_implemented until a separate NewsProvider exists, and unsupported domains remain separate from SSI market data.

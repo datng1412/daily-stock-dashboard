@@ -28,7 +28,7 @@ Out of scope:
 * Portfolio trading actions.
 * UI source switcher or comparison card.
 * Provider comparison endpoint.
-* Buy/sell/hold or recommendation wording.
+* Trading-instruction, price-target, or recommendation wording.
 
 ## Provider roles
 
@@ -77,6 +77,21 @@ External providers are still required for BCTC/KQKD, financial statements, finan
 | Corporate actions, dividends, rights, splits | External provider | Stub/unavailable | Do not infer events from reference or adjusted-close gaps |
 | Macro/Fed/oil/USD/gold | External provider | Unsupported/future provider | Keep outside FC Data market-price ownership |
 
+## Current endpoint/source mapping
+
+| Feature | SSI source/endpoint | Current status | Notes |
+| --- | --- | --- | --- |
+| DailyOhlc | `GET /Market/DailyOhlc` | OK | Canonical dashboard `latest_price` currently uses this close. Also owns chart candles and internal indicators. |
+| DailyStockPrice | `GET /Market/DailyStockPrice` | OK, investigation pending | Owns reference, ceiling/floor, matched/put-through, adjusted close if provided, and latest foreign-flow fields. Latest smoke found same-day DailyOhlc versus DailyStockPrice close/volume mismatch for FPT on `2026-06-22`. |
+| IndexList | `GET /Market/IndexList` | OK | Use SSI-returned index codes instead of hardcoded assumptions. |
+| IndexComponents | `GET /Market/IndexComponents` | Clean unavailable when provider request fails | Provider/service/API coverage exists, but live component rows remain unconfirmed in the current SSI environment. |
+| IntradayOhlc | `GET /Market/IntradayOhlc` | Contract exists; returned rows may be stale/mismatched | Freshness must be validated against SSI DailyOhlc date before rendering intraday metrics. |
+| Realtime snapshot | SSI realtime/data endpoint candidates | Contract exists; currently unavailable/404 in latest smoke | Not confirmed live. The dashboard must not claim realtime is live unless `realtime_snapshot` is non-null and `realtime_status.status = ok`. |
+| Trade tape | SSI trade-tape endpoint candidates | Contract exists; currently unavailable/404 in latest smoke | Not confirmed live. Desired unavailable contract is `trade_tape=[]` plus `trade_tape_status`, with endpoint/http details in diagnostics. |
+| Securities/SecuritiesDetails | `GET /Market/Securities`, `GET /Market/SecuritiesDetails` | Partial metadata | Optional company name, issuer, security type, lot size, listed shares, and listed date may remain null. |
+| News | Not SSI | Disabled until separate provider exists | Mozyfin is not used for VN runtime news. |
+| FC Trading/order/account APIs | Not used | Not supported | No order placement, account actions, cash transfer, stock transfer, or portfolio trading actions are in scope. |
+
 Decision rule:
 
 ```text
@@ -86,6 +101,8 @@ If data is realtime snapshot or trade tape and SSI is unavailable: show unavaila
 If data is news/fundamentals/corporate actions/macro: use external provider.
 If SSI-owned data is unavailable: show unavailable, do not silently fallback.
 ```
+
+SSI realtime and trade tape are not confirmed live in the latest smoke context. The dashboard must not use daily close as a realtime substitute, and it must not claim realtime is live unless the realtime snapshot object exists and its public status is `ok`.
 
 ## Configuration
 
@@ -167,6 +184,7 @@ Strict daily/chart behavior:
 * Vite local development proxies `/api` to `http://127.0.0.1:8000` by default. Set `VITE_API_PROXY_TARGET=http://127.0.0.1:<port>` when testing a backend on a non-default port.
 * Primary row-level `Data unavailable` UI state is tied to required SSI DailyOhlc validity and SSI DailyOhlc cache errors. Optional quote, metadata, corporate-action, news, intraday, SSI realtime, SSI trade-tape, and SSI index-component states are caveats or separate source statuses, not fatal SSI daily-data failures.
 * Dashboard status copy should say `Daily source SSI`, `SSI realtime unavailable`, `SSI trade tape unavailable`, and `News disabled` for those specific states. Concise primary banners should state that daily SSI data is still available; attempted endpoints, HTTP status, and other sanitized technical details belong in diagnostics.
+* Live-section contract: object data is `null` when unavailable, list data is `[]` when unavailable, and public statuses stay simple (`ok`, `unavailable`, or `disabled`). Provider endpoint attempts, HTTP status, stale dates, retryability, and raw provider error summaries belong in diagnostics/logs rather than primary metric fields.
 
 Strict DailyStockPrice behavior:
 
@@ -190,6 +208,7 @@ Strict IntradayOhlc behavior:
 * The dashboard should use neutral labels such as latest intraday close and intraday change instead of assuming the requested timeframe describes the returned rows.
 * Intraday candles are not realtime matched quotes and must remain separate from SSI realtime snapshot, SSI trade tape, and official SSI DailyOhlc close.
 * Mozyfin and KBS are not used as intraday candle fallback providers.
+* Unavailable live sections must not be filled with placeholder metrics. Use `intraday_pulse=null` with `intraday_candles=[]` for unavailable/stale intraday, `realtime_snapshot=null` for unavailable realtime snapshot, and empty trade lists for unavailable trade tape. Primary UI should show concise unavailable states; attempted endpoints, HTTP status, and sanitized provider diagnostics belong in details/logs.
 
 SSI request parameters:
 
@@ -345,6 +364,10 @@ Probe mode tests both documented FC Data base URL shapes and prints only endpoin
 * News rendering is independent from SSI index, quote, metadata, finality, intraday, and realtime caveats. If a future NewsProvider supplies rows, the selected ticker news block should remain visible and clearly separate from SSI market data.
 * Keep DailyOhlc and DailyStockPrice labels separate: daily close/chart candles come from SSI DailyOhlc; reference/limits/foreign/matched/put-through fields come from SSI DailyStockPrice.
 * Keep primary cache labels scoped to SSI DailyOhlc. Quote/news/intraday/realtime cache or availability issues should remain in diagnostics or caveats so they do not imply official daily market data is unavailable.
+* Latest smoke found a same-date FPT mismatch on `2026-06-22`: SSI DailyOhlc/dashboard close fields were `70,700`, while SSI DailyStockPrice close/adjusted close were `70,800`; DailyOhlc volume was `3,642,400`, while DailyStockPrice matched volume was `3,643,500`. Keep SSI DailyOhlc as canonical `latest_price` until canonical source and final/provisional semantics are explicitly designed.
+* Trade-tape unavailable contract still needs cleanup if responses expose a wrapper object with `trades: []`. Desired public contract is `trade_tape=[]`, `trade_tape_status={status:"unavailable", source:"SSI"}`, and detailed endpoint/http diagnostics under a diagnostics block.
+* Realtime and trade-tape unavailable messages should be short and user-safe. Attempted endpoints, last endpoint, HTTP status such as 404, retryability, and raw provider error summaries should move to diagnostics.
+* For non-retryable SSI realtime/trade-tape 404 responses, add future backoff or a longer TTL to avoid repeated endpoint probes.
 
 ## Current limitations
 

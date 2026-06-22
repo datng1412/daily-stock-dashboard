@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [fix] Render unavailable VN SSI intraday, realtime, and trade-tape sections as concise status states instead of placeholder metric rows.
+- [documentation] Redesign VN dashboard docs around a data-quality-first SSI market-data product boundary, including product spec, data contract, roadmap, runbook, and ADR-style decisions.
+- [documentation] Document VN live-section null/empty contract: missing objects return `null`, missing lists return `[]`, unavailable sections render concise states, and diagnostics stay separate from primary UI.
+- [documentation] Record remaining VN data-quality TODOs, including DailyOhlc versus DailyStockPrice mismatch, `trade_tape=[]` contract cleanup, realtime/trade-tape diagnostics split, metadata gaps, foreign-flow history, and cache semantics.
+- [documentation] Clarify that current VN runtime disables Mozyfin and keeps KBS legacy-only, superseding earlier transitional provider separation notes.
 - [fix] Parse SSI IndexComponents provider error/status payloads without backend 500s.
 - [improvement] Clarify VN dashboard provider status copy so daily SSI availability, optional realtime/trade-tape unavailability, disabled news, and index-component diagnostics are shown separately.
 - [fix] Prevent strict VN dashboard runtime from constructing Mozyfin providers when legacy Mozyfin flags are disabled.
@@ -48,7 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [improvement] Surface SSI DailyStockPrice reference, ceiling/floor, foreign, matched, put-through, and adjusted-close fields in the Vietnam selected ticker detail.
 - [new feature] Made SSI FastConnect the strict source for supported Vietnam REST market data.
 - [fix] Removed Mozyfin fallback from SSI-owned OHLCV/chart/index/reference/foreign data paths.
-- [improvement] Kept Mozyfin for news and KBS for realtime snapshot/trade tape.
+- [improvement] Documented the earlier transitional provider separation; current VN runtime now keeps Mozyfin disabled and KBS legacy-only.
 - [new feature] Add a disabled-by-default SSI FastConnect FC Data provider foundation with AccessToken handling and normalized Securities, DailyOhlc, DailyStockPrice, and DailyIndex responses.
 - [test] Add mocked SSI FastConnect provider tests covering disabled, missing-credential, auth, mapping, and secret-safe failure paths.
 - [documentation] Document SSI FastConnect FC Data integration scope, security rules, configuration, and non-migration limits.
@@ -56,11 +61,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [documentation] Add SSI FastConnect integration phases and migration rules.
 - [improvement] Separate Vietnam watchlist data caveats from primary market scan labels and show caveats as compact secondary row context.
 - [fix] Refine the Vietnam watchlist scan so normal warning-only rows no longer become primary Risk elevated scan states.
-- [improvement] Add a neutral Vietnam watchlist scan summary and table scan-state column for faster ticker comparison without changing Mozyfin daily or KBS snapshot semantics.
+- [improvement] Add a neutral Vietnam watchlist scan summary and table scan-state column for faster ticker comparison while preserving source semantics.
 - [fix] Ensure Docker and Render Vietnam dashboard deployments create and use a writable stock-index cache directory.
 - [chore] Share Vietnam inspect chart range, overlay, zoom, pan, reset, and expand controls between compact and expanded chart modes.
-- [improvement] Add expanded Vietnam inspect chart mode with shared range, overlay, zoom, pan, reset, and close controls while preserving Mozyfin daily and KBS snapshot separation.
-- [improvement] First round of hierarchy improvements for the Vietnam market dashboard: enhanced the selected ticker header, separated Mozyfin daily data from KBS snapshot data, and collapsed data diagnostics by default.
+- [improvement] Add expanded Vietnam inspect chart mode with shared range, overlay, zoom, pan, reset, and close controls while preserving daily and live-section separation.
+- [improvement] First round of hierarchy improvements for the Vietnam market dashboard: enhanced the selected ticker header, separated daily data from live snapshot data, and collapsed data diagnostics by default.
 - [improvement] Add frontend-only zoom, pan, and reset controls to the Vietnam inspect chart while preserving Mozyfin/KBS data semantics.
 - [improvement] Add an inspect-only Vietnam daily OHLCV chart with close, volume, RSI14, MA20/MA50, and optional Bollinger overlays while keeping KBS snapshot separate.
 - [fix] Clarify Vietnam dashboard session volume ratio semantics, hide unavailable 1H average-volume comparisons, and show corporate actions as recent/upcoming states without inferring events.
@@ -74,15 +79,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [improvement] Add VN market phase labels for normal weekdays, including ATO, continuous sessions, lunch break, ATC, post-close, closed, and weekend/closed states with `holidayAware=false`.
 - [chore] Add `vnstock==4.0.4` as a runtime deployment dependency and validate Docker/Render KBS snapshot readiness.
 
-- [documentation] Document the Vietnam KBS/vnstock snapshot architecture as a separate optional layer that preserves Mozyfin daily OHLCV and 1H intraday semantics.
+- [documentation] Document the Vietnam KBS/vnstock snapshot architecture as a separate optional legacy layer; current VN runtime keeps KBS disabled by default.
 
 - [documentation] Add root Docker and Render deployment support for the Vietnam dashboard, including live-mode environment guidance and fixture-mode guardrails.
 
 - [documentation] Add reference-only Vietnam realtime data and news source resource docs for future provider evaluation.
 
-- [documentation] Add a concise local Windows quick runbook for starting the Vietnam dashboard in live or fixture mode.
+- [documentation] Add a concise local Windows quick runbook for starting the Vietnam dashboard.
 
-- [documentation] Add Vietnam dashboard continuity and guardrail documentation, protect local Mozyfin config/runtime artifacts in `.gitignore`, update `.env.example` with VN live-mode placeholders, and clarify README/RUNBOOK semantics for Mozyfin quote limitations plus live/fixture mode checks.
+- [documentation] Add Vietnam dashboard continuity and guardrail documentation, protect local provider config/runtime artifacts in `.gitignore`, update `.env.example` with VN live-mode placeholders, and clarify README/RUNBOOK data-source semantics.
 
 - [改进] 越南行情看板新增 Asia/Ho_Chi_Minh 时间格式化与数据新鲜度展示，并将原始时间戳、字段名和缓存调试信息收纳到 Advanced/Raw Data。
 

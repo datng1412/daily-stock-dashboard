@@ -269,7 +269,7 @@ class VietnamWatchItem(BaseModel):
     intraday_is_realtime_quote: bool = False
     intraday_warning: Optional[str] = None
     intraday_candles: List[Dict[str, Any]] = Field(default_factory=list)
-    intraday_pulse: Dict[str, Any] = Field(default_factory=dict)
+    intraday_pulse: Optional[Dict[str, Any]] = None
     intraday_labels: List[str] = Field(default_factory=list)
     intraday_details: List[Dict[str, Any]] = Field(default_factory=list)
     intraday_status: Dict[str, Any] = Field(default_factory=dict)

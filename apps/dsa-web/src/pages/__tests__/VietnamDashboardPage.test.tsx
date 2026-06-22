@@ -283,6 +283,18 @@ const makeResponse = (tickers: string[], options: { fixtureMode?: boolean } = {}
   formulas: { neutralStatusLabels: 'Rule-based neutral condition labels only; no trading recommendations are generated' },
 });
 
+const makeCurrentIntradayCandles = () => [
+  {
+    dateTime: '2026-06-10T10:00:00+07:00',
+    timestamp: 1781074800,
+    open: 100,
+    high: 103,
+    low: 99,
+    close: 102,
+    volume: 1234567,
+  },
+];
+
 const mockedGetVietnamWatchlist = vi.mocked(stocksApi.getVietnamWatchlist);
 const mockedGetVietnamRealtimeQuotes = vi.mocked(stocksApi.getVietnamRealtimeQuotes);
 const mockedGetVietnamRealtimeTrades = vi.mocked(stocksApi.getVietnamRealtimeTrades);
@@ -891,7 +903,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     render(<VietnamDashboardPage />);
 
-    expect(await screen.findByText('SSI intraday unavailable.')).toBeInTheDocument();
+    expect((await screen.findAllByText('SSI intraday unavailable.')).length).toBeGreaterThan(0);
     expect(screen.getByText('SSI intraday is unavailable or disabled; SSI realtime board and trade tape context remain separate.')).toBeInTheDocument();
     expect(screen.queryByText(/Mozyfin/i)).not.toBeInTheDocument();
   });
@@ -933,9 +945,9 @@ describe('VietnamDashboardPage watchlist loading', () => {
     render(<VietnamDashboardPage />);
 
     expect((await screen.findAllByText('SSI IntradayOhlc latest candle date does not match latest daily trading date.')).length).toBeGreaterThan(0);
-    expect(screen.getByText('2026-06-12 / 2026-06-19')).toBeInTheDocument();
-    expect(screen.getByText('mismatched')).toBeInTheDocument();
-    expect(screen.getByText('Intraday pulse (1m)')).toBeInTheDocument();
+    expect(screen.getByText('SSI intraday unavailable.')).toBeInTheDocument();
+    expect(screen.queryByText('2026-06-12 / 2026-06-19')).not.toBeInTheDocument();
+    expect(screen.queryByText('Intraday pulse (1m)')).not.toBeInTheDocument();
     expect(screen.queryByText(/1H close|Latest 1H|Session 1H/)).not.toBeInTheDocument();
   });
 
@@ -1518,6 +1530,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
         avgVolume20D: 4800000,
       },
       liquidity: { ...response.watchlist[0].liquidity, avgVolume20D: 4800000 },
+      intradayCandles: makeCurrentIntradayCandles(),
       intradayPulse: {
         latest1hClose: 102,
         latest1hOpen: 100,
@@ -1537,6 +1550,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
         rangePercent: 4,
         volumeVsAvg1h: null,
       },
+      intradayStatus: { status: 'ok', source: 'SSI', message: null },
     };
     mockedGetVietnamWatchlist.mockResolvedValue(response);
     mockedGetVietnamRealtimeQuotes.mockImplementation(async (tickers) => ({
@@ -1556,7 +1570,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(screen.queryByText('0.72x')).not.toBeInTheDocument();
   });
 
-  it('shows volume ratio missing states when daily average or session volume is unavailable', async () => {
+  it('hides session volume ratio when daily average is unavailable', async () => {
     const response = makeResponse(defaultTickers);
     response.watchlist[0] = {
       ...response.watchlist[0],
@@ -1591,10 +1605,10 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
 
-    expect(screen.getAllByText('20D avg unavailable').length).toBeGreaterThan(0);
+    expect(screen.queryByText('20D avg unavailable')).not.toBeInTheDocument();
   });
 
-  it('shows a session volume missing state when neither SSI realtime nor intraday session volume is available', async () => {
+  it('hides session volume metrics when neither SSI realtime nor intraday session volume is available', async () => {
     const response = makeResponse(defaultTickers);
     response.watchlist[0] = {
       ...response.watchlist[0],
@@ -1636,13 +1650,15 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
 
-    expect(screen.getAllByText('Session volume unavailable').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Session volume unavailable')).not.toBeInTheDocument();
+    expect(screen.queryByText('Session volume / 20D avg daily volume')).not.toBeInTheDocument();
   });
 
   it('shows explanatory intraday empty states instead of bare placeholders', async () => {
     const response = makeResponse(defaultTickers);
     response.watchlist[0] = {
       ...response.watchlist[0],
+      intradayCandles: makeCurrentIntradayCandles(),
       intradayPulse: {
         latest1hClose: 102,
         latest1hOpen: 100,
@@ -1662,6 +1678,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
         rangePercent: 4,
         volumeVsAvg1h: null,
       },
+      intradayStatus: { status: 'ok', source: 'SSI', message: null },
     };
     mockedGetVietnamWatchlist.mockResolvedValue(response);
 
@@ -1692,6 +1709,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     const response = makeResponse(defaultTickers);
     response.watchlist[0] = {
       ...response.watchlist[0],
+      intradayCandles: makeCurrentIntradayCandles(),
       intradayPulse: {
         latest1hClose: 102,
         latest1hOpen: 100,
@@ -1711,6 +1729,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
         rangePercent: 4,
         volumeVsAvg1h: 1.75,
       },
+      intradayStatus: { status: 'ok', source: 'SSI', message: null },
     };
     mockedGetVietnamWatchlist.mockResolvedValue(response);
 
@@ -1960,6 +1979,38 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(screen.queryByText('SSI unavailable')).not.toBeInTheDocument();
   });
 
+  it('does not render fake realtime or trade tape metrics when SSI live sections are unavailable', async () => {
+    mockedGetVietnamRealtimeQuotes.mockImplementation(async (tickers) => makeRealtimeResponse(tickers, {
+      unavailable: true,
+      error: 'SSI FastConnect realtime snapshot unavailable (attempted endpoints: RealtimeQuote, RealtimePrice). Last error: HTTP 404',
+    }));
+    mockedGetVietnamRealtimeTrades.mockImplementation(async (symbol) => ({
+      ...makeTradesResponse(symbol),
+      status: 'unavailable',
+      error: 'SSI FastConnect trade tape unavailable (attempted endpoints: TradeTape, MatchedTrades). Last error: HTTP 404',
+      trades: [],
+    }));
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledWith(defaultTickers));
+
+    const realtimeHeading = screen.getByRole('heading', { name: 'SSI realtime' });
+    const realtimeCard = realtimeHeading.closest('div')?.parentElement as HTMLElement;
+    expect(within(realtimeCard).getByText('SSI realtime unavailable. Daily SSI data is still available.')).toBeInTheDocument();
+    expect(within(realtimeCard).queryByText('Snapshot price')).not.toBeInTheDocument();
+    expect(within(realtimeCard).queryByText('Snapshot time')).not.toBeInTheDocument();
+    expect(within(realtimeCard).queryByText('SSI change')).not.toBeInTheDocument();
+    expect(within(realtimeCard).queryByText('SSI session accumulated volume')).not.toBeInTheDocument();
+    expect(within(realtimeCard).queryByText('SSI realtime snapshot; may differ from trade tape')).not.toBeInTheDocument();
+
+    const tradeHeading = screen.getByRole('heading', { name: 'Latest trade tape' });
+    const tradeCard = tradeHeading.closest('div')?.parentElement as HTMLElement;
+    expect(within(tradeCard).getByText('SSI trade tape unavailable.')).toBeInTheDocument();
+    expect(within(tradeCard).queryByText(/attempted endpoints/i)).not.toBeInTheDocument();
+    expect(within(tradeCard).queryByRole('table')).not.toBeInTheDocument();
+  });
+
   it('shows normalized SSI realtime timeout without raw provider text in warning banners', async () => {
     const rawTimeout = 'è¿žæŽ¥ä¸Šæ¸¸æœåŠ¡è¶…æ—¶: upstream timeout';
     mockedGetVietnamRealtimeQuotes.mockImplementation(async (tickers) => makeRealtimeResponse(tickers, {
@@ -1979,7 +2030,8 @@ describe('VietnamDashboardPage watchlist loading', () => {
     render(<VietnamDashboardPage />);
 
     expect(await screen.findAllByText('SSI realtime unavailable. Daily SSI data is still available.')).not.toHaveLength(0);
-    expect(screen.getByText('Latest trade tape unavailable: SSI realtime provider timeout')).toBeInTheDocument();
+    expect(screen.getByText('SSI trade tape unavailable.')).toBeInTheDocument();
+    expect(screen.queryByText('Latest trade tape unavailable: SSI realtime provider timeout')).not.toBeInTheDocument();
     expect(screen.queryByText(/è¿žæŽ¥ä¸Šæ¸¸æœåŠ¡è¶…æ—¶/)).not.toBeInTheDocument();
   });
 

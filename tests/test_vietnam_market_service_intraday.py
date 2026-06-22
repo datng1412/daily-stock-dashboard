@@ -232,8 +232,8 @@ def test_ssi_intraday_date_mismatch_is_unavailable_without_downgrading_daily_row
     assert item["intraday_status"]["intraday_requested_timeframe"] == "1h"
     assert item["intraday_status"]["intraday_actual_granularity"] == "1m"
     assert item["intraday_candles"] == []
-    assert item["intraday_pulse"]["direction"] == "unknown"
-    assert "Intraday up" not in item["intraday_labels"]
+    assert item["intraday_pulse"] is None
+    assert item["intraday_labels"] == []
 
 
 def test_ssi_intraday_detects_provider_returned_minute_granularity():
@@ -310,6 +310,7 @@ def test_ssi_intraday_failure_does_not_downgrade_daily_row():
     assert item["intraday_status"]["status"] == "unavailable"
     assert item["intraday_status"]["message"] == "SSI FastConnect request failed"
     assert item["intraday_candles"] == []
+    assert item["intraday_pulse"] is None
 
 
 def test_ssi_intraday_can_be_disabled_without_mozyfin_fallback():
@@ -324,4 +325,6 @@ def test_ssi_intraday_can_be_disabled_without_mozyfin_fallback():
     assert item["status"] == "ok"
     assert item["intraday_source"] == "SSI"
     assert item["intraday_status"]["status"] == "disabled"
+    assert item["intraday_candles"] == []
+    assert item["intraday_pulse"] is None
     assert fetcher.intraday_calls == 0

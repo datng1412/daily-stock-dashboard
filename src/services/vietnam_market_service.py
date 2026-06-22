@@ -1551,28 +1551,17 @@ class VietnamMarketService:
     ) -> Dict[str, Any]:
         reason_text = reason or VN_INTRADAY_UNAVAILABLE_REASON
         diagnostics = dict(diagnostics or {})
-        pulse = calculate_intraday_pulse([])
-        pulse.update(
-            {
-                "intraday_latest_date": diagnostics.get("intraday_latest_date"),
-                "daily_price_date": diagnostics.get("daily_price_date"),
-                "date_match": diagnostics.get("date_match") or "unknown",
-                "intraday_granularity": diagnostics.get("intraday_granularity") or "unknown",
-                "intraday_granularity_seconds": diagnostics.get("intraday_granularity_seconds"),
-                "intraday_granularity_label": diagnostics.get("intraday_granularity_label") or "provider-returned",
-                "intraday_requested_timeframe": intraday_timeframe,
-                "intraday_actual_granularity": diagnostics.get("intraday_granularity") or "unknown",
-                "intraday_actual_granularity_seconds": diagnostics.get("intraday_granularity_seconds"),
-            }
-        )
+        intraday_granularity = diagnostics.get("intraday_granularity") or "unknown"
+        intraday_granularity_seconds = diagnostics.get("intraday_granularity_seconds")
+        intraday_granularity_label = diagnostics.get("intraday_granularity_label") or "provider-returned"
         return {
             "intraday_timeframe": intraday_timeframe,
             "intraday_requested_timeframe": intraday_timeframe,
-            "intraday_granularity": pulse["intraday_granularity"],
-            "intraday_actual_granularity": pulse["intraday_granularity"],
-            "intraday_granularity_seconds": pulse["intraday_granularity_seconds"],
-            "intraday_actual_granularity_seconds": pulse["intraday_granularity_seconds"],
-            "intraday_granularity_label": pulse["intraday_granularity_label"],
+            "intraday_granularity": intraday_granularity,
+            "intraday_actual_granularity": intraday_granularity,
+            "intraday_granularity_seconds": intraday_granularity_seconds,
+            "intraday_actual_granularity_seconds": intraday_granularity_seconds,
+            "intraday_granularity_label": intraday_granularity_label,
             "intraday_latest_date": diagnostics.get("intraday_latest_date"),
             "daily_price_date": diagnostics.get("daily_price_date"),
             "date_match": diagnostics.get("date_match") or "unknown",
@@ -1580,23 +1569,16 @@ class VietnamMarketService:
             "intraday_is_realtime_quote": False,
             "intraday_warning": reason_text,
             "intraday_candles": [],
-            "intraday_pulse": pulse,
-            "intraday_labels": ["Intraday data limited"],
-            "intraday_details": [
-                _intraday_detail(
-                    "Intraday data limited",
-                    "info",
-                    reason_text,
-                    {"source": "SSI IntradayOhlc", "status": status},
-                )
-            ],
+            "intraday_pulse": None,
+            "intraday_labels": [],
+            "intraday_details": [],
             "intraday_status": {
                 "status": status,
                 "source": VN_SOURCE_SSI,
                 "message": reason_text,
                 "intraday_requested_timeframe": intraday_timeframe,
-                "intraday_actual_granularity": pulse["intraday_granularity"],
-                "intraday_actual_granularity_seconds": pulse["intraday_granularity_seconds"],
+                "intraday_actual_granularity": intraday_granularity,
+                "intraday_actual_granularity_seconds": intraday_granularity_seconds,
                 **diagnostics,
             },
         }
@@ -1722,14 +1704,6 @@ class VietnamMarketService:
         return updated
 
     def _disabled_intraday_payload(self, intraday_timeframe: str) -> Dict[str, Any]:
-        pulse = calculate_intraday_pulse([])
-        pulse.update(
-            {
-                "intraday_requested_timeframe": intraday_timeframe,
-                "intraday_actual_granularity": "unknown",
-                "intraday_actual_granularity_seconds": None,
-            }
-        )
         return {
             "intraday_timeframe": intraday_timeframe,
             "intraday_requested_timeframe": intraday_timeframe,
@@ -1745,16 +1719,9 @@ class VietnamMarketService:
             "intraday_is_realtime_quote": False,
             "intraday_warning": VN_INTRADAY_DISABLED_REASON,
             "intraday_candles": [],
-            "intraday_pulse": pulse,
-            "intraday_labels": ["Intraday data limited"],
-            "intraday_details": [
-                _intraday_detail(
-                    "Intraday data limited",
-                    "info",
-                    VN_INTRADAY_DISABLED_REASON,
-                    {"source": "SSI IntradayOhlc", "status": "disabled"},
-                )
-            ],
+            "intraday_pulse": None,
+            "intraday_labels": [],
+            "intraday_details": [],
             "intraday_status": {
                 "status": "disabled",
                 "source": VN_SOURCE_SSI,
@@ -1835,14 +1802,7 @@ class VietnamMarketService:
         reason_text = reason or VN_REALTIME_UNAVAILABLE_REASON
         return {
             "realtime_source": VN_SOURCE_SSI,
-            "realtime_snapshot": {
-                "ticker": symbol,
-                "symbol": symbol,
-                "source": VN_SOURCE_SSI,
-                "status": status,
-                "error": reason_text if status == "error" else None,
-                "error_detail": reason_text,
-            },
+            "realtime_snapshot": None,
             "realtime_status": {
                 "status": status,
                 "source": VN_SOURCE_SSI,

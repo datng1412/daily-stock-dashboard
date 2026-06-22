@@ -307,10 +307,9 @@ const sessionVolumeToAvgDailyVolume = (
   state?: KbsSnapshotDisplayResult,
 ) => {
   const avgVolume20D = item.indicators.avgVolume20D ?? item.liquidity?.avgVolume20D;
-  const sessionVolume = usableKbsSessionVolume(realtimeQuote, state) ?? intradaySessionVolume(item) ?? null;
-  if (avgVolume20D === null || avgVolume20D === undefined) return '20D avg unavailable';
-  if (sessionVolume === null || sessionVolume === undefined) return 'Session volume unavailable';
-  if (avgVolume20D <= 0) return '20D avg unavailable';
+  const sessionVolume = currentSessionVolume(item, realtimeQuote, state);
+  if (avgVolume20D === null || avgVolume20D === undefined || avgVolume20D <= 0) return null;
+  if (sessionVolume === null || sessionVolume === undefined) return null;
   return formatRatio(sessionVolume / avgVolume20D);
 };
 
@@ -335,6 +334,30 @@ const intradaySessionLow = (item: VietnamWatchItem) => item.intradayPulse?.sessi
 const intradaySessionRange = (item: VietnamWatchItem) => item.intradayPulse?.sessionRangePctFromIntraday ?? item.intradayPulse?.sessionRangePctFrom1H ?? null;
 const intradaySessionVolume = (item: VietnamWatchItem) => item.intradayPulse?.sessionVolumeFromIntraday ?? item.intradayPulse?.sessionVolumeFrom1H ?? null;
 const intradayVolumeVsAverage = (item: VietnamWatchItem) => item.intradayPulse?.intradayVolumeVsAverage ?? item.intradayPulse?.volumeVsAvg1h ?? null;
+
+const hasCurrentIntradayData = (item?: VietnamWatchItem | null) => (
+  item?.intradayStatus?.status === 'ok'
+  && Boolean(item.intradayPulse)
+  && (item.intradayCandles?.length ?? 0) > 0
+  && item.dateMatch !== 'mismatched'
+);
+
+const hasRealtimeSnapshotData = (quote?: VietnamRealtimeQuote | null) => (
+  quote?.status === 'ok'
+  && hasDisplayValue(quote.snapshotPrice ?? quote.realtimePrice ?? quote.price)
+);
+
+const hasTradeTapeData = (rows?: VietnamRealtimeTrade[] | null) => (
+  Array.isArray(rows) && rows.length > 0
+);
+
+const currentSessionVolume = (
+  item: VietnamWatchItem,
+  realtimeQuote?: VietnamRealtimeQuote | null,
+  state?: KbsSnapshotDisplayResult,
+) => usableKbsSessionVolume(realtimeQuote, state) ?? (
+  hasCurrentIntradayData(item) ? intradaySessionVolume(item) : null
+);
 
 const rawKbsFreshnessText = (quote?: VietnamRealtimeQuote | null) => (
   `raw age ${quote?.ageSeconds ?? '-'}s | raw stale ${quote?.isStale === null || quote?.isStale === undefined ? '-' : String(quote.isStale)} | reason ${quote?.staleReason ?? '-'}`
@@ -544,6 +567,8 @@ const WatchCard: React.FC<{ item: VietnamWatchItem; realtimeQuote?: VietnamRealt
   const lastFetched = latestFetchedValue(item);
   const kbsState = kbsSnapshotState(realtimeQuote, marketPhase.code);
   const sessionVolumeRatioText = sessionVolumeToAvgDailyVolume(item, realtimeQuote, kbsState);
+  const hasRealtimeSnapshot = hasRealtimeSnapshotData(realtimeQuote);
+  const hasIntradayPulse = hasCurrentIntradayData(item);
   const newsItems = item.news ?? [];
 
   return (
@@ -588,6 +613,7 @@ const WatchCard: React.FC<{ item: VietnamWatchItem; realtimeQuote?: VietnamRealt
           </div>
           <p className="text-xs text-secondary-text">OHLCV close {formatPrice(item.ohlcvClose ?? item.close)}</p>
         </div>
+        {hasRealtimeSnapshot ? (
         <div>
           <p className="text-xs text-secondary-text">SSI realtime</p>
           <div className="mt-1 flex flex-wrap items-center gap-2">
@@ -599,6 +625,7 @@ const WatchCard: React.FC<{ item: VietnamWatchItem; realtimeQuote?: VietnamRealt
           </p>
           <p className="text-xs text-secondary-text">{kbsSnapshotSummaryText(realtimeQuote, kbsState)}</p>
         </div>
+        ) : null}
         <div>
           <p className="text-xs text-secondary-text">Volume (shares)</p>
           <p className="text-lg font-semibold text-foreground">{formatNumber(item.volume)}</p>
@@ -611,10 +638,12 @@ const WatchCard: React.FC<{ item: VietnamWatchItem; realtimeQuote?: VietnamRealt
           <p className="text-xs text-secondary-text">RSI14 Wilder/RMA</p>
           <p className="font-semibold text-foreground">{formatNumber(item.indicators.rsi14Wilder ?? item.indicators.rsi14, 2)}</p>
         </div>
+        {sessionVolumeRatioText ? (
         <div>
           <p className="text-xs text-secondary-text">Session volume / 20D avg daily volume</p>
           <p className="font-semibold text-foreground">{sessionVolumeRatioText}</p>
         </div>
+        ) : null}
         <div>
           <p className="text-xs text-secondary-text">Daily cache</p>
           <Badge variant={officialDailyCacheFreshness(item).variant}>{officialDailyCacheFreshness(item).label}</Badge>
@@ -665,7 +694,7 @@ const WatchCard: React.FC<{ item: VietnamWatchItem; realtimeQuote?: VietnamRealt
         </div>
       </div>
 
-      {item.intradayPulse ? (
+      {hasIntradayPulse ? (
         <div className="mt-3 rounded-lg border border-border/60 bg-elevated/40 p-3 text-xs">
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
             <span className="font-medium text-foreground">Intraday pulse ({intradayGranularityText(item)})</span>
@@ -679,7 +708,7 @@ const WatchCard: React.FC<{ item: VietnamWatchItem; realtimeQuote?: VietnamRealt
             <span>Intraday close {formatPrice(intradayLatestClose(item))}</span>
             <span className={signalTone(intradayChange(item))}>Change {formatPrice(intradayChange(item))} ({formatNumber(intradayChangePercent(item), 2)}%)</span>
             <span>Time {formatVietnamTime(item.intradayCandles?.at(-1)?.dateTime ?? item.intradayCandles?.at(-1)?.timestamp)}</span>
-            <span>Range {formatNumber(item.intradayPulse.rangePercent, 2)}%</span>
+            <span>Range {formatNumber(item.intradayPulse?.rangePercent, 2)}%</span>
             <span>Volume {formatNumber(intradayLatestVolume(item))}</span>
           </div>
         </div>
@@ -1053,8 +1082,10 @@ const SelectedTickerHeader: React.FC<{
   if (!item) return null;
   const kbsState = kbsSnapshotState(realtimeQuote, marketPhase.code);
   const avgVolume20D = item.indicators.avgVolume20D ?? item.liquidity?.avgVolume20D;
-  const sessionVolume = usableKbsSessionVolume(realtimeQuote, kbsState) ?? intradaySessionVolume(item) ?? null;
+  const sessionVolume = currentSessionVolume(item, realtimeQuote, kbsState);
   const kbsPrice = realtimeQuote?.snapshotPrice ?? realtimeQuote?.realtimePrice;
+  const hasRealtimeSnapshot = hasRealtimeSnapshotData(realtimeQuote);
+  const hasSessionVolume = hasDisplayValue(sessionVolume);
   const ssiReferencePrice = item.dailyStockPrice?.referencePrice ?? item.ssiReferencePrice ?? item.priceLimit?.referencePrice ?? null;
   const ssiDailyClose = item.dailyClose ?? item.latestPrice ?? item.close ?? null;
   const priceVsReference = ssiDailyClose != null && ssiReferencePrice != null ? ssiDailyClose - ssiReferencePrice : null;
@@ -1095,21 +1126,25 @@ const SelectedTickerHeader: React.FC<{
             <dd className="mt-1 font-semibold text-foreground">{formatPrice(item.latestPrice ?? item.close)}</dd>
             <dd className="mt-1 text-xs text-secondary-text">{item.latestPriceDate ?? item.priceDate ?? '-'}</dd>
           </div>
+          {hasRealtimeSnapshot ? (
           <div className="rounded-lg bg-elevated/50 p-3">
             <dt className="text-xs text-secondary-text">SSI realtime</dt>
             <dd className="mt-1 font-semibold text-foreground">{formatPrice(kbsPrice)}</dd>
             <dd className="mt-1 text-xs text-secondary-text">{kbsState.label}</dd>
           </div>
+          ) : null}
           <div className="rounded-lg bg-elevated/50 p-3">
             <dt className="text-xs text-secondary-text">Vs SSI reference</dt>
             <dd className={cn('mt-1 font-semibold', signalTone(priceVsReference))}>
               {formatReferenceDelta(priceVsReference, priceVsReferencePct)}
             </dd>
           </div>
+          {hasSessionVolume ? (
           <div className="rounded-lg bg-elevated/50 p-3">
             <dt className="text-xs text-secondary-text">Session volume</dt>
             <dd className="mt-1 font-semibold text-foreground">{formatNumber(sessionVolume)}</dd>
           </div>
+          ) : null}
           <div className="rounded-lg bg-elevated/50 p-3">
             <dt className="text-xs text-secondary-text">20D avg volume</dt>
             <dd className="mt-1 font-semibold text-foreground">{formatNumber(avgVolume20D)}</dd>
@@ -2055,6 +2090,9 @@ const StockDetailView: React.FC<{
   const conditionSummary = buildVietnamConditionSummary({ item, fixtureMode });
   const marketStatusDetails = (item.statusDetails ?? []).filter((detail) => !DATA_CAVEAT_LABELS.has(detail.label));
   const kbsState = kbsSnapshotState(realtimeQuote, marketPhase.code);
+  const hasRealtimeSnapshot = hasRealtimeSnapshotData(realtimeQuote);
+  const hasCurrentIntraday = hasCurrentIntradayData(item);
+  const hasTradeTape = hasTradeTapeData(realtimeTrades);
   const sessionCandlesCount = item.intradayPulse?.sessionCandlesCount ?? 0;
   const hasSessionCandles = sessionCandlesCount > 0;
   const hasSessionHighLowFromIntraday = intradaySessionHigh(item) != null && intradaySessionLow(item) != null;
@@ -2154,10 +2192,12 @@ const StockDetailView: React.FC<{
           <dt className="text-xs text-secondary-text">20D average volume (shares)</dt>
           <dd className="mt-1 font-medium text-foreground">{formatNumber(avgVolume20D)}</dd>
         </div>
+        {sessionVolumeRatioText ? (
         <div className="rounded-lg bg-elevated/50 p-3">
           <dt className="text-xs text-secondary-text">Session volume / 20D avg daily volume</dt>
           <dd className="mt-1 font-medium text-foreground">{sessionVolumeRatioText}</dd>
         </div>
+        ) : null}
         <div className="rounded-lg bg-elevated/50 p-3">
           <dt className="text-xs text-secondary-text">Distance to 20D high</dt>
           <dd className="mt-1 font-medium text-foreground">{formatNumber(indicators.distanceTo20dHighPct, 2)}%</dd>
@@ -2362,6 +2402,7 @@ const StockDetailView: React.FC<{
             {item.intradayWarning}
           </div>
         ) : null}
+        {hasCurrentIntraday ? (
         <dl className="mt-3 grid gap-3 text-sm md:grid-cols-4">
           <div className="rounded-lg bg-card/60 p-3">
             <dt className="text-xs text-secondary-text">Latest intraday close (VND)</dt>
@@ -2425,12 +2466,17 @@ const StockDetailView: React.FC<{
             <dd className="mt-1 text-xs text-secondary-text">{item.dateMatch ?? 'unknown'}</dd>
           </div>
         </dl>
+        ) : (
+          <p className="mt-3 text-sm text-secondary-text">SSI intraday unavailable.</p>
+        )}
+        {hasCurrentIntraday ? (
         <div className="mt-3 flex flex-wrap gap-1">
           {(item.intradayLabels ?? []).map((label) => (
             <Badge key={`${item.ticker}-detail-${label}`} variant={intradayVariant(label)}>{label}</Badge>
           ))}
         </div>
-        {item.intradayDetails?.length ? (
+        ) : null}
+        {hasCurrentIntraday && item.intradayDetails?.length ? (
           <div className="mt-3 grid gap-2">
             {item.intradayDetails.map((detail) => (
               <div key={`${item.ticker}-intraday-${detail.label}-${detail.reason}`} className="rounded-lg border border-border/50 bg-card/50 p-3">
@@ -2454,6 +2500,7 @@ const StockDetailView: React.FC<{
           <h3 className="text-sm font-semibold text-foreground">SSI realtime</h3>
           <Badge variant={kbsStateVariant(kbsState)}>{kbsState.label}</Badge>
         </div>
+        {hasRealtimeSnapshot ? (
         <dl className="mt-3 grid gap-3 text-sm md:grid-cols-4">
           <div>
             <dt className="text-xs text-secondary-text">Snapshot price</dt>
@@ -2474,15 +2521,22 @@ const StockDetailView: React.FC<{
             <dd className="mt-1 font-medium text-foreground">{formatNumber(realtimeQuote?.volumeAccumulated)}</dd>
           </div>
         </dl>
+        ) : (
+          <p className="mt-3 text-sm text-secondary-text">SSI realtime unavailable. Daily SSI data is still available.</p>
+        )}
+        {hasRealtimeSnapshot ? (
         <p className="mt-3 text-xs text-secondary-text">
           {kbsState.reason}
         </p>
-        {realtimeQuote?.error ? (
+        ) : null}
+        {hasRealtimeSnapshot && realtimeQuote?.error ? (
           <p className="mt-1 text-xs text-secondary-text">{kbsErrorMessage(realtimeQuote.error)}</p>
         ) : null}
+        {hasRealtimeSnapshot ? (
         <p className="mt-3 text-xs text-secondary-text">
           {realtimeQuote?.snapshotNote ?? 'SSI realtime snapshot; may differ from trade tape'}
         </p>
+        ) : null}
       </div>
       <div className="mt-4 rounded-lg border border-border/60 bg-elevated/30 p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -2492,15 +2546,12 @@ const StockDetailView: React.FC<{
         <p className="mt-2 text-xs text-secondary-text">
           Trade tape may not include auction/ATC prints.
         </p>
-        {tradesError ? (
+        {tradesError || (!tradesLoading && !hasTradeTape) ? (
           <div className="mt-3 rounded-lg border border-warning/20 bg-warning/10 p-2 text-xs text-warning">
-            Latest trade tape unavailable: {kbsErrorMessage(tradesError) ?? 'SSI trade tape unavailable'}
+            SSI trade tape unavailable.
           </div>
         ) : null}
-        {!tradesError && !tradesLoading && realtimeTrades.length === 0 ? (
-          <p className="mt-3 text-xs text-secondary-text">Latest trade tape unavailable.</p>
-        ) : null}
-        {realtimeTrades.length > 0 ? (
+        {hasTradeTape ? (
           <div className="mt-3 overflow-x-auto">
             <table className="w-full min-w-[520px] text-left text-xs">
               <thead className="border-b border-border/70 uppercase text-secondary-text">
