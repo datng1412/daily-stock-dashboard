@@ -2,6 +2,12 @@
 
 This repo now supports an initial Vietnam market adapter through `mozyfin-cli`.
 
+## Current VN Dashboard vs Future Foreign-Stock Tracker
+
+The current VN dashboard is a Vietnam market-data dashboard. Its active technical direction is documented separately in the VN SSI dashboard docs, including `docs/VN_PRODUCT_SPEC.md`, `docs/VN_DASHBOARD_ROADMAP.md`, and `docs/VN_DATA_CONTRACT.md`.
+
+The foreign-stock tracker documents are future product-strategy notes for a larger Vietnamese-first platform for tracking and understanding foreign assets. They do not change the current VN dashboard runtime, SSI market-data contract, API behavior, or supported execution capabilities.
+
 ## Setup
 
 1. Install dependencies:
