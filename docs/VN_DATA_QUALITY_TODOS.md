@@ -4,6 +4,17 @@
 
 This document tracks data-quality and contract work for the SSI-first Vietnam dashboard. The dashboard should remain a market-data quality surface: daily SSI data first, optional live sections only when real data exists, and diagnostics separated from primary UI fields.
 
+## Phase Mapping
+
+The product phase plan lives in `docs/VN_DASHBOARD_ROADMAP.md`. Data-quality TODOs map to that plan as follows:
+
+| Priority | Main phase | Notes |
+| --- | --- | --- |
+| P0 - contract/data correctness | Phase 1 and Phase 2 | Surface mismatches in Data Quality Summary, then clean public contracts and diagnostics split. |
+| P1 - live-section semantics | Phase 2 and Phase 4 | Clean stale/unavailable API shape first; investigate SSI realtime/trade-tape endpoints after contract cleanup. |
+| P2 - enrichment | Phase 5, with finality work started in Phase 1 | Improve metadata and foreign-flow history after the public data-quality summary exists. |
+| P3 - cleanup | Phase 2 and Phase 8 | Clarify cache/provider states now; revisit durable cache semantics if persistence is added. |
+
 ## P0 - Contract/Data Correctness
 
 ### Investigate SSI DailyOhlc vs DailyStockPrice Mismatch

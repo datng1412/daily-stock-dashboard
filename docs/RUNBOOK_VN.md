@@ -123,9 +123,9 @@ For each ticker, inspect:
 
 Use `ConvertTo-Json -Depth 12`; shallow JSON depth can stringify nested objects as `@{...}` and mislead debugging.
 
-## Smoke Endpoints
+## Current Milestone Smoke (Phase 0)
 
-Use these endpoints for a focused docs/runtime smoke. They should not print credentials or raw auth responses.
+Use these endpoints for the current SSI provider milestone smoke. They should not print credentials or raw auth responses. Future phase implementation steps live in `docs/VN_DASHBOARD_ROADMAP.md`, not this runbook.
 
 ```text
 GET http://127.0.0.1:8000/api/v1/stocks/vn/watchlist?tickers=FPT&force_refresh=true
@@ -159,7 +159,7 @@ Expected unavailable examples:
 realtime_snapshot: null
 intraday_pulse: null
 intraday_candles: []
-trade rows: []
+trade_tape: []
 ```
 
 The UI should show concise states such as:

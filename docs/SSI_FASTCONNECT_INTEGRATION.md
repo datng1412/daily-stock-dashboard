@@ -245,7 +245,7 @@ Strict index metadata behavior:
 * SSI provider error/status payloads for IndexComponents are parsed with case-insensitive `code`, `errorCode`, `status`, and `Status` handling and must become sanitized unavailable responses, not backend 500s.
 * Mozyfin and KBS are not used as fallback providers for SSI-owned index list, index component, or daily index data.
 
-Company research Phase 1 behavior:
+Company research current behavior:
 
 * `/api/v1/stocks/vn/company/{ticker}` exposes a company research snapshot contract for one VN ticker.
 * The endpoint reuses the SSI-backed watchlist row for profile, price, trading stats, foreign flow, and derived technical blocks.
@@ -383,6 +383,23 @@ Probe mode tests both documented FC Data base URL shapes and prints only endpoin
 * Fundamentals, corporate actions, dividends, rights, splits, and macro data require external providers.
 * FC Trading remains out of scope.
 
+## Provider-dependent product phases
+
+The full VN product phase plan is in `docs/VN_DASHBOARD_ROADMAP.md`. SSI-dependent phases are:
+
+| Phase | SSI dependency | Integration rule |
+| --- | --- | --- |
+| Phase 0 - SSI Provider Milestone Freeze | DailyOhlc, DailyStockPrice, IntradayOhlc contract, realtime/trade-tape contracts, metadata, index diagnostics | Freeze current SSI-first source ownership and unavailable-state behavior. |
+| Phase 1 - Data Quality Summary | DailyOhlc, DailyStockPrice, IntradayOhlc, realtime status, trade-tape status, Securities/SecuritiesDetails | Surface source mismatch, stale live sections, partial metadata, and finality uncertainty without hiding daily data. |
+| Phase 2 - Clean Public Contract and Diagnostics Split | IntradayOhlc, realtime endpoint candidates, trade-tape endpoint candidates | Normalize `null`/`[]` public data and move endpoint/http/raw provider details to diagnostics. |
+| Phase 3 - Company Detail Product Redesign | Same SSI-backed company snapshot contract | Reframe company detail as a data-quality report while keeping SSI source ownership explicit. |
+| Phase 4 - SSI Realtime and Trade Tape Investigation | Realtime/trade-tape endpoint candidates and entitlements | Confirm endpoint names, permissions, row shapes, error classes, and backoff; do not claim live support until data exists with status `ok`. |
+| Phase 5 - Metadata and Foreign Flow Enrichment | Securities/SecuritiesDetails and DailyStockPrice history | Improve metadata mapping and compute foreign-flow windows only from validated historical DailyStockPrice rows. |
+| Phase 6 - VN News Provider | None; news is not SSI-owned | Keep news disabled until a separate provider exists. |
+| Phase 7 - Financials and Corporate Actions | None unless SSI exposes explicit structured sources later | Use only explicit structured external sources; do not infer events from market-data gaps. |
+| Phase 8 - Local Persistence and Historical Cache | DailyOhlc, DailyStockPrice, metadata, diagnostics | Persist source/date/fetched_at and keep stale-data semantics explicit. |
+| Phase 9 - Portfolio / Watchlist Workflow | SSI source/freshness status as alert inputs | Alerts remain neutral data-quality/source-freshness alerts, not trading advice. |
+
 ## Next phase
 
-Use the roadmap priority order: continue with SSI realtime/streaming protocol hardening, then external fundamentals/corporate-actions/news provider work. Do not introduce FC Trading or Mozyfin/KBS fallback for SSI-owned market data in any phase.
+Use the roadmap phase order. Phase 0 freezes the current SSI milestone; Phase 1 and Phase 2 should make data quality and public contracts clearer before Phase 4 realtime/trade-tape investigation and later external provider work. Do not introduce FC Trading or Mozyfin/KBS fallback for SSI-owned market data in any phase.

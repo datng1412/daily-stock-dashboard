@@ -18,6 +18,8 @@ Use `ok` only when the section has usable data for its purpose. Use `unavailable
 
 Technical sub-statuses, provider codes, HTTP status, retryability, and endpoint attempts belong in diagnostics.
 
+Profile completeness labels such as `partial` are data-quality classifications, not provider status enum values. Provider/live-section statuses should remain `ok`, `unavailable`, or `disabled`.
+
 ## Missing Data Rules
 
 Use these rules consistently across backend responses and frontend rendering:
@@ -51,6 +53,8 @@ Daily finality must stay explicit:
 If daily SSI data is unavailable, the row should expose an unavailable status and null daily metrics rather than borrowing live, intraday, or legacy-provider values.
 
 ## Live Section Contract
+
+This is the Phase 2 public contract target. Missing live objects and lists must not be represented by placeholder objects or fake metric rows.
 
 ### Intraday
 
@@ -208,24 +212,24 @@ Cache errors and provider unavailable states are separate concepts. A provider 4
 
 ### P0
 
-* Investigate SSI DailyOhlc vs DailyStockPrice same-date mismatch. Latest smoke observed FPT on `2026-06-22` with DailyOhlc/dashboard close fields at `70,700`, DailyStockPrice close/adjusted close at `70,800`, DailyOhlc volume at `3,642,400`, and DailyStockPrice matched volume at `3,643,500`.
-* Normalize unavailable `trade_tape` to `[]` with status in `trade_tape_status` and diagnostics under `diagnostics.trade_tape`.
-* Split public realtime/trade-tape status messages from diagnostics.
+* Phase 1: investigate SSI DailyOhlc vs DailyStockPrice same-date mismatch. Latest smoke observed FPT on `2026-06-22` with DailyOhlc/dashboard close fields at `70,700`, DailyStockPrice close/adjusted close at `70,800`, DailyOhlc volume at `3,642,400`, and DailyStockPrice matched volume at `3,643,500`.
+* Phase 2: normalize unavailable `trade_tape` to `[]` with status in `trade_tape_status` and diagnostics under `diagnostics.trade_tape`.
+* Phase 2: split public realtime/trade-tape status messages from diagnostics.
 
 ### P1
 
-* Deprecate top-level `intraday_timeframe`.
-* Move stale intraday latest-date/date-match metadata into status/diagnostics when no usable intraday data exists.
-* Add backoff or longer TTL for non-retryable SSI realtime/trade-tape 404 responses.
+* Phase 2: deprecate top-level `intraday_timeframe`.
+* Phase 2: move stale intraday latest-date/date-match metadata into status/diagnostics when no usable intraday data exists.
+* Phase 2 and Phase 4: add backoff or longer TTL for non-retryable SSI realtime/trade-tape 404 responses.
 
 ### P2
 
-* Improve SSI metadata mapping for company name, issuer, security type, lot size, listed shares, and listed date.
-* Add historical SSI DailyStockPrice foreign-flow support if available.
-* Clean quote metadata semantics when quote is disabled or unreliable.
-* Improve `final_close_status` using VN session/calendar rules.
+* Phase 5: improve SSI metadata mapping for company name, issuer, security type, lot size, listed shares, listed date, and industry if available.
+* Phase 5: add historical SSI DailyStockPrice foreign-flow support if available.
+* Phase 1 and Phase 2: clean quote metadata semantics when quote is disabled or unreliable.
+* Phase 1: improve `final_close_status` using VN session/calendar rules.
 
 ### P3
 
-* Clarify cache errors versus provider unavailable.
-* Clarify units metadata versus data availability.
+* Phase 2 and Phase 8: clarify cache errors versus provider unavailable.
+* Phase 2: clarify units metadata versus data availability.

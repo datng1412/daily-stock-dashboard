@@ -159,26 +159,44 @@ Current known limitations are part of the product surface and should be visible 
 
 ## Future Milestones
 
-### M1 - SSI Daily MVP Freeze
+The full implementation roadmap is tracked in `docs/VN_DASHBOARD_ROADMAP.md`. Product milestones are summarized here so the spec stays aligned with the end-to-end plan.
 
-Freeze current daily data semantics around SSI DailyOhlc as canonical `latest_price` until the DailyOhlc versus DailyStockPrice mismatch is resolved.
+### Phase 0 - SSI Provider Milestone Freeze
 
-### M2 - Data-Quality Panel
+Freeze the SSI-provider migration milestone: SSI daily data is primary, Mozyfin is disabled for VN runtime, KBS is legacy optional only, news is disabled, and unavailable live sections use `null` or `[]` instead of fake metrics.
 
-Move provider diagnostics, endpoint attempts, HTTP status, stale-date metadata, retryability, and raw provider error summaries into a dedicated diagnostics panel.
+### Phase 1 - Data Quality Summary
 
-### M3 - Company Research Page Expansion
+Turn source mismatch, finality uncertainty, stale intraday, unavailable live data, and partial metadata into visible neutral warnings on the dashboard selected ticker and company detail.
 
-Expand the company page with richer SSI metadata, clearer source coverage, and future external provider blocks for financials and events.
+### Phase 2 - Clean Public Contract and Diagnostics Split
 
-### M4 - SSI Realtime/Trade-Tape Investigation
+Normalize unavailable public data to `intraday_pulse = null`, `intraday_candles = []`, `realtime_snapshot = null`, and `trade_tape = []`; keep endpoint attempts, HTTP status, raw provider errors, retryability, and stale-date details in diagnostics.
 
-Confirm SSI realtime and trade-tape endpoint names, permissions, row shapes, retry behavior, and final public contract. Keep unavailable states explicit until confirmed.
+### Phase 3 - Company Detail Product Redesign
 
-### M5 - News Provider
+Redesign the company detail page as a data-quality report with a strong header, Data Quality Summary, daily core data, lower-prominence live availability, grouped future modules, and collapsible diagnostics.
 
-Implement a separate news provider contract. Mozyfin remains disabled for VN runtime.
+### Phase 4 - SSI Realtime and Trade Tape Investigation
 
-### M6 - Financials/Corporate Actions
+Confirm whether available SSI FastConnect Data endpoints and entitlements can provide usable realtime snapshot and trade tape. Do not claim live support until `realtime_snapshot` is non-null and status is `ok`.
 
-Add external provider coverage for financial statements, ratios, dividends, rights, splits, and corporate action event history. Do not infer these from price gaps.
+### Phase 5 - Metadata and Foreign Flow Enrichment
+
+Improve SSI Securities/SecuritiesDetails metadata mapping, add profile completeness semantics, and compute `foreign_net_5d`/`foreign_net_20d` only from validated DailyStockPrice history.
+
+### Phase 6 - VN News Provider
+
+Add a separate VN NewsProvider when a source is chosen. Until then, keep `news = []` and `news_status.status = disabled`.
+
+### Phase 7 - Financials and Corporate Actions
+
+Add explicit structured financial statement, ratio, dividend, rights, split, and event-history providers. Do not infer corporate actions from price gaps or mutate raw OHLCV.
+
+### Phase 8 - Local Persistence and Historical Cache
+
+Add durable local history only if product needs exceed process-local cache. Persist source, date, and fetch time, and keep stale data clearly labeled.
+
+### Phase 9 - Portfolio / Watchlist Workflow
+
+Add saved watchlists, groups, notes, neutral data-quality alerts, source freshness alerts, and exports without turning the product into an advisor.

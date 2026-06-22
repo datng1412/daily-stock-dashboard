@@ -19,6 +19,23 @@ Operational rule:
 - Separate facts, source status, diagnostics, and neutral interpretation.
 - Prefer neutral labels such as `Strong`, `Improving`, `Neutral`, `Weakening`, `Risk elevated`, and `Data unavailable`.
 
+## VN Product Phase Plan
+
+Decision: the VN dashboard roadmap uses an explicit Phase 0 through Phase 9 plan.
+
+Rationale:
+
+- The product needs to move beyond the SSI migration milestone without blurring current behavior and future work.
+- Later work should expand data quality, contract cleanliness, provider coverage, persistence, and workflow while preserving the current product boundary.
+
+Operational rule:
+
+- Phase 0 freezes the current SSI provider milestone.
+- Phase 1 and Phase 2 prioritize data-quality visibility and contract cleanup before broader provider expansion.
+- Phase 4 may investigate SSI realtime/trade-tape endpoints, but live support must not be claimed until actual rows exist with status `ok`.
+- Phase 6 and Phase 7 require separate explicit providers for news, financials, and corporate actions.
+- Phase 9 workflow tools remain neutral data-quality/watchlist tooling, not recommendation features.
+
 ## Vietnam Dashboard Data Source
 
 Decision: SSI FastConnect is the strict primary VN market-data provider for supported dashboard fields.
@@ -106,8 +123,8 @@ Decision: unavailable optional live sections use null or empty data, not placeho
 
 Operational rule:
 
-- No object data: `null`.
-- No list data: `[]`.
+- Missing object data: `null`.
+- Missing list data: `[]`.
 - `realtime_snapshot` is `null` when no usable SSI realtime snapshot exists.
 - `intraday_pulse` is `null` and `intraday_candles` is `[]` when intraday is unavailable, stale, or mismatched.
 - Trade rows are `[]` when no trade tape rows exist.
