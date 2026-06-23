@@ -284,7 +284,15 @@ Phase 3.2A status:
 * No backend/API contract fields, provider calls, endpoints, polling, or request-orchestration behavior changed in Phase 3.2A.
 * Provider endpoint details, HTTP status, and raw provider summaries stay in diagnostics rather than the primary readiness strip.
 
-Phase 3.2B remaining:
+Phase 3.2B status:
+
+* Added lightweight explanations to the `/vietnam` Data Readiness strip.
+* Each readiness item exposes factual source/status context through tooltip/accessibility text.
+* Explanations derive from the same already loaded frontend watchlist, selected ticker, realtime, and trade-tape state used by the strip.
+* No backend/API contract fields, provider calls, endpoints, polling, or request-orchestration behavior changed in Phase 3.2B.
+* Explanations do not expose endpoint details, HTTP status, retryability, raw provider summaries, or advisory labels.
+
+Phase 3.2C remaining:
 
 Goal:
 

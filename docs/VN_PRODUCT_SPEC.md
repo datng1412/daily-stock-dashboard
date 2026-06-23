@@ -278,6 +278,8 @@ Phase 3.1 polished the `/vietnam` indicator table into the main daily scan surfa
 
 Phase 3.2A adds a compact `/vietnam` Data Readiness strip near the top of the dashboard. The strip is visual/status-only and derives its states from already loaded frontend response data and live-section status objects. It does not add backend fields, endpoints, provider calls, polling, request orchestration, or refresh-preservation behavior.
 
+Phase 3.2B adds lightweight explanations to the Data Readiness strip so each item has factual source/status context. The explanations are frontend-only, derive from the same already loaded response/status data, and do not add backend fields, endpoints, provider calls, polling, request orchestration, or refresh-preservation behavior.
+
 Next Phase 3 work makes the dashboard progressive: data readiness and refresh UX, selected ticker progressive disclosure, request-state orchestration, local filtering, and chart UX polish. The company detail page remains part of the same source-aware explanation layer, not a separate advisor experience.
 
 ### Phase 4.0 - SSI Realtime and Trade Tape Investigation

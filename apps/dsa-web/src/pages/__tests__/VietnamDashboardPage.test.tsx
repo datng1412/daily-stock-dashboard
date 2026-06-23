@@ -571,6 +571,10 @@ const dataReadinessStrip = () => {
   return within(strip);
 };
 
+const dataReadinessItem = (label: RegExp | string) => (
+  dataReadinessStrip().getByRole('group', { name: label })
+);
+
 const inspectChartCard = () => {
   const detail = within(screen.getByText('Stock detail').closest('section') as HTMLElement);
   const chartHeading = detail.getByRole('heading', { name: 'Inspect chart' });
@@ -660,6 +664,35 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(strip.getByText('Realtime ready')).toBeInTheDocument();
     expect(strip.getByText('Trade tape ready')).toBeInTheDocument();
     expect(strip.getByText('News disabled')).toBeInTheDocument();
+
+    expect(dataReadinessItem(/Daily data: all current loaded rows include usable SSI DailyOhlc daily fields\./)).toHaveAttribute(
+      'title',
+      'Daily data: all current loaded rows include usable SSI DailyOhlc daily fields.',
+    );
+    expect(dataReadinessItem(/Reference \/ foreign: all current loaded rows include SSI DailyStockPrice reference or foreign-flow fields\./)).toHaveAttribute(
+      'title',
+      'Reference / foreign: all current loaded rows include SSI DailyStockPrice reference or foreign-flow fields.',
+    );
+    expect(dataReadinessItem(/Indicators: all current loaded rows include technical fields such as RSI14, moving averages, or volume ratio\./)).toHaveAttribute(
+      'title',
+      'Indicators: all current loaded rows include technical fields such as RSI14, moving averages, or volume ratio.',
+    );
+    expect(dataReadinessItem(/Intraday: existing intraday status is disabled\./)).toHaveAttribute(
+      'title',
+      'Intraday: existing intraday status is disabled.',
+    );
+    expect(dataReadinessItem(/Realtime: all current loaded rows show existing realtime status is ok and a usable realtime snapshot is present\./)).toHaveAttribute(
+      'title',
+      'Realtime: all current loaded rows show existing realtime status is ok and a usable realtime snapshot is present.',
+    );
+    expect(dataReadinessItem(/Trade tape: existing trade tape status is ok and usable trade rows are present\./)).toHaveAttribute(
+      'title',
+      'Trade tape: existing trade tape status is ok and usable trade rows are present.',
+    );
+    expect(dataReadinessItem(/News: news is disabled because live news data\/status is not implemented in this phase\./)).toHaveAttribute(
+      'title',
+      'News: news is disabled because live news data/status is not implemented in this phase.',
+    );
   });
 
   it('shows daily data loading during the initial watchlist request', async () => {
@@ -672,6 +705,10 @@ describe('VietnamDashboardPage watchlist loading', () => {
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(dataReadinessStrip().getByText('Loading daily data')).toBeInTheDocument());
+    expect(dataReadinessItem(/Daily data: current watchlist is loading and no usable daily rows are loaded yet\./)).toHaveAttribute(
+      'title',
+      'Daily data: current watchlist is loading and no usable daily rows are loaded yet.',
+    );
 
     await act(async () => {
       resolveWatchlist?.(makeResponse(defaultTickers));
@@ -732,6 +769,14 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(strip.getByText('Daily data ready')).toBeInTheDocument();
     expect(strip.getByText('Foreign flow partial')).toBeInTheDocument();
     expect(strip.getByText('Indicators partial')).toBeInTheDocument();
+    expect(dataReadinessItem(/Reference \/ foreign: some current loaded rows include SSI DailyStockPrice reference or foreign-flow fields\./)).toHaveAttribute(
+      'title',
+      'Reference / foreign: some current loaded rows include SSI DailyStockPrice reference or foreign-flow fields.',
+    );
+    expect(dataReadinessItem(/Indicators: some current loaded rows include technical fields such as RSI14, moving averages, or volume ratio\./)).toHaveAttribute(
+      'title',
+      'Indicators: some current loaded rows include technical fields such as RSI14, moving averages, or volume ratio.',
+    );
   });
 
   it('renders optional realtime and trade tape unavailable without endpoint diagnostics', async () => {
@@ -796,6 +841,18 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(strip.getByText('Realtime unavailable')).toBeInTheDocument();
     expect(strip.getByText('Trade tape unavailable')).toBeInTheDocument();
     expect(strip.getByText('News disabled')).toBeInTheDocument();
+    expect(dataReadinessItem(/Realtime: existing realtime status is unavailable or no usable realtime snapshot is present\./)).toHaveAttribute(
+      'title',
+      'Realtime: existing realtime status is unavailable or no usable realtime snapshot is present.',
+    );
+    expect(dataReadinessItem(/Trade tape: existing status is unavailable or no usable trade rows are present in the current response\./)).toHaveAttribute(
+      'title',
+      'Trade tape: existing status is unavailable or no usable trade rows are present in the current response.',
+    );
+    expect(dataReadinessItem(/News: news is disabled because live news data\/status is not implemented in this phase\./)).toHaveAttribute(
+      'title',
+      'News: news is disabled because live news data/status is not implemented in this phase.',
+    );
     expect(strip.queryByText(/Attempted endpoints|RealtimeQuote|TradeTape|HTTP status|raw provider/i)).not.toBeInTheDocument();
   });
 

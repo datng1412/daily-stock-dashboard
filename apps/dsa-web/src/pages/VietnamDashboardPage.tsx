@@ -66,6 +66,7 @@ interface DataReadinessItem {
   label: string;
   state: ReadinessState;
   detail: string;
+  explanation: string;
 }
 
 const WATCHLIST_SCAN_ORDER: WatchlistScanLabel[] = ['Strong', 'Improving', 'Neutral', 'Weakening', 'Risk elevated', 'Data unavailable'];
@@ -532,6 +533,90 @@ const readinessText = (key: ReadinessItemKey, state: ReadinessState) => {
   return copy[key][state];
 };
 
+const coverageExplanation = (
+  key: Extract<ReadinessItemKey, 'daily' | 'referenceForeign' | 'indicators'>,
+  state: ReadinessState,
+  total: number,
+  readyCount: number,
+) => {
+  const labels = {
+    daily: 'Daily data',
+    referenceForeign: 'Reference / foreign',
+    indicators: 'Indicators',
+  } as const;
+  const readyCopy = {
+    daily: 'usable SSI DailyOhlc daily fields',
+    referenceForeign: 'SSI DailyStockPrice reference or foreign-flow fields',
+    indicators: 'technical fields such as RSI14, moving averages, or volume ratio',
+  } as const;
+  const noRowsCopy = {
+    daily: 'no usable daily rows are loaded yet',
+    referenceForeign: 'no loaded rows include SSI DailyStockPrice reference or foreign-flow fields',
+    indicators: 'no loaded rows include technical fields',
+  } as const;
+  const label = labels[key];
+  if (state === 'Loading') return `${label}: current watchlist is loading and ${noRowsCopy[key]}.`;
+  if (state === 'Ready') {
+    return readyCount === total
+      ? `${label}: all current loaded rows include ${readyCopy[key]}.`
+      : `${label}: most current loaded rows include ${readyCopy[key]}.`;
+  }
+  if (state === 'Partial') return `${label}: some current loaded rows include ${readyCopy[key]}.`;
+  return `${label}: ${noRowsCopy[key]} after the current load.`;
+};
+
+const statusExplanation = (
+  key: Extract<ReadinessItemKey, 'intraday' | 'realtime' | 'news'>,
+  state: ReadinessState,
+  total: number,
+  readyCount: number,
+) => {
+  const labels = {
+    intraday: 'Intraday',
+    realtime: 'Realtime',
+    news: 'News',
+  } as const;
+  const readyCopy = {
+    intraday: 'existing status/data indicates usable intraday data without assuming a fixed cadence',
+    realtime: 'existing realtime status is ok and a usable realtime snapshot is present',
+    news: 'existing frontend state includes news rows or ok news status',
+  } as const;
+  const unavailableCopy = {
+    intraday: 'existing intraday status/data is unavailable or unusable in the current response',
+    realtime: 'existing realtime status is unavailable or no usable realtime snapshot is present',
+    news: 'news readiness is not backed by live news data/status in this phase',
+  } as const;
+  const disabledCopy = {
+    intraday: 'existing intraday status is disabled',
+    realtime: 'existing realtime status is disabled',
+    news: 'news is disabled because live news data/status is not implemented in this phase',
+  } as const;
+  const notImplementedCopy = {
+    intraday: 'intraday readiness is marked not implemented by the existing status',
+    realtime: 'realtime readiness is marked not implemented by the existing status',
+    news: 'news is not implemented and no fake news items are shown',
+  } as const;
+  const label = labels[key];
+  if (state === 'Loading') return `${label}: current status is loading from existing frontend state.`;
+  if (state === 'Ready') {
+    return readyCount === total
+      ? `${label}: all current loaded rows show ${readyCopy[key]}.`
+      : `${label}: current loaded state shows ${readyCopy[key]}.`;
+  }
+  if (state === 'Partial') return `${label}: only some current loaded rows show ${readyCopy[key]}.`;
+  if (state === 'Disabled') return `${label}: ${disabledCopy[key]}.`;
+  if (state === 'Not implemented') return `${label}: ${notImplementedCopy[key]}.`;
+  return `${label}: ${unavailableCopy[key]}.`;
+};
+
+const tradeTapeExplanation = (state: ReadinessState) => {
+  if (state === 'Loading') return 'Trade tape: current trade tape status is loading from existing frontend state.';
+  if (state === 'Ready') return 'Trade tape: existing trade tape status is ok and usable trade rows are present.';
+  if (state === 'Disabled') return 'Trade tape: existing trade tape status is disabled.';
+  if (state === 'Not implemented') return 'Trade tape: trade tape readiness is marked not implemented by the existing status.';
+  return 'Trade tape: existing status is unavailable or no usable trade rows are present in the current response.';
+};
+
 const liveStateFromCounts = (
   total: number,
   readyCount: number,
@@ -571,9 +656,12 @@ const deriveDataReadiness = ({
 }): DataReadinessItem[] => {
   const rows = data?.watchlist ?? [];
   const rowCount = rows.length;
-  const dailyState = readinessFromCoverage(rowCount, rows.filter(hasOfficialDailyData).length, loading);
-  const referenceForeignState = readinessFromCoverage(rowCount, rows.filter(hasReferenceOrForeignData).length, loading);
-  const indicatorState = readinessFromCoverage(rowCount, rows.filter(hasIndicatorData).length, loading);
+  const dailyReadyCount = rows.filter(hasOfficialDailyData).length;
+  const referenceForeignReadyCount = rows.filter(hasReferenceOrForeignData).length;
+  const indicatorReadyCount = rows.filter(hasIndicatorData).length;
+  const dailyState = readinessFromCoverage(rowCount, dailyReadyCount, loading);
+  const referenceForeignState = readinessFromCoverage(rowCount, referenceForeignReadyCount, loading);
+  const indicatorState = readinessFromCoverage(rowCount, indicatorReadyCount, loading);
 
   const intradayReadyCount = rows.filter(hasCurrentIntradayData).length;
   const intradayDisabledCount = rows.filter((item) => (
@@ -633,13 +721,55 @@ const deriveDataReadiness = ({
   const newsState = liveStateFromCounts(rowCount, newsReadyCount, newsDisabledCount, newsNotImplementedCount, loading);
 
   return [
-    { key: 'daily', label: 'Daily data', state: dailyState, detail: readinessText('daily', dailyState) },
-    { key: 'referenceForeign', label: 'Reference / foreign', state: referenceForeignState, detail: readinessText('referenceForeign', referenceForeignState) },
-    { key: 'indicators', label: 'Indicators', state: indicatorState, detail: readinessText('indicators', indicatorState) },
-    { key: 'intraday', label: 'Intraday', state: intradayState, detail: readinessText('intraday', intradayState) },
-    { key: 'realtime', label: 'Realtime', state: realtimeState, detail: readinessText('realtime', realtimeState) },
-    { key: 'tradeTape', label: 'Trade tape', state: tradeTapeState, detail: readinessText('tradeTape', tradeTapeState) },
-    { key: 'news', label: 'News', state: newsState, detail: readinessText('news', newsState) },
+    {
+      key: 'daily',
+      label: 'Daily data',
+      state: dailyState,
+      detail: readinessText('daily', dailyState),
+      explanation: coverageExplanation('daily', dailyState, rowCount, dailyReadyCount),
+    },
+    {
+      key: 'referenceForeign',
+      label: 'Reference / foreign',
+      state: referenceForeignState,
+      detail: readinessText('referenceForeign', referenceForeignState),
+      explanation: coverageExplanation('referenceForeign', referenceForeignState, rowCount, referenceForeignReadyCount),
+    },
+    {
+      key: 'indicators',
+      label: 'Indicators',
+      state: indicatorState,
+      detail: readinessText('indicators', indicatorState),
+      explanation: coverageExplanation('indicators', indicatorState, rowCount, indicatorReadyCount),
+    },
+    {
+      key: 'intraday',
+      label: 'Intraday',
+      state: intradayState,
+      detail: readinessText('intraday', intradayState),
+      explanation: statusExplanation('intraday', intradayState, rowCount, intradayReadyCount),
+    },
+    {
+      key: 'realtime',
+      label: 'Realtime',
+      state: realtimeState,
+      detail: readinessText('realtime', realtimeState),
+      explanation: statusExplanation('realtime', realtimeState, rowCount, realtimeReadyCount),
+    },
+    {
+      key: 'tradeTape',
+      label: 'Trade tape',
+      state: tradeTapeState,
+      detail: readinessText('tradeTape', tradeTapeState),
+      explanation: tradeTapeExplanation(tradeTapeState),
+    },
+    {
+      key: 'news',
+      label: 'News',
+      state: newsState,
+      detail: readinessText('news', newsState),
+      explanation: statusExplanation('news', newsState, rowCount, newsReadyCount),
+    },
   ];
 };
 
@@ -691,7 +821,13 @@ const DataReadinessStrip: React.FC<{
       </div>
       <dl className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
         {items.map((item) => (
-          <div key={item.key} className="rounded-lg border border-border/50 bg-elevated/40 p-3">
+          <div
+            key={item.key}
+            className="rounded-lg border border-border/50 bg-elevated/40 p-3"
+            role="group"
+            aria-label={item.explanation}
+            title={item.explanation}
+          >
             <dt className="flex items-center justify-between gap-2 text-xs font-medium text-secondary-text">
               <span>{item.label}</span>
               <Badge variant={readinessVariant(item)}>{item.state}</Badge>
