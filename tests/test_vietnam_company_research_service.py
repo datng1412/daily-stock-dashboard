@@ -104,19 +104,15 @@ def test_vietnam_company_research_endpoint_returns_phase_one_contract(monkeypatc
                         },
                         "trade_tape_source": "SSI",
                         "trade_tape_status": {"status": "ok", "source": "SSI", "message": None},
-                        "trade_tape": {
-                            "status": "ok",
-                            "source": "SSI",
-                            "trades": [
-                                {
-                                    "time": "10:16:00",
-                                    "price": 124.8,
-                                    "volume": 1000,
-                                    "value": 124_800_000,
-                                    "source": "SSI",
-                                }
-                            ],
-                        },
+                        "trade_tape": [
+                            {
+                                "time": "10:16:00",
+                                "price": 124.8,
+                                "volume": 1000,
+                                "value": 124_800_000,
+                                "source": "SSI",
+                            }
+                        ],
                         "warnings": [],
                         "news": [],
                     }
@@ -172,3 +168,111 @@ def test_vietnam_company_research_endpoint_returns_phase_one_contract(monkeypatc
     assert payload["financials"]["source"] != "SSI"
     assert payload["events"]["source"] != "SSI"
     assert payload["status"] != "unavailable"
+
+
+def test_vietnam_company_research_keeps_unavailable_live_sections_visible(monkeypatch, tmp_path):
+    class StubVietnamMarketService:
+        def build_watchlist(self, symbols=None, **kwargs):
+            assert symbols == ["FPT"]
+            return {
+                "market": "VN",
+                "source": "SSI",
+                "watchlist": [
+                    {
+                        "ticker": "FPT",
+                        "status": "ok",
+                        "source": "SSI",
+                        "actual_source": "SSI",
+                        "fallback_used": False,
+                        "company_name": "FPT Corporation",
+                        "exchange": "HOSE",
+                        "symbol_metadata": {
+                            "status": "ok",
+                            "symbol": "FPT",
+                            "exchange": "HOSE",
+                            "market": "HOSE",
+                            "source": "SSI",
+                        },
+                        "latest_price": 124.6,
+                        "daily_close": 124.6,
+                        "latest_price_date": "2026-06-17",
+                        "open": 123.4,
+                        "high": 125.0,
+                        "low": 122.8,
+                        "close": 124.6,
+                        "volume": 1_234_567,
+                        "amount": 123_456_789_000,
+                        "daily_stock_price": {"status": "ok", "date": "2026-06-17", "close": 124.6, "source": "SSI"},
+                        "price_limit": {},
+                        "foreign": {},
+                        "indicators": {},
+                        "intraday_source": "SSI",
+                        "intraday_status": {
+                            "status": "unavailable",
+                            "source": "SSI IntradayOhlc",
+                            "message": "SSI IntradayOhlc latest candle date does not match latest daily trading date.",
+                        },
+                        "intraday_candles": [],
+                        "intraday_pulse": None,
+                        "realtime_source": "SSI realtime contract",
+                        "realtime_status": {
+                            "status": "unavailable",
+                            "source": "SSI realtime contract",
+                            "message": "SSI realtime unavailable.",
+                            "diagnostics": {"provider_message": "attempted endpoints: RealtimeQuote"},
+                        },
+                        "realtime_snapshot": None,
+                        "trade_tape_source": "SSI trade-tape contract",
+                        "trade_tape_status": {
+                            "status": "unavailable",
+                            "source": "SSI trade-tape contract",
+                            "message": "SSI trade tape unavailable.",
+                            "diagnostics": {"provider_message": "attempted endpoints: TradeTape"},
+                        },
+                        "trade_tape": [],
+                        "data_quality_summary": {
+                            "overall_status": "partial",
+                            "canonical_price_source": "SSI DailyOhlc",
+                            "issues": [],
+                            "checks": {
+                                "daily_ohlc": "ok",
+                                "daily_stock_price": "ok",
+                                "final_close_status": "unknown",
+                                "adjusted_price_status": "unknown",
+                                "intraday": "unavailable",
+                                "realtime": "unavailable",
+                                "trade_tape": "unavailable",
+                                "profile": "ok",
+                                "news": "disabled",
+                            },
+                        },
+                        "warnings": [],
+                        "news": [],
+                    }
+                ],
+            }
+
+    monkeypatch.setattr(
+        "src.services.vietnam_company_research_service.VietnamMarketService",
+        StubVietnamMarketService,
+    )
+    client = TestClient(create_app(static_dir=tmp_path / "static"))
+
+    response = client.get("/api/v1/stocks/vn/company/FPT")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "ok"
+    assert payload["price"]["latest_price"] == 124.6
+    assert payload["intraday"]["status"] == "unavailable"
+    assert payload["intraday"]["candles"] == []
+    assert payload["intraday"]["pulse"] is None
+    assert payload["realtime"]["status"] == "unavailable"
+    assert payload["realtime"]["snapshot"] is None
+    assert payload["realtime"]["message"] == "SSI realtime unavailable."
+    assert payload["trade_tape"]["status"] == "unavailable"
+    assert payload["trade_tape"]["trades"] == []
+    assert payload["trade_tape"]["message"] == "SSI trade tape unavailable."
+    assert payload["data_quality_summary"]["checks"]["intraday"] == "unavailable"
+    assert payload["data_quality_summary"]["checks"]["realtime"] == "unavailable"
+    assert payload["data_quality_summary"]["checks"]["trade_tape"] == "unavailable"

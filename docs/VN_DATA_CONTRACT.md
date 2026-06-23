@@ -71,7 +71,7 @@ Required rules:
 
 ## Live Section Contract
 
-This is the Phase 2 public contract target. Missing live objects and lists must not be represented by placeholder objects or fake metric rows.
+This is the Phase 2 public contract. Missing live objects and lists must not be represented by placeholder objects or fake metric rows.
 
 ### Intraday
 
@@ -95,7 +95,7 @@ intraday_pulse = null
 
 Stale latest-date metadata and date-match details should move to `intraday_status` or diagnostics when there is no usable intraday section.
 
-The company endpoint must follow the same missing-object rule. When nested company `intraday.status = unavailable`, `intraday.candles = []` and `intraday.pulse = null`. A placeholder `{}` pulse is a cleanup bug, not the desired contract.
+The company endpoint follows the same missing-object rule. When nested company `intraday.status = unavailable`, `intraday.candles = []` and `intraday.pulse = null`.
 
 ### Realtime Snapshot
 
@@ -131,7 +131,7 @@ trade_tape_status.status = unavailable or disabled
 trade_tape = []
 ```
 
-The desired public contract is a list for `trade_tape`. A wrapper object with `trades: []` is a remaining cleanup item and should not become the long-term public shape.
+The watchlist public contract is a list for `trade_tape`. Company detail keeps a nested `trade_tape.trades` list because the company page groups block status and rows together.
 
 ### Diagnostics
 
@@ -146,6 +146,8 @@ Diagnostics may include:
 * Row counts.
 * Normalized keys.
 * Sanitized provider error summaries.
+
+Watchlist live-section status objects may include a nested `diagnostics` object for sanitized provider details that were previously embedded in public messages. The public `message` field must remain short and user-safe.
 
 Diagnostics must not include:
 
@@ -249,14 +251,16 @@ Units metadata does not prove data availability. UI availability must depend on 
 
 Cache errors and provider unavailable states are separate concepts. A provider 404 or unavailable live endpoint should not be shown as a daily SSI cache failure.
 
+## Recently Completed Contract Cleanup
+
+* Phase 2.1 completed: unavailable watchlist `trade_tape` is `[]`, status stays in `trade_tape_status`, and sanitized provider details move to status diagnostics instead of public messages.
+* Phase 2.1 completed: unavailable company `intraday.pulse` is `null`, not `{}`.
+
 ## Known Contract TODOs
 
 ### P0
 
 * Phase 1: investigate SSI DailyOhlc vs DailyStockPrice same-date mismatch. Latest smoke observed FPT on `2026-06-22` with DailyOhlc/dashboard close fields at `70,700`, DailyStockPrice close/adjusted close at `70,800`, DailyOhlc volume at `3,642,400`, and DailyStockPrice matched volume at `3,643,500`.
-* Phase 2: normalize unavailable `trade_tape` to `[]` with status in `trade_tape_status` and diagnostics under `diagnostics.trade_tape`.
-* Phase 2: split public realtime/trade-tape status messages from diagnostics.
-
 ### P1
 
 * Phase 2: deprecate top-level `intraday_timeframe`.

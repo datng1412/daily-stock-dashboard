@@ -79,10 +79,10 @@ Null/empty rules:
 - `trade_tape = []` when unavailable/no rows.
 - `news = []` while disabled.
 
-Current known caveats from handoff snapshots:
+Implemented contract notes:
 
-- Watchlist/company trade tape can still expose a wrapper object with inner `trades: []`; Phase 2 target is public `trade_tape = []`.
-- Realtime/trade-tape status messages can still contain endpoint details; Phase 2 target is short public message plus diagnostics.
+- Watchlist `trade_tape` is public list data. It returns `[]` when unavailable/no rows and trade rows when usable.
+- Realtime/trade-tape status messages are short and user-safe. Sanitized provider details may appear under status diagnostics or other diagnostics-only structures.
 - DailyOhlc and DailyStockPrice can disagree on same ticker/date.
 
 Future changes:
@@ -154,14 +154,14 @@ Source ownership:
 
 Null/empty rules:
 
-- `intraday.candles = []` and target `intraday.pulse = null` when intraday is unavailable. Handoff snapshot showed current `pulse = {}`; Phase 2 should clean this.
+- `intraday.candles = []` and `intraday.pulse = null` when intraday is unavailable.
 - `realtime_snapshot = null` when unavailable.
-- `trade_tape = []` when unavailable/no rows.
+- `trade_tape.trades = []` when unavailable/no rows.
 - Future module lists stay empty while not implemented/unavailable.
 
-Current known caveats from handoff snapshots:
+Implemented contract notes:
 
-- Company intraday currently can report `status = unavailable`, `candles = []`, and `pulse = {}`; target is `pulse = null`.
+- Company intraday unavailable shape is `status = unavailable`, `candles = []`, and `pulse = null`.
 - Profile can have `name = null` and `industry = null` while provider status is `ok`; docs define this as provider OK plus profile completeness `partial`.
 - Company price and trading stats now align shared daily values with SSI DailyOhlc; remaining numeric differences versus DailyStockPrice are intentional when fields are explicitly labeled as reference, matched, put-through, adjusted, or foreign-flow values.
 - News placeholders use `NewsProvider future`; financials/events/corporate-action placeholders use `external provider future`. `not_implemented` is allowed for future modules, not live-provider statuses.

@@ -66,17 +66,18 @@ Conventions:
 | Field | Meaning | Source | Unit | Nullable | Canonical | UI placement | Known caveat |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `intraday_candles` | Usable intraday candles | SSI IntradayOhlc | list of OHLCV candles | no, empty list if unavailable | no | Live availability/chart adjunct | `[]` when unavailable/stale/no usable rows. |
-| `intraday_pulse` | Compact intraday summary object | Derived from usable SSI IntradayOhlc | object | yes | no | Live availability/Data Quality Summary | Handoff found company endpoint can return `{}` when unavailable; Phase 2 target is `null`. |
+| `intraday_pulse` | Compact intraday summary object | Derived from usable SSI IntradayOhlc | object | yes | no | Live availability/Data Quality Summary | Phase 2.1 normalizes unavailable watchlist/company intraday pulse to `null`. |
 | `realtime_snapshot` | Realtime snapshot object | SSI realtime contract | object | yes | no | Live availability | `null` until SSI realtime is confirmed and status is `ok`. |
-| `trade_tape` | Trade tape row list | SSI trade-tape contract | list | no, empty list if unavailable | no | Live availability | Target public contract is `[]` when unavailable/no rows; wrapper object with inner `trades: []` is legacy/current cleanup. |
-| `trade_tape_status` | Public status/source/message for trade tape | Service status wrapper | object | yes | no | Live availability status | Message should be short; endpoint details belong in `diagnostics.trade_tape`. |
+| `trade_tape` | Watchlist trade tape row list | SSI trade-tape contract | list | no, empty list if unavailable | no | Live availability | Phase 2.1 normalizes watchlist public data to a list: `[]` when unavailable/no rows, trade rows when usable. |
+| `trade_tape.trades` | Company detail trade tape rows | SSI trade-tape contract | list | no, empty list if unavailable | no | Company live availability | Company detail keeps rows under the nested block while preserving the same empty-list rule. |
+| `trade_tape_status` | Public status/source/message for trade tape | Service status wrapper | object | yes | no | Live availability status | Message should be short; sanitized endpoint/provider details belong in status diagnostics or other diagnostics-only structures. |
 
 ## Diagnostics Fields
 
 | Field | Meaning | Source | Unit | Nullable | Canonical | UI placement | Known caveat |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `diagnostics.realtime` | Technical details for realtime snapshot attempts | Provider/service diagnostics | object | yes | no | Collapsible diagnostics only | May include endpoint labels, last endpoint, HTTP status, retryable flag, sanitized error summary. |
-| `diagnostics.trade_tape` | Technical details for trade tape attempts | Provider/service diagnostics | object | yes | no | Collapsible diagnostics only | Must not leak tokens, auth headers, account IDs, or raw auth responses. |
+| `diagnostics.realtime` / `realtime_status.diagnostics` | Technical details for realtime snapshot attempts | Provider/service diagnostics | object | yes | no | Collapsible diagnostics only | May include endpoint labels, last endpoint, HTTP status, retryable flag, sanitized error summary. |
+| `diagnostics.trade_tape` / `trade_tape_status.diagnostics` | Technical details for trade tape attempts | Provider/service diagnostics | object | yes | no | Collapsible diagnostics only | Must not leak tokens, auth headers, account IDs, or raw auth responses. |
 
 ## Profile Fields
 

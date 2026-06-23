@@ -29,15 +29,15 @@ Do not mix them into a single UI badge without source context.
 | `unknown` | System cannot determine a semantic status | `final_close_status = unknown` or `adjusted_price_status = unknown` | Show conservative caveat; do not infer. |
 | `error` | Unexpected processing or provider error | Parser failure, schema mismatch, unhandled provider response | Prefer sanitized unavailable public status plus detailed diagnostics/logs. |
 
-## Current Handoff Findings To Preserve
+## Phase 2.1 Public Contract Cleanup
 
-- Company intraday can currently expose `pulse = {}` while unavailable; target classification/status is unavailable with `pulse = null`.
-- Trade tape can currently expose a wrapper object with inner `trades: []`; target public contract is `trade_tape = []`.
-- Realtime/trade-tape public messages can include endpoint dumps; target is short message plus diagnostics.
+- Company intraday unavailable shape is visible with `pulse = null`, `candles = []`, and status/message fields.
+- Watchlist trade tape public data is list-shaped: `trade_tape = []` when unavailable/no rows. Company detail keeps a nested block with `trade_tape.trades = []`.
+- Realtime/trade-tape public messages are short and user-safe; sanitized provider details move to status diagnostics or other diagnostics-only structures.
 - Profile provider status can be `ok` while profile completeness is `partial`.
 
 ## Diagnostics Rules
 
 - Public message: short, user-safe, no endpoint dump.
-- Diagnostics: attempted endpoint, last endpoint, HTTP status, retryable flag, stale-date mismatch, sanitized provider error summary.
+- Diagnostics: attempted endpoint, last endpoint, HTTP status, retryable flag, stale-date mismatch, sanitized provider error summary. Watchlist live status objects may carry these in a nested `diagnostics` field.
 - Forbidden everywhere: credentials, tokens, auth headers, account IDs, raw auth responses.

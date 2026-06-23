@@ -172,7 +172,7 @@ def test_ssi_intraday_success_returns_sorted_candles_and_daily_stays_ok(monkeypa
     assert item["source"] == "SSI"
     assert item["actual_source"] == "SSI"
     assert item["fallback_used"] is False
-    assert item["intraday_source"] == "SSI"
+    assert item["intraday_source"] == "SSI IntradayOhlc"
     assert item["intraday_status"]["status"] == "ok"
     assert item["intraday_requested_timeframe"] == "1h"
     assert item["intraday_actual_granularity"] == "1h"
@@ -221,7 +221,7 @@ def test_ssi_intraday_date_mismatch_is_unavailable_without_downgrading_daily_row
 
     assert item["status"] == "ok"
     assert item["daily_stock_price"]["status"] == "ok"
-    assert item["intraday_source"] == "SSI"
+    assert item["intraday_source"] == "SSI IntradayOhlc"
     assert item["intraday_status"]["status"] == "unavailable"
     assert item["intraday_status"]["message"] == "SSI IntradayOhlc latest candle date does not match latest daily trading date."
     assert item["intraday_status"]["intraday_latest_date"] == "2026-06-29"
@@ -306,7 +306,7 @@ def test_ssi_intraday_failure_does_not_downgrade_daily_row():
 
     assert item["status"] == "ok"
     assert item["daily_stock_price"]["status"] == "ok"
-    assert item["intraday_source"] == "SSI"
+    assert item["intraday_source"] == "SSI IntradayOhlc"
     assert item["intraday_status"]["status"] == "unavailable"
     assert item["intraday_status"]["message"] == "SSI FastConnect request failed"
     assert item["intraday_candles"] == []
@@ -323,7 +323,7 @@ def test_ssi_intraday_can_be_disabled_without_mozyfin_fallback():
     )["watchlist"][0]
 
     assert item["status"] == "ok"
-    assert item["intraday_source"] == "SSI"
+    assert item["intraday_source"] == "SSI IntradayOhlc"
     assert item["intraday_status"]["status"] == "disabled"
     assert item["intraday_candles"] == []
     assert item["intraday_pulse"] is None

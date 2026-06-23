@@ -191,8 +191,9 @@ def test_ssi_realtime_failure_is_separate_from_daily_row():
     assert item["realtime_source"] == "SSI realtime contract"
     assert item["realtime_status"]["status"] == "unavailable"
     assert item["realtime_snapshot"] is None
-    assert "realtime snapshot unavailable" in item["realtime_status"]["message"]
-    assert "RealtimeQuote" in item["realtime_status"]["message"]
+    assert item["realtime_status"]["message"] == "SSI realtime unavailable."
+    assert "RealtimeQuote" not in item["realtime_status"]["message"]
+    assert "RealtimeQuote" in item["realtime_status"]["diagnostics"]["provider_message"]
 
 
 def test_ssi_trade_tape_success_returns_normalized_trades():
@@ -210,8 +211,8 @@ def test_ssi_trade_tape_success_returns_normalized_trades():
     assert item["trade_tape_source"] == "SSI trade-tape contract"
     assert item["trade_tape_status"]["status"] == "ok"
     assert item["trade_tape_status"]["source"] == "SSI trade-tape contract"
-    assert item["trade_tape"]["source"] == "SSI trade-tape contract"
-    assert item["trade_tape"]["trades"][0]["sequence_if_available"] == "1"
+    assert item["trade_tape"][0]["source"] == "SSI trade-tape contract"
+    assert item["trade_tape"][0]["sequence_if_available"] == "1"
 
 
 def test_ssi_trade_tape_failure_is_separate_from_daily_row():
@@ -229,9 +230,11 @@ def test_ssi_trade_tape_failure_is_separate_from_daily_row():
 
     assert item["status"] == "ok"
     assert item["trade_tape_source"] == "SSI trade-tape contract"
+    assert item["trade_tape"] == []
     assert item["trade_tape_status"]["status"] == "unavailable"
-    assert "trade tape unavailable" in item["trade_tape_status"]["message"]
-    assert "TradeTape" in item["trade_tape_status"]["message"]
+    assert item["trade_tape_status"]["message"] == "SSI trade tape unavailable."
+    assert "TradeTape" not in item["trade_tape_status"]["message"]
+    assert "TradeTape" in item["trade_tape_status"]["diagnostics"]["provider_message"]
 
 
 def test_realtime_and_trade_tape_can_be_disabled_without_kbs_fallback():
@@ -246,6 +249,7 @@ def test_realtime_and_trade_tape_can_be_disabled_without_kbs_fallback():
     assert item["realtime_source"] is None
     assert item["realtime_status"]["status"] == "disabled"
     assert item["trade_tape_source"] is None
+    assert item["trade_tape"] == []
     assert item["trade_tape_status"]["status"] == "disabled"
     assert fetcher.realtime_calls == 0
     assert fetcher.trade_calls == 0

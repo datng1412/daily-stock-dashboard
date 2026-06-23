@@ -156,9 +156,10 @@ class VietnamCompanyResearchService:
             technical["bollinger_lower"],
         )
         intraday_status = _dict(row.get("intraday_status"))
+        intraday_pulse = row.get("intraday_pulse") if isinstance(row.get("intraday_pulse"), dict) else None
         intraday = {
             "candles": list(row.get("intraday_candles") or []),
-            "pulse": _dict(row.get("intraday_pulse")),
+            "pulse": intraday_pulse,
             "requested_timeframe": row.get("intraday_requested_timeframe") or row.get("intraday_timeframe"),
             "granularity": row.get("intraday_granularity"),
             "actual_granularity": row.get("intraday_actual_granularity") or row.get("intraday_granularity"),
@@ -180,11 +181,12 @@ class VietnamCompanyResearchService:
             "message": realtime_status.get("message"),
         }
         trade_tape_status = _dict(row.get("trade_tape_status"))
-        trade_tape_payload = _dict(row.get("trade_tape"))
+        trade_tape_payload = row.get("trade_tape")
+        trade_tape_rows = trade_tape_payload if isinstance(trade_tape_payload, list) else _dict(trade_tape_payload).get("trades")
         trade_tape = {
-            "trades": list(trade_tape_payload.get("trades") or []),
+            "trades": list(trade_tape_rows or []),
             "source": SSI_TRADE_TAPE_SOURCE,
-            "status": trade_tape_status.get("status") or trade_tape_payload.get("status") or "unavailable",
+            "status": trade_tape_status.get("status") or _dict(trade_tape_payload).get("status") or "unavailable",
             "message": trade_tape_status.get("message"),
         }
 
@@ -306,7 +308,7 @@ class VietnamCompanyResearchService:
         }
         missing_intraday = {
             "candles": [],
-            "pulse": {},
+            "pulse": None,
             "granularity": "unknown",
             "granularity_seconds": None,
             "granularity_label": "provider-returned",

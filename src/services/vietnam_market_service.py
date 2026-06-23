@@ -431,6 +431,19 @@ def _status_from_block(block: Any, default: str = "unavailable") -> str:
     return str(value) if value else default
 
 
+def _status_diagnostics(reason: Optional[str]) -> Dict[str, Any]:
+    if not reason:
+        return {}
+    return {"provider_message": str(reason)}
+
+
+def _public_live_status(status: Optional[str]) -> str:
+    normalized = str(status or "").lower()
+    if normalized in {"ok", "unavailable", "disabled"}:
+        return normalized
+    return "unavailable"
+
+
 def build_vietnam_data_quality_summary(row: Dict[str, Any]) -> Dict[str, Any]:
     """Build a user-safe data-quality summary without changing source semantics."""
     daily_close = _safe_float(
@@ -1970,12 +1983,7 @@ class VietnamMarketService:
     def _disabled_trade_tape_payload(symbol: str) -> Dict[str, Any]:
         return {
             "trade_tape_source": None,
-            "trade_tape": {
-                "ticker": symbol,
-                "source": None,
-                "trades": [],
-                "status": "disabled",
-            },
+            "trade_tape": [],
             "trade_tape_status": {
                 "status": "disabled",
                 "source": None,
@@ -1992,15 +2000,20 @@ class VietnamMarketService:
         reason: Optional[str] = None,
     ) -> Dict[str, Any]:
         reason_text = reason or VN_REALTIME_UNAVAILABLE_REASON
+        public_status = _public_live_status(status)
+        status_payload = {
+            "status": public_status,
+            "source": SSI_REALTIME_SOURCE,
+            "message": VN_REALTIME_UNAVAILABLE_REASON,
+            "ticker": symbol,
+        }
+        diagnostics = _status_diagnostics(reason_text if reason_text != VN_REALTIME_UNAVAILABLE_REASON else None)
+        if diagnostics:
+            status_payload["diagnostics"] = diagnostics
         return {
             "realtime_source": SSI_REALTIME_SOURCE,
             "realtime_snapshot": None,
-            "realtime_status": {
-                "status": status,
-                "source": SSI_REALTIME_SOURCE,
-                "message": reason_text,
-                "ticker": symbol,
-            },
+            "realtime_status": status_payload,
         }
 
     @staticmethod
@@ -2011,23 +2024,20 @@ class VietnamMarketService:
         reason: Optional[str] = None,
     ) -> Dict[str, Any]:
         reason_text = reason or VN_TRADE_TAPE_UNAVAILABLE_REASON
+        public_status = _public_live_status(status)
+        status_payload = {
+            "status": public_status,
+            "source": SSI_TRADE_TAPE_SOURCE,
+            "message": VN_TRADE_TAPE_UNAVAILABLE_REASON,
+            "ticker": symbol,
+        }
+        diagnostics = _status_diagnostics(reason_text if reason_text != VN_TRADE_TAPE_UNAVAILABLE_REASON else None)
+        if diagnostics:
+            status_payload["diagnostics"] = diagnostics
         return {
             "trade_tape_source": SSI_TRADE_TAPE_SOURCE,
-            "trade_tape": {
-                "ticker": symbol,
-                "symbol": symbol,
-                "source": SSI_TRADE_TAPE_SOURCE,
-                "trades": [],
-                "status": status,
-                "error": reason_text if status == "error" else None,
-                "error_detail": reason_text,
-            },
-            "trade_tape_status": {
-                "status": status,
-                "source": SSI_TRADE_TAPE_SOURCE,
-                "message": reason_text,
-                "ticker": symbol,
-            },
+            "trade_tape": [],
+            "trade_tape_status": status_payload,
         }
 
     @staticmethod
@@ -2136,20 +2146,14 @@ class VietnamMarketService:
             if trades:
                 return {
                     "trade_tape_source": SSI_TRADE_TAPE_SOURCE,
-                    "trade_tape": {
-                        "ticker": symbol,
-                        "symbol": symbol,
-                        "source": SSI_TRADE_TAPE_SOURCE,
-                        "fetched_at": _utc_now().isoformat(),
-                        "trades": trades,
-                        "status": "ok",
-                    },
+                    "trade_tape": trades,
                     "trade_tape_status": {
                         "status": "ok",
                         "source": SSI_TRADE_TAPE_SOURCE,
                         "message": None,
                         "ticker": symbol,
                         "count": len(trades),
+                        "fetched_at": _utc_now().isoformat(),
                     },
                 }
             return self._ssi_trade_tape_unavailable_payload(symbol, reason="SSI trade tape returned no trade rows.")

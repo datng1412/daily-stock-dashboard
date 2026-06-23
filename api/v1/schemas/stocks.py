@@ -277,7 +277,7 @@ class VietnamWatchItem(BaseModel):
     realtime_snapshot: Optional[Dict[str, Any]] = None
     realtime_status: Dict[str, Any] = Field(default_factory=dict)
     trade_tape_source: Optional[str] = None
-    trade_tape: Dict[str, Any] = Field(default_factory=dict)
+    trade_tape: List[Dict[str, Any]] = Field(default_factory=list)
     trade_tape_status: Dict[str, Any] = Field(default_factory=dict)
     cache_status: Dict[str, Any] = Field(default_factory=dict)
     cache_last_fetched_at: Dict[str, Any] = Field(default_factory=dict)
@@ -437,7 +437,7 @@ class VietnamCompanyIntraday(BaseModel):
     """Intraday snapshot derived from SSI IntradayOhlc."""
 
     candles: List[Dict[str, Any]] = Field(default_factory=list)
-    pulse: Dict[str, Any] = Field(default_factory=dict)
+    pulse: Optional[Dict[str, Any]] = None
     requested_timeframe: Optional[str] = None
     granularity: Optional[str] = None
     actual_granularity: Optional[str] = None
