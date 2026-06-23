@@ -255,6 +255,7 @@ Cache errors and provider unavailable states are separate concepts. A provider 4
 
 * Phase 2.1 completed: unavailable watchlist `trade_tape` is `[]`, status stays in `trade_tape_status`, and sanitized provider details move to status diagnostics instead of public messages.
 * Phase 2.1 completed: unavailable company `intraday.pulse` is `null`, not `{}`.
+* Phase 2.2 completed: frontend rendering treats unavailable live objects as `null`, missing watchlist trade tape as `[]`, company trade rows as `trade_tape.trades = []`, and status diagnostics as diagnostics-only UI content.
 
 ## Known Contract TODOs
 

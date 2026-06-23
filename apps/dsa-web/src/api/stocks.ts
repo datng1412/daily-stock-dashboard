@@ -232,7 +232,7 @@ export type VietnamWatchItem = {
     intradayLatestDate?: string | null;
     dailyPriceDate?: string | null;
     dateMatch?: string | null;
-  };
+  } | null;
   intradayLabels?: string[];
   intradayDetails?: Array<{
     label: string;
@@ -255,6 +255,7 @@ export type VietnamWatchItem = {
     intradayGranularitySeconds?: number | null;
     intradayActualGranularitySeconds?: number | null;
     intradayGranularityLabel?: string | null;
+    diagnostics?: Record<string, unknown> | null;
   };
   realtimeSource?: string | null;
   realtimeSnapshot?: VietnamRealtimeQuote | null;
@@ -262,23 +263,17 @@ export type VietnamWatchItem = {
     status?: string | null;
     source?: string | null;
     message?: string | null;
+    diagnostics?: Record<string, unknown> | null;
   };
   tradeTapeSource?: string | null;
-  tradeTape?: {
-    ticker?: string | null;
-    symbol?: string | null;
-    source?: string | null;
-    fetchedAt?: string | null;
-    trades?: VietnamRealtimeTrade[];
-    status?: string | null;
-    error?: string | null;
-    errorDetail?: string | null;
-  };
+  tradeTape?: VietnamRealtimeTrade[];
   tradeTapeStatus?: {
     status?: string | null;
     source?: string | null;
     message?: string | null;
     count?: number | null;
+    fetchedAt?: string | null;
+    diagnostics?: Record<string, unknown> | null;
   };
   dataQualitySummary?: VietnamDataQualitySummary;
   cacheStatus: Record<string, string>;
@@ -570,7 +565,7 @@ export type VietnamCompanyIntraday = {
     intradayActualGranularity?: string | null;
     intradayActualGranularitySeconds?: number | null;
     direction?: 'up' | 'down' | 'flat' | 'unknown' | null;
-  };
+  } | null;
   requestedTimeframe?: string | null;
   granularity?: string | null;
   actualGranularity?: string | null;
@@ -583,6 +578,7 @@ export type VietnamCompanyIntraday = {
   source?: string | null;
   status: 'ok' | 'disabled' | 'unavailable' | 'error' | string;
   message?: string | null;
+  diagnostics?: Record<string, unknown> | null;
 };
 
 export type VietnamCompanyRealtime = {
@@ -590,6 +586,7 @@ export type VietnamCompanyRealtime = {
   source?: string | null;
   status: 'ok' | 'disabled' | 'not_implemented' | 'unavailable' | 'error' | string;
   message?: string | null;
+  diagnostics?: Record<string, unknown> | null;
 };
 
 export type VietnamCompanyTradeTape = {
@@ -597,6 +594,7 @@ export type VietnamCompanyTradeTape = {
   source?: string | null;
   status: 'ok' | 'disabled' | 'not_implemented' | 'unavailable' | 'error' | string;
   message?: string | null;
+  diagnostics?: Record<string, unknown> | null;
 };
 
 export type VietnamDataQualityIssue = {

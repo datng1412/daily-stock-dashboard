@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { stocksApi, type VietnamCompanyResearchResponse } from '../../api/stocks';
@@ -212,21 +212,36 @@ describe('VietnamCompanyResearchPage', () => {
     snapshot.intraday = {
       source: 'SSI IntradayOhlc',
       status: 'unavailable',
-      message: 'SSI IntradayOhlc latest candle date does not match latest daily trading date.',
+      message: 'SSI intraday unavailable for the latest daily date.',
       candles: [],
-      pulse: undefined,
+      pulse: null,
+      diagnostics: {
+        intradayLatestDate: '2026-06-12',
+        dailyPriceDate: '2026-06-17',
+        dateMatch: 'mismatched',
+      },
     };
     snapshot.realtime = {
       source: 'SSI realtime contract',
       status: 'unavailable',
-      message: 'SSI FastConnect realtime snapshot unavailable (attempted endpoints: RealtimeQuote).',
+      message: 'SSI realtime unavailable.',
       snapshot: null,
+      diagnostics: {
+        attemptedEndpoints: ['RealtimeQuote'],
+        httpStatus: 404,
+        retryable: false,
+      },
     };
     snapshot.tradeTape = {
       source: 'SSI trade-tape contract',
       status: 'unavailable',
-      message: 'SSI FastConnect trade tape unavailable (attempted endpoints: TradeTape).',
+      message: 'SSI trade tape unavailable.',
       trades: [],
+      diagnostics: {
+        attemptedEndpoints: ['TradeTape'],
+        httpStatus: 404,
+        retryable: false,
+      },
     };
     vi.mocked(stocksApi.getVietnamCompanyResearch).mockResolvedValue(snapshot);
 
@@ -240,7 +255,14 @@ describe('VietnamCompanyResearchPage', () => {
     expect(screen.queryByText('Session volume from intraday')).not.toBeInTheDocument();
     expect(screen.queryByText('Realtime snapshot price')).not.toBeInTheDocument();
     expect(screen.queryByText('Trades loaded')).not.toBeInTheDocument();
-    expect(screen.queryByText(/attempted endpoints/i)).not.toBeInTheDocument();
+    const liveSections = within(screen.getByRole('heading', { name: 'Intraday pulse' }).closest('section')?.parentElement as HTMLElement);
+    expect(liveSections.queryByText(/RealtimeQuote|TradeTape|HTTP status|attempted endpoints/i)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('Show diagnostics'));
+    expect(screen.getByText('SSI realtime status - Attempted endpoints')).toBeInTheDocument();
+    expect(screen.getByText('RealtimeQuote')).toBeInTheDocument();
+    expect(screen.getByText('SSI trade tape status - Attempted endpoints')).toBeInTheDocument();
+    expect(screen.getByText('TradeTape')).toBeInTheDocument();
   });
 
   it('renders DailyOhlc versus DailyStockPrice mismatch in the data quality summary', async () => {

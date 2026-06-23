@@ -88,7 +88,7 @@ Implemented contract notes:
 Future changes:
 
 - Phase 1: keep dashboard top aggregates tied to the latest successful complete watchlist response; incomplete refreshes and auxiliary responses must not update summary cards.
-- Phase 2: normalize live public contract and diagnostics split.
+- Phase 2 cleanup: live public contract uses `null`/`[]` for missing data and keeps endpoint/http details in diagnostics.
 - Phase 3: ensure company detail consumes the same contract consistently.
 
 ## `GET /api/v1/stocks/vn/chart`
@@ -169,7 +169,7 @@ Implemented contract notes:
 Future changes:
 
 - Phase 1: add Data Quality Summary above detailed cards.
-- Phase 2: clean null/list contracts and diagnostics split.
+- Phase 2 cleanup: frontend renders normalized null/list live contracts and keeps diagnostics lower priority.
 - Phase 3: redesign page into data-quality report layout.
 
 ## `GET /api/v1/stocks/vn/observability`

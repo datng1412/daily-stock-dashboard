@@ -45,4 +45,5 @@ Rules that apply to every state:
 
 - Phase 1 adds the Data Quality Summary that surfaces mismatch, finality, adjusted-price, stale intraday, unavailable live data, and profile partial states.
 - Phase 2 cleans public contract shapes and moves provider/debug details to diagnostics.
+- Phase 2.2 frontend rendering consumes normalized `null`/`[]` live-section shapes and keeps live status diagnostics in collapsed diagnostics panels on dashboard and company detail views.
 - Phase 3 applies these states to the company detail layout so the page reads like a data-quality report rather than a debug board.

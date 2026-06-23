@@ -16,6 +16,12 @@ type MetricRow = {
   tone?: string;
 };
 
+type DiagnosticRow = {
+  section: string;
+  label: string;
+  value: string;
+};
+
 const statusVariant = (status?: string | null): StatusVariant => {
   if (status === 'ok') return 'success';
   if (status === 'partial') return 'warning';
@@ -55,6 +61,55 @@ const normalizeTicker = (ticker?: string) => (ticker ?? '').trim().toUpperCase()
 
 const hasMetricValue = (value?: number | string | null) => (
   value !== null && value !== undefined && value !== '' && !(typeof value === 'number' && Number.isNaN(value))
+);
+
+const diagnosticLabel = (key: string) => {
+  const knownLabels: Record<string, string> = {
+    attemptedEndpoints: 'Attempted endpoints',
+    attempted_endpoints: 'Attempted endpoints',
+    lastEndpoint: 'Last endpoint',
+    last_endpoint: 'Last endpoint',
+    httpStatus: 'HTTP status',
+    http_status: 'HTTP status',
+    providerMessage: 'Provider message',
+    provider_message: 'Provider message',
+    rawProviderErrorSummary: 'Provider error summary',
+    raw_provider_error_summary: 'Provider error summary',
+    sanitizedErrorContext: 'Sanitized error context',
+    sanitized_error_context: 'Sanitized error context',
+    retryable: 'Retryable',
+  };
+  if (knownLabels[key]) return knownLabels[key];
+  const words = key.replace(/([A-Z])/g, ' $1').replaceAll('_', ' ').trim();
+  return words ? `${words.charAt(0).toUpperCase()}${words.slice(1)}` : key;
+};
+
+const diagnosticValueText = (value: unknown): string | null => {
+  if (value === null || value === undefined || value === '') return null;
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (Array.isArray(value)) {
+    const values = value.map(diagnosticValueText).filter((entry): entry is string => Boolean(entry));
+    return values.length ? values.join(', ') : null;
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+};
+
+const liveStatusDiagnosticRows = (
+  section: string,
+  diagnostics?: Record<string, unknown> | null,
+): DiagnosticRow[] => (
+  Object.entries(diagnostics ?? {})
+    .map(([key, value]) => ({
+      section,
+      label: diagnosticLabel(key),
+      value: diagnosticValueText(value),
+    }))
+    .filter((row): row is DiagnosticRow => Boolean(row.value))
 );
 
 const hasCompanyIntradayData = (snapshot: VietnamCompanyResearchResponse) => (
@@ -135,6 +190,30 @@ const SourceCoveragePanel: React.FC<{ snapshot: VietnamCompanyResearchResponse }
     </div>
   </SectionShell>
 );
+
+const CompanyDiagnosticsPanel: React.FC<{ snapshot: VietnamCompanyResearchResponse }> = ({ snapshot }) => {
+  const rows = [
+    ...liveStatusDiagnosticRows('SSI intraday status', snapshot.intraday?.diagnostics),
+    ...liveStatusDiagnosticRows('SSI realtime status', snapshot.realtime?.diagnostics),
+    ...liveStatusDiagnosticRows('SSI trade tape status', snapshot.tradeTape?.diagnostics),
+  ];
+
+  if (!rows.length) return null;
+
+  return (
+    <details className="rounded-lg border border-border/60 bg-elevated/30 p-3 text-xs text-secondary-text">
+      <summary className="cursor-pointer font-medium text-foreground">Show diagnostics</summary>
+      <dl className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+        {rows.map((row) => (
+          <div key={`${row.section}-${row.label}`} className="rounded-lg border border-border/60 bg-card/50 p-3">
+            <dt>{row.section} - {row.label}</dt>
+            <dd className="mt-1 break-words font-medium text-foreground">{row.value}</dd>
+          </div>
+        ))}
+      </dl>
+    </details>
+  );
+};
 
 const CompanyHeader: React.FC<{ snapshot: VietnamCompanyResearchResponse; onRefresh: () => void; refreshing: boolean }> = ({
   snapshot,
@@ -357,6 +436,7 @@ const VietnamCompanyResearchPage: React.FC = () => {
         <PlaceholderSection title="Financials" block={snapshot.financials} />
         <PlaceholderSection title="Events" block={snapshot.events} />
       </section>
+      <CompanyDiagnosticsPanel snapshot={snapshot} />
     </AppPage>
   );
 };

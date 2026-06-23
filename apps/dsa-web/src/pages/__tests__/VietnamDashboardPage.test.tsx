@@ -228,7 +228,7 @@ const makeItem = (ticker: string): VietnamWatchItem => ({
   intradayIsRealtimeQuote: false,
   intradayWarning: 'SSI IntradayOhlc is disabled.',
   intradayCandles: [],
-  intradayPulse: undefined,
+  intradayPulse: null,
   intradayLabels: ['Intraday data limited'],
   intradayDetails: [
     {
@@ -830,6 +830,101 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(screen.getByText('Stock detail')).toBeInTheDocument();
   });
 
+  it('handles normalized selected ticker live null and empty-list fields with diagnostics collapsed', async () => {
+    const response = makeResponse(defaultTickers);
+    response.watchlist[0] = {
+      ...response.watchlist[0],
+      intradayCandles: [],
+      intradayPulse: null,
+      realtimeSnapshot: null,
+      tradeTape: [],
+      intradayStatus: {
+        status: 'unavailable',
+        source: 'SSI IntradayOhlc',
+        message: 'SSI intraday unavailable for the latest daily date.',
+        diagnostics: {
+          latestIntradayDate: '2026-06-12',
+          dailyPriceDate: '2026-06-22',
+          retryable: false,
+        },
+      },
+      realtimeStatus: {
+        status: 'unavailable',
+        source: 'SSI realtime contract',
+        message: 'SSI realtime unavailable.',
+        diagnostics: {
+          attemptedEndpoints: ['RealtimeQuote'],
+          httpStatus: 404,
+          retryable: false,
+        },
+      },
+      tradeTapeStatus: {
+        status: 'unavailable',
+        source: 'SSI trade-tape contract',
+        message: 'SSI trade tape unavailable.',
+        count: 0,
+        diagnostics: {
+          attemptedEndpoints: ['TradeTape'],
+          httpStatus: 404,
+          retryable: false,
+        },
+      },
+      dataQualitySummary: {
+        overallStatus: 'partial',
+        canonicalPriceSource: 'SSI DailyOhlc',
+        issues: [
+          { code: 'realtime_unavailable', severity: 'info', message: 'SSI realtime unavailable.' },
+          { code: 'trade_tape_unavailable', severity: 'info', message: 'SSI trade tape unavailable.' },
+        ],
+        checks: {
+          dailyOhlc: 'ok',
+          intraday: 'unavailable',
+          realtime: 'unavailable',
+          tradeTape: 'unavailable',
+          profile: 'ok',
+          news: 'disabled',
+        },
+      },
+    };
+    mockedGetVietnamWatchlist.mockResolvedValue(response);
+    mockedGetVietnamRealtimeQuotes.mockImplementation(async (tickers) => makeRealtimeResponse(tickers, { unavailable: true }));
+    mockedGetVietnamRealtimeTrades.mockImplementation(async (symbol) => ({
+      ...makeTradesResponse(symbol),
+      status: 'unavailable',
+      error: null,
+      errorDetail: null,
+      rawError: null,
+      trades: [],
+    }));
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledWith(defaultTickers));
+
+    const header = selectedTickerHeader();
+    expect(header.getByText('Data quality: partial')).toBeInTheDocument();
+    expect(header.getByText('Realtime: unavailable')).toBeInTheDocument();
+    expect(header.getByText('Trade tape: unavailable')).toBeInTheDocument();
+    expect(header.queryByText(/RealtimeQuote|TradeTape|HTTP status|attempted endpoints/i)).not.toBeInTheDocument();
+
+    const detail = within(screen.getByText('Stock detail').closest('section') as HTMLElement);
+    expect(detail.getByText('SSI intraday unavailable.')).toBeInTheDocument();
+    expect(detail.getByText('SSI realtime unavailable. Daily SSI data is still available.')).toBeInTheDocument();
+    expect(detail.getByText('SSI trade tape unavailable.')).toBeInTheDocument();
+    expect(detail.queryByText('Latest intraday close')).not.toBeInTheDocument();
+    expect(detail.queryByText('Realtime snapshot price')).not.toBeInTheDocument();
+    expect(detail.queryByRole('table')).not.toBeInTheDocument();
+    expect(detail.queryByText(/RealtimeQuote|TradeTape|HTTP status|attempted endpoints/i)).not.toBeInTheDocument();
+
+    const panel = dataStatusPanel();
+    fireEvent.click(panel.getByText('Show diagnostics'));
+    expect(panel.getByText('Live status diagnostics')).toBeInTheDocument();
+    expect(panel.getByText('SSI realtime status - Attempted endpoints')).toBeInTheDocument();
+    expect(panel.getByText('RealtimeQuote')).toBeInTheDocument();
+    expect(panel.getByText('SSI trade tape status - Attempted endpoints')).toBeInTheDocument();
+    expect(panel.getByText('TradeTape')).toBeInTheDocument();
+  });
+
   it('shows selected ticker mismatch, profile partial, and unavailable live states neutrally', async () => {
     const response = makeResponse(defaultTickers);
     (response.watchlist[0] as VietnamWatchItem & { dataQualitySummary?: unknown }).dataQualitySummary = {
@@ -1254,7 +1349,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
       intradaySource: 'SSI',
       intradayWarning: 'SSI intraday unavailable.',
       intradayCandles: [],
-      intradayPulse: undefined,
+      intradayPulse: null,
       intradayStatus: { status: 'unavailable', source: 'SSI', message: 'SSI intraday unavailable.' },
     };
     mockedGetVietnamWatchlist.mockResolvedValue(response);
@@ -1280,22 +1375,17 @@ describe('VietnamDashboardPage watchlist loading', () => {
       dateMatch: 'mismatched',
       intradayWarning: 'SSI IntradayOhlc latest candle date does not match latest daily trading date.',
       intradayCandles: [],
-      intradayPulse: {
-        latestIntradayClose: null,
-        latestIntradayOpen: null,
-        latestIntradayHigh: null,
-        latestIntradayLow: null,
-        latestIntradayVolume: null,
-        intradayChange: null,
-        intradayChangePercent: null,
-        direction: 'unknown',
-        sessionCandlesCount: 0,
-      },
+      intradayPulse: null,
       intradayLabels: ['Intraday data limited'],
       intradayStatus: {
         status: 'unavailable',
         source: 'SSI',
         message: 'SSI IntradayOhlc latest candle date does not match latest daily trading date.',
+        diagnostics: {
+          intradayLatestDate: '2026-06-12',
+          dailyPriceDate: '2026-06-19',
+          dateMatch: 'mismatched',
+        },
       },
     };
     mockedGetVietnamWatchlist.mockResolvedValue(response);

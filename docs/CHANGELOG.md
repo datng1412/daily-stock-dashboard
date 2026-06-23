@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 - [fix] Normalize VN unavailable live-section API shapes to `null`/`[]` data with concise public status messages and retained diagnostics.
+- [fix] Align VN dashboard and company frontend rendering with normalized live-section null/empty shapes and diagnostics-only provider details.
 - [improvement] Move the VN dashboard indicator table above the selected ticker and simplify the selected ticker summary hierarchy.
 - [fix] Clean legacy Mozyfin/KBS naming from active VN dashboard realtime/trade-tape UI labels and mark superseded VN runbooks.
 - [fix] Standardize VN company source labels for SSI DailyOhlc, DailyStockPrice, live contracts, and future external domains.

@@ -447,6 +447,61 @@ const realtimeIssueSummary = (realtimeError?: string | null, tradesError?: strin
   return null;
 };
 
+type DiagnosticRow = {
+  section: string;
+  label: string;
+  value: string;
+};
+
+const diagnosticLabel = (key: string) => {
+  const knownLabels: Record<string, string> = {
+    attemptedEndpoints: 'Attempted endpoints',
+    attempted_endpoints: 'Attempted endpoints',
+    lastEndpoint: 'Last endpoint',
+    last_endpoint: 'Last endpoint',
+    httpStatus: 'HTTP status',
+    http_status: 'HTTP status',
+    providerMessage: 'Provider message',
+    provider_message: 'Provider message',
+    rawProviderErrorSummary: 'Provider error summary',
+    raw_provider_error_summary: 'Provider error summary',
+    sanitizedErrorContext: 'Sanitized error context',
+    sanitized_error_context: 'Sanitized error context',
+    retryable: 'Retryable',
+  };
+  if (knownLabels[key]) return knownLabels[key];
+  const words = key.replace(/([A-Z])/g, ' $1').replaceAll('_', ' ').trim();
+  return words ? `${words.charAt(0).toUpperCase()}${words.slice(1)}` : key;
+};
+
+const diagnosticValueText = (value: unknown): string | null => {
+  if (value === null || value === undefined || value === '') return null;
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (Array.isArray(value)) {
+    const values = value.map(diagnosticValueText).filter((entry): entry is string => Boolean(entry));
+    return values.length ? values.join(', ') : null;
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+};
+
+const liveStatusDiagnosticRows = (
+  section: string,
+  diagnostics?: Record<string, unknown> | null,
+): DiagnosticRow[] => (
+  Object.entries(diagnostics ?? {})
+    .map(([key, value]) => ({
+      section,
+      label: diagnosticLabel(key),
+      value: diagnosticValueText(value),
+    }))
+    .filter((row): row is DiagnosticRow => Boolean(row.value))
+);
+
 const realtimeStatusBadgeText = (status?: string | null) => (
   status === 'unavailable' || status === 'error' ? 'SSI realtime unavailable' : 'SSI realtime'
 );
@@ -902,6 +957,11 @@ const DataStatusPanel: React.FC<{
   const dataStatusVariant = dataStatusLabel === 'OK' ? 'success' : dataStatusLabel === 'Partial' ? 'warning' : 'danger';
   const metadata = data?.cacheMetadata;
   const issueSummary = realtimeIssueSummary(realtimeError, tradesError);
+  const liveStatusDiagnostics = [
+    ...liveStatusDiagnosticRows('SSI intraday status', selectedItem?.intradayStatus?.diagnostics),
+    ...liveStatusDiagnosticRows('SSI realtime status', selectedItem?.realtimeStatus?.diagnostics),
+    ...liveStatusDiagnosticRows('SSI trade tape status', selectedItem?.tradeTapeStatus?.diagnostics),
+  ];
 
   return (
     <section className="rounded-lg border border-border/70 bg-card p-4">
@@ -1013,6 +1073,19 @@ const DataStatusPanel: React.FC<{
             <span className="font-medium text-foreground">SSI trade tape diagnostic</span> {tradesError ?? '-'}
           </div>
         </div>
+        {liveStatusDiagnostics.length ? (
+          <div className="mt-3 rounded-lg border border-border/60 bg-card/50 p-3">
+            <p className="font-medium text-foreground">Live status diagnostics</p>
+            <dl className="mt-2 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+              {liveStatusDiagnostics.map((row) => (
+                <div key={`${row.section}-${row.label}`}>
+                  <dt>{row.section} - {row.label}</dt>
+                  <dd className="mt-1 break-words font-medium text-foreground">{row.value}</dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        ) : null}
         <div className="mt-3 grid gap-2 rounded-lg border border-border/60 bg-card/50 p-3 md:grid-cols-4 xl:grid-cols-8">
           <div>
             <span className="font-medium text-foreground">VN data req</span> {observability?.dashboardRuntime?.watchlistRequestsTotal ?? '-'}
