@@ -164,8 +164,10 @@ def test_ssi_realtime_success_returns_normalized_snapshot_and_daily_stays_ok(mon
     assert item["source"] == "SSI"
     assert item["actual_source"] == "SSI"
     assert item["fallback_used"] is False
-    assert item["realtime_source"] == "SSI"
+    assert item["realtime_source"] == "SSI realtime contract"
     assert item["realtime_status"]["status"] == "ok"
+    assert item["realtime_status"]["source"] == "SSI realtime contract"
+    assert item["realtime_snapshot"]["source"] == "SSI realtime contract"
     assert item["realtime_snapshot"]["price"] == 130.5
     assert item["realtime_snapshot"]["bid_levels"][0]["price"] == 130.4
     assert fetcher.realtime_calls == 1
@@ -186,7 +188,7 @@ def test_ssi_realtime_failure_is_separate_from_daily_row():
 
     assert item["status"] == "ok"
     assert item["daily_stock_price"]["status"] == "ok"
-    assert item["realtime_source"] == "SSI"
+    assert item["realtime_source"] == "SSI realtime contract"
     assert item["realtime_status"]["status"] == "unavailable"
     assert item["realtime_snapshot"] is None
     assert "realtime snapshot unavailable" in item["realtime_status"]["message"]
@@ -201,11 +203,14 @@ def test_ssi_trade_tape_success_returns_normalized_trades():
     item = service.build_watchlist(["FPT"], force_refresh=True)["watchlist"][0]
 
     assert endpoint_payload["status"] == "ok"
-    assert endpoint_payload["source"] == "SSI"
+    assert endpoint_payload["source"] == "SSI trade-tape contract"
     assert endpoint_payload["trades"][0]["price"] == 130.5
+    assert endpoint_payload["trades"][0]["source"] == "SSI trade-tape contract"
     assert endpoint_payload["trades"][0]["value"] == 130_500_000
-    assert item["trade_tape_source"] == "SSI"
+    assert item["trade_tape_source"] == "SSI trade-tape contract"
     assert item["trade_tape_status"]["status"] == "ok"
+    assert item["trade_tape_status"]["source"] == "SSI trade-tape contract"
+    assert item["trade_tape"]["source"] == "SSI trade-tape contract"
     assert item["trade_tape"]["trades"][0]["sequence_if_available"] == "1"
 
 
@@ -223,7 +228,7 @@ def test_ssi_trade_tape_failure_is_separate_from_daily_row():
     item = _service(fetcher).build_watchlist(["FPT"], force_refresh=True)["watchlist"][0]
 
     assert item["status"] == "ok"
-    assert item["trade_tape_source"] == "SSI"
+    assert item["trade_tape_source"] == "SSI trade-tape contract"
     assert item["trade_tape_status"]["status"] == "unavailable"
     assert "trade tape unavailable" in item["trade_tape_status"]["message"]
     assert "TradeTape" in item["trade_tape_status"]["message"]
@@ -267,7 +272,7 @@ def test_data_quality_summary_has_no_mismatch_when_daily_sources_match():
     assert summary["checks"]["daily_stock_price"] == "ok"
     assert "daily_ohlc_vs_daily_stock_price_mismatch" not in _issue_codes(summary)
     assert item["latest_price"] == 130.0
-    assert item["latest_price_source"] == "SSI"
+    assert item["latest_price_source"] == "SSI DailyOhlc"
 
 
 def test_data_quality_summary_keeps_valid_ssi_daily_ok_when_optional_live_unavailable():
@@ -279,7 +284,7 @@ def test_data_quality_summary_keeps_valid_ssi_daily_ok_when_optional_live_unavai
             "ohlcv_close": 70_600.0,
             "latest_price_date": "2026-06-22",
             "ohlcv_date": "2026-06-22",
-            "latest_price_source": "SSI",
+            "latest_price_source": "SSI DailyOhlc",
             "actual_source": "SSI",
             "source": "SSI",
             "daily_stock_price": {
@@ -311,7 +316,7 @@ def test_data_quality_summary_marks_missing_daily_close_unavailable():
             "daily_close": None,
             "ohlcv_close": None,
             "latest_price_date": "2026-06-22",
-            "latest_price_source": "SSI",
+            "latest_price_source": "SSI DailyOhlc",
             "actual_source": "SSI",
             "source": "SSI",
             "intraday_status": {"status": "disabled"},
@@ -341,7 +346,7 @@ def test_data_quality_summary_warns_on_same_date_daily_source_mismatch():
         "date": "2026-06-30",
     }
     assert item["latest_price"] == 130.0
-    assert item["latest_price_source"] == "SSI"
+    assert item["latest_price_source"] == "SSI DailyOhlc"
 
 
 def test_data_quality_summary_marks_profile_partial_without_failing_daily_row():

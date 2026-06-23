@@ -18,7 +18,7 @@ const makeCompanySnapshot = (): VietnamCompanyResearchResponse => ({
     name: 'FPT Corporation',
     exchange: 'HOSE',
     industry: null,
-    source: 'SSI',
+    source: 'SSI SecuritiesDetails',
     status: 'ok',
   },
   price: {
@@ -28,7 +28,9 @@ const makeCompanySnapshot = (): VietnamCompanyResearchResponse => ({
     ceilingPrice: 131.6,
     floorPrice: 114.4,
     priceDate: '2026-06-17',
-    source: 'SSI DailyOhlc + SSI DailyStockPrice',
+    source: 'SSI DailyOhlc',
+    canonicalSource: 'SSI DailyOhlc',
+    referenceSource: 'SSI DailyStockPrice',
     status: 'ok',
   },
   tradingStats: {
@@ -58,11 +60,11 @@ const makeCompanySnapshot = (): VietnamCompanyResearchResponse => ({
     bollingerUpper: 130,
     bollingerMiddle: 120,
     bollingerLower: 110,
-    source: 'derived_from_ssi_ohlcv',
+    source: 'derived from SSI DailyOhlc',
     status: 'ok',
   },
   intraday: {
-    source: 'SSI',
+    source: 'SSI IntradayOhlc',
     status: 'ok',
     message: null,
     candles: [
@@ -78,7 +80,7 @@ const makeCompanySnapshot = (): VietnamCompanyResearchResponse => ({
     },
   },
   realtime: {
-    source: 'SSI',
+    source: 'SSI realtime contract',
     status: 'ok',
     message: null,
     snapshot: {
@@ -93,7 +95,7 @@ const makeCompanySnapshot = (): VietnamCompanyResearchResponse => ({
     },
   },
   tradeTape: {
-    source: 'SSI',
+    source: 'SSI trade-tape contract',
     status: 'ok',
     message: null,
     trades: [
@@ -126,12 +128,12 @@ const makeCompanySnapshot = (): VietnamCompanyResearchResponse => ({
     { block: 'Daily OHLCV', source: 'SSI DailyOhlc', status: 'ok' },
     { block: 'Daily stock price', source: 'SSI DailyStockPrice', status: 'ok' },
     { block: 'Intraday OHLCV', source: 'SSI IntradayOhlc', status: 'ok' },
-    { block: 'Realtime snapshot', source: 'SSI', status: 'ok' },
-    { block: 'Trade tape', source: 'SSI', status: 'ok' },
+    { block: 'Realtime snapshot', source: 'SSI realtime contract', status: 'ok' },
+    { block: 'Trade tape', source: 'SSI trade-tape contract', status: 'ok' },
     { block: 'Profile', source: 'SSI SecuritiesDetails', status: 'ok' },
-    { block: 'News', source: 'NewsProvider', status: 'not_implemented' },
-    { block: 'Financials', source: 'TBD', status: 'not_implemented' },
-    { block: 'Corporate actions', source: 'TBD', status: 'not_implemented' },
+    { block: 'News', source: 'NewsProvider future', status: 'not_implemented' },
+    { block: 'Financials', source: 'external provider future', status: 'not_implemented' },
+    { block: 'Corporate actions', source: 'external provider future', status: 'not_implemented' },
   ],
   news: {
     items: [],
@@ -178,13 +180,20 @@ describe('VietnamCompanyResearchPage', () => {
     expect(screen.getByRole('heading', { name: 'Source coverage' })).toBeInTheDocument();
     expect(screen.getByText('Daily OHLCV')).toBeInTheDocument();
     expect(screen.getByText('Canonical latest price')).toBeInTheDocument();
-    expect(screen.getByText('SSI reference')).toBeInTheDocument();
+    expect(screen.getByText('Reference price')).toBeInTheDocument();
+    expect(screen.getByText('Canonical price: SSI DailyOhlc. Reference and limit fields: SSI DailyStockPrice.')).toBeInTheDocument();
     expect(screen.getByText('Daily OHLCV volume')).toBeInTheDocument();
     expect(screen.getByText('SSI realtime/session volume')).toBeInTheDocument();
     expect(screen.getByText('Latest trade tape volume')).toBeInTheDocument();
+    expect(screen.getByText('Latest trade tape price')).toBeInTheDocument();
     expect(screen.getAllByText('SSI DailyStockPrice').length).toBeGreaterThan(0);
     expect(screen.getByRole('heading', { name: 'Intraday pulse' })).toBeInTheDocument();
-    expect(screen.getByText('SSI IntradayOhlc')).toBeInTheDocument();
+    expect(screen.getAllByText('SSI IntradayOhlc').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('SSI realtime contract').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('SSI trade-tape contract').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('SSI DailyOhlc').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Volume')).not.toBeInTheDocument();
+    expect(screen.queryByText('Value')).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'SSI realtime' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'SSI trade tape' })).toBeInTheDocument();
     expect(screen.getByText('Trades loaded')).toBeInTheDocument();
@@ -201,20 +210,20 @@ describe('VietnamCompanyResearchPage', () => {
   it('renders concise unavailable live sections without fake metric rows', async () => {
     const snapshot = makeCompanySnapshot();
     snapshot.intraday = {
-      source: 'SSI',
+      source: 'SSI IntradayOhlc',
       status: 'unavailable',
       message: 'SSI IntradayOhlc latest candle date does not match latest daily trading date.',
       candles: [],
       pulse: undefined,
     };
     snapshot.realtime = {
-      source: 'SSI',
+      source: 'SSI realtime contract',
       status: 'unavailable',
       message: 'SSI FastConnect realtime snapshot unavailable (attempted endpoints: RealtimeQuote).',
       snapshot: null,
     };
     snapshot.tradeTape = {
-      source: 'SSI',
+      source: 'SSI trade-tape contract',
       status: 'unavailable',
       message: 'SSI FastConnect trade tape unavailable (attempted endpoints: TradeTape).',
       trades: [],
@@ -229,7 +238,7 @@ describe('VietnamCompanyResearchPage', () => {
     expect(screen.getByText('SSI trade tape unavailable.')).toBeInTheDocument();
     expect(screen.queryByText('Latest intraday close')).not.toBeInTheDocument();
     expect(screen.queryByText('Session volume from intraday')).not.toBeInTheDocument();
-    expect(screen.queryByText('Snapshot price')).not.toBeInTheDocument();
+    expect(screen.queryByText('Realtime snapshot price')).not.toBeInTheDocument();
     expect(screen.queryByText('Trades loaded')).not.toBeInTheDocument();
     expect(screen.queryByText(/attempted endpoints/i)).not.toBeInTheDocument();
   });

@@ -18,6 +18,8 @@ Conventions:
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `latest_price` | Canonical dashboard latest daily price | SSI DailyOhlc close | VND | yes | yes | Watchlist, selected ticker header, company hero | Can differ from DailyStockPrice close; Phase 1 should surface mismatch. |
 | `latest_price_source` | Source label for `latest_price` | Service metadata | text | yes | yes | Source badge near latest price | Should identify SSI DailyOhlc when daily data is canonical. |
+| `price.source` / `price.canonical_source` | Company price block canonical source | SSI DailyOhlc | text | yes | yes | Company price summary source note | Must not be a mixed DailyOhlc/DailyStockPrice label. |
+| `price.reference_source` | Company reference/limit field source | SSI DailyStockPrice | text | yes | no | Company price summary source note | Applies to reference, ceiling, and floor fields only. |
 | `latest_price_raw_field` | Raw provider field used for latest price when available | Provider normalization metadata | text | yes | no | Diagnostics only | Must not be used as proof of realtime support. |
 | `daily_close` | Daily close value exposed by watchlist/company contract | SSI DailyOhlc | VND | yes | yes | Daily core data | Same semantic owner as `latest_price` when DailyOhlc is valid. |
 | `ohlcv_close` | Close from normalized OHLCV row | SSI DailyOhlc | VND | yes | yes | Data Quality Summary/diagnostics | Used to compare with DailyStockPrice close. |
@@ -88,4 +90,21 @@ Conventions:
 
 - Company shared daily fields: company `latest_price`, `daily_close`, daily OHLCV open/high/low/close/volume, and daily value align with the watchlist SSI DailyOhlc fields. Company reference, limits, foreign flow, matched/put-through, and adjusted-close values remain SSI DailyStockPrice-specific.
 - Dashboard top summary `Foreign net volume` sums `ssi_foreign_net_volume` from the latest successful complete watchlist response in shares. Do not mix this with `ssi_foreign_net_value`, which is VND and should be shown as a separate value-based metric if added.
+- Active dashboard labels use `Realtime snapshot`, `SSI realtime`, and `Trade tape` for live sections. KBS/Mozyfin names are reserved for legacy diagnostics or historical notes, not normal runtime UI.
 - Future module statuses: live-provider statuses remain `ok`, `unavailable`, `disabled`; future modules may use `not_implemented` until Phase 2 chooses a normalized shape.
+
+## Standard Source Labels
+
+- `SSI DailyOhlc`: canonical daily OHLCV, daily close, chart candles, daily volume, and daily trading value.
+- `SSI DailyStockPrice`: reference, ceiling, floor, matched/put-through, adjusted-close, and foreign-flow fields.
+- `derived from SSI DailyOhlc`: technical indicators computed from canonical daily OHLCV.
+- `SSI Securities` / `SSI SecuritiesDetails`: security metadata and profile fields when available.
+- `SSI IntradayOhlc`: intraday candles and derived intraday pulse.
+- `SSI realtime contract`: optional realtime snapshot contract; live support is not confirmed by this label.
+- `SSI trade-tape contract`: optional trade-tape contract; live support is not confirmed by this label.
+- `SSI IndexList` / `SSI IndexComponents`: index metadata and component rows.
+- `disabled`: intentionally disabled public sections, including current VN news status.
+- `NewsProvider future`: future VN news domain; not implemented today.
+- `external provider future`: future financials/corporate-action domains; not implemented today.
+
+Compatibility aliases may map raw provider field names into the same source owner only. They must not substitute across DailyOhlc, DailyStockPrice, intraday, realtime, trade tape, Mozyfin, or KBS ownership boundaries.

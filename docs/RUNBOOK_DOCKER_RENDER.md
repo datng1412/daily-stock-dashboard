@@ -1,5 +1,7 @@
 # Docker and Render Runbook
 
+> Legacy/superseded document. Current VN dashboard runtime uses strict SSI FastConnect mode. Mozyfin is disabled for VN runtime, and KBS is legacy-only behind explicit development flags. See `docs/RUNBOOK_VN.md` and `docs/SSI_FASTCONNECT_INTEGRATION.md` for current guidance.
+
 This runbook covers local Docker startup and Render.com-style Docker deployment for the Vietnam stock dashboard.
 
 Do not commit runtime secrets. Pass `MOZYFIN_API_KEY` through environment variables or a private host secret store.

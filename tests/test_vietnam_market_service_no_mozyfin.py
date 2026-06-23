@@ -229,18 +229,18 @@ def test_vn_watchlist_does_not_request_mozyfin_when_env_vars_exist(monkeypatch):
     assert item["source"] == "SSI"
     assert item["actual_source"] == "SSI"
     assert item["fallback_used"] is False
-    assert item["latest_price_source"] == "SSI"
+    assert item["latest_price_source"] == "SSI DailyOhlc"
     assert item["daily_stock_price"]["status"] == "ok"
     assert item["news"] == []
     assert item["news_status"]["status"] == "disabled"
     assert item["cache_status"]["news_cache"] == "disabled"
     assert "news" not in item["cache_errors"]
-    assert item["intraday_source"] == "SSI"
+    assert item["intraday_source"] == "SSI IntradayOhlc"
     assert item["intraday_status"]["status"] == "ok"
     assert item["cache_status"]["intraday_cache"] in {"miss", "refresh"}
-    assert item["realtime_source"] == "SSI"
+    assert item["realtime_source"] == "SSI realtime contract"
     assert item["realtime_status"]["status"] == "ok"
-    assert item["trade_tape_source"] == "SSI"
+    assert item["trade_tape_source"] == "SSI trade-tape contract"
     assert item["trade_tape_status"]["status"] == "ok"
 
 
@@ -263,8 +263,15 @@ def test_company_research_uses_ssi_and_not_implemented_placeholders():
     )
 
     assert snapshot["ticker"] == "FPT"
-    assert snapshot["price"]["source"] == "SSI DailyOhlc + SSI DailyStockPrice"
+    assert snapshot["price"]["source"] == "SSI DailyOhlc"
+    assert snapshot["price"]["canonical_source"] == "SSI DailyOhlc"
+    assert snapshot["price"]["reference_source"] == "SSI DailyStockPrice"
     assert snapshot["trading_stats"]["source"] == "SSI DailyOhlc"
+    assert snapshot["foreign_flow"]["source"] == "SSI DailyStockPrice"
+    assert snapshot["technical"]["source"] == "derived from SSI DailyOhlc"
+    assert snapshot["news"]["source"] != "SSI"
+    assert snapshot["financials"]["source"] != "SSI"
+    assert snapshot["events"]["source"] != "SSI"
     assert snapshot["news"]["status"] == "not_implemented"
     assert snapshot["financials"]["status"] == "not_implemented"
     assert snapshot["events"]["status"] == "not_implemented"
@@ -319,6 +326,6 @@ def test_index_components_service_uses_ssi_without_mozyfin_manager(monkeypatch):
     payload = service.build_index_components("VN30", market="HOSE")
 
     assert payload["status"] == "ok"
-    assert payload["source"] == "SSI"
+    assert payload["source"] == "SSI IndexComponents"
     assert payload["fallback_used"] is False
     assert payload["rows"][0]["symbol"] == "FPT"

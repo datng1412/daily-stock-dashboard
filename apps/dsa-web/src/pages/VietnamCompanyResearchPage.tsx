@@ -224,9 +224,9 @@ const VietnamCompanyResearchPage: React.FC = () => {
   const priceRows: MetricRow[] = [
     { label: 'Canonical latest price', value: snapshot.price.latestPrice, formatter: formatPrice },
     { label: 'Daily close', value: snapshot.price.dailyClose, formatter: formatPrice },
-    { label: 'SSI reference', value: snapshot.price.referencePrice, formatter: formatPrice },
-    { label: 'SSI ceiling', value: snapshot.price.ceilingPrice, formatter: formatPrice },
-    { label: 'SSI floor', value: snapshot.price.floorPrice, formatter: formatPrice },
+    { label: 'Reference price', value: snapshot.price.referencePrice, formatter: formatPrice },
+    { label: 'Ceiling price', value: snapshot.price.ceilingPrice, formatter: formatPrice },
+    { label: 'Floor price', value: snapshot.price.floorPrice, formatter: formatPrice },
     { label: 'Price date', value: snapshot.price.priceDate, formatter: (value) => formatNumber(value) },
   ];
   const tradingRows: MetricRow[] = [
@@ -282,19 +282,19 @@ const VietnamCompanyResearchPage: React.FC = () => {
     { label: 'Candles loaded', value: snapshot.intraday?.candles?.length ?? 0 },
   ];
   const realtimeRows: MetricRow[] = [
-    { label: 'Snapshot price', value: snapshot.realtime?.snapshot?.price ?? snapshot.realtime?.snapshot?.realtimePrice, formatter: formatPrice },
-    { label: 'Change', value: snapshot.realtime?.snapshot?.change ?? snapshot.realtime?.snapshot?.priceChange, formatter: formatSignedNumber },
-    { label: 'Change %', value: snapshot.realtime?.snapshot?.changePct ?? snapshot.realtime?.snapshot?.percentChange, formatter: (value) => `${formatNumber(value, 2)}%` },
-    { label: 'Reference', value: snapshot.realtime?.snapshot?.referencePrice, formatter: formatPrice },
+    { label: 'Realtime snapshot price', value: snapshot.realtime?.snapshot?.price ?? snapshot.realtime?.snapshot?.realtimePrice, formatter: formatPrice },
+    { label: 'Realtime change', value: snapshot.realtime?.snapshot?.change ?? snapshot.realtime?.snapshot?.priceChange, formatter: formatSignedNumber },
+    { label: 'Realtime change %', value: snapshot.realtime?.snapshot?.changePct ?? snapshot.realtime?.snapshot?.percentChange, formatter: (value) => `${formatNumber(value, 2)}%` },
+    { label: 'Realtime reference price', value: snapshot.realtime?.snapshot?.referencePrice, formatter: formatPrice },
     { label: 'SSI realtime/session volume', value: snapshot.realtime?.snapshot?.volume ?? snapshot.realtime?.snapshot?.volumeAccumulated },
     { label: 'Fetched at', value: snapshot.realtime?.snapshot?.fetchedAt, formatter: (value) => formatNumber(value) },
   ];
   const tradeTapeRows: MetricRow[] = [
     { label: 'Trades loaded', value: snapshot.tradeTape?.trades?.length ?? 0 },
     { label: 'Latest time', value: snapshot.tradeTape?.trades?.[0]?.time, formatter: (value) => formatNumber(value) },
-    { label: 'Latest price', value: snapshot.tradeTape?.trades?.[0]?.price, formatter: formatPrice },
+    { label: 'Latest trade tape price', value: snapshot.tradeTape?.trades?.[0]?.price, formatter: formatPrice },
     { label: 'Latest trade tape volume', value: snapshot.tradeTape?.trades?.[0]?.volume },
-    { label: 'Latest value', value: snapshot.tradeTape?.trades?.[0]?.value },
+    { label: 'Latest trade tape value', value: snapshot.tradeTape?.trades?.[0]?.value },
     { label: 'Source', value: snapshot.tradeTape?.source, formatter: (value) => formatNumber(value) },
   ];
 
@@ -316,6 +316,9 @@ const VietnamCompanyResearchPage: React.FC = () => {
       </section>
       <section className="grid gap-4 xl:grid-cols-2">
         <SectionShell title="Price summary" source={snapshot.price.source} status={snapshot.price.status}>
+          <p className="mb-3 text-xs text-secondary-text">
+            Canonical price: {formatSource(snapshot.price.canonicalSource ?? snapshot.price.source)}. Reference and limit fields: {formatSource(snapshot.price.referenceSource)}.
+          </p>
           <MetricGrid rows={priceRows} />
         </SectionShell>
         <SectionShell title="Trading stats" source={snapshot.tradingStats.source} status={snapshot.tradingStats.status}>
@@ -327,21 +330,21 @@ const VietnamCompanyResearchPage: React.FC = () => {
         <SectionShell title="Technical snapshot" source={snapshot.technical.source} status={snapshot.technical.status}>
           <MetricGrid rows={technicalRows} />
         </SectionShell>
-        <SectionShell title="Intraday pulse" source={snapshot.intraday?.source ?? 'SSI'} status={snapshot.intraday?.status ?? 'unavailable'}>
+        <SectionShell title="Intraday pulse" source={snapshot.intraday?.source ?? 'SSI IntradayOhlc'} status={snapshot.intraday?.status ?? 'unavailable'}>
           {hasIntradayData ? (
             <MetricGrid rows={intradayRows} />
           ) : (
             <p className="text-sm text-secondary-text">SSI intraday unavailable.</p>
           )}
         </SectionShell>
-        <SectionShell title="SSI realtime" source={snapshot.realtime?.source ?? 'SSI'} status={snapshot.realtime?.status ?? 'unavailable'}>
+        <SectionShell title="SSI realtime" source={snapshot.realtime?.source ?? 'SSI realtime contract'} status={snapshot.realtime?.status ?? 'unavailable'}>
           {hasRealtimeData ? (
             <MetricGrid rows={realtimeRows} />
           ) : (
             <p className="text-sm text-secondary-text">SSI realtime unavailable. Daily SSI data is still available.</p>
           )}
         </SectionShell>
-        <SectionShell title="SSI trade tape" source={snapshot.tradeTape?.source ?? 'SSI'} status={snapshot.tradeTape?.status ?? 'unavailable'}>
+        <SectionShell title="SSI trade tape" source={snapshot.tradeTape?.source ?? 'SSI trade-tape contract'} status={snapshot.tradeTape?.status ?? 'unavailable'}>
           {hasTradeTapeRows ? (
             <MetricGrid rows={tradeTapeRows} />
           ) : (

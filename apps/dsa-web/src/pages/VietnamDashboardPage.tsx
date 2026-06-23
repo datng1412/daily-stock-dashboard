@@ -19,7 +19,7 @@ import { AppPage, Badge, Button, Input, Loading } from '../components/common';
 import { DataQualitySummary } from '../components/dashboard';
 import { cn } from '../utils/cn';
 import { buildVietnamConditionSummary, VIETNAM_CONDITION_SUMMARY_SUBTITLE } from '../utils/vietnamConditionSummary';
-import { getKbsSnapshotDisplayState, type KbsSnapshotDisplayResult } from '../utils/kbsSnapshotState';
+import { getRealtimeSnapshotDisplayState, type RealtimeSnapshotDisplayResult } from '../utils/realtimeSnapshotState';
 import { getVietnamMarketPhase, type VietnamMarketPhase } from '../utils/vietnamMarketPhase';
 import {
   formatAbsoluteDateTime,
@@ -43,8 +43,8 @@ import {
 
 const DEFAULT_TICKERS = ['FPT', 'VPB', 'MSB', 'SCS', 'ACV', 'ACB'];
 const AUTO_REFRESH_INTERVALS = [60, 180, 300];
-const KBS_QUOTE_REFRESH_INTERVALS = [10, 15, 30];
-const KBS_TRADE_REFRESH_INTERVALS = [5, 10, 15];
+const REALTIME_SNAPSHOT_REFRESH_INTERVALS = [10, 15, 30];
+const TRADE_TAPE_REFRESH_INTERVALS = [5, 10, 15];
 const DEFAULT_WATCHLIST = normalizeVietnamWatchlist(DEFAULT_TICKERS) ?? DEFAULT_TICKERS;
 const DETAIL_NEWS_LIMIT = 8;
 const INSPECT_RANGES = [
@@ -290,7 +290,7 @@ const officialDailySourceLabel = (item: VietnamWatchItem) => {
   return source ? `Daily source: ${source}` : 'Daily OK';
 };
 
-const kbsStateVariant = (state: KbsSnapshotDisplayResult) => {
+const realtimeSnapshotStateVariant = (state: RealtimeSnapshotDisplayResult) => {
   if (state.severity === 'ok') return 'success' as const;
   if (state.severity === 'info') return 'info' as const;
   if (state.severity === 'warning') return 'warning' as const;
@@ -298,8 +298,8 @@ const kbsStateVariant = (state: KbsSnapshotDisplayResult) => {
   return 'default' as const;
 };
 
-const kbsSnapshotState = (quote?: VietnamRealtimeQuote | null, marketPhaseCode?: string | null) =>
-  getKbsSnapshotDisplayState({
+const realtimeSnapshotState = (quote?: VietnamRealtimeQuote | null, marketPhaseCode?: string | null) =>
+  getRealtimeSnapshotDisplayState({
     quoteStatus: quote?.status,
     ageSeconds: quote?.ageSeconds,
     isStale: quote?.isStale,
@@ -308,7 +308,7 @@ const kbsSnapshotState = (quote?: VietnamRealtimeQuote | null, marketPhaseCode?:
     snapshotTimeDisplay: quote?.snapshotTimeDisplay ?? quote?.realtimeTimeDisplay ?? quote?.snapshotTime ?? quote?.realtimeTime,
   });
 
-const usableKbsSessionVolume = (quote?: VietnamRealtimeQuote | null, state?: KbsSnapshotDisplayResult) => {
+const usableRealtimeSessionVolume = (quote?: VietnamRealtimeQuote | null, state?: RealtimeSnapshotDisplayResult) => {
   if (quote?.volumeAccumulated === null || quote?.volumeAccumulated === undefined) return null;
   if (quote.status === 'error' || quote.status === 'unavailable') return null;
   if (quote.isStale === true || state?.severity === 'error' || state?.severity === 'warning') return null;
@@ -318,7 +318,7 @@ const usableKbsSessionVolume = (quote?: VietnamRealtimeQuote | null, state?: Kbs
 const sessionVolumeToAvgDailyVolume = (
   item: VietnamWatchItem,
   realtimeQuote?: VietnamRealtimeQuote | null,
-  state?: KbsSnapshotDisplayResult,
+  state?: RealtimeSnapshotDisplayResult,
 ) => {
   const avgVolume20D = item.indicators.avgVolume20D ?? item.liquidity?.avgVolume20D;
   const sessionVolume = currentSessionVolume(item, realtimeQuote, state);
@@ -368,12 +368,12 @@ const hasTradeTapeData = (rows?: VietnamRealtimeTrade[] | null) => (
 const currentSessionVolume = (
   item: VietnamWatchItem,
   realtimeQuote?: VietnamRealtimeQuote | null,
-  state?: KbsSnapshotDisplayResult,
-) => usableKbsSessionVolume(realtimeQuote, state) ?? (
+  state?: RealtimeSnapshotDisplayResult,
+) => usableRealtimeSessionVolume(realtimeQuote, state) ?? (
   hasCurrentIntradayData(item) ? intradaySessionVolume(item) : null
 );
 
-const rawKbsFreshnessText = (quote?: VietnamRealtimeQuote | null) => (
+const rawRealtimeFreshnessText = (quote?: VietnamRealtimeQuote | null) => (
   `raw age ${quote?.ageSeconds ?? '-'}s | raw stale ${quote?.isStale === null || quote?.isStale === undefined ? '-' : String(quote.isStale)} | reason ${quote?.staleReason ?? '-'}`
 );
 
@@ -431,7 +431,7 @@ const newsUnavailableText = (item: VietnamWatchItem) => (
     : item.newsStatus?.message ?? 'News not implemented.'
 );
 
-const kbsErrorMessage = (error?: string | null) => {
+const realtimeErrorMessage = (error?: string | null) => {
   if (!error) return null;
   const lower = error.toLowerCase();
   if (lower.includes('timeout') || lower.includes('timed out') || error.includes('è¶…æ—¶')) return 'SSI realtime provider timeout';
@@ -455,8 +455,8 @@ const tradeTapeStatusBadgeText = (status?: string | null) => (
   status === 'unavailable' || status === 'error' ? 'SSI trade tape unavailable' : 'SSI trade tape'
 );
 
-const kbsSnapshotSummaryText = (quote: VietnamRealtimeQuote | null | undefined, state: KbsSnapshotDisplayResult) => {
-  const cleanError = kbsErrorMessage(quote?.error);
+const realtimeSnapshotSummaryText = (quote: VietnamRealtimeQuote | null | undefined, state: RealtimeSnapshotDisplayResult) => {
+  const cleanError = realtimeErrorMessage(quote?.error);
   if (cleanError) return cleanError;
   const time = quote?.snapshotTimeDisplay ?? quote?.realtimeTimeDisplay ?? quote?.snapshotTime ?? quote?.realtimeTime;
   if (state.label === 'Last available SSI realtime' && time) return `Last available · ${formatVietnamTime(time)}`;
@@ -464,7 +464,7 @@ const kbsSnapshotSummaryText = (quote: VietnamRealtimeQuote | null | undefined, 
   return state.label;
 };
 
-const kbsProviderStatus = (
+const realtimeProviderStatus = (
   quotes: Record<string, VietnamRealtimeQuote | undefined>,
   activeTickers: string[],
   quoteError?: string | null,
@@ -515,7 +515,7 @@ const watchlistScanState = (
   marketPhaseCode?: string | null,
 ): WatchlistScanState => {
   const labels = marketStatusLabels(item, item.statusLabels?.length ?? 0).map((label) => label.toLowerCase());
-  const kbsState = kbsSnapshotState(realtimeQuote, marketPhaseCode);
+  const realtimeState = realtimeSnapshotState(realtimeQuote, marketPhaseCode);
   const dailyFreshness = officialDailyCacheFreshness(item);
 
   if (item.status === 'unavailable' || item.error || !hasOfficialDailyData(item)) {
@@ -525,13 +525,13 @@ const watchlistScanState = (
     return { label: 'Data unavailable', variant: 'danger', reason: 'SSI DailyOhlc source error' };
   }
   if (
-    kbsState.severity === 'warning' ||
-    kbsState.severity === 'error' ||
+    realtimeState.severity === 'warning' ||
+    realtimeState.severity === 'error' ||
     labels.some((label) =>
       ['weak', 'risk', 'caution', 'negative', 'low liquidity', 'overextended'].some((needle) => label.includes(needle)),
     )
   ) {
-    return { label: 'Weakening', variant: 'warning', reason: kbsState.severity === 'warning' || kbsState.severity === 'error' ? 'SSI realtime needs context' : 'Neutral labels show caution' };
+    return { label: 'Weakening', variant: 'warning', reason: realtimeState.severity === 'warning' || realtimeState.severity === 'error' ? 'SSI realtime needs context' : 'Neutral labels show caution' };
   }
 
   const constructiveLabelCount = labels.filter((label) =>
@@ -546,7 +546,7 @@ const watchlistScanState = (
   return { label: 'Neutral', variant: 'default', reason: 'No strong directional condition' };
 };
 
-const kbsStateTone = (state: KbsSnapshotDisplayResult) => {
+const realtimeSnapshotStateTone = (state: RealtimeSnapshotDisplayResult) => {
   if (state.severity === 'ok') return 'text-success';
   if (state.severity === 'info') return 'text-cyan';
   if (state.severity === 'warning') return 'text-warning';
@@ -595,8 +595,8 @@ const WatchCard: React.FC<{ item: VietnamWatchItem; realtimeQuote?: VietnamRealt
   const positive = (item.changePct ?? 0) >= 0;
   const TrendIcon = positive ? ArrowUpRight : ArrowDownRight;
   const lastFetched = latestFetchedValue(item);
-  const kbsState = kbsSnapshotState(realtimeQuote, marketPhase.code);
-  const sessionVolumeRatioText = sessionVolumeToAvgDailyVolume(item, realtimeQuote, kbsState);
+  const realtimeState = realtimeSnapshotState(realtimeQuote, marketPhase.code);
+  const sessionVolumeRatioText = sessionVolumeToAvgDailyVolume(item, realtimeQuote, realtimeState);
   const hasRealtimeSnapshot = hasRealtimeSnapshotData(realtimeQuote);
   const hasIntradayPulse = hasCurrentIntradayData(item);
   const newsItems = item.news ?? [];
@@ -648,16 +648,16 @@ const WatchCard: React.FC<{ item: VietnamWatchItem; realtimeQuote?: VietnamRealt
           <p className="text-xs text-secondary-text">SSI realtime</p>
           <div className="mt-1 flex flex-wrap items-center gap-2">
             <p className="text-lg font-semibold text-foreground">{formatPrice(realtimeQuote?.realtimePrice)}</p>
-            <Badge variant={kbsStateVariant(kbsState)}>{kbsState.label}</Badge>
+            <Badge variant={realtimeSnapshotStateVariant(realtimeState)}>{realtimeState.label}</Badge>
           </div>
           <p className={cn('text-xs', signalTone(realtimeQuote?.priceChange))}>
             {formatPrice(realtimeQuote?.priceChange)} / {formatNumber(realtimeQuote?.percentChange, 2)}%
           </p>
-          <p className="text-xs text-secondary-text">{kbsSnapshotSummaryText(realtimeQuote, kbsState)}</p>
+          <p className="text-xs text-secondary-text">{realtimeSnapshotSummaryText(realtimeQuote, realtimeState)}</p>
         </div>
         ) : null}
         <div>
-          <p className="text-xs text-secondary-text">Volume (shares)</p>
+          <p className="text-xs text-secondary-text">Daily OHLCV volume</p>
           <p className="text-lg font-semibold text-foreground">{formatNumber(item.volume)}</p>
         </div>
         <div>
@@ -739,7 +739,7 @@ const WatchCard: React.FC<{ item: VietnamWatchItem; realtimeQuote?: VietnamRealt
             <span className={signalTone(intradayChange(item))}>Change {formatPrice(intradayChange(item))} ({formatNumber(intradayChangePercent(item), 2)}%)</span>
             <span>Time {formatVietnamTime(item.intradayCandles?.at(-1)?.dateTime ?? item.intradayCandles?.at(-1)?.timestamp)}</span>
             <span>Range {formatNumber(item.intradayPulse?.rangePercent, 2)}%</span>
-            <span>Volume {formatNumber(intradayLatestVolume(item))}</span>
+            <span>Latest intraday volume {formatNumber(intradayLatestVolume(item))}</span>
           </div>
         </div>
       ) : null}
@@ -851,12 +851,12 @@ const DataStatusPanel: React.FC<{
   watchlist: string[];
   realtimeError?: string | null;
   tradesError?: string | null;
-  lastKbsQuoteRefreshAt?: string | null;
-  lastKbsTradeRefreshAt?: string | null;
-  lastKbsErrorAt?: string | null;
-  kbsAutoRefreshEnabled: boolean;
-  kbsQuoteRefreshInterval: number;
-  kbsTradeRefreshInterval: number;
+  lastRealtimeSnapshotRefreshAt?: string | null;
+  lastTradeTapeRefreshAt?: string | null;
+  lastRealtimeErrorAt?: string | null;
+  realtimeAutoRefreshEnabled: boolean;
+  realtimeSnapshotRefreshInterval: number;
+  tradeTapeRefreshInterval: number;
   marketPhase: VietnamMarketPhase;
   observability?: VietnamObservabilityResponse | null;
 }> = ({
@@ -870,18 +870,18 @@ const DataStatusPanel: React.FC<{
   watchlist,
   realtimeError,
   tradesError,
-  lastKbsQuoteRefreshAt,
-  lastKbsTradeRefreshAt,
-  lastKbsErrorAt,
-  kbsAutoRefreshEnabled,
-  kbsQuoteRefreshInterval,
-  kbsTradeRefreshInterval,
+  lastRealtimeSnapshotRefreshAt,
+  lastTradeTapeRefreshAt,
+  lastRealtimeErrorAt,
+  realtimeAutoRefreshEnabled,
+  realtimeSnapshotRefreshInterval,
+  tradeTapeRefreshInterval,
   marketPhase,
   observability,
 }) => {
-  const status = kbsProviderStatus(realtimeQuotes, watchlist, realtimeError, tradesError);
+  const status = realtimeProviderStatus(realtimeQuotes, watchlist, realtimeError, tradesError);
   const selectedQuote = selectedItem?.ticker ? realtimeQuotes[selectedItem.ticker] : undefined;
-  const selectedKbsState = kbsSnapshotState(selectedQuote, marketPhase.code);
+  const selectedRealtimeState = realtimeSnapshotState(selectedQuote, marketPhase.code);
   const latestTrade = realtimeTrades[0];
   const selectedLastFetched = selectedItem ? latestFetchedValue(selectedItem) : null;
   const selectedCacheStatus = selectedItem?.cacheStatus
@@ -920,7 +920,7 @@ const DataStatusPanel: React.FC<{
           <Badge variant={data?.fixtureMode ? 'warning' : data ? 'success' : 'default'}>
             {data?.dataQuality.source ?? 'SSI pending'}
           </Badge>
-          <Badge variant={kbsStateVariant(selectedKbsState)}>{selectedKbsState.label}</Badge>
+          <Badge variant={realtimeSnapshotStateVariant(selectedRealtimeState)}>{selectedRealtimeState.label}</Badge>
           <Badge variant="default">{marketPhase.holidayAware ? 'Holiday calendar enabled' : 'holidayAware=false'}</Badge>
         </div>
       </div>
@@ -972,21 +972,21 @@ const DataStatusPanel: React.FC<{
           </div>
           <div className="rounded-lg bg-card/60 p-3">
             <dt className="text-xs text-secondary-text">SSI realtime</dt>
-            <dd className="mt-1 font-medium text-foreground">{formatVietnamTime(lastKbsQuoteRefreshAt)}</dd>
+            <dd className="mt-1 font-medium text-foreground">{formatVietnamTime(lastRealtimeSnapshotRefreshAt)}</dd>
             <dd className="mt-1 text-xs text-secondary-text">
               raw stale {status.staleCount} | unavailable {status.unavailableCount}
             </dd>
           </div>
           <div className="rounded-lg bg-card/60 p-3">
             <dt className="text-xs text-secondary-text">SSI trade tape</dt>
-            <dd className="mt-1 font-medium text-foreground">{formatVietnamTime(lastKbsTradeRefreshAt)}</dd>
+            <dd className="mt-1 font-medium text-foreground">{formatVietnamTime(lastTradeTapeRefreshAt)}</dd>
             <dd className="mt-1 text-xs text-secondary-text">latest {latestTrade?.time ?? '-'}</dd>
           </div>
           <div className="rounded-lg bg-card/60 p-3">
             <dt className="text-xs text-secondary-text">Realtime auto-refresh</dt>
-            <dd className="mt-1 font-medium text-foreground">{kbsAutoRefreshEnabled ? 'on' : 'off'}</dd>
-            <dd className="mt-1 text-xs text-secondary-text">quotes {kbsQuoteRefreshInterval}s | trades {kbsTradeRefreshInterval}s</dd>
-            <dd className="mt-1 text-xs text-secondary-text">{lastKbsErrorAt ? `last error ${formatVietnamTime(lastKbsErrorAt)}` : 'last error -'}</dd>
+            <dd className="mt-1 font-medium text-foreground">{realtimeAutoRefreshEnabled ? 'on' : 'off'}</dd>
+            <dd className="mt-1 text-xs text-secondary-text">snapshot {realtimeSnapshotRefreshInterval}s | trade tape {tradeTapeRefreshInterval}s</dd>
+            <dd className="mt-1 text-xs text-secondary-text">{lastRealtimeErrorAt ? `last error ${formatVietnamTime(lastRealtimeErrorAt)}` : 'last error -'}</dd>
           </div>
         </dl>
         <div className="mt-3 grid gap-2 md:grid-cols-3">
@@ -996,10 +996,10 @@ const DataStatusPanel: React.FC<{
           <div className="rounded-lg border border-border/60 bg-card/50 p-3">
             <span className="font-medium text-foreground">SSI realtime time</span> {selectedQuote?.realtimeTimeDisplay ?? selectedQuote?.realtimeTime ?? '-'}
             <div className="mt-1">
-              <Badge variant={kbsStateVariant(selectedKbsState)}>{selectedKbsState.label}</Badge>
+              <Badge variant={realtimeSnapshotStateVariant(selectedRealtimeState)}>{selectedRealtimeState.label}</Badge>
             </div>
-            <div className="mt-1">{selectedKbsState.reason}</div>
-            <div className="mt-1">{rawKbsFreshnessText(selectedQuote)}</div>
+            <div className="mt-1">{selectedRealtimeState.reason}</div>
+            <div className="mt-1">{rawRealtimeFreshnessText(selectedQuote)}</div>
           </div>
           <div className="rounded-lg border border-border/60 bg-card/50 p-3">
             <span className="font-medium text-foreground">Cache status</span> {selectedCacheStatus}
@@ -1110,10 +1110,10 @@ const SelectedTickerHeader: React.FC<{
   marketPhase: VietnamMarketPhase;
 }> = ({ item, realtimeQuote, marketPhase }) => {
   if (!item) return null;
-  const kbsState = kbsSnapshotState(realtimeQuote, marketPhase.code);
+  const realtimeState = realtimeSnapshotState(realtimeQuote, marketPhase.code);
   const avgVolume20D = item.indicators.avgVolume20D ?? item.liquidity?.avgVolume20D;
-  const sessionVolume = currentSessionVolume(item, realtimeQuote, kbsState);
-  const kbsPrice = realtimeQuote?.snapshotPrice ?? realtimeQuote?.realtimePrice;
+  const sessionVolume = currentSessionVolume(item, realtimeQuote, realtimeState);
+  const realtimeSnapshotPrice = realtimeQuote?.snapshotPrice ?? realtimeQuote?.realtimePrice;
   const hasRealtimeSnapshot = hasRealtimeSnapshotData(realtimeQuote);
   const hasSessionVolume = hasDisplayValue(sessionVolume);
   const ssiReferencePrice = item.dailyStockPrice?.referencePrice ?? item.ssiReferencePrice ?? item.priceLimit?.referencePrice ?? null;
@@ -1142,7 +1142,7 @@ const SelectedTickerHeader: React.FC<{
           </div>
           <div className="mt-3 flex flex-wrap gap-2">
             <Badge variant="info">{dailySourceLabel}</Badge>
-            <Badge variant={kbsStateVariant(kbsState)}>{realtimeStatusBadgeText(realtimeQuote?.status ?? item.realtimeStatus?.status)}</Badge>
+            <Badge variant={realtimeSnapshotStateVariant(realtimeState)}>{realtimeStatusBadgeText(realtimeQuote?.status ?? item.realtimeStatus?.status)}</Badge>
             <Badge variant={item.tradeTapeStatus?.status === 'unavailable' || item.tradeTapeStatus?.status === 'error' ? 'warning' : 'default'}>
               {tradeTapeStatusBadgeText(item.tradeTapeStatus?.status)}
             </Badge>
@@ -1163,8 +1163,8 @@ const SelectedTickerHeader: React.FC<{
           {hasRealtimeSnapshot ? (
           <div className="rounded-lg bg-elevated/50 p-3">
             <dt className="text-xs text-secondary-text">SSI realtime</dt>
-            <dd className="mt-1 font-semibold text-foreground">{formatPrice(kbsPrice)}</dd>
-            <dd className="mt-1 text-xs text-secondary-text">{kbsState.label}</dd>
+            <dd className="mt-1 font-semibold text-foreground">{formatPrice(realtimeSnapshotPrice)}</dd>
+            <dd className="mt-1 text-xs text-secondary-text">{realtimeState.label}</dd>
           </div>
           ) : null}
           <div className="rounded-lg bg-elevated/50 p-3">
@@ -1175,7 +1175,7 @@ const SelectedTickerHeader: React.FC<{
           </div>
           {hasSessionVolume ? (
           <div className="rounded-lg bg-elevated/50 p-3">
-            <dt className="text-xs text-secondary-text">Session volume</dt>
+            <dt className="text-xs text-secondary-text">Realtime session volume</dt>
             <dd className="mt-1 font-semibold text-foreground">{formatNumber(sessionVolume)}</dd>
           </div>
           ) : null}
@@ -1292,7 +1292,7 @@ const IndicatorTable: React.FC<{
             <th className="px-3 py-2">Source</th>
             <th className="px-3 py-2">Price date</th>
             <th className="px-3 py-2 text-right">SSI realtime</th>
-            <th className="px-3 py-2 text-right">SSI change</th>
+            <th className="px-3 py-2 text-right">Realtime change</th>
             <th className="px-3 py-2">SSI time</th>
             <th className="px-3 py-2 text-right">Intraday change</th>
             <th className="px-3 py-2">Final close</th>
@@ -1306,8 +1306,8 @@ const IndicatorTable: React.FC<{
         <tbody>
           {items.map((item) => {
             const quote = realtimeQuotes[item.ticker];
-            const kbsState = kbsSnapshotState(quote, marketPhase.code);
-            const sessionVolumeRatioText = sessionVolumeToAvgDailyVolume(item, quote, kbsState);
+            const realtimeState = realtimeSnapshotState(quote, marketPhase.code);
+            const sessionVolumeRatioText = sessionVolumeToAvgDailyVolume(item, quote, realtimeState);
             const scanState = watchlistScanState(item, quote, marketPhase.code);
             const dailyFreshness = officialDailyCacheFreshness(item);
             return (
@@ -1348,7 +1348,7 @@ const IndicatorTable: React.FC<{
                 <td className="px-3 py-3">{item.latestPriceDate ?? item.priceDate ?? '-'}</td>
                 <td className="px-3 py-3 text-right">
                   <div className="font-medium text-foreground">{formatPrice(quote?.realtimePrice)}</div>
-                  <div className={cn('mt-1 text-xs font-medium', kbsStateTone(kbsState))}>{kbsState.label}</div>
+                  <div className={cn('mt-1 text-xs font-medium', realtimeSnapshotStateTone(realtimeState))}>{realtimeState.label}</div>
                 </td>
                 <td className={cn('px-3 py-3 text-right', signalTone(quote?.priceChange))}>
                   {formatPrice(quote?.priceChange)} / {formatNumber(quote?.percentChange, 2)}%
@@ -1567,7 +1567,7 @@ const BrokerInspectChartSvg: React.FC<{
           <line key={`grid-${y}`} x1={CHART_LEFT} x2={CHART_WIDTH - CHART_RIGHT} y1={y} y2={y} stroke="rgba(148,163,184,0.18)" />
         ))}
         <text x={14} y={PRICE_TOP + 18} fill="#94a3b8" fontSize="12">Price</text>
-        <text x={14} y={VOLUME_TOP + 18} fill="#94a3b8" fontSize="12">Volume</text>
+        <text x={14} y={VOLUME_TOP + 18} fill="#94a3b8" fontSize="12">Daily volume</text>
         <text x={14} y={RSI_TOP + 18} fill="#94a3b8" fontSize="12">RSI14</text>
         <line x1={CHART_LEFT} x2={CHART_WIDTH - CHART_RIGHT} y1={rsiScale(30) ?? 0} y2={rsiScale(30) ?? 0} stroke="#64748b" strokeDasharray="5 5" />
         <line x1={CHART_LEFT} x2={CHART_WIDTH - CHART_RIGHT} y1={rsiScale(70) ?? 0} y2={rsiScale(70) ?? 0} stroke="#64748b" strokeDasharray="5 5" />
@@ -1646,11 +1646,11 @@ const BrokerInspectChartSvg: React.FC<{
             <dt>High</dt><dd className="text-right text-foreground">{formatPrice(hoverPoint.high)}</dd>
             <dt>Low</dt><dd className="text-right text-foreground">{formatPrice(hoverPoint.low)}</dd>
             <dt>Close</dt><dd className="text-right text-foreground">{formatPrice(hoverPoint.close)}</dd>
-            <dt>Volume</dt><dd className="text-right text-foreground">{formatNumber(hoverPoint.volume)}</dd>
+            <dt>Daily volume</dt><dd className="text-right text-foreground">{formatNumber(hoverPoint.volume)}</dd>
             <dt>MA20</dt><dd className="text-right text-foreground">{formatPrice(hoverPoint.ma20)}</dd>
             <dt>MA50</dt><dd className="text-right text-foreground">{formatPrice(hoverPoint.ma50)}</dd>
-            <dt>Volume MA20</dt><dd className="text-right text-foreground">{formatNumber(hoverPoint.volumeMa20)}</dd>
-            <dt>Volume MA50</dt><dd className="text-right text-foreground">{formatNumber(hoverPoint.volumeMa50)}</dd>
+            <dt>Daily volume MA20</dt><dd className="text-right text-foreground">{formatNumber(hoverPoint.volumeMa20)}</dd>
+            <dt>Daily volume MA50</dt><dd className="text-right text-foreground">{formatNumber(hoverPoint.volumeMa50)}</dd>
             <dt>RSI14</dt><dd className="text-right text-foreground">{formatNumber(hoverPoint.rsi14, 2)}</dd>
             {showBollinger ? (
               <>
@@ -1941,8 +1941,8 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
             {showMA20 ? <span data-testid="inspect-legend-ma20">MA20</span> : null}
             {showMA50 ? <span data-testid="inspect-legend-ma50">MA50</span> : null}
             {showBollinger ? <span data-testid="inspect-legend-bollinger">Bollinger upper/mid/lower</span> : null}
-            <span>Volume MA20</span>
-            <span>Volume MA50</span>
+            <span>Daily volume MA20</span>
+            <span>Daily volume MA50</span>
             <span>RSI14</span>
           </div>
           <BrokerInspectChartSvg points={visiblePoints} showMA20={showMA20} showMA50={showMA50} showBollinger={showBollinger} />
@@ -2019,8 +2019,8 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
               {showMA20 ? <span>MA20</span> : null}
               {showMA50 ? <span>MA50</span> : null}
               {showBollinger ? <span>Bollinger upper/mid/lower</span> : null}
-              <span>Volume MA20</span>
-              <span>Volume MA50</span>
+              <span>Daily volume MA20</span>
+              <span>Daily volume MA50</span>
               <span>RSI14</span>
             </div>
 
@@ -2123,7 +2123,7 @@ const StockDetailView: React.FC<{
   const latestIntradayCandle = item.intradayCandles?.at(-1);
   const conditionSummary = buildVietnamConditionSummary({ item, fixtureMode });
   const marketStatusDetails = (item.statusDetails ?? []).filter((detail) => !DATA_CAVEAT_LABELS.has(detail.label));
-  const kbsState = kbsSnapshotState(realtimeQuote, marketPhase.code);
+  const realtimeState = realtimeSnapshotState(realtimeQuote, marketPhase.code);
   const hasRealtimeSnapshot = hasRealtimeSnapshotData(realtimeQuote);
   const hasCurrentIntraday = hasCurrentIntradayData(item);
   const hasTradeTape = hasTradeTapeData(realtimeTrades);
@@ -2144,7 +2144,7 @@ const StockDetailView: React.FC<{
     : 'Session volume requires current-session intraday candles.';
   const hasVolumeVsAverage = intradayVolumeVsAverage(item) != null;
   const avgVolume20D = indicators.avgVolume20D ?? item.liquidity?.avgVolume20D;
-  const sessionVolumeRatioText = sessionVolumeToAvgDailyVolume(item, realtimeQuote, kbsState);
+  const sessionVolumeRatioText = sessionVolumeToAvgDailyVolume(item, realtimeQuote, realtimeState);
   const finalCloseLabel = finalCloseDisplayLabel(item.finalCloseStatus);
   const foreignNet5dLatestAvailable = indicators.foreignNet5dLatestAvailable;
   const foreignNet20dLatestAvailable = indicators.foreignNet20dLatestAvailable;
@@ -2164,8 +2164,8 @@ const StockDetailView: React.FC<{
   const hasSsiDailyStockPrice = ssiDailyStatus === 'ok' && ssiDailyHasCoreValues;
   const ssiDailySource = ssiDailyStockPrice.source ?? item.referenceSource ?? item.priceLimit?.source ?? 'SSI DailyStockPrice';
   const ssiDailyRows = [
-    { label: 'Reference', value: formatPrice(ssiReferencePrice), show: hasDisplayValue(ssiReferencePrice) },
-    { label: 'Ceiling / floor', value: `${formatPrice(ssiCeilingPrice)} / ${formatPrice(ssiFloorPrice)}`, show: hasDisplayValue(ssiCeilingPrice) || hasDisplayValue(ssiFloorPrice) },
+    { label: 'Reference price', value: formatPrice(ssiReferencePrice), show: hasDisplayValue(ssiReferencePrice) },
+    { label: 'Ceiling price / floor price', value: `${formatPrice(ssiCeilingPrice)} / ${formatPrice(ssiFloorPrice)}`, show: hasDisplayValue(ssiCeilingPrice) || hasDisplayValue(ssiFloorPrice) },
     { label: 'Foreign net volume', value: `${formatNumber(ssiDailyStockPrice.foreignNetVolume ?? item.ssiForeignNetVolume ?? item.foreign?.net)} shares`, tone: signalTone(ssiDailyStockPrice.foreignNetVolume ?? item.ssiForeignNetVolume ?? item.foreign?.net), show: hasDisplayValue(ssiDailyStockPrice.foreignNetVolume ?? item.ssiForeignNetVolume ?? item.foreign?.net) },
     { label: 'Foreign net value', value: formatNumber(ssiDailyStockPrice.foreignNetValue ?? item.ssiForeignNetValue ?? item.foreign?.netValue), tone: signalTone(ssiDailyStockPrice.foreignNetValue ?? item.ssiForeignNetValue ?? item.foreign?.netValue), show: hasDisplayValue(ssiDailyStockPrice.foreignNetValue ?? item.ssiForeignNetValue ?? item.foreign?.netValue) },
     { label: 'Matched volume', value: formatNumber(ssiDailyStockPrice.matchedVolume ?? item.ssiMatchedVolume), show: hasDisplayValue(ssiDailyStockPrice.matchedVolume ?? item.ssiMatchedVolume) },
@@ -2249,11 +2249,11 @@ const StockDetailView: React.FC<{
           <dd className="mt-1 font-medium text-foreground">{formatNumber(indicators.rsi14Wilder ?? indicators.rsi14, 2)}</dd>
         </div>
         <div className="rounded-lg bg-elevated/50 p-3">
-          <dt className="text-xs text-secondary-text">Latest price / OHLCV close (VND)</dt>
+          <dt className="text-xs text-secondary-text">Daily close / OHLCV close (VND)</dt>
           <dd className="mt-1 font-medium text-foreground">{formatPrice(item.dailyClose ?? item.latestPrice ?? item.close)} / {formatPrice(item.ohlcvClose ?? item.close)}</dd>
         </div>
         <div className="rounded-lg bg-elevated/50 p-3">
-          <dt className="text-xs text-secondary-text">Latest price source</dt>
+          <dt className="text-xs text-secondary-text">Daily price source</dt>
           <dd className="mt-1 flex flex-wrap gap-1">
             <Badge variant={priceSourceVariant(item.latestPriceSource)}>{item.latestPriceSource ?? 'unknown'}</Badge>
           </dd>
@@ -2262,7 +2262,7 @@ const StockDetailView: React.FC<{
               ? 'No reliable latest matched quote field is present, so daily OHLCV close is used.'
               : isSsiDailyPriceSource(item.latestPriceSource)
                 ? 'SSI DailyOhlc close is used because no reliable latest matched quote field is present.'
-              : 'Latest price comes from quote data when a reliable field is present.'}
+              : 'Daily price comes from quote data when a reliable field is present.'}
           </dd>
         </div>
         <div className="rounded-lg bg-elevated/50 p-3">
@@ -2328,7 +2328,7 @@ const StockDetailView: React.FC<{
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <h3 className="text-sm font-semibold text-foreground">SSI DailyStockPrice</h3>
-            <p className="mt-1 text-xs text-secondary-text">Reference, limits, matched, put-through, and foreign fields from SSI.</p>
+            <p className="mt-1 text-xs text-secondary-text">Reference price, limits, matched, put-through, and foreign fields from SSI DailyStockPrice.</p>
           </div>
           <div className="flex flex-wrap gap-1">
             <Badge variant={ssiDailyStatus === 'ok' ? 'info' : 'default'}>{ssiDailyStatus ?? 'unavailable'}</Badge>
@@ -2532,26 +2532,26 @@ const StockDetailView: React.FC<{
       <div className="mt-4 rounded-lg border border-border/60 bg-elevated/30 p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-sm font-semibold text-foreground">SSI realtime</h3>
-          <Badge variant={kbsStateVariant(kbsState)}>{kbsState.label}</Badge>
+          <Badge variant={realtimeSnapshotStateVariant(realtimeState)}>{realtimeState.label}</Badge>
         </div>
         {hasRealtimeSnapshot ? (
         <dl className="mt-3 grid gap-3 text-sm md:grid-cols-4">
           <div>
-            <dt className="text-xs text-secondary-text">Snapshot price</dt>
+            <dt className="text-xs text-secondary-text">Realtime snapshot price</dt>
             <dd className="mt-1 font-medium text-foreground">{formatPrice(realtimeQuote?.snapshotPrice ?? realtimeQuote?.realtimePrice)}</dd>
           </div>
           <div>
-            <dt className="text-xs text-secondary-text">Snapshot time</dt>
+            <dt className="text-xs text-secondary-text">Realtime snapshot time</dt>
             <dd className="mt-1 font-medium text-foreground">{realtimeQuote?.snapshotTimeDisplay ?? realtimeQuote?.realtimeTimeDisplay ?? realtimeQuote?.snapshotTime ?? realtimeQuote?.realtimeTime ?? '-'}</dd>
           </div>
           <div>
-            <dt className="text-xs text-secondary-text">SSI change</dt>
+            <dt className="text-xs text-secondary-text">Realtime change</dt>
             <dd className={cn('mt-1 font-medium', signalTone(realtimeQuote?.priceChange))}>
               {formatPrice(realtimeQuote?.priceChange)} / {formatNumber(realtimeQuote?.percentChange, 2)}%
             </dd>
           </div>
           <div>
-            <dt className="text-xs text-secondary-text">SSI session accumulated volume</dt>
+            <dt className="text-xs text-secondary-text">Realtime session volume</dt>
             <dd className="mt-1 font-medium text-foreground">{formatNumber(realtimeQuote?.volumeAccumulated)}</dd>
           </div>
         </dl>
@@ -2560,11 +2560,11 @@ const StockDetailView: React.FC<{
         )}
         {hasRealtimeSnapshot ? (
         <p className="mt-3 text-xs text-secondary-text">
-          {kbsState.reason}
+          {realtimeState.reason}
         </p>
         ) : null}
         {hasRealtimeSnapshot && realtimeQuote?.error ? (
-          <p className="mt-1 text-xs text-secondary-text">{kbsErrorMessage(realtimeQuote.error)}</p>
+          <p className="mt-1 text-xs text-secondary-text">{realtimeErrorMessage(realtimeQuote.error)}</p>
         ) : null}
         {hasRealtimeSnapshot ? (
         <p className="mt-3 text-xs text-secondary-text">
@@ -2574,7 +2574,7 @@ const StockDetailView: React.FC<{
       </div>
       <div className="mt-4 rounded-lg border border-border/60 bg-elevated/30 p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-sm font-semibold text-foreground">Latest trade tape</h3>
+          <h3 className="text-sm font-semibold text-foreground">Trade tape</h3>
           <Badge variant={tradesError ? 'warning' : 'info'}>{tradesLoading ? 'Loading' : 'SSI trade tape'}</Badge>
         </div>
         <p className="mt-2 text-xs text-secondary-text">
@@ -2591,9 +2591,9 @@ const StockDetailView: React.FC<{
               <thead className="border-b border-border/70 uppercase text-secondary-text">
                 <tr>
                   <th className="py-2 pr-3">Time</th>
-                  <th className="px-3 py-2 text-right">Price</th>
-                  <th className="px-3 py-2 text-right">Volume</th>
-                  <th className="px-3 py-2">Type</th>
+                  <th className="px-3 py-2 text-right">Trade tape price</th>
+                  <th className="px-3 py-2 text-right">Trade tape volume</th>
+                  <th className="px-3 py-2">Trade type</th>
                   <th className="px-3 py-2">Source</th>
                 </tr>
               </thead>
@@ -2734,9 +2734,9 @@ const VietnamDashboardPage: React.FC = () => {
   const [indexList, setIndexList] = useState<VietnamIndexListResponse | null>(null);
   const [indexComponents, setIndexComponents] = useState<VietnamIndexComponentsResponse | null>(null);
   const [indexCoverageError, setIndexCoverageError] = useState<string | null>(null);
-  const [lastKbsQuoteRefreshAt, setLastKbsQuoteRefreshAt] = useState<string | null>(null);
-  const [lastKbsTradeRefreshAt, setLastKbsTradeRefreshAt] = useState<string | null>(null);
-  const [lastKbsErrorAt, setLastKbsErrorAt] = useState<string | null>(null);
+  const [lastRealtimeSnapshotRefreshAt, setLastRealtimeSnapshotRefreshAt] = useState<string | null>(null);
+  const [lastTradeTapeRefreshAt, setLastTradeTapeRefreshAt] = useState<string | null>(null);
+  const [lastRealtimeErrorAt, setLastRealtimeErrorAt] = useState<string | null>(null);
   const [observability, setObservability] = useState<VietnamObservabilityResponse | null>(null);
   const [marketPhase, setMarketPhase] = useState(() => getVietnamMarketPhase());
   const [loading, setLoading] = useState(true);
@@ -2745,13 +2745,13 @@ const VietnamDashboardPage: React.FC = () => {
   const [selectedTicker, setSelectedTicker] = useState<string | null>(initialWatchlist.tickers[0] ?? DEFAULT_WATCHLIST[0]);
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(false);
   const [autoRefreshInterval, setAutoRefreshInterval] = useState(180);
-  const [kbsAutoRefreshEnabled, setKbsAutoRefreshEnabled] = useState(false);
-  const [kbsQuoteRefreshInterval, setKbsQuoteRefreshInterval] = useState(15);
-  const [kbsTradeRefreshInterval, setKbsTradeRefreshInterval] = useState(10);
-  const [kbsQuoteNextRefreshAt, setKbsQuoteNextRefreshAt] = useState<number | null>(null);
-  const [kbsTradeNextRefreshAt, setKbsTradeNextRefreshAt] = useState<number | null>(null);
-  const [kbsQuoteCountdownSeconds, setKbsQuoteCountdownSeconds] = useState<number | null>(null);
-  const [kbsTradeCountdownSeconds, setKbsTradeCountdownSeconds] = useState<number | null>(null);
+  const [realtimeAutoRefreshEnabled, setRealtimeAutoRefreshEnabled] = useState(false);
+  const [realtimeSnapshotRefreshInterval, setRealtimeSnapshotRefreshInterval] = useState(15);
+  const [tradeTapeRefreshInterval, setTradeTapeRefreshInterval] = useState(10);
+  const [realtimeSnapshotNextRefreshAt, setRealtimeSnapshotNextRefreshAt] = useState<number | null>(null);
+  const [tradeTapeNextRefreshAt, setTradeTapeNextRefreshAt] = useState<number | null>(null);
+  const [realtimeSnapshotCountdownSeconds, setRealtimeSnapshotCountdownSeconds] = useState<number | null>(null);
+  const [tradeTapeCountdownSeconds, setTradeTapeCountdownSeconds] = useState<number | null>(null);
   const [lastRefreshKind, setLastRefreshKind] = useState<'manual' | 'auto' | 'force live'>('manual');
   const [lastRefreshAt, setLastRefreshAt] = useState<string | null>(null);
   const [nextRefreshAt, setNextRefreshAt] = useState<number | null>(null);
@@ -2777,12 +2777,12 @@ const VietnamDashboardPage: React.FC = () => {
   const tradesRequestIdRef = useRef(0);
   const corporateActionsRequestIdRef = useRef(0);
   const nextRefreshAtRef = useRef(0);
-  const kbsQuoteNextRefreshAtRef = useRef(0);
-  const kbsTradeNextRefreshAtRef = useRef(0);
-  const kbsQuoteRefreshInFlightRef = useRef(false);
-  const kbsTradeRefreshInFlightRef = useRef(false);
-  const pendingKbsQuoteTickersRef = useRef<string[] | null>(null);
-  const pendingKbsTradeSymbolRef = useRef<string | null>(null);
+  const realtimeSnapshotNextRefreshAtRef = useRef(0);
+  const tradeTapeNextRefreshAtRef = useRef(0);
+  const realtimeSnapshotRefreshInFlightRef = useRef(false);
+  const tradeTapeRefreshInFlightRef = useRef(false);
+  const pendingRealtimeSnapshotTickersRef = useRef<string[] | null>(null);
+  const pendingTradeTapeSymbolRef = useRef<string | null>(null);
   const nextWatchlistLoadRef = useRef<{ tickers: string[]; forceRefresh: boolean; refreshKind: 'manual' | 'auto' | 'force live' } | null>(null);
 
   const loadObservability = useCallback(async () => {
@@ -2824,16 +2824,16 @@ const VietnamDashboardPage: React.FC = () => {
       const response = await stocksApi.getVietnamRealtimeQuotes(requestedTickers);
       if (requestId !== realtimeRequestIdRef.current) return;
       setRealtimeQuotes(Object.fromEntries(response.quotes.map((quote) => [quote.symbol, quote])));
-      setLastKbsQuoteRefreshAt(new Date().toISOString());
-      setRealtimeError(response.status === 'ok' ? null : kbsErrorMessage(response.error) ?? 'SSI realtime unavailable');
+      setLastRealtimeSnapshotRefreshAt(new Date().toISOString());
+      setRealtimeError(response.status === 'ok' ? null : realtimeErrorMessage(response.error) ?? 'SSI realtime unavailable');
       if (response.status !== 'ok') {
-        setLastKbsErrorAt(new Date().toISOString());
+        setLastRealtimeErrorAt(new Date().toISOString());
       }
       void loadObservability();
     } catch (err) {
       if (requestId !== realtimeRequestIdRef.current) return;
-      setLastKbsErrorAt(new Date().toISOString());
-      setRealtimeError(kbsErrorMessage(err instanceof Error ? err.message : null) ?? (err instanceof Error ? err.message : 'SSI realtime unavailable'));
+      setLastRealtimeErrorAt(new Date().toISOString());
+      setRealtimeError(realtimeErrorMessage(err instanceof Error ? err.message : null) ?? (err instanceof Error ? err.message : 'SSI realtime unavailable'));
       void loadObservability();
     } finally {
       if (requestId === realtimeRequestIdRef.current) {
@@ -2856,16 +2856,16 @@ const VietnamDashboardPage: React.FC = () => {
       if (requestId !== tradesRequestIdRef.current) return;
       if (symbol !== selectedTickerRef.current) return;
       setRealtimeTrades(response.trades);
-      setLastKbsTradeRefreshAt(new Date().toISOString());
-      setTradesError(response.status === 'ok' ? null : kbsErrorMessage(response.error) ?? 'Latest trade tape unavailable');
+      setLastTradeTapeRefreshAt(new Date().toISOString());
+      setTradesError(response.status === 'ok' ? null : realtimeErrorMessage(response.error) ?? 'Trade tape unavailable');
       if (response.status !== 'ok') {
-        setLastKbsErrorAt(new Date().toISOString());
+        setLastRealtimeErrorAt(new Date().toISOString());
       }
       void loadObservability();
     } catch (err) {
       if (requestId !== tradesRequestIdRef.current) return;
-      setLastKbsErrorAt(new Date().toISOString());
-      setTradesError(kbsErrorMessage(err instanceof Error ? err.message : null) ?? (err instanceof Error ? err.message : 'Latest trade tape unavailable'));
+      setLastRealtimeErrorAt(new Date().toISOString());
+      setTradesError(realtimeErrorMessage(err instanceof Error ? err.message : null) ?? (err instanceof Error ? err.message : 'Trade tape unavailable'));
       void loadObservability();
     } finally {
       if (requestId === tradesRequestIdRef.current) {
@@ -2941,46 +2941,46 @@ const VietnamDashboardPage: React.FC = () => {
     }
   }, []);
 
-  const refreshKbsQuotes = useCallback(async (tickersOverride?: string[]) => {
+  const refreshRealtimeSnapshots = useCallback(async (tickersOverride?: string[]) => {
     const targetTickers = tickersOverride ?? logicalWatchlistRef.current;
-    if (kbsQuoteRefreshInFlightRef.current) {
+    if (realtimeSnapshotRefreshInFlightRef.current) {
       if (tickersOverride) {
-        pendingKbsQuoteTickersRef.current = targetTickers;
+        pendingRealtimeSnapshotTickersRef.current = targetTickers;
       }
       return false;
     }
-    kbsQuoteRefreshInFlightRef.current = true;
+    realtimeSnapshotRefreshInFlightRef.current = true;
     try {
       await loadRealtimeQuotes(targetTickers);
       return true;
     } finally {
-      kbsQuoteRefreshInFlightRef.current = false;
-      const pendingTickers = pendingKbsQuoteTickersRef.current;
-      pendingKbsQuoteTickersRef.current = null;
+      realtimeSnapshotRefreshInFlightRef.current = false;
+      const pendingTickers = pendingRealtimeSnapshotTickersRef.current;
+      pendingRealtimeSnapshotTickersRef.current = null;
       if (pendingTickers && pendingTickers.join(',') !== targetTickers.join(',')) {
-        void refreshKbsQuotes(pendingTickers);
+        void refreshRealtimeSnapshots(pendingTickers);
       }
     }
   }, [loadRealtimeQuotes]);
 
-  const refreshKbsTrades = useCallback(async (selectedTickerOverride?: string | null) => {
+  const refreshTradeTape = useCallback(async (selectedTickerOverride?: string | null) => {
     const targetTicker = selectedTickerOverride ?? selectedTicker;
-    if (kbsTradeRefreshInFlightRef.current) {
+    if (tradeTapeRefreshInFlightRef.current) {
       if (targetTicker) {
-        pendingKbsTradeSymbolRef.current = targetTicker;
+        pendingTradeTapeSymbolRef.current = targetTicker;
       }
       return false;
     }
-    kbsTradeRefreshInFlightRef.current = true;
+    tradeTapeRefreshInFlightRef.current = true;
     try {
       await loadRealtimeTrades(targetTicker);
       return true;
     } finally {
-      kbsTradeRefreshInFlightRef.current = false;
-      const pendingSymbol = pendingKbsTradeSymbolRef.current;
-      pendingKbsTradeSymbolRef.current = null;
+      tradeTapeRefreshInFlightRef.current = false;
+      const pendingSymbol = pendingTradeTapeSymbolRef.current;
+      pendingTradeTapeSymbolRef.current = null;
       if (pendingSymbol && pendingSymbol !== targetTicker) {
-        void refreshKbsTrades(pendingSymbol);
+        void refreshTradeTape(pendingSymbol);
       }
     }
   }, [loadRealtimeTrades, selectedTicker]);
@@ -3007,7 +3007,7 @@ const VietnamDashboardPage: React.FC = () => {
       setLastRefreshKind(refreshKind);
       setLastRefreshAt(new Date().toISOString());
       void loadObservability();
-      void refreshKbsQuotes(requestedTickers);
+      void refreshRealtimeSnapshots(requestedTickers);
     } catch (err) {
       if (requestId !== requestIdRef.current) return;
       setError(err instanceof Error ? err.message : 'Failed to load Vietnam dashboard');
@@ -3017,7 +3017,7 @@ const VietnamDashboardPage: React.FC = () => {
         setForceLoading(false);
       }
     }
-  }, [loadObservability, refreshKbsQuotes]);
+  }, [loadObservability, refreshRealtimeSnapshots]);
 
   const handlePresetChange = useCallback((event: React.ChangeEvent<HTMLSelectElement>) => {
     const presetId = event.target.value as VietnamWatchlistPresetId;
@@ -3076,12 +3076,12 @@ const VietnamDashboardPage: React.FC = () => {
     setWatchlistError(null);
   }, [applyWatchlist]);
 
-  const handleRefreshKbs = useCallback(() => {
+  const handleRefreshRealtimeData = useCallback(() => {
     void Promise.allSettled([
-      refreshKbsQuotes(),
-      refreshKbsTrades(),
+      refreshRealtimeSnapshots(),
+      refreshTradeTape(),
     ]);
-  }, [refreshKbsQuotes, refreshKbsTrades]);
+  }, [refreshRealtimeSnapshots, refreshTradeTape]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -3105,8 +3105,8 @@ const VietnamDashboardPage: React.FC = () => {
   }, [load, logicalWatchlistKey]);
 
   useEffect(() => {
-    void refreshKbsTrades(selectedTicker);
-  }, [refreshKbsTrades, selectedTicker]);
+    void refreshTradeTape(selectedTicker);
+  }, [refreshTradeTape, selectedTicker]);
 
   useEffect(() => {
     void loadCorporateActions(selectedTicker);
@@ -3122,19 +3122,19 @@ const VietnamDashboardPage: React.FC = () => {
         setNextRefreshAt(next);
         setCountdownSeconds(autoRefreshInterval);
       }
-      if (!hidden && kbsAutoRefreshEnabled && Date.now() >= kbsQuoteNextRefreshAtRef.current) {
-        const next = Date.now() + kbsQuoteRefreshInterval * 1000;
-        kbsQuoteNextRefreshAtRef.current = next;
-        setKbsQuoteNextRefreshAt(next);
-        setKbsQuoteCountdownSeconds(kbsQuoteRefreshInterval);
-        void refreshKbsQuotes();
+      if (!hidden && realtimeAutoRefreshEnabled && Date.now() >= realtimeSnapshotNextRefreshAtRef.current) {
+        const next = Date.now() + realtimeSnapshotRefreshInterval * 1000;
+        realtimeSnapshotNextRefreshAtRef.current = next;
+        setRealtimeSnapshotNextRefreshAt(next);
+        setRealtimeSnapshotCountdownSeconds(realtimeSnapshotRefreshInterval);
+        void refreshRealtimeSnapshots();
       }
-      if (!hidden && kbsAutoRefreshEnabled && Date.now() >= kbsTradeNextRefreshAtRef.current) {
-        const next = Date.now() + kbsTradeRefreshInterval * 1000;
-        kbsTradeNextRefreshAtRef.current = next;
-        setKbsTradeNextRefreshAt(next);
-        setKbsTradeCountdownSeconds(kbsTradeRefreshInterval);
-        void refreshKbsTrades();
+      if (!hidden && realtimeAutoRefreshEnabled && Date.now() >= tradeTapeNextRefreshAtRef.current) {
+        const next = Date.now() + tradeTapeRefreshInterval * 1000;
+        tradeTapeNextRefreshAtRef.current = next;
+        setTradeTapeNextRefreshAt(next);
+        setTradeTapeCountdownSeconds(tradeTapeRefreshInterval);
+        void refreshTradeTape();
       }
     };
     document.addEventListener('visibilitychange', onVisibilityChange);
@@ -3142,11 +3142,11 @@ const VietnamDashboardPage: React.FC = () => {
   }, [
     autoRefreshEnabled,
     autoRefreshInterval,
-    kbsAutoRefreshEnabled,
-    kbsQuoteRefreshInterval,
-    kbsTradeRefreshInterval,
-    refreshKbsQuotes,
-    refreshKbsTrades,
+    realtimeAutoRefreshEnabled,
+    realtimeSnapshotRefreshInterval,
+    tradeTapeRefreshInterval,
+    refreshRealtimeSnapshots,
+    refreshTradeTape,
   ]);
 
   useEffect(() => {
@@ -3182,64 +3182,64 @@ const VietnamDashboardPage: React.FC = () => {
   }, [autoRefreshEnabled, autoRefreshInterval, load]);
 
   useEffect(() => {
-    if (!kbsAutoRefreshEnabled) {
-      setKbsQuoteNextRefreshAt(null);
-      setKbsQuoteCountdownSeconds(null);
+    if (!realtimeAutoRefreshEnabled) {
+      setRealtimeSnapshotNextRefreshAt(null);
+      setRealtimeSnapshotCountdownSeconds(null);
       return undefined;
     }
     const scheduleNext = () => {
-      const next = Date.now() + kbsQuoteRefreshInterval * 1000;
-      kbsQuoteNextRefreshAtRef.current = next;
-      setKbsQuoteNextRefreshAt(next);
-      setKbsQuoteCountdownSeconds(kbsQuoteRefreshInterval);
+      const next = Date.now() + realtimeSnapshotRefreshInterval * 1000;
+      realtimeSnapshotNextRefreshAtRef.current = next;
+      setRealtimeSnapshotNextRefreshAt(next);
+      setRealtimeSnapshotCountdownSeconds(realtimeSnapshotRefreshInterval);
     };
     scheduleNext();
     const timer = window.setInterval(() => {
       if (document.visibilityState === 'hidden') {
         setIsTabHidden(true);
-        setKbsQuoteCountdownSeconds(null);
+        setRealtimeSnapshotCountdownSeconds(null);
         return;
       }
       setIsTabHidden(false);
-      setKbsQuoteCountdownSeconds(Math.max(0, Math.ceil((kbsQuoteNextRefreshAtRef.current - Date.now()) / 1000)));
-      if (Date.now() < kbsQuoteNextRefreshAtRef.current) return;
+      setRealtimeSnapshotCountdownSeconds(Math.max(0, Math.ceil((realtimeSnapshotNextRefreshAtRef.current - Date.now()) / 1000)));
+      if (Date.now() < realtimeSnapshotNextRefreshAtRef.current) return;
       scheduleNext();
-      if (!kbsQuoteRefreshInFlightRef.current) {
-        void refreshKbsQuotes();
+      if (!realtimeSnapshotRefreshInFlightRef.current) {
+        void refreshRealtimeSnapshots();
       }
     }, 1000);
     return () => window.clearInterval(timer);
-  }, [kbsAutoRefreshEnabled, kbsQuoteRefreshInterval, refreshKbsQuotes]);
+  }, [realtimeAutoRefreshEnabled, realtimeSnapshotRefreshInterval, refreshRealtimeSnapshots]);
 
   useEffect(() => {
-    if (!kbsAutoRefreshEnabled) {
-      setKbsTradeNextRefreshAt(null);
-      setKbsTradeCountdownSeconds(null);
+    if (!realtimeAutoRefreshEnabled) {
+      setTradeTapeNextRefreshAt(null);
+      setTradeTapeCountdownSeconds(null);
       return undefined;
     }
     const scheduleNext = () => {
-      const next = Date.now() + kbsTradeRefreshInterval * 1000;
-      kbsTradeNextRefreshAtRef.current = next;
-      setKbsTradeNextRefreshAt(next);
-      setKbsTradeCountdownSeconds(kbsTradeRefreshInterval);
+      const next = Date.now() + tradeTapeRefreshInterval * 1000;
+      tradeTapeNextRefreshAtRef.current = next;
+      setTradeTapeNextRefreshAt(next);
+      setTradeTapeCountdownSeconds(tradeTapeRefreshInterval);
     };
     scheduleNext();
     const timer = window.setInterval(() => {
       if (document.visibilityState === 'hidden') {
         setIsTabHidden(true);
-        setKbsTradeCountdownSeconds(null);
+        setTradeTapeCountdownSeconds(null);
         return;
       }
       setIsTabHidden(false);
-      setKbsTradeCountdownSeconds(Math.max(0, Math.ceil((kbsTradeNextRefreshAtRef.current - Date.now()) / 1000)));
-      if (Date.now() < kbsTradeNextRefreshAtRef.current) return;
+      setTradeTapeCountdownSeconds(Math.max(0, Math.ceil((tradeTapeNextRefreshAtRef.current - Date.now()) / 1000)));
+      if (Date.now() < tradeTapeNextRefreshAtRef.current) return;
       scheduleNext();
-      if (!kbsTradeRefreshInFlightRef.current) {
-        void refreshKbsTrades();
+      if (!tradeTapeRefreshInFlightRef.current) {
+        void refreshTradeTape();
       }
     }, 1000);
     return () => window.clearInterval(timer);
-  }, [kbsAutoRefreshEnabled, kbsTradeRefreshInterval, refreshKbsTrades]);
+  }, [realtimeAutoRefreshEnabled, tradeTapeRefreshInterval, refreshTradeTape]);
 
   useEffect(() => {
     const rows = data?.watchlist ?? [];
@@ -3292,7 +3292,7 @@ const VietnamDashboardPage: React.FC = () => {
             <DatabaseZap className="h-4 w-4" />
             Force live refresh
           </Button>
-          <Button variant="secondary" onClick={handleRefreshKbs} isLoading={realtimeLoading || tradesLoading} loadingText="Refreshing realtime">
+          <Button variant="secondary" onClick={handleRefreshRealtimeData} isLoading={realtimeLoading || tradesLoading} loadingText="Refreshing realtime">
             <Activity className="h-4 w-4" />
             Refresh realtime
           </Button>
@@ -3307,10 +3307,10 @@ const VietnamDashboardPage: React.FC = () => {
               <Badge variant={autoRefreshEnabled ? 'success' : 'default'}>
                 Auto-refresh {autoRefreshEnabled ? 'ON' : 'OFF'}
               </Badge>
-              <Badge variant={kbsAutoRefreshEnabled ? 'success' : 'default'}>
-                Auto-refresh realtime {kbsAutoRefreshEnabled ? 'ON' : 'OFF'}
+              <Badge variant={realtimeAutoRefreshEnabled ? 'success' : 'default'}>
+                Auto-refresh realtime {realtimeAutoRefreshEnabled ? 'ON' : 'OFF'}
               </Badge>
-              {isTabHidden && (autoRefreshEnabled || kbsAutoRefreshEnabled) ? <Badge variant="warning">Paused while tab hidden</Badge> : null}
+              {isTabHidden && (autoRefreshEnabled || realtimeAutoRefreshEnabled) ? <Badge variant="warning">Paused while tab hidden</Badge> : null}
               {(realtimeLoading || tradesLoading) ? <Badge variant="info">Refreshing realtime...</Badge> : null}
             </div>
             <p className="mt-1 text-xs text-secondary-text">
@@ -3342,8 +3342,8 @@ const VietnamDashboardPage: React.FC = () => {
             <label className="inline-flex items-center gap-2 text-sm text-secondary-text">
               <input
                 type="checkbox"
-                checked={kbsAutoRefreshEnabled}
-                onChange={(event) => setKbsAutoRefreshEnabled(event.target.checked)}
+                checked={realtimeAutoRefreshEnabled}
+                onChange={(event) => setRealtimeAutoRefreshEnabled(event.target.checked)}
                 className="h-4 w-4 rounded border-border bg-elevated"
               />
               Auto-refresh realtime
@@ -3351,23 +3351,23 @@ const VietnamDashboardPage: React.FC = () => {
             <label className="flex items-center gap-2 text-sm text-secondary-text">
               SSI realtime
               <select
-                value={kbsQuoteRefreshInterval}
-                onChange={(event) => setKbsQuoteRefreshInterval(Number(event.target.value))}
+                value={realtimeSnapshotRefreshInterval}
+                onChange={(event) => setRealtimeSnapshotRefreshInterval(Number(event.target.value))}
                 className="h-9 rounded-lg border border-border/70 bg-elevated px-3 text-sm text-foreground"
               >
-                {KBS_QUOTE_REFRESH_INTERVALS.map((seconds) => (
+                {REALTIME_SNAPSHOT_REFRESH_INTERVALS.map((seconds) => (
                   <option key={seconds} value={seconds}>{seconds}s</option>
                 ))}
               </select>
             </label>
             <label className="flex items-center gap-2 text-sm text-secondary-text">
-              Latest trade tape
+              Trade tape
               <select
-                value={kbsTradeRefreshInterval}
-                onChange={(event) => setKbsTradeRefreshInterval(Number(event.target.value))}
+                value={tradeTapeRefreshInterval}
+                onChange={(event) => setTradeTapeRefreshInterval(Number(event.target.value))}
                 className="h-9 rounded-lg border border-border/70 bg-elevated px-3 text-sm text-foreground"
               >
-                {KBS_TRADE_REFRESH_INTERVALS.map((seconds) => (
+                {TRADE_TAPE_REFRESH_INTERVALS.map((seconds) => (
                   <option key={seconds} value={seconds}>{seconds}s</option>
                 ))}
               </select>
@@ -3400,24 +3400,24 @@ const VietnamDashboardPage: React.FC = () => {
           <div className="rounded-lg bg-elevated/50 p-3">
             <dt className="text-xs text-secondary-text">Next SSI realtime</dt>
             <dd className="mt-1 font-medium text-foreground">
-              {kbsAutoRefreshEnabled && !isTabHidden ? formatCountdown(kbsQuoteCountdownSeconds) : 'Paused'}
+              {realtimeAutoRefreshEnabled && !isTabHidden ? formatCountdown(realtimeSnapshotCountdownSeconds) : 'Paused'}
             </dd>
             <dd className="mt-1 text-xs text-secondary-text">
-              {kbsAutoRefreshEnabled && !isTabHidden && kbsQuoteNextRefreshAt ? formatVietnamTime(kbsQuoteNextRefreshAt) : '-'}
+              {realtimeAutoRefreshEnabled && !isTabHidden && realtimeSnapshotNextRefreshAt ? formatVietnamTime(realtimeSnapshotNextRefreshAt) : '-'}
             </dd>
           </div>
           <div className="rounded-lg bg-elevated/50 p-3">
-            <dt className="text-xs text-secondary-text">Next latest trade tape</dt>
+            <dt className="text-xs text-secondary-text">Next trade tape</dt>
             <dd className="mt-1 font-medium text-foreground">
-              {kbsAutoRefreshEnabled && !isTabHidden ? formatCountdown(kbsTradeCountdownSeconds) : 'Paused'}
+              {realtimeAutoRefreshEnabled && !isTabHidden ? formatCountdown(tradeTapeCountdownSeconds) : 'Paused'}
             </dd>
             <dd className="mt-1 text-xs text-secondary-text">
-              {kbsAutoRefreshEnabled && !isTabHidden && kbsTradeNextRefreshAt ? formatVietnamTime(kbsTradeNextRefreshAt) : '-'}
+              {realtimeAutoRefreshEnabled && !isTabHidden && tradeTapeNextRefreshAt ? formatVietnamTime(tradeTapeNextRefreshAt) : '-'}
             </dd>
           </div>
         </dl>
         <div className="mt-3 rounded-lg border border-border/60 bg-elevated/30 p-3 text-xs text-secondary-text">
-          Latest price currently uses the configured daily OHLCV candle close when no reliable realtime matched quote field is present.
+          Daily close currently uses the configured daily OHLCV candle close when no reliable realtime matched quote field is present.
         </div>
       </section>
 
@@ -3559,12 +3559,12 @@ const VietnamDashboardPage: React.FC = () => {
         watchlist={watchlist}
         realtimeError={realtimeError}
         tradesError={tradesError}
-        lastKbsQuoteRefreshAt={lastKbsQuoteRefreshAt}
-        lastKbsTradeRefreshAt={lastKbsTradeRefreshAt}
-        lastKbsErrorAt={lastKbsErrorAt}
-        kbsAutoRefreshEnabled={kbsAutoRefreshEnabled}
-        kbsQuoteRefreshInterval={kbsQuoteRefreshInterval}
-        kbsTradeRefreshInterval={kbsTradeRefreshInterval}
+        lastRealtimeSnapshotRefreshAt={lastRealtimeSnapshotRefreshAt}
+        lastTradeTapeRefreshAt={lastTradeTapeRefreshAt}
+        lastRealtimeErrorAt={lastRealtimeErrorAt}
+        realtimeAutoRefreshEnabled={realtimeAutoRefreshEnabled}
+        realtimeSnapshotRefreshInterval={realtimeSnapshotRefreshInterval}
+        tradeTapeRefreshInterval={tradeTapeRefreshInterval}
         marketPhase={marketPhase}
         observability={observability}
       />

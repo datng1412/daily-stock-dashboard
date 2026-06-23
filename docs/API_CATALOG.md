@@ -15,6 +15,7 @@ Global rules:
 - Live-provider statuses use `ok`, `unavailable`, or `disabled`.
 - Future modules may use `not_implemented` until Phase 2 decides whether to normalize them.
 - Diagnostics carry endpoint/http/raw-provider details; primary fields do not.
+- Active UI labels must not present SSI realtime or SSI trade-tape contracts as KBS. KBS/Mozyfin names are legacy diagnostics or historical context only.
 
 ## `GET /api/v1/stocks/vn/watchlist/health`
 
@@ -66,7 +67,8 @@ Source ownership:
 - `latest_price`, daily close, chart-compatible OHLCV: SSI DailyOhlc.
 - Reference, ceiling/floor, matched/put-through, latest foreign flow: SSI DailyStockPrice.
 - Intraday: SSI IntradayOhlc.
-- Realtime snapshot and trade tape: SSI live contracts when confirmed.
+- Realtime snapshot: SSI realtime contract when usable.
+- Trade tape: SSI trade-tape contract when usable.
 - News: disabled now; future separate provider.
 
 Null/empty rules:
@@ -145,7 +147,7 @@ Response sections:
 Source ownership:
 
 - Daily core values align with SSI DailyOhlc canonical source for shared watchlist/company fields.
-- Company `price.source` can be mixed (`SSI DailyOhlc + SSI DailyStockPrice`) because the block contains canonical daily price plus SSI DailyStockPrice reference/limit fields.
+- Company `price.source` and `price.canonical_source` identify `SSI DailyOhlc`; `price.reference_source` identifies `SSI DailyStockPrice` for reference, ceiling, and floor fields.
 - Company `trading_stats` uses SSI DailyOhlc daily open/high/low/close/volume/value.
 - Reference/limits, foreign flow, matched/put-through, and adjusted-close values use SSI DailyStockPrice when exposed.
 - Profile metadata uses SSI Securities/SecuritiesDetails when available.
@@ -162,7 +164,7 @@ Current known caveats from handoff snapshots:
 - Company intraday currently can report `status = unavailable`, `candles = []`, and `pulse = {}`; target is `pulse = null`.
 - Profile can have `name = null` and `industry = null` while provider status is `ok`; docs define this as provider OK plus profile completeness `partial`.
 - Company price and trading stats now align shared daily values with SSI DailyOhlc; remaining numeric differences versus DailyStockPrice are intentional when fields are explicitly labeled as reference, matched, put-through, adjusted, or foreign-flow values.
-- News/financials/events can use `not_implemented`; this is allowed for future modules, not live-provider statuses.
+- News placeholders use `NewsProvider future`; financials/events/corporate-action placeholders use `external provider future`. `not_implemented` is allowed for future modules, not live-provider statuses.
 
 Future changes:
 
@@ -307,6 +309,7 @@ Response rules:
 - Missing quote lists return `[]`; embedded unavailable snapshot objects should be `null`.
 - SSI realtime is not confirmed live in the handoff context; endpoint/http details belong in diagnostics.
 - Legacy KBS may exist behind explicit development flags, but it is not a normal VN runtime fallback.
+- Primary UI should label this section as SSI realtime or realtime snapshot, not KBS.
 
 ## `GET /api/v1/stocks/vn/realtime/trades`
 
@@ -328,3 +331,4 @@ Response rules:
 - Trade tape is separate from daily OHLCV, intraday OHLCV, and realtime snapshot.
 - SSI trade tape is not confirmed live in the handoff context; endpoint/http details belong in diagnostics.
 - Legacy KBS may exist behind explicit development flags, but it is not a normal VN runtime fallback.
+- Primary UI should label this section as trade tape, not KBS.

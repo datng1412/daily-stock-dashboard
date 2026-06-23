@@ -1,5 +1,7 @@
 # Local Windows Quick Runbook
 
+> Legacy/superseded document. Current VN dashboard runtime uses strict SSI FastConnect mode. Mozyfin is disabled for VN runtime, and KBS is legacy-only behind explicit development flags. See `docs/RUNBOOK_VN.md` and `docs/SSI_FASTCONNECT_INTEGRATION.md` for current guidance.
+
 This runbook assumes the PC is already set up: repo cloned, Python venv created, Python dependencies installed, frontend dependencies installed, and frontend built.
 
 Use this repo path:

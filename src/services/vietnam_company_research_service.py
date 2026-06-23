@@ -14,6 +14,15 @@ from src.services.vietnam_market_service import VietnamMarketService
 
 
 NOT_IMPLEMENTED_MESSAGE = "News provider is not implemented yet."
+SSI_DAILY_OHLC_SOURCE = "SSI DailyOhlc"
+SSI_DAILY_STOCK_PRICE_SOURCE = "SSI DailyStockPrice"
+SSI_SECURITIES_DETAILS_SOURCE = "SSI SecuritiesDetails"
+SSI_INTRADAY_SOURCE = "SSI IntradayOhlc"
+SSI_REALTIME_SOURCE = "SSI realtime contract"
+SSI_TRADE_TAPE_SOURCE = "SSI trade-tape contract"
+TECHNICAL_DAILY_OHLC_SOURCE = "derived from SSI DailyOhlc"
+NEWS_FUTURE_SOURCE = "NewsProvider future"
+EXTERNAL_FUTURE_SOURCE = "external provider future"
 
 
 def _vn_ticker(symbol: str) -> str:
@@ -76,9 +85,11 @@ class VietnamCompanyResearchService:
             "name": profile_name,
             "exchange": _first_present(row.get("exchange"), metadata.get("exchange"), row.get("market")),
             "industry": None,
-            "source": "SSI",
+            "source": _first_present(metadata.get("source_label"), metadata.get("source")) or SSI_SECURITIES_DETAILS_SOURCE,
             "status": "ok" if metadata.get("status") == "ok" or _has_value(profile_name, row.get("exchange"), metadata.get("exchange")) else "missing",
         }
+        if profile["source"] == "SSI":
+            profile["source"] = SSI_SECURITIES_DETAILS_SOURCE
 
         reference_price = _first_present(daily_stock_price.get("reference_price"), row.get("ssi_reference_price"), price_limit.get("reference_price"))
         ceiling_price = _first_present(daily_stock_price.get("ceiling_price"), row.get("ssi_ceiling_price"), price_limit.get("ceiling_price"))
@@ -91,7 +102,9 @@ class VietnamCompanyResearchService:
             "ceiling_price": ceiling_price,
             "floor_price": floor_price,
             "price_date": price_date,
-            "source": "SSI DailyOhlc + SSI DailyStockPrice",
+            "source": SSI_DAILY_OHLC_SOURCE,
+            "canonical_source": SSI_DAILY_OHLC_SOURCE,
+            "reference_source": SSI_DAILY_STOCK_PRICE_SOURCE,
             "status": _status_for(row.get("latest_price"), row.get("daily_close"), reference_price, ceiling_price, floor_price),
         }
 
@@ -103,7 +116,7 @@ class VietnamCompanyResearchService:
             "close": row.get("close"),
             "volume": row.get("volume"),
             "value": trading_value,
-            "source": "SSI DailyOhlc",
+            "source": SSI_DAILY_OHLC_SOURCE,
             "status": _status_for(row.get("open"), row.get("high"), row.get("low"), row.get("close"), row.get("volume"), trading_value),
         }
 
@@ -114,7 +127,7 @@ class VietnamCompanyResearchService:
             "foreign_buy_value": _first_present(daily_stock_price.get("foreign_buy_value"), foreign.get("buy_value")),
             "foreign_sell_value": _first_present(daily_stock_price.get("foreign_sell_value"), foreign.get("sell_value")),
             "foreign_net_value": _first_present(daily_stock_price.get("foreign_net_value"), row.get("ssi_foreign_net_value"), foreign.get("net_value")),
-            "source": "SSI DailyOhlc + SSI DailyStockPrice",
+            "source": SSI_DAILY_STOCK_PRICE_SOURCE,
         }
         foreign_flow["status"] = _status_for(
             foreign_flow["foreign_buy_volume"],
@@ -132,7 +145,7 @@ class VietnamCompanyResearchService:
             "bollinger_upper": bollinger.get("upper"),
             "bollinger_middle": bollinger.get("middle"),
             "bollinger_lower": bollinger.get("lower"),
-            "source": "derived_from_ssi_ohlcv",
+            "source": TECHNICAL_DAILY_OHLC_SOURCE,
         }
         technical["status"] = _status_for(
             technical["ma20"],
@@ -155,14 +168,14 @@ class VietnamCompanyResearchService:
             "latest_date": row.get("intraday_latest_date"),
             "daily_price_date": row.get("daily_price_date"),
             "date_match": row.get("date_match"),
-            "source": row.get("intraday_source") or intraday_status.get("source") or "SSI",
+            "source": SSI_INTRADAY_SOURCE,
             "status": intraday_status.get("status") or "unavailable",
             "message": intraday_status.get("message") or row.get("intraday_warning"),
         }
         realtime_status = _dict(row.get("realtime_status"))
         realtime = {
             "snapshot": row.get("realtime_snapshot") if isinstance(row.get("realtime_snapshot"), dict) else None,
-            "source": row.get("realtime_source") or realtime_status.get("source"),
+            "source": SSI_REALTIME_SOURCE,
             "status": realtime_status.get("status") or "unavailable",
             "message": realtime_status.get("message"),
         }
@@ -170,7 +183,7 @@ class VietnamCompanyResearchService:
         trade_tape_payload = _dict(row.get("trade_tape"))
         trade_tape = {
             "trades": list(trade_tape_payload.get("trades") or []),
-            "source": row.get("trade_tape_source") or trade_tape_status.get("source"),
+            "source": SSI_TRADE_TAPE_SOURCE,
             "status": trade_tape_status.get("status") or trade_tape_payload.get("status") or "unavailable",
             "message": trade_tape_status.get("message"),
         }
@@ -195,9 +208,9 @@ class VietnamCompanyResearchService:
             "realtime": realtime,
             "trade_tape": trade_tape,
             "source_coverage": source_coverage,
-            "news": self._placeholder("not_implemented", "NewsProvider", NOT_IMPLEMENTED_MESSAGE),
-            "financials": self._placeholder("not_implemented", "TBD"),
-            "events": self._placeholder("not_implemented", "TBD"),
+            "news": self._placeholder("not_implemented", NEWS_FUTURE_SOURCE, NOT_IMPLEMENTED_MESSAGE),
+            "financials": self._placeholder("not_implemented", EXTERNAL_FUTURE_SOURCE),
+            "events": self._placeholder("not_implemented", EXTERNAL_FUTURE_SOURCE),
             "data_quality_summary": _dict(row.get("data_quality_summary")),
             "warnings": list(row.get("warnings") or []),
             "errors": errors,
@@ -215,20 +228,30 @@ class VietnamCompanyResearchService:
         realtime: Optional[Dict[str, Any]] = None,
         trade_tape: Optional[Dict[str, Any]] = None,
     ) -> list[Dict[str, Any]]:
-        daily_stock_status = "ok" if daily_stock_price.get("status") == "ok" or price.get("status") == "ok" or foreign_flow.get("status") == "ok" else "missing"
+        has_daily_stock_price_fields = any(
+            price.get(field) is not None
+            for field in ("reference_price", "ceiling_price", "floor_price")
+        )
+        daily_stock_status = (
+            "ok"
+            if daily_stock_price.get("status") == "ok"
+            or foreign_flow.get("status") == "ok"
+            or has_daily_stock_price_fields
+            else "missing"
+        )
         intraday_status = _dict(intraday).get("status") or "unavailable"
         realtime_status = _dict(realtime).get("status") or "unavailable"
         trade_tape_status = _dict(trade_tape).get("status") or "unavailable"
         return [
-            {"block": "Daily OHLCV", "source": "SSI DailyOhlc", "status": "ok" if technical.get("status") == "ok" or trading_stats.get("status") == "ok" else "missing"},
-            {"block": "Daily stock price", "source": "SSI DailyStockPrice", "status": daily_stock_status},
-            {"block": "Intraday OHLCV", "source": "SSI IntradayOhlc", "status": intraday_status},
-            {"block": "Realtime snapshot", "source": "SSI", "status": realtime_status},
-            {"block": "Trade tape", "source": "SSI", "status": trade_tape_status},
-            {"block": "Profile", "source": "SSI SecuritiesDetails", "status": profile.get("status", "missing")},
-            {"block": "News", "source": "NewsProvider", "status": "not_implemented"},
-            {"block": "Financials", "source": "TBD", "status": "not_implemented"},
-            {"block": "Corporate actions", "source": "TBD", "status": "not_implemented"},
+            {"block": "Daily OHLCV", "source": SSI_DAILY_OHLC_SOURCE, "status": "ok" if technical.get("status") == "ok" or trading_stats.get("status") == "ok" else "missing"},
+            {"block": "Daily stock price", "source": SSI_DAILY_STOCK_PRICE_SOURCE, "status": daily_stock_status},
+            {"block": "Intraday OHLCV", "source": SSI_INTRADAY_SOURCE, "status": intraday_status},
+            {"block": "Realtime snapshot", "source": SSI_REALTIME_SOURCE, "status": realtime_status},
+            {"block": "Trade tape", "source": SSI_TRADE_TAPE_SOURCE, "status": trade_tape_status},
+            {"block": "Profile", "source": profile.get("source") or SSI_SECURITIES_DETAILS_SOURCE, "status": profile.get("status", "missing")},
+            {"block": "News", "source": NEWS_FUTURE_SOURCE, "status": "not_implemented"},
+            {"block": "Financials", "source": EXTERNAL_FUTURE_SOURCE, "status": "not_implemented"},
+            {"block": "Corporate actions", "source": EXTERNAL_FUTURE_SOURCE, "status": "not_implemented"},
         ]
 
     def _placeholder(self, status: str, source: Optional[str], message: Optional[str] = None) -> Dict[str, Any]:
@@ -238,7 +261,7 @@ class VietnamCompanyResearchService:
         return payload
 
     def _unavailable_payload(self, symbol: str, errors: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        profile = {"ticker": symbol, "name": None, "exchange": None, "industry": None, "source": "SSI", "status": "missing"}
+        profile = {"ticker": symbol, "name": None, "exchange": None, "industry": None, "source": SSI_SECURITIES_DETAILS_SOURCE, "status": "missing"}
         missing_price = {
             "latest_price": None,
             "daily_close": None,
@@ -246,7 +269,9 @@ class VietnamCompanyResearchService:
             "ceiling_price": None,
             "floor_price": None,
             "price_date": None,
-            "source": "SSI DailyOhlc",
+            "source": SSI_DAILY_OHLC_SOURCE,
+            "canonical_source": SSI_DAILY_OHLC_SOURCE,
+            "reference_source": SSI_DAILY_STOCK_PRICE_SOURCE,
             "status": "missing",
         }
         missing_trading = {
@@ -256,7 +281,7 @@ class VietnamCompanyResearchService:
             "close": None,
             "volume": None,
             "value": None,
-            "source": "SSI DailyStockPrice",
+            "source": SSI_DAILY_OHLC_SOURCE,
             "status": "missing",
         }
         missing_foreign = {
@@ -266,7 +291,7 @@ class VietnamCompanyResearchService:
             "foreign_buy_value": None,
             "foreign_sell_value": None,
             "foreign_net_value": None,
-            "source": "SSI DailyStockPrice",
+            "source": SSI_DAILY_STOCK_PRICE_SOURCE,
             "status": "missing",
         }
         missing_technical = {
@@ -276,7 +301,7 @@ class VietnamCompanyResearchService:
             "bollinger_upper": None,
             "bollinger_middle": None,
             "bollinger_lower": None,
-            "source": "derived_from_ssi_ohlcv",
+            "source": TECHNICAL_DAILY_OHLC_SOURCE,
             "status": "missing",
         }
         missing_intraday = {
@@ -288,19 +313,19 @@ class VietnamCompanyResearchService:
             "latest_date": None,
             "daily_price_date": None,
             "date_match": "unknown",
-            "source": "SSI",
+            "source": SSI_INTRADAY_SOURCE,
             "status": "unavailable",
             "message": "SSI intraday unavailable.",
         }
         missing_realtime = {
             "snapshot": None,
-            "source": "SSI",
+            "source": SSI_REALTIME_SOURCE,
             "status": "unavailable",
             "message": "SSI realtime unavailable.",
         }
         missing_trade_tape = {
             "trades": [],
-            "source": "SSI",
+            "source": SSI_TRADE_TAPE_SOURCE,
             "status": "unavailable",
             "message": "SSI trade tape unavailable.",
         }
@@ -316,9 +341,9 @@ class VietnamCompanyResearchService:
             "realtime": missing_realtime,
             "trade_tape": missing_trade_tape,
             "source_coverage": self._source_coverage(profile, missing_price, missing_trading, missing_foreign, missing_technical, {}, missing_intraday, missing_realtime, missing_trade_tape),
-            "news": self._placeholder("not_implemented", "RSS provider", NOT_IMPLEMENTED_MESSAGE),
-            "financials": self._placeholder("not_implemented", "TBD"),
-            "events": self._placeholder("not_implemented", "TBD"),
+            "news": self._placeholder("not_implemented", NEWS_FUTURE_SOURCE, NOT_IMPLEMENTED_MESSAGE),
+            "financials": self._placeholder("not_implemented", EXTERNAL_FUTURE_SOURCE),
+            "events": self._placeholder("not_implemented", EXTERNAL_FUTURE_SOURCE),
             "data_quality_summary": {
                 "overall_status": "unavailable",
                 "canonical_price_source": "SSI DailyOhlc",

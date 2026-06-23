@@ -308,7 +308,7 @@ class VietnamChartResponse(BaseModel):
     symbol: str
     status: str = "ok"
     reason: Optional[str] = None
-    source: str = "SSI"
+    source: str = "SSI DailyOhlc"
     primary_source: Optional[str] = None
     actual_source: Optional[str] = None
     fallback_used: bool = False
@@ -335,7 +335,7 @@ class VietnamIndexListResponse(BaseModel):
     """SSI IndexList response for Vietnam dashboard index discovery."""
 
     status: str = "ok"
-    source: str = "SSI"
+    source: str = "SSI IndexList"
     reason: Optional[str] = None
     market: Optional[str] = None
     rows: List[VietnamIndexInfo] = Field(default_factory=list)
@@ -359,7 +359,7 @@ class VietnamIndexComponentsResponse(BaseModel):
     """SSI IndexComponents response for Vietnam dashboard index membership."""
 
     status: str = "ok"
-    source: str = "SSI"
+    source: str = "SSI IndexComponents"
     reason: Optional[str] = None
     index_code: str
     market: Optional[str] = None
@@ -389,6 +389,8 @@ class VietnamCompanyPrice(BaseModel):
     floor_price: Optional[float] = None
     price_date: Optional[str] = None
     source: Optional[str] = None
+    canonical_source: Optional[str] = None
+    reference_source: Optional[str] = None
     status: str = "missing"
 
 
@@ -600,7 +602,7 @@ class VietnamRealtimeQuote(BaseModel):
     foreign_buy_volume: Optional[float] = None
     foreign_sell_volume: Optional[float] = None
     foreign_room: Optional[float] = None
-    source: str = "SSI"
+    source: str = "SSI realtime contract"
     status: str = "ok"
     error: Optional[str] = None
     error_detail: Optional[str] = None
@@ -611,7 +613,7 @@ class VietnamRealtimeResponse(BaseModel):
     """Vietnam optional realtime/snapshot quote response."""
 
     market: str = "VN"
-    source: str = "SSI"
+    source: str = "SSI realtime contract"
     status: str = "ok"
     error: Optional[str] = None
     error_detail: Optional[str] = None
@@ -632,14 +634,14 @@ class VietnamRealtimeTrade(BaseModel):
     sequence_if_available: Optional[str] = None
     match_type: Optional[str] = None
     id: Optional[str] = None
-    source: str = "SSI"
+    source: str = "SSI trade-tape contract"
 
 
 class VietnamRealtimeTradesResponse(BaseModel):
     """Vietnam optional realtime trade tape response."""
 
     market: str = "VN"
-    source: str = "SSI"
+    source: str = "SSI trade-tape contract"
     symbol: str
     status: str = "ok"
     error: Optional[str] = None

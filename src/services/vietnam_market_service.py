@@ -67,7 +67,15 @@ VN_PROVIDER_SSI = "ssi"
 VN_PROVIDER_NONE = "none"
 VN_SOURCE_MOZYFIN = "Mozyfin"
 VN_SOURCE_SSI = "SSI"
+SSI_DAILY_OHLC_SOURCE = "SSI DailyOhlc"
 SSI_DAILY_STOCK_PRICE_SOURCE = "SSI DailyStockPrice"
+SSI_SECURITIES_SOURCE = "SSI Securities"
+SSI_SECURITIES_DETAILS_SOURCE = "SSI SecuritiesDetails"
+SSI_INTRADAY_SOURCE = "SSI IntradayOhlc"
+SSI_REALTIME_SOURCE = "SSI realtime contract"
+SSI_TRADE_TAPE_SOURCE = "SSI trade-tape contract"
+SSI_INDEX_LIST_SOURCE = "SSI IndexList"
+SSI_INDEX_COMPONENTS_SOURCE = "SSI IndexComponents"
 SSI_UNAVAILABLE_REASON = "SSI FastConnect unavailable"
 VN_INTRADAY_WARNING = "SSI IntradayOhlc candle data is not a realtime matched quote."
 VN_INTRADAY_DISABLED_REASON = "SSI IntradayOhlc is disabled."
@@ -1702,7 +1710,7 @@ class VietnamMarketService:
             "intraday_latest_date": intraday_latest_date,
             "daily_price_date": None,
             "date_match": "unknown",
-            "intraday_source": VN_SOURCE_SSI,
+            "intraday_source": SSI_INTRADAY_SOURCE,
             "intraday_is_realtime_quote": False,
             "intraday_warning": "SSI IntradayOhlc granularity is provider-returned; use the returned timestamps for cadence.",
             "intraday_candles": candles,
@@ -1711,7 +1719,7 @@ class VietnamMarketService:
             "intraday_details": details,
             "intraday_status": {
                 "status": "ok",
-                "source": VN_SOURCE_SSI,
+                "source": SSI_INTRADAY_SOURCE,
                 "message": None,
                 "count": len(candles),
                 "ticker": symbol,
@@ -1749,7 +1757,7 @@ class VietnamMarketService:
             "intraday_latest_date": diagnostics.get("intraday_latest_date"),
             "daily_price_date": diagnostics.get("daily_price_date"),
             "date_match": diagnostics.get("date_match") or "unknown",
-            "intraday_source": VN_SOURCE_SSI,
+            "intraday_source": SSI_INTRADAY_SOURCE,
             "intraday_is_realtime_quote": False,
             "intraday_warning": reason_text,
             "intraday_candles": [],
@@ -1758,7 +1766,7 @@ class VietnamMarketService:
             "intraday_details": [],
             "intraday_status": {
                 "status": status,
-                "source": VN_SOURCE_SSI,
+                "source": SSI_INTRADAY_SOURCE,
                 "message": reason_text,
                 "intraday_requested_timeframe": intraday_timeframe,
                 "intraday_actual_granularity": intraday_granularity,
@@ -1899,7 +1907,7 @@ class VietnamMarketService:
             "intraday_latest_date": None,
             "daily_price_date": None,
             "date_match": "unknown",
-            "intraday_source": VN_SOURCE_SSI,
+            "intraday_source": SSI_INTRADAY_SOURCE,
             "intraday_is_realtime_quote": False,
             "intraday_warning": VN_INTRADAY_DISABLED_REASON,
             "intraday_candles": [],
@@ -1908,7 +1916,7 @@ class VietnamMarketService:
             "intraday_details": [],
             "intraday_status": {
                 "status": "disabled",
-                "source": VN_SOURCE_SSI,
+                "source": SSI_INTRADAY_SOURCE,
                 "message": VN_INTRADAY_DISABLED_REASON,
                 "intraday_requested_timeframe": intraday_timeframe,
                 "intraday_actual_granularity": "unknown",
@@ -1985,11 +1993,11 @@ class VietnamMarketService:
     ) -> Dict[str, Any]:
         reason_text = reason or VN_REALTIME_UNAVAILABLE_REASON
         return {
-            "realtime_source": VN_SOURCE_SSI,
+            "realtime_source": SSI_REALTIME_SOURCE,
             "realtime_snapshot": None,
             "realtime_status": {
                 "status": status,
-                "source": VN_SOURCE_SSI,
+                "source": SSI_REALTIME_SOURCE,
                 "message": reason_text,
                 "ticker": symbol,
             },
@@ -2004,11 +2012,11 @@ class VietnamMarketService:
     ) -> Dict[str, Any]:
         reason_text = reason or VN_TRADE_TAPE_UNAVAILABLE_REASON
         return {
-            "trade_tape_source": VN_SOURCE_SSI,
+            "trade_tape_source": SSI_TRADE_TAPE_SOURCE,
             "trade_tape": {
                 "ticker": symbol,
                 "symbol": symbol,
-                "source": VN_SOURCE_SSI,
+                "source": SSI_TRADE_TAPE_SOURCE,
                 "trades": [],
                 "status": status,
                 "error": reason_text if status == "error" else None,
@@ -2016,7 +2024,7 @@ class VietnamMarketService:
             },
             "trade_tape_status": {
                 "status": status,
-                "source": VN_SOURCE_SSI,
+                "source": SSI_TRADE_TAPE_SOURCE,
                 "message": reason_text,
                 "ticker": symbol,
             },
@@ -2035,7 +2043,7 @@ class VietnamMarketService:
         return {
             "symbol": symbol,
             "ticker": symbol,
-            "source": VN_SOURCE_SSI,
+            "source": SSI_REALTIME_SOURCE,
             "fetched_at": fetched_at,
             "price": price,
             "change": change,
@@ -2057,7 +2065,7 @@ class VietnamMarketService:
             "realtime_time": fetched_at,
             "snapshot_time": fetched_at,
             "snapshot_note": "SSI realtime snapshot; separate from official daily close.",
-            "reference_price_source": "SSI",
+            "reference_price_source": SSI_REALTIME_SOURCE,
             "open_price": _safe_float(row.get("open")),
             "high_price": _safe_float(row.get("high")),
             "low_price": _safe_float(row.get("low")),
@@ -2084,7 +2092,7 @@ class VietnamMarketService:
             "sequence_if_available": sequence,
             "match_type": side,
             "id": sequence,
-            "source": VN_SOURCE_SSI,
+            "source": SSI_TRADE_TAPE_SOURCE,
         }
 
     def _load_ssi_realtime_payload(self, symbol: str) -> Dict[str, Any]:
@@ -2099,11 +2107,11 @@ class VietnamMarketService:
             if quote:
                 normalized = self._realtime_quote_from_snapshot(quote, symbol)
                 return {
-                    "realtime_source": VN_SOURCE_SSI,
+                    "realtime_source": SSI_REALTIME_SOURCE,
                     "realtime_snapshot": normalized,
                     "realtime_status": {
                         "status": "ok",
-                        "source": VN_SOURCE_SSI,
+                        "source": SSI_REALTIME_SOURCE,
                         "message": None,
                         "ticker": symbol,
                     },
@@ -2127,18 +2135,18 @@ class VietnamMarketService:
             trades = [self._trade_row_from_ssi(row) for row in (payload.get("trades") or []) if isinstance(row, dict)]
             if trades:
                 return {
-                    "trade_tape_source": VN_SOURCE_SSI,
+                    "trade_tape_source": SSI_TRADE_TAPE_SOURCE,
                     "trade_tape": {
                         "ticker": symbol,
                         "symbol": symbol,
-                        "source": VN_SOURCE_SSI,
+                        "source": SSI_TRADE_TAPE_SOURCE,
                         "fetched_at": _utc_now().isoformat(),
                         "trades": trades,
                         "status": "ok",
                     },
                     "trade_tape_status": {
                         "status": "ok",
-                        "source": VN_SOURCE_SSI,
+                        "source": SSI_TRADE_TAPE_SOURCE,
                         "message": None,
                         "ticker": symbol,
                         "count": len(trades),
@@ -2191,7 +2199,10 @@ class VietnamMarketService:
         return rows[-1], None
 
     @staticmethod
-    def _normalize_ssi_symbol_metadata(row: Dict[str, Any]) -> Dict[str, Any]:
+    def _normalize_ssi_symbol_metadata(
+        row: Dict[str, Any],
+        source_label: str = SSI_SECURITIES_DETAILS_SOURCE,
+    ) -> Dict[str, Any]:
         return {
             "status": "ok",
             "symbol": str(row.get("symbol")).upper() if row.get("symbol") not in (None, "") else None,
@@ -2204,7 +2215,7 @@ class VietnamMarketService:
             "lot_size": _safe_int(row.get("lot_size")),
             "listed_shares": _safe_int(row.get("listed_shares")),
             "listed_date": row.get("listed_date"),
-            "source": VN_SOURCE_SSI,
+            "source": source_label,
         }
 
     @staticmethod
@@ -2228,19 +2239,19 @@ class VietnamMarketService:
         details_payload = fetcher.get_securities_details(symbol=normalized_symbol, market=market)
         row = self._matching_ssi_metadata_row(details_payload, normalized_symbol)
         if row:
-            return self._normalize_ssi_symbol_metadata(row)
+            return self._normalize_ssi_symbol_metadata(row, SSI_SECURITIES_DETAILS_SOURCE)
 
         securities_payload = fetcher.get_securities(market=market)
         row = self._matching_ssi_metadata_row(securities_payload, normalized_symbol)
         if row:
-            return self._normalize_ssi_symbol_metadata(row)
+            return self._normalize_ssi_symbol_metadata(row, SSI_SECURITIES_SOURCE)
 
         reason = self._safe_provider_reason(details_payload, SSI_UNAVAILABLE_REASON)
         if isinstance(securities_payload, dict) and securities_payload.get("status") != "ok":
             reason = self._safe_provider_reason(securities_payload, reason)
         return {
             "status": "unavailable",
-            "source": VN_SOURCE_SSI,
+            "source": SSI_SECURITIES_DETAILS_SOURCE,
             "reason": reason,
             "symbol": None,
             "exchange": None,
@@ -2270,7 +2281,7 @@ class VietnamMarketService:
             logger.debug("SSI symbol metadata unavailable for %s", symbol)
         return {
             "status": "unavailable",
-            "source": VN_SOURCE_SSI,
+            "source": SSI_SECURITIES_DETAILS_SOURCE,
             "reason": SSI_UNAVAILABLE_REASON,
             "symbol": None,
             "exchange": None,
@@ -2546,11 +2557,11 @@ class VietnamMarketService:
         if payload.get("status") != "ok":
             return {
                 "status": "unavailable",
-            "source": VN_SOURCE_SSI,
-            "reason": self._safe_provider_reason(payload),
-            "index_code": normalized_index,
-            "rows": [],
-        }
+                "source": VN_SOURCE_SSI,
+                "reason": self._safe_provider_reason(payload),
+                "index_code": normalized_index,
+                "rows": [],
+            }
         return payload
 
     def build_index_list(self, market: Optional[str] = None) -> Dict[str, Any]:
@@ -2560,7 +2571,7 @@ class VietnamMarketService:
         if payload.get("status") != "ok":
             return {
                 "status": "unavailable",
-                "source": VN_SOURCE_SSI,
+                "source": SSI_INDEX_LIST_SOURCE,
                 "reason": self._safe_provider_reason(payload),
                 "market": normalized_market,
                 "rows": [],
@@ -2569,6 +2580,7 @@ class VietnamMarketService:
             }
         return {
             **payload,
+            "source": SSI_INDEX_LIST_SOURCE,
             "fallback_used": False,
             "rows": payload.get("rows") or [],
             "count": len(payload.get("rows") or []),
@@ -2582,7 +2594,7 @@ class VietnamMarketService:
         if payload.get("status") != "ok":
             return {
                 "status": "unavailable",
-                "source": VN_SOURCE_SSI,
+                "source": SSI_INDEX_COMPONENTS_SOURCE,
                 "reason": self._safe_provider_reason(payload),
                 "index_code": normalized_index,
                 "market": normalized_market,
@@ -2592,6 +2604,7 @@ class VietnamMarketService:
             }
         return {
             **payload,
+            "source": SSI_INDEX_COMPONENTS_SOURCE,
             "fallback_used": False,
             "index_code": payload.get("index_code") or normalized_index,
             "rows": payload.get("rows") or [],
@@ -2712,7 +2725,7 @@ class VietnamMarketService:
         if not tickers:
             return {
                 "market": "VN",
-                "source": VN_SOURCE_SSI,
+                "source": SSI_REALTIME_SOURCE,
                 "status": "unavailable",
                 "error": "No symbol requested",
                 "error_detail": "No Vietnam ticker was requested.",
@@ -2724,7 +2737,7 @@ class VietnamMarketService:
         if self.config.realtime_data_provider != VN_PROVIDER_SSI or not self.config.ssi_realtime_enabled:
             return {
                 "market": "VN",
-                "source": VN_SOURCE_SSI,
+                "source": SSI_REALTIME_SOURCE,
                 "status": "disabled",
                 "error": None,
                 "error_detail": VN_REALTIME_DISABLED_REASON,
@@ -2754,7 +2767,7 @@ class VietnamMarketService:
         ]
         response = {
             "market": "VN",
-            "source": VN_SOURCE_SSI,
+            "source": SSI_REALTIME_SOURCE,
             "status": "ok" if status == "ok" and quotes else status,
             "error": None if status == "ok" else payload.get("reason") or VN_REALTIME_UNAVAILABLE_REASON,
             "error_detail": None if status == "ok" else payload.get("reason") or payload.get("message") or VN_REALTIME_UNAVAILABLE_REASON,
@@ -2789,7 +2802,7 @@ class VietnamMarketService:
         if not ticker:
             return {
                 "market": "VN",
-                "source": VN_SOURCE_SSI,
+                "source": SSI_TRADE_TAPE_SOURCE,
                 "symbol": "",
                 "status": "unavailable",
                 "error": "No symbol requested",
@@ -2802,7 +2815,7 @@ class VietnamMarketService:
         if self.config.trade_tape_provider != VN_PROVIDER_SSI or not self.config.ssi_trade_tape_enabled:
             return {
                 "market": "VN",
-                "source": VN_SOURCE_SSI,
+                "source": SSI_TRADE_TAPE_SOURCE,
                 "symbol": ticker,
                 "status": "disabled",
                 "error": None,
@@ -2830,7 +2843,7 @@ class VietnamMarketService:
         trades = [self._trade_row_from_ssi(row) for row in payload.get("trades", []) if isinstance(row, dict)]
         response = {
             "market": "VN",
-            "source": VN_SOURCE_SSI,
+            "source": SSI_TRADE_TAPE_SOURCE,
             "symbol": ticker,
             "status": "ok" if status == "ok" and trades else status,
             "error": None if status == "ok" else payload.get("reason") or VN_TRADE_TAPE_UNAVAILABLE_REASON,
@@ -3030,7 +3043,7 @@ class VietnamMarketService:
         if ssi_daily_stock_price:
             ssi_daily_stock_price = dict(ssi_daily_stock_price)
             ssi_daily_stock_price.setdefault("status", "ok")
-            ssi_daily_stock_price.setdefault("source", VN_SOURCE_SSI)
+            ssi_daily_stock_price.setdefault("source", SSI_DAILY_STOCK_PRICE_SOURCE)
             limit_state, foreign, foreign_history = self._apply_ssi_daily_stock_price_enrichment(
                 symbol,
                 ssi_daily_stock_price,
@@ -3077,7 +3090,7 @@ class VietnamMarketService:
             latest_price_date = ohlcv_date
             price_source_warning = "Quote does not provide a reliable latest price field; latest price uses OHLCV close."
         if latest_price_source == "ohlcv" and provider_meta.get("actual_source") == VN_SOURCE_SSI:
-            latest_price_source = VN_SOURCE_SSI
+            latest_price_source = SSI_DAILY_OHLC_SOURCE
             price_source_warning = "Quote does not provide a reliable latest price field; latest price uses SSI DailyOhlc close."
         corporate_action = build_corporate_action_reference(
             previous_close=prev_close,

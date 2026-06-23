@@ -506,6 +506,8 @@ export type VietnamCompanyPrice = {
   floorPrice?: number | null;
   priceDate?: string | null;
   source?: string | null;
+  canonicalSource?: string | null;
+  referenceSource?: string | null;
   status: 'ok' | 'missing' | string;
 };
 

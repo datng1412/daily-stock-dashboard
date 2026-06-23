@@ -54,7 +54,7 @@ Daily finality must stay explicit:
 
 If daily SSI data is unavailable, the row should expose an unavailable status and null daily metrics rather than borrowing live, intraday, or legacy-provider values.
 
-Company detail aligns shared canonical daily fields with the watchlist row: `latest_price`, `daily_close`, daily OHLCV open/high/low/close/volume, and daily trading value use SSI DailyOhlc fields. Company reference, ceiling/floor, foreign-flow, matched, put-through, and adjusted-close fields remain SSI DailyStockPrice-specific and must be labeled as such when shown.
+Company detail aligns shared canonical daily fields with the watchlist row: `latest_price`, `daily_close`, daily OHLCV open/high/low/close/volume, and daily trading value use SSI DailyOhlc fields. In the company price block, `price.source` and `price.canonical_source` identify `SSI DailyOhlc`; `price.reference_source` identifies `SSI DailyStockPrice` for reference, ceiling, and floor fields. Company foreign-flow, matched, put-through, and adjusted-close fields remain SSI DailyStockPrice-specific and must be labeled as such when shown.
 
 ## Data Quality Summary Contract
 
@@ -79,7 +79,7 @@ When SSI IntradayOhlc is usable:
 
 ```text
 intraday_status.status = ok
-intraday_source = SSI
+intraday_source = SSI IntradayOhlc
 intraday_candles = [ ... ]
 intraday_pulse = { ... }
 ```
@@ -88,7 +88,7 @@ When intraday is unavailable, stale, disabled, or date-mismatched:
 
 ```text
 intraday_status.status = unavailable or disabled
-intraday_source = SSI
+intraday_source = SSI IntradayOhlc
 intraday_candles = []
 intraday_pulse = null
 ```
@@ -209,6 +209,8 @@ Rules:
 | Mozyfin | Disabled for VN runtime | No fallback |
 | KBS | Legacy optional only | Disabled by default |
 
+Compatibility aliases must stay within the same source owner. Do not use SSI DailyStockPrice close to overwrite `latest_price`, do not use DailyOhlc volume to fill matched volume, and do not use realtime, trade-tape, Mozyfin, or KBS values to fill daily fields.
+
 ## UI Rendering Rules
 
 ### Daily Data
@@ -216,6 +218,8 @@ Rules:
 Render daily data when the row has valid SSI DailyOhlc fields and daily status is OK. Optional section failures should not hide daily close, chart, or DailyStockPrice fields.
 
 The dashboard top summary `Foreign net volume` aggregates `ssi_foreign_net_volume` from the latest successful complete watchlist response and labels the unit as shares. It must not aggregate legacy `foreign_net` fallbacks, incomplete refresh rows, auxiliary realtime/trade/index/corporate-action responses, or mix volume with `ssi_foreign_net_value` in VND.
+
+Daily volume labels should identify SSI DailyOhlc ownership, for example `Daily OHLCV volume`. Active realtime and trade-tape controls should use `Realtime snapshot`, `SSI realtime`, or `Trade tape`; KBS and Mozyfin names are allowed only in legacy diagnostics or superseded historical docs.
 
 ### Optional Live Metrics
 

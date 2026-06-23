@@ -135,8 +135,10 @@ def test_vietnam_company_research_endpoint_returns_phase_one_contract(monkeypatc
     payload = response.json()
     assert payload["ticker"] == "FPT"
     assert payload["status"] == "ok"
-    assert payload["profile"]["source"] == "SSI"
-    assert payload["price"]["source"] == "SSI DailyOhlc + SSI DailyStockPrice"
+    assert payload["profile"]["source"] == "SSI SecuritiesDetails"
+    assert payload["price"]["source"] == "SSI DailyOhlc"
+    assert payload["price"]["canonical_source"] == "SSI DailyOhlc"
+    assert payload["price"]["reference_source"] == "SSI DailyStockPrice"
     assert payload["price"]["latest_price"] == 124.6
     assert payload["price"]["daily_close"] == 124.6
     assert payload["price"]["reference_price"] == 123.0
@@ -144,15 +146,19 @@ def test_vietnam_company_research_endpoint_returns_phase_one_contract(monkeypatc
     assert payload["trading_stats"]["close"] == 124.6
     assert payload["trading_stats"]["volume"] == 1_234_567
     assert payload["trading_stats"]["value"] == 123_456_789_000
+    assert payload["foreign_flow"]["source"] == "SSI DailyStockPrice"
     assert payload["foreign_flow"]["foreign_net_value"] == 200_000_000
     coverage = {item["block"]: item for item in payload["source_coverage"]}
     assert coverage["Daily OHLCV"]["source"] == "SSI DailyOhlc"
     assert coverage["Daily stock price"]["source"] == "SSI DailyStockPrice"
     assert coverage["Intraday OHLCV"]["source"] == "SSI IntradayOhlc"
-    assert coverage["Realtime snapshot"]["source"] == "SSI"
+    assert coverage["Realtime snapshot"]["source"] == "SSI realtime contract"
     assert coverage["Realtime snapshot"]["status"] == "ok"
-    assert coverage["Trade tape"]["source"] == "SSI"
+    assert coverage["Trade tape"]["source"] == "SSI trade-tape contract"
     assert coverage["Trade tape"]["status"] == "ok"
+    assert coverage["News"]["source"] == "NewsProvider future"
+    assert coverage["Financials"]["source"] == "external provider future"
+    assert coverage["Corporate actions"]["source"] == "external provider future"
     assert payload["intraday"]["status"] == "ok"
     assert payload["realtime"]["status"] == "ok"
     assert payload["realtime"]["snapshot"]["price"] == 124.8
@@ -162,4 +168,7 @@ def test_vietnam_company_research_endpoint_returns_phase_one_contract(monkeypatc
     assert coverage["Financials"]["status"] == "not_implemented"
     assert payload["news"]["items"] == []
     assert payload["news"]["status"] == "not_implemented"
+    assert payload["news"]["source"] != "SSI"
+    assert payload["financials"]["source"] != "SSI"
+    assert payload["events"]["source"] != "SSI"
     assert payload["status"] != "unavailable"
