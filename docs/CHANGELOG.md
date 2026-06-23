@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [new feature] Add a visual VN dashboard Data Readiness strip derived from existing frontend data without backend/API changes.
 - [documentation] Document the VN dashboard progressive data workspace direction, Phase 3.2-7.0 upgrade plan, and use-now/use-later/avoid-for-now architecture choices.
 - [improvement] Polish the VN dashboard indicator table with compact daily scan columns and client-side sorting.
 - [new feature] Add local-only custom VN dashboard watchlists with browser persistence.

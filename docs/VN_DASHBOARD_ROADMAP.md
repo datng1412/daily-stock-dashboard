@@ -276,9 +276,18 @@ Phase 3.1 status:
 
 ### Phase 3.2 - Data Readiness and Progressive Loading UX
 
+Phase 3.2A status:
+
+* Added a compact `/vietnam` Data Readiness strip near the top of the dashboard.
+* Readiness items cover Daily data, Reference / foreign, Indicators, Intraday, Realtime, Trade tape, and News.
+* The strip is visual/status-only and derives from already loaded frontend watchlist data, selected ticker data, realtime quote status, and trade-tape status.
+* No backend/API contract fields, provider calls, endpoints, polling, or request-orchestration behavior changed in Phase 3.2A.
+* Provider endpoint details, HTTP status, and raw provider summaries stay in diagnostics rather than the primary readiness strip.
+
+Phase 3.2B remaining:
+
 Goal:
 
-* Add a compact data readiness strip.
 * Add section-level readiness states.
 * Keep previous successful data visible while refreshing.
 * Show `Updating...` instead of blanking the table.

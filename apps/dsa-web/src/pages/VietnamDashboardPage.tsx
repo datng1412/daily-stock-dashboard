@@ -52,11 +52,20 @@ type BadgeVariant = NonNullable<React.ComponentProps<typeof Badge>['variant']>;
 type WatchlistScanLabel = 'Strong' | 'Improving' | 'Neutral' | 'Weakening' | 'Risk elevated' | 'Data unavailable';
 type VietnamDashboardPresetId = 'vn30' | 'banks' | 'securities' | 'real-estate' | 'consumer' | 'logistics' | 'tech' | 'oil-gas' | 'electricity';
 type VietnamDashboardActivePresetId = 'my' | 'custom' | VietnamDashboardPresetId;
+type ReadinessState = 'Ready' | 'Partial' | 'Unavailable' | 'Disabled' | 'Loading' | 'Not implemented';
+type ReadinessItemKey = 'daily' | 'referenceForeign' | 'indicators' | 'intraday' | 'realtime' | 'tradeTape' | 'news';
 
 interface WatchlistScanState {
   label: WatchlistScanLabel;
   variant: BadgeVariant;
   reason: string;
+}
+
+interface DataReadinessItem {
+  key: ReadinessItemKey;
+  label: string;
+  state: ReadinessState;
+  detail: string;
 }
 
 const WATCHLIST_SCAN_ORDER: WatchlistScanLabel[] = ['Strong', 'Improving', 'Neutral', 'Weakening', 'Risk elevated', 'Data unavailable'];
@@ -407,6 +416,293 @@ const hasRealtimeSnapshotData = (quote?: VietnamRealtimeQuote | null) => (
 const hasTradeTapeData = (rows?: VietnamRealtimeTrade[] | null) => (
   Array.isArray(rows) && rows.length > 0
 );
+
+const readinessFromCoverage = (
+  total: number,
+  readyCount: number,
+  loading: boolean,
+): ReadinessState => {
+  if (loading && total === 0) return 'Loading';
+  if (total === 0) return 'Unavailable';
+  if (readyCount === total || readyCount / total >= 0.75) return 'Ready';
+  if (readyCount > 0) return 'Partial';
+  return 'Unavailable';
+};
+
+const normalizedStatus = (status?: string | null) => String(status ?? '').trim().toLowerCase();
+
+const hasReferenceOrForeignData = (item: VietnamWatchItem) => (
+  [
+    item.dailyStockPrice?.referencePrice,
+    item.dailyStockPrice?.ceilingPrice,
+    item.dailyStockPrice?.floorPrice,
+    item.dailyStockPrice?.foreignBuyVolume,
+    item.dailyStockPrice?.foreignSellVolume,
+    item.dailyStockPrice?.foreignNetVolume,
+    item.dailyStockPrice?.foreignBuyValue,
+    item.dailyStockPrice?.foreignSellValue,
+    item.dailyStockPrice?.foreignNetValue,
+    item.ssiReferencePrice,
+    item.ssiCeilingPrice,
+    item.ssiFloorPrice,
+    item.ssiForeignNetVolume,
+    item.ssiForeignNetValue,
+    item.priceLimit?.referencePrice,
+    item.foreign?.net,
+    item.foreign?.netValue,
+  ].some(hasDisplayValue)
+);
+
+const hasIndicatorData = (item: VietnamWatchItem) => (
+  [
+    rsi14Value(item),
+    finiteNumber(item.indicators.ma20),
+    finiteNumber(item.indicators.ma50),
+    volumeRatioValue(item),
+  ].some((value) => value !== null)
+);
+
+const readinessVariant = (item: DataReadinessItem): BadgeVariant => {
+  if (item.state === 'Ready') return 'success';
+  if (item.state === 'Partial') return 'warning';
+  if (item.state === 'Loading') return 'info';
+  if (item.state === 'Unavailable' && item.key === 'daily') return 'danger';
+  return 'default';
+};
+
+const readinessText = (key: ReadinessItemKey, state: ReadinessState) => {
+  const copy: Record<ReadinessItemKey, Record<ReadinessState, string>> = {
+    daily: {
+      Ready: 'Daily data ready',
+      Partial: 'Daily data partial',
+      Unavailable: 'Daily data unavailable',
+      Disabled: 'Daily data disabled',
+      Loading: 'Loading daily data',
+      'Not implemented': 'Daily data not implemented',
+    },
+    referenceForeign: {
+      Ready: 'Foreign flow ready',
+      Partial: 'Foreign flow partial',
+      Unavailable: 'Foreign flow unavailable',
+      Disabled: 'Reference / foreign disabled',
+      Loading: 'Loading reference / foreign',
+      'Not implemented': 'Reference / foreign not implemented',
+    },
+    indicators: {
+      Ready: 'Indicators ready',
+      Partial: 'Indicators partial',
+      Unavailable: 'Indicators unavailable',
+      Disabled: 'Indicators disabled',
+      Loading: 'Loading indicators',
+      'Not implemented': 'Indicators not implemented',
+    },
+    intraday: {
+      Ready: 'Intraday ready',
+      Partial: 'Intraday partial',
+      Unavailable: 'Intraday unavailable',
+      Disabled: 'Intraday disabled',
+      Loading: 'Loading intraday',
+      'Not implemented': 'Intraday not implemented',
+    },
+    realtime: {
+      Ready: 'Realtime ready',
+      Partial: 'Realtime partial',
+      Unavailable: 'Realtime unavailable',
+      Disabled: 'Realtime disabled',
+      Loading: 'Loading realtime',
+      'Not implemented': 'Realtime not implemented',
+    },
+    tradeTape: {
+      Ready: 'Trade tape ready',
+      Partial: 'Trade tape partial',
+      Unavailable: 'Trade tape unavailable',
+      Disabled: 'Trade tape disabled',
+      Loading: 'Loading trade tape',
+      'Not implemented': 'Trade tape not implemented',
+    },
+    news: {
+      Ready: 'News ready',
+      Partial: 'News partial',
+      Unavailable: 'News unavailable',
+      Disabled: 'News disabled',
+      Loading: 'Loading news',
+      'Not implemented': 'News not implemented',
+    },
+  };
+  return copy[key][state];
+};
+
+const liveStateFromCounts = (
+  total: number,
+  readyCount: number,
+  disabledCount: number,
+  notImplementedCount: number,
+  loading: boolean,
+): ReadinessState => {
+  if (loading && total === 0) return 'Loading';
+  if (total === 0) return 'Unavailable';
+  if (readyCount === total || readyCount / total >= 0.75) return 'Ready';
+  if (readyCount > 0) return 'Partial';
+  if (disabledCount === total) return 'Disabled';
+  if (notImplementedCount === total) return 'Not implemented';
+  return 'Unavailable';
+};
+
+const deriveDataReadiness = ({
+  data,
+  selectedItem,
+  loading,
+  realtimeQuotes,
+  realtimeLoading,
+  realtimeTrades,
+  tradesLoading,
+  tradesError,
+  marketPhase,
+}: {
+  data?: VietnamWatchlistResponse | null;
+  selectedItem?: VietnamWatchItem | null;
+  loading: boolean;
+  realtimeQuotes: Record<string, VietnamRealtimeQuote | undefined>;
+  realtimeLoading: boolean;
+  realtimeTrades: VietnamRealtimeTrade[];
+  tradesLoading: boolean;
+  tradesError?: string | null;
+  marketPhase: VietnamMarketPhase;
+}): DataReadinessItem[] => {
+  const rows = data?.watchlist ?? [];
+  const rowCount = rows.length;
+  const dailyState = readinessFromCoverage(rowCount, rows.filter(hasOfficialDailyData).length, loading);
+  const referenceForeignState = readinessFromCoverage(rowCount, rows.filter(hasReferenceOrForeignData).length, loading);
+  const indicatorState = readinessFromCoverage(rowCount, rows.filter(hasIndicatorData).length, loading);
+
+  const intradayReadyCount = rows.filter(hasCurrentIntradayData).length;
+  const intradayDisabledCount = rows.filter((item) => (
+    normalizedStatus(item.intradayStatus?.status ?? item.dataQualitySummary?.checks?.intraday) === 'disabled'
+  )).length;
+  const intradayNotImplementedCount = rows.filter((item) => (
+    normalizedStatus(item.intradayStatus?.status ?? item.dataQualitySummary?.checks?.intraday) === 'not_implemented'
+  )).length;
+  const intradayState = liveStateFromCounts(rowCount, intradayReadyCount, intradayDisabledCount, intradayNotImplementedCount, loading);
+
+  const realtimeReadyCount = rows.filter((item) => {
+    const quote = realtimeQuotes[item.ticker];
+    const state = realtimeSnapshotState(quote ?? item.realtimeSnapshot, marketPhase.code);
+    return (
+      (hasRealtimeSnapshotData(quote) || hasRealtimeSnapshotData(item.realtimeSnapshot))
+      && state.severity !== 'warning'
+      && state.severity !== 'error'
+    );
+  }).length;
+  const realtimeDisabledCount = rows.filter((item) => (
+    normalizedStatus(realtimeQuotes[item.ticker]?.status ?? item.realtimeStatus?.status ?? item.dataQualitySummary?.checks?.realtime) === 'disabled'
+  )).length;
+  const realtimeNotImplementedCount = rows.filter((item) => (
+    normalizedStatus(realtimeQuotes[item.ticker]?.status ?? item.realtimeStatus?.status ?? item.dataQualitySummary?.checks?.realtime) === 'not_implemented'
+  )).length;
+  const hasAnyRealtimeStatus = rows.some((item) => (
+    realtimeQuotes[item.ticker]
+    || item.realtimeStatus?.status
+    || item.realtimeSnapshot
+    || item.dataQualitySummary?.checks?.realtime
+  ));
+  const realtimeState = liveStateFromCounts(
+    rowCount,
+    realtimeReadyCount,
+    realtimeDisabledCount,
+    realtimeNotImplementedCount,
+    realtimeLoading && !hasAnyRealtimeStatus,
+  );
+
+  const selectedTradeStatus = normalizedStatus(selectedItem?.tradeTapeStatus?.status ?? selectedItem?.dataQualitySummary?.checks?.tradeTape);
+  const selectedTradeRows = selectedItem?.tradeTape ?? [];
+  const tradeTapeState: ReadinessState = tradesLoading && !hasTradeTapeData(realtimeTrades) && !hasTradeTapeData(selectedTradeRows)
+    ? 'Loading'
+    : tradesError
+      ? 'Unavailable'
+      : hasTradeTapeData(realtimeTrades) || (selectedTradeStatus === 'ok' && hasTradeTapeData(selectedTradeRows))
+        ? 'Ready'
+        : selectedTradeStatus === 'disabled'
+          ? 'Disabled'
+          : selectedTradeStatus === 'not_implemented'
+            ? 'Not implemented'
+            : 'Unavailable';
+
+  const newsReadyCount = rows.filter((item) => (item.news?.length ?? 0) > 0 || normalizedStatus(item.newsStatus?.status) === 'ok').length;
+  const newsDisabledCount = rows.filter((item) => normalizedStatus(item.newsStatus?.status) === 'disabled').length;
+  const newsNotImplementedCount = rows.filter((item) => normalizedStatus(item.newsStatus?.status) === 'not_implemented').length;
+  const newsState = liveStateFromCounts(rowCount, newsReadyCount, newsDisabledCount, newsNotImplementedCount, loading);
+
+  return [
+    { key: 'daily', label: 'Daily data', state: dailyState, detail: readinessText('daily', dailyState) },
+    { key: 'referenceForeign', label: 'Reference / foreign', state: referenceForeignState, detail: readinessText('referenceForeign', referenceForeignState) },
+    { key: 'indicators', label: 'Indicators', state: indicatorState, detail: readinessText('indicators', indicatorState) },
+    { key: 'intraday', label: 'Intraday', state: intradayState, detail: readinessText('intraday', intradayState) },
+    { key: 'realtime', label: 'Realtime', state: realtimeState, detail: readinessText('realtime', realtimeState) },
+    { key: 'tradeTape', label: 'Trade tape', state: tradeTapeState, detail: readinessText('tradeTape', tradeTapeState) },
+    { key: 'news', label: 'News', state: newsState, detail: readinessText('news', newsState) },
+  ];
+};
+
+const DataReadinessStrip: React.FC<{
+  data?: VietnamWatchlistResponse | null;
+  selectedItem?: VietnamWatchItem | null;
+  loading: boolean;
+  realtimeQuotes: Record<string, VietnamRealtimeQuote | undefined>;
+  realtimeLoading: boolean;
+  realtimeTrades: VietnamRealtimeTrade[];
+  tradesLoading: boolean;
+  tradesError?: string | null;
+  marketPhase: VietnamMarketPhase;
+}> = ({
+  data,
+  selectedItem,
+  loading,
+  realtimeQuotes,
+  realtimeLoading,
+  realtimeTrades,
+  tradesLoading,
+  tradesError,
+  marketPhase,
+}) => {
+  const items = deriveDataReadiness({
+    data,
+    selectedItem,
+    loading,
+    realtimeQuotes,
+    realtimeLoading,
+    realtimeTrades,
+    tradesLoading,
+    tradesError,
+    marketPhase,
+  });
+
+  return (
+    <section className="rounded-lg border border-border/70 bg-card p-4" data-testid="data-readiness-strip">
+      <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-base font-semibold text-foreground">Data readiness</h2>
+            <Badge variant="default">Visual only</Badge>
+          </div>
+          <p className="mt-1 text-xs text-secondary-text">
+            Derived from loaded dashboard data. Provider diagnostics stay in Data status.
+          </p>
+        </div>
+      </div>
+      <dl className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
+        {items.map((item) => (
+          <div key={item.key} className="rounded-lg border border-border/50 bg-elevated/40 p-3">
+            <dt className="flex items-center justify-between gap-2 text-xs font-medium text-secondary-text">
+              <span>{item.label}</span>
+              <Badge variant={readinessVariant(item)}>{item.state}</Badge>
+            </dt>
+            <dd className="mt-2 text-sm font-medium text-foreground">{item.detail}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  );
+};
 
 const currentSessionVolume = (
   item: VietnamWatchItem,
@@ -3613,6 +3909,18 @@ const VietnamDashboardPage: React.FC = () => {
           </Button>
         </div>
       </header>
+
+      <DataReadinessStrip
+        data={data}
+        selectedItem={selectedItem}
+        loading={loading}
+        realtimeQuotes={realtimeQuotes}
+        realtimeLoading={realtimeLoading}
+        realtimeTrades={realtimeTrades}
+        tradesLoading={tradesLoading}
+        tradesError={tradesError}
+        marketPhase={marketPhase}
+      />
 
       <section className="rounded-lg border border-border/70 bg-card p-4">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">

@@ -566,6 +566,11 @@ const selectedTickerHeader = () => {
   return within(header);
 };
 
+const dataReadinessStrip = () => {
+  const strip = screen.getByTestId('data-readiness-strip');
+  return within(strip);
+};
+
 const inspectChartCard = () => {
   const detail = within(screen.getByText('Stock detail').closest('section') as HTMLElement);
   const chartHeading = detail.getByRole('heading', { name: 'Inspect chart' });
@@ -631,6 +636,202 @@ describe('VietnamDashboardPage watchlist loading', () => {
   afterEach(() => {
     vi.useRealTimers();
     Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
+  });
+
+  it('renders the data readiness strip from loaded dashboard data', async () => {
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledWith(defaultTickers));
+    await screen.findByText('Trade tape ready');
+
+    const strip = dataReadinessStrip();
+    expect(strip.getByRole('heading', { name: 'Data readiness' })).toBeInTheDocument();
+    expect(strip.getByText('Daily data')).toBeInTheDocument();
+    expect(strip.getByText('Reference / foreign')).toBeInTheDocument();
+    expect(strip.getByText('Indicators')).toBeInTheDocument();
+    expect(strip.getByText('Intraday')).toBeInTheDocument();
+    expect(strip.getByText('Realtime')).toBeInTheDocument();
+    expect(strip.getByText('Trade tape')).toBeInTheDocument();
+    expect(strip.getByText('News')).toBeInTheDocument();
+    expect(strip.getByText('Daily data ready')).toBeInTheDocument();
+    expect(strip.getByText('Foreign flow ready')).toBeInTheDocument();
+    expect(strip.getByText('Indicators ready')).toBeInTheDocument();
+    expect(strip.getByText('Intraday disabled')).toBeInTheDocument();
+    expect(strip.getByText('Realtime ready')).toBeInTheDocument();
+    expect(strip.getByText('Trade tape ready')).toBeInTheDocument();
+    expect(strip.getByText('News disabled')).toBeInTheDocument();
+  });
+
+  it('shows daily data loading during the initial watchlist request', async () => {
+    let resolveWatchlist: ((response: VietnamWatchlistResponse) => void) | undefined;
+    mockedGetVietnamWatchlist.mockImplementationOnce(() => new Promise<VietnamWatchlistResponse>((resolve) => {
+      resolveWatchlist = resolve;
+      return undefined;
+    }));
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(dataReadinessStrip().getByText('Loading daily data')).toBeInTheDocument());
+
+    await act(async () => {
+      resolveWatchlist?.(makeResponse(defaultTickers));
+    });
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+  });
+
+  it('shows partial reference and indicator readiness from row coverage', async () => {
+    const response = makeResponse(defaultTickers);
+    response.watchlist = response.watchlist.map((item, index) => {
+      if (index < 3) return item;
+      return {
+        ...item,
+        dailyStockPrice: {
+          ...item.dailyStockPrice,
+          status: 'unavailable',
+          referencePrice: null,
+          ceilingPrice: null,
+          floorPrice: null,
+          foreignBuyVolume: null,
+          foreignSellVolume: null,
+          foreignNetVolume: null,
+          foreignBuyValue: null,
+          foreignSellValue: null,
+          foreignNetValue: null,
+        },
+        ssiReferencePrice: null,
+        ssiCeilingPrice: null,
+        ssiFloorPrice: null,
+        ssiForeignNetVolume: null,
+        ssiForeignNetValue: null,
+        priceLimit: {
+          ...item.priceLimit,
+          referencePrice: null,
+          ceilingPrice: null,
+          floorPrice: null,
+        },
+        foreign: { ...item.foreign, buy: null, sell: null, net: null, netValue: null },
+        indicators: {
+          ...item.indicators,
+          ma20: null,
+          ma50: null,
+          rsi14: null,
+          rsi14Wilder: null,
+          avgVolume20D: null,
+          volumeRatio: null,
+        },
+        liquidity: { ...item.liquidity, avgVolume20D: null },
+      };
+    });
+    mockedGetVietnamWatchlist.mockResolvedValue(response);
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+
+    const strip = dataReadinessStrip();
+    expect(strip.getByText('Daily data ready')).toBeInTheDocument();
+    expect(strip.getByText('Foreign flow partial')).toBeInTheDocument();
+    expect(strip.getByText('Indicators partial')).toBeInTheDocument();
+  });
+
+  it('renders optional realtime and trade tape unavailable without endpoint diagnostics', async () => {
+    const response = makeResponse(defaultTickers);
+    response.watchlist = response.watchlist.map((item, index) => index === 0
+      ? {
+          ...item,
+          realtimeStatus: {
+            status: 'unavailable',
+            source: 'SSI',
+            message: 'SSI realtime unavailable.',
+            diagnostics: {
+              attemptedEndpoints: ['RealtimeQuote'],
+              httpStatus: 404,
+              rawProviderErrorSummary: 'raw provider message',
+            },
+          },
+          tradeTapeStatus: {
+            status: 'unavailable',
+            source: 'SSI',
+            message: 'SSI trade tape unavailable.',
+            diagnostics: {
+              attemptedEndpoints: ['TradeTape'],
+              httpStatus: 404,
+              rawProviderErrorSummary: 'raw provider message',
+            },
+          },
+          tradeTape: [],
+          dataQualitySummary: {
+            ...item.dataQualitySummary,
+            checks: {
+              ...item.dataQualitySummary?.checks,
+              realtime: 'unavailable',
+              tradeTape: 'unavailable',
+            },
+          },
+        }
+      : item);
+    mockedGetVietnamWatchlist.mockResolvedValue(response);
+    mockedGetVietnamRealtimeQuotes.mockResolvedValue(makeRealtimeResponse(defaultTickers, {
+      unavailable: true,
+      error: 'SSI realtime unavailable',
+      errorDetail: 'Attempted endpoints: RealtimeQuote',
+      rawError: 'HTTP status 404',
+    }));
+    mockedGetVietnamRealtimeTrades.mockResolvedValue({
+      ...makeTradesResponse('FPT'),
+      status: 'unavailable',
+      error: 'SSI trade tape unavailable',
+      errorDetail: 'Attempted endpoints: TradeTape',
+      rawError: 'HTTP status 404',
+      trades: [],
+    });
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledWith(defaultTickers));
+    await screen.findByText('Trade tape unavailable');
+
+    const strip = dataReadinessStrip();
+    expect(strip.getByText('Daily data ready')).toBeInTheDocument();
+    expect(strip.getByText('Realtime unavailable')).toBeInTheDocument();
+    expect(strip.getByText('Trade tape unavailable')).toBeInTheDocument();
+    expect(strip.getByText('News disabled')).toBeInTheDocument();
+    expect(strip.queryByText(/Attempted endpoints|RealtimeQuote|TradeTape|HTTP status|raw provider/i)).not.toBeInTheDocument();
+  });
+
+  it('does not add API calls for the data readiness strip', async () => {
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+    await waitFor(() => expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledWith(defaultTickers));
+    await waitFor(() => expect(mockedGetVietnamRealtimeTrades).toHaveBeenCalledWith('FPT', 100));
+    await waitFor(() => expect(mockedGetVietnamCorporateActions).toHaveBeenCalledWith(['FPT'], 6));
+    await waitFor(() => expect(mockedGetVietnamIndexList).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mockedGetVietnamIndexComponents).toHaveBeenCalledTimes(1));
+
+    const callCounts = {
+      watchlist: mockedGetVietnamWatchlist.mock.calls.length,
+      realtime: mockedGetVietnamRealtimeQuotes.mock.calls.length,
+      tradeTape: mockedGetVietnamRealtimeTrades.mock.calls.length,
+      corporateActions: mockedGetVietnamCorporateActions.mock.calls.length,
+      indexList: mockedGetVietnamIndexList.mock.calls.length,
+      indexComponents: mockedGetVietnamIndexComponents.mock.calls.length,
+    };
+    expect(dataReadinessStrip().getByRole('heading', { name: 'Data readiness' })).toBeInTheDocument();
+    expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(callCounts.watchlist);
+    expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledTimes(callCounts.realtime);
+    expect(mockedGetVietnamRealtimeTrades).toHaveBeenCalledTimes(callCounts.tradeTape);
+    expect(mockedGetVietnamCorporateActions).toHaveBeenCalledTimes(callCounts.corporateActions);
+    expect(mockedGetVietnamIndexList).toHaveBeenCalledTimes(callCounts.indexList);
+    expect(mockedGetVietnamIndexComponents).toHaveBeenCalledTimes(callCounts.indexComponents);
+  });
+
+  it('does not use recommendation wording in the data readiness strip', async () => {
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+
+    expect(dataReadinessStrip().queryByText(/\b(buy|sell|hold)\b|target[- ]price|recommendation/i)).not.toBeInTheDocument();
   });
 
   it('renders Custom preset controls', async () => {

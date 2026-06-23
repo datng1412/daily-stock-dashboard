@@ -79,5 +79,6 @@ Provider endpoint details, HTTP status, retryability, and raw provider summaries
 - Phase 1 adds the Data Quality Summary that surfaces mismatch, finality, adjusted-price, stale intraday, unavailable live data, and profile partial states.
 - Phase 2 cleans public contract shapes and moves provider/debug details to diagnostics.
 - Phase 2.2 frontend rendering consumes normalized `null`/`[]` live-section shapes and keeps live status diagnostics in collapsed diagnostics panels on dashboard and company detail views.
-- Phase 3.2 applies section-level readiness states so first load, refresh, partial data, unavailable optional sections, disabled future modules, and hard failures are visually distinct.
+- Phase 3.2A adds a visual Data Readiness strip on `/vietnam` using user-facing labels such as `Ready`, `Partial`, `Unavailable`, and `Disabled`. It derives from existing loaded frontend data and status objects; it does not introduce API contract fields or request-state behavior.
+- Phase 3.2B applies fuller section-level request states so first load, refresh, partial data, unavailable optional sections, disabled future modules, and hard failures are visually distinct.
 - Phase 3.3 applies progressive disclosure to the selected ticker so daily explanation remains compact and diagnostics stay lower priority.
