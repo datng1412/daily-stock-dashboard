@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [test] Add a local VN dashboard smoke/regression harness for strict SSI contract checks.
 - [fix] Normalize VN unavailable live-section API shapes to `null`/`[]` data with concise public status messages and retained diagnostics.
 - [fix] Align VN dashboard and company frontend rendering with normalized live-section null/empty shapes and diagnostics-only provider details.
 - [improvement] Move the VN dashboard indicator table above the selected ticker and simplify the selected ticker summary hierarchy.

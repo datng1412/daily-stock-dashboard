@@ -123,6 +123,33 @@ Check:
 - No Mozyfin/KBS normal fallback.
 - No endpoint dumps in primary UI.
 
+## Local VN Dashboard Smoke Harness
+
+Run this after Phase 2+ VN dashboard changes when a local backend is already running:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\smoke_vn_dashboard.ps1 -SkipFrontendOpen
+```
+
+Use `-ForceRefresh` only when the goal is to bypass backend cache:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\smoke_vn_dashboard.ps1 -SkipFrontendOpen -ForceRefresh
+```
+
+Expected protection:
+
+- Requested watchlist tickers are present.
+- Daily SSI fields remain available for usable rows.
+- The printed `EXPECTED Foreign net volume` is computed only from `ssi_foreign_net_volume`.
+- Watchlist trade tape remains list data and company trade rows remain `trade_tape.trades`.
+- Unavailable live objects use `null`; unavailable live lists use `[]`.
+- Company price/trading/foreign-flow sources stay split between SSI DailyOhlc and SSI DailyStockPrice.
+- News, financials, and events are not labeled as SSI market-data sections.
+- Public status messages stay short while diagnostics may retain endpoint, HTTP status, provider message, and sanitized error context.
+
+This harness is local/manual regression coverage. It requires a running backend and does not replace deterministic backend/frontend unit tests.
+
 ## Legacy/Quarantine Notes
 
 - KBS tests or code paths are legacy-only unless explicitly enabled.

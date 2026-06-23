@@ -1,6 +1,6 @@
 # Vietnam Dashboard Runbook
 
-Last updated: 2026-06-22
+Last updated: 2026-06-23
 
 ## Goal
 
@@ -88,6 +88,53 @@ Use probe mode only for endpoint diagnostics. It must not print tokens, credenti
 ```powershell
 python scripts\ssi_fastconnect_smoke.py --probe
 ```
+
+## VN Dashboard Contract Smoke
+
+Use the Phase 2.3 smoke harness after starting the local backend. It validates the public VN dashboard contract without adding API calls, provider fallback, retries, or browser automation.
+
+Start backend from the repo root in one PowerShell window:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\start_backend_local.ps1
+```
+
+Start the frontend in a second PowerShell window when you want to inspect the UI:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\start_web_local.ps1
+```
+
+Run the smoke harness from the repo root:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\smoke_vn_dashboard.ps1 -SkipFrontendOpen
+```
+
+Force backend refresh only when you intentionally want to bypass cache:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\smoke_vn_dashboard.ps1 -SkipFrontendOpen -ForceRefresh
+```
+
+The smoke harness checks:
+
+- `/api/v1/stocks/vn/watchlist` returns requested tickers with daily SSI fields when rows are usable.
+- `ssi_foreign_net_volume` exists and the expected top-card aggregate is computed only from that field.
+- Watchlist `trade_tape` is list data, with status in `trade_tape_status`.
+- Missing live objects remain `null` and missing live lists remain `[]`.
+- `/api/v1/stocks/vn/company/{ticker}` keeps company price/trading fields on SSI DailyOhlc and reference/foreign flow on SSI DailyStockPrice.
+- News, financials, and events are not SSI-labeled.
+- Public live-section messages stay short while diagnostics can retain attempted endpoints, HTTP status, retryability, and sanitized provider context.
+
+Expected frontend URLs printed by the script:
+
+```text
+http://127.0.0.1:5173/vietnam
+http://127.0.0.1:5173/vietnam/company/FPT
+```
+
+The script prints safe target URLs, tickers, PASS/FAIL status, failed checks, API status summary, and expected frontend URLs. It must not print SSI credentials, tokens, account IDs, auth headers, or raw auth responses.
 
 ## Force Refresh API
 
