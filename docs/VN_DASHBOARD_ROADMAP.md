@@ -243,6 +243,22 @@ Purpose:
 
 Turn the company detail page from a debug board into a product-quality data report.
 
+Phase 3.0A status:
+
+* Implemented frontend-only watchlist preset groups on `/vietnam`.
+* Preset names: VN30, Banks, Securities, Real estate, Consumer, Logistics, Tech, Oil & gas, and Electricity.
+* Preset switching replaces the active ticker list through the existing watchlist request path.
+* If the current selected ticker is in the new preset, it remains selected; otherwise the first preset ticker becomes selected.
+* Presets are scan buckets only. New provider calls, polling changes, source semantics changes, and trading-advice wording remain out of scope.
+
+Phase 3.0B status:
+
+* Added a `Custom` preset workflow on `/vietnam`.
+* Custom input accepts comma, whitespace, semicolon, and newline separators; normalizes tickers to uppercase; removes duplicates; and keeps only the first 30 valid tickers.
+* Custom lists can be applied for the current session, saved to browser localStorage under `vnDashboard.customWatchlist.v1`, or cleared locally.
+* Invalid or empty custom input does not replace the active watchlist.
+* Custom persistence is local-only: no backend storage, server sync, new endpoints, provider calls, polling changes, or source semantics changes.
+
 Current issues:
 
 * Profile can show unavailable fields while source coverage says OK.

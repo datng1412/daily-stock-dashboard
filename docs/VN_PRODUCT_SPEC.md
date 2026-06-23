@@ -46,6 +46,7 @@ Purpose:
 Required first-order blocks:
 
 * Watchlist table/cards.
+* Preset scan buckets for VN30, sectors, and common market groups.
 * Indicator table as the primary watchlist scan surface.
 * Compact selected ticker summary.
 * SSI DailyOhlc chart.
@@ -147,6 +148,8 @@ The current MVP is:
 * SSI IntradayOhlc contract with freshness validation.
 * SSI realtime and trade-tape contracts with explicit unavailable states when live rows are not confirmed.
 * Company research page shell using the same source-aware market-data contract.
+* Frontend-only watchlist preset groups for VN30, Banks, Securities, Real estate, Consumer, Logistics, Tech, Oil & gas, and Electricity.
+* Local-only custom watchlist input using browser localStorage; no server sync.
 * News disabled until a separate provider is implemented.
 
 ## Current Limitations
@@ -179,6 +182,10 @@ Turn source mismatch, finality uncertainty, stale intraday, unavailable live dat
 Normalize unavailable public data to `intraday_pulse = null`, `intraday_candles = []`, `realtime_snapshot = null`, and `trade_tape = []`; keep endpoint attempts, HTTP status, raw provider errors, retryability, and stale-date details in diagnostics.
 
 ### Phase 3 - Company Detail Product Redesign
+
+Phase 3.0A implemented a frontend-only watchlist preset-group pass before the company detail redesign. Preset groups are scan buckets only: switching a preset changes the requested ticker list, keeps the selected ticker when it remains in the group, otherwise selects the first ticker, and does not add provider calls, polling, or data-source changes.
+
+Phase 3.0B added a local Custom preset workflow. Users can apply, save, and clear a comma/whitespace/semicolon/newline-separated ticker list stored under `vnDashboard.customWatchlist.v1` in browser localStorage. Invalid or empty custom input does not replace the active watchlist. The feature is local-only and does not add backend storage, server sync, or new endpoints.
 
 Redesign the company detail page as a data-quality report with a strong header, Data Quality Summary, daily core data, lower-prominence live availability, grouped future modules, and collapsible diagnostics.
 

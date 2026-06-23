@@ -12,7 +12,6 @@ import {
   type VietnamWatchItem,
   type VietnamWatchlistResponse,
 } from '../../api/stocks';
-import { VIETNAM_WATCHLIST_STORAGE_KEY } from '../../utils/vietnamWatchlist';
 import VietnamDashboardPage from '../VietnamDashboardPage';
 
 const mockedGetVietnamMarketPhase = vi.fn();
@@ -35,6 +34,18 @@ vi.mock('../../utils/vietnamMarketPhase', () => ({
 }));
 
 const defaultTickers = ['FPT', 'VPB', 'MSB', 'SCS', 'ACV', 'ACB'];
+const customWatchlistStorageKey = 'vnDashboard.customWatchlist.v1';
+const presetTickers = {
+  VN30: ['ACB', 'BCM', 'BID', 'BVH', 'CTG', 'FPT', 'GAS', 'GVR', 'HDB', 'HPG', 'MBB', 'MSN', 'MWG', 'PLX', 'POW', 'SAB', 'SHB', 'SSB', 'SSI', 'STB', 'TCB', 'TPB', 'VCB', 'VHM', 'VIC', 'VJC', 'VNM', 'VPB', 'VRE'],
+  Banks: ['VCB', 'BID', 'CTG', 'MBB', 'TCB', 'ACB', 'VPB', 'HDB', 'STB', 'TPB', 'SHB', 'MSB', 'LPB', 'SSB', 'OCB', 'EIB'],
+  Securities: ['SSI', 'VCI', 'VND', 'HCM', 'SHS', 'VIX', 'MBS', 'FTS', 'CTS', 'BSI', 'AGR', 'ORS'],
+  'Real estate': ['VHM', 'VIC', 'VRE', 'NVL', 'PDR', 'KDH', 'NLG', 'DXG', 'DIG', 'CEO', 'HDC', 'CII', 'KBC', 'SZC'],
+  Consumer: ['VNM', 'MSN', 'MWG', 'FRT', 'PNJ', 'SAB', 'BHN', 'QNS', 'DBC', 'HAG', 'BAF', 'ANV', 'FMC'],
+  Logistics: ['GMD', 'HAH', 'VSC', 'VOS', 'VTO', 'VTP', 'SGP', 'PHP', 'DVP', 'SCS'],
+  Tech: ['FPT', 'CMG', 'ELC', 'VGI', 'VTP', 'CTR'],
+  'Oil & gas': ['GAS', 'PLX', 'PVD', 'PVS', 'BSR', 'OIL', 'PVC', 'PVT', 'PVB', 'POW'],
+  Electricity: ['POW', 'NT2', 'REE', 'PC1', 'GEX', 'HDG', 'QTP', 'PPC', 'CHP', 'VSH', 'TTA', 'GEG'],
+} as const;
 
 const makeMarketPhase = (phase = 'Continuous afternoon', code = 'continuous_afternoon', isAuction = false) => ({
   phase,
@@ -607,37 +618,208 @@ describe('VietnamDashboardPage watchlist loading', () => {
     Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
   });
 
-  it('force-refreshes a newly added non-default ticker using the updated watchlist', async () => {
+  it('renders Custom preset controls', async () => {
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
-    await waitFor(() => expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledWith(defaultTickers));
 
-    fireEvent.change(screen.getByLabelText('Ticker'), { target: { value: 'gmd.vn' } });
-    fireEvent.click(screen.getByRole('button', { name: /add ticker/i }));
-
-    const expectedTickers = [...defaultTickers, 'GMD'];
-    await waitFor(() => {
-      expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(expectedTickers, true);
-      expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledWith(expectedTickers);
-    });
-
-    expect(JSON.parse(localStorage.getItem(VIETNAM_WATCHLIST_STORAGE_KEY) ?? '[]')).toEqual(expectedTickers);
-    expect(screen.getAllByText('GMD').length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: 'Custom' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Custom watchlist')).toHaveAttribute('placeholder', 'FPT, VPB, ACB');
+    expect(screen.getByRole('button', { name: 'Apply custom' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save custom' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Clear custom' })).toBeInTheDocument();
+    expect(screen.getByText('Saved locally in this browser.')).toBeInTheDocument();
   });
 
-  it('keeps preset switching on the selected preset list without forcing live refresh', async () => {
+  it('typing in custom watchlist input does not call the watchlist endpoint', async () => {
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
-    await waitFor(() => expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledWith(defaultTickers));
+    const watchlistCalls = mockedGetVietnamWatchlist.mock.calls.length;
 
-    fireEvent.change(screen.getByLabelText('Preset list'), { target: { value: 'tech' } });
+    fireEvent.change(screen.getByLabelText('Custom watchlist'), { target: { value: 'fpt, vpb, acb' } });
 
-    await waitFor(() => {
-      expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(['FPT', 'CMG', 'ELC', 'VGI', 'VTP', 'CTR'], false);
-      expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledWith(['FPT', 'CMG', 'ELC', 'VGI', 'VTP', 'CTR']);
-    });
+    expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistCalls);
+  });
+
+  it('normalizes lowercase custom input and removes duplicates preserving order', async () => {
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+
+    fireEvent.change(screen.getByLabelText('Custom watchlist'), { target: { value: 'fpt; vpb\nfpt acb' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Apply custom' }));
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(['FPT', 'VPB', 'ACB'], false));
+    expect(screen.getByLabelText('Custom watchlist')).toHaveValue('FPT, VPB, ACB');
+    expect(screen.getByText('Duplicate tickers removed.')).toBeInTheDocument();
+    expect(selectedTickerHeader().getByRole('heading', { name: 'FPT' })).toBeInTheDocument();
+  });
+
+  it('shows invalid custom tickers and does not apply them', async () => {
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+    const watchlistCalls = mockedGetVietnamWatchlist.mock.calls.length;
+
+    fireEvent.change(screen.getByLabelText('Custom watchlist'), { target: { value: 'FPT, @@@, ACB' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Apply custom' }));
+
+    expect(screen.getByText('Invalid tickers: @@@')).toBeInTheDocument();
+    expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistCalls);
+    expect(selectedTickerHeader().getByRole('heading', { name: 'FPT' })).toBeInTheDocument();
+  });
+
+  it('shows empty custom list validation and does not apply', async () => {
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+    const watchlistCalls = mockedGetVietnamWatchlist.mock.calls.length;
+
+    fireEvent.change(screen.getByLabelText('Custom watchlist'), { target: { value: ' , ; \n ' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Apply custom' }));
+
+    expect(screen.getByText('Custom watchlist is empty.')).toBeInTheDocument();
+    expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistCalls);
+  });
+
+  it('applies custom watchlist through the expected watchlist request and selects first when needed', async () => {
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+
+    fireEvent.change(screen.getByLabelText('Custom watchlist'), { target: { value: 'vpb acb' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Apply custom' }));
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(['VPB', 'ACB'], false));
+    expect(selectedTickerHeader().getByRole('heading', { name: 'VPB' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Custom' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('saving custom writes localStorage without calling the watchlist endpoint', async () => {
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+    const watchlistCalls = mockedGetVietnamWatchlist.mock.calls.length;
+
+    fireEvent.change(screen.getByLabelText('Custom watchlist'), { target: { value: 'fpt vpb acb' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save custom' }));
+
+    expect(JSON.parse(localStorage.getItem(customWatchlistStorageKey) ?? '[]')).toEqual(['FPT', 'VPB', 'ACB']);
+    expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistCalls);
+  });
+
+  it('keeps only the first 30 custom tickers', async () => {
+    const manyTickers = Array.from({ length: 32 }, (_, index) => `T${String(index + 1).padStart(2, '0')}`);
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+
+    fireEvent.change(screen.getByLabelText('Custom watchlist'), { target: { value: manyTickers.join(' ') } });
+    fireEvent.click(screen.getByRole('button', { name: 'Apply custom' }));
+
+    const expectedTickers = manyTickers.slice(0, 30);
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(expectedTickers, false));
+    expect(screen.getByText('Only first 30 tickers kept.')).toBeInTheDocument();
+  });
+
+  it('loads saved custom watchlist and uses it from the Custom preset', async () => {
+    localStorage.setItem(customWatchlistStorageKey, JSON.stringify(['GMD', 'SCS']));
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+    expect(screen.getByLabelText('Custom watchlist')).toHaveValue('GMD, SCS');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Custom' }));
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(['GMD', 'SCS'], false));
+    expect(selectedTickerHeader().getByRole('heading', { name: 'GMD' })).toBeInTheDocument();
+  });
+
+  it('clear custom removes localStorage and clears the custom input without reloading watchlist', async () => {
+    localStorage.setItem(customWatchlistStorageKey, JSON.stringify(['FPT', 'VPB']));
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+    const watchlistCalls = mockedGetVietnamWatchlist.mock.calls.length;
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear custom' }));
+
+    expect(localStorage.getItem(customWatchlistStorageKey)).toBeNull();
+    expect(screen.getByLabelText('Custom watchlist')).toHaveValue('');
+    expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistCalls);
+  });
+
+  it('renders all preset group buttons with exact names', async () => {
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+
+    const presetGroup = within(screen.getByRole('group', { name: 'Preset groups' }));
+    for (const presetName of Object.keys(presetTickers)) {
+      expect(presetGroup.getByRole('button', { name: presetName })).toBeInTheDocument();
+    }
+  });
+
+  it('switches each preset through the expected watchlist ticker request', async () => {
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+
+    const presetGroup = within(screen.getByRole('group', { name: 'Preset groups' }));
+    let expectedWatchlistCalls = 1;
+    for (const [presetName, tickers] of Object.entries(presetTickers)) {
+      fireEvent.click(presetGroup.getByRole('button', { name: presetName }));
+      expectedWatchlistCalls += 1;
+      await waitFor(() => {
+        expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith([...tickers], false);
+        expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(expectedWatchlistCalls);
+      });
+    }
+  });
+
+  it('keeps the selected ticker when it exists in the new preset', async () => {
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+
+    fireEvent.click(screen.getByRole('button', { name: 'VN30' }));
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith([...presetTickers.VN30], false));
+    expect(selectedTickerHeader().getByRole('heading', { name: 'FPT' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'VN30' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('falls back to the first preset ticker when the selected ticker is absent', async () => {
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Banks' }));
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith([...presetTickers.Banks], false));
+    expect(selectedTickerHeader().getByRole('heading', { name: 'VCB' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Banks' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('does not add extra watchlist requests while switching a preset', async () => {
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+    await waitFor(() => expect(mockedGetVietnamIndexList).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mockedGetVietnamIndexComponents).toHaveBeenCalledTimes(1));
+    const watchlistCalls = mockedGetVietnamWatchlist.mock.calls.length;
+    const indexListCalls = mockedGetVietnamIndexList.mock.calls.length;
+    const indexComponentCalls = mockedGetVietnamIndexComponents.mock.calls.length;
+
+    fireEvent.click(screen.getByRole('button', { name: 'Consumer' }));
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith([...presetTickers.Consumer], false));
+    expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistCalls + 1);
+    expect(mockedGetVietnamIndexList).toHaveBeenCalledTimes(indexListCalls);
+    expect(mockedGetVietnamIndexComponents).toHaveBeenCalledTimes(indexComponentCalls);
   });
 
   it('keeps SSI daily close, SSI realtime, and trade tape separate', async () => {
@@ -2852,10 +3034,10 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(1));
 
-    fireEvent.change(screen.getByLabelText('Ticker'), { target: { value: 'BAD SYMBOL' } });
-    fireEvent.click(screen.getByRole('button', { name: /add ticker/i }));
+    fireEvent.change(screen.getByLabelText('Custom watchlist'), { target: { value: 'FPT @@@ ACB' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Apply custom' }));
 
-    expect(await screen.findByText('Use letters and numbers only, up to 10 characters.')).toBeInTheDocument();
+    expect(await screen.findByText('Invalid tickers: @@@')).toBeInTheDocument();
     expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(1);
   });
 

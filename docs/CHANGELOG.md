@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [new feature] Add local-only custom VN dashboard watchlists with browser persistence.
+- [new feature] Add frontend-only VN dashboard watchlist preset groups for common scan buckets.
 - [test] Add a local VN dashboard smoke/regression harness for strict SSI contract checks.
 - [fix] Normalize VN unavailable live-section API shapes to `null`/`[]` data with concise public status messages and retained diagnostics.
 - [fix] Align VN dashboard and company frontend rendering with normalized live-section null/empty shapes and diagnostics-only provider details.

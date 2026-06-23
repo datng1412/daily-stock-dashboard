@@ -1,6 +1,6 @@
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, AlertTriangle, ArrowDown, ArrowDownRight, ArrowUp, ArrowUpRight, Banknote, DatabaseZap, Maximize2, Plus, RefreshCw, RotateCcw, ShieldAlert, X } from 'lucide-react';
+import { Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, Banknote, DatabaseZap, Maximize2, RefreshCw, RotateCcw, ShieldAlert, X } from 'lucide-react';
 import {
   stocksApi,
   type VietnamChartPoint,
@@ -15,7 +15,7 @@ import {
   type VietnamWatchItem,
   type VietnamWatchlistResponse,
 } from '../api/stocks';
-import { AppPage, Badge, Button, Input, Loading } from '../components/common';
+import { AppPage, Badge, Button, Loading } from '../components/common';
 import { DataQualitySummary } from '../components/dashboard';
 import { cn } from '../utils/cn';
 import { buildVietnamConditionSummary, VIETNAM_CONDITION_SUMMARY_SUBTITLE } from '../utils/vietnamConditionSummary';
@@ -30,18 +30,12 @@ import {
 } from '../utils/vietnamTime';
 import {
   VIETNAM_WATCHLIST_MAX_SIZE,
-  VIETNAM_WATCHLIST_PRESETS,
-  getVietnamPresetTickers,
-  moveVietnamTicker,
   normalizeVietnamTicker,
   normalizeVietnamWatchlist,
-  readVietnamWatchlist,
-  validateVietnamTicker,
-  type VietnamWatchlistPresetId,
-  writeVietnamWatchlist,
 } from '../utils/vietnamWatchlist';
 
 const DEFAULT_TICKERS = ['FPT', 'VPB', 'MSB', 'SCS', 'ACV', 'ACB'];
+const CUSTOM_WATCHLIST_STORAGE_KEY = 'vnDashboard.customWatchlist.v1';
 const AUTO_REFRESH_INTERVALS = [60, 180, 300];
 const REALTIME_SNAPSHOT_REFRESH_INTERVALS = [10, 15, 30];
 const TRADE_TAPE_REFRESH_INTERVALS = [5, 10, 15];
@@ -56,6 +50,8 @@ const INSPECT_RANGES = [
 type InspectRangeLabel = typeof INSPECT_RANGES[number]['label'];
 type BadgeVariant = NonNullable<React.ComponentProps<typeof Badge>['variant']>;
 type WatchlistScanLabel = 'Strong' | 'Improving' | 'Neutral' | 'Weakening' | 'Risk elevated' | 'Data unavailable';
+type VietnamDashboardPresetId = 'vn30' | 'banks' | 'securities' | 'real-estate' | 'consumer' | 'logistics' | 'tech' | 'oil-gas' | 'electricity';
+type VietnamDashboardActivePresetId = 'my' | 'custom' | VietnamDashboardPresetId;
 
 interface WatchlistScanState {
   label: WatchlistScanLabel;
@@ -65,6 +61,53 @@ interface WatchlistScanState {
 
 const WATCHLIST_SCAN_ORDER: WatchlistScanLabel[] = ['Strong', 'Improving', 'Neutral', 'Weakening', 'Risk elevated', 'Data unavailable'];
 const DATA_CAVEAT_LABELS = new Set(['Foreign data stale', 'Indicator caution', 'Price finality unknown', 'Adjusted price unknown']);
+const VIETNAM_DASHBOARD_PRESETS: Array<{ id: VietnamDashboardPresetId; label: string; tickers: string[] }> = [
+  {
+    id: 'vn30',
+    label: 'VN30',
+    tickers: ['ACB', 'BCM', 'BID', 'BVH', 'CTG', 'FPT', 'GAS', 'GVR', 'HDB', 'HPG', 'MBB', 'MSN', 'MWG', 'PLX', 'POW', 'SAB', 'SHB', 'SSB', 'SSI', 'STB', 'TCB', 'TPB', 'VCB', 'VHM', 'VIC', 'VJC', 'VNM', 'VPB', 'VRE'],
+  },
+  {
+    id: 'banks',
+    label: 'Banks',
+    tickers: ['VCB', 'BID', 'CTG', 'MBB', 'TCB', 'ACB', 'VPB', 'HDB', 'STB', 'TPB', 'SHB', 'MSB', 'LPB', 'SSB', 'OCB', 'EIB'],
+  },
+  {
+    id: 'securities',
+    label: 'Securities',
+    tickers: ['SSI', 'VCI', 'VND', 'HCM', 'SHS', 'VIX', 'MBS', 'FTS', 'CTS', 'BSI', 'AGR', 'ORS'],
+  },
+  {
+    id: 'real-estate',
+    label: 'Real estate',
+    tickers: ['VHM', 'VIC', 'VRE', 'NVL', 'PDR', 'KDH', 'NLG', 'DXG', 'DIG', 'CEO', 'HDC', 'CII', 'KBC', 'SZC'],
+  },
+  {
+    id: 'consumer',
+    label: 'Consumer',
+    tickers: ['VNM', 'MSN', 'MWG', 'FRT', 'PNJ', 'SAB', 'BHN', 'QNS', 'DBC', 'HAG', 'BAF', 'ANV', 'FMC'],
+  },
+  {
+    id: 'logistics',
+    label: 'Logistics',
+    tickers: ['GMD', 'HAH', 'VSC', 'VOS', 'VTO', 'VTP', 'SGP', 'PHP', 'DVP', 'SCS'],
+  },
+  {
+    id: 'tech',
+    label: 'Tech',
+    tickers: ['FPT', 'CMG', 'ELC', 'VGI', 'VTP', 'CTR'],
+  },
+  {
+    id: 'oil-gas',
+    label: 'Oil & gas',
+    tickers: ['GAS', 'PLX', 'PVD', 'PVS', 'BSR', 'OIL', 'PVC', 'PVT', 'PVB', 'POW'],
+  },
+  {
+    id: 'electricity',
+    label: 'Electricity',
+    tickers: ['POW', 'NT2', 'REE', 'PC1', 'GEX', 'HDG', 'QTP', 'PPC', 'CHP', 'VSH', 'TTA', 'GEG'],
+  },
+];
 
 const formatNumber = (value?: number | null, maximumFractionDigits = 0) => {
   if (value === null || value === undefined || Number.isNaN(value)) return '-';
@@ -415,6 +458,95 @@ const sumSsiForeignNetVolume = (items: VietnamWatchItem[]) => (
     return value === null ? sum : sum + value;
   }, 0)
 );
+
+const getDashboardPresetTickers = (presetId: VietnamDashboardPresetId) => {
+  const preset = VIETNAM_DASHBOARD_PRESETS.find((item) => item.id === presetId);
+  return preset ? normalizeVietnamWatchlist(preset.tickers) : null;
+};
+
+const formatCustomWatchlistInput = (tickers: string[]) => tickers.join(', ');
+
+const parseCustomWatchlistInput = (value: string) => {
+  const rawTokens = value
+    .split(/[,\s;]+/)
+    .map((ticker) => ticker.trim())
+    .filter(Boolean);
+
+  if (!rawTokens.length) {
+    return { tickers: [] as string[], messages: [] as string[], error: 'Custom watchlist is empty.' };
+  }
+
+  const normalizedTokens = rawTokens.map((ticker) => normalizeVietnamTicker(ticker));
+  const invalidTickers = normalizedTokens.filter((ticker) => !/^[A-Z0-9]{2,10}$/.test(ticker));
+  if (invalidTickers.length) {
+    return { tickers: [] as string[], messages: [] as string[], error: `Invalid tickers: ${Array.from(new Set(invalidTickers)).join(', ')}` };
+  }
+
+  const seen = new Set<string>();
+  const deduped: string[] = [];
+  let duplicateRemoved = false;
+  for (const ticker of normalizedTokens) {
+    if (seen.has(ticker)) {
+      duplicateRemoved = true;
+      continue;
+    }
+    seen.add(ticker);
+    deduped.push(ticker);
+  }
+
+  const messages: string[] = [];
+  if (duplicateRemoved) messages.push('Duplicate tickers removed.');
+  const tickers = deduped.slice(0, VIETNAM_WATCHLIST_MAX_SIZE);
+  if (deduped.length > VIETNAM_WATCHLIST_MAX_SIZE) messages.push('Only first 30 tickers kept.');
+
+  return { tickers, messages, error: null };
+};
+
+const localStorageOrNull = () => {
+  if (typeof window === 'undefined') return null;
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+};
+
+const readCustomWatchlist = () => {
+  const storage = localStorageOrNull();
+  if (!storage) return [] as string[];
+  try {
+    const raw = storage.getItem(CUSTOM_WATCHLIST_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed) || parsed.some((value) => typeof value !== 'string')) return [];
+    const result = parseCustomWatchlistInput(parsed.join(','));
+    return result.error ? [] : result.tickers;
+  } catch {
+    return [];
+  }
+};
+
+const writeCustomWatchlist = (tickers: string[]) => {
+  const storage = localStorageOrNull();
+  if (!storage) return false;
+  try {
+    storage.setItem(CUSTOM_WATCHLIST_STORAGE_KEY, JSON.stringify(tickers));
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const clearCustomWatchlist = () => {
+  const storage = localStorageOrNull();
+  if (!storage) return false;
+  try {
+    storage.removeItem(CUSTOM_WATCHLIST_STORAGE_KEY);
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 const isCompleteWatchlistResponse = (response: VietnamWatchlistResponse, requestedTickers: string[]) => {
   const expectedTickers = requestedTickers
@@ -2806,14 +2938,13 @@ const StockDetailView: React.FC<{
 };
 
 const VietnamDashboardPage: React.FC = () => {
-  const initialWatchlist = useMemo(() => readVietnamWatchlist(DEFAULT_WATCHLIST), []);
-  const [watchlist, setWatchlist] = useState<string[]>(initialWatchlist.tickers);
-  const [activePresetId, setActivePresetId] = useState<VietnamWatchlistPresetId>('my');
-  const [watchlistInput, setWatchlistInput] = useState('');
+  const initialCustomWatchlist = useMemo(() => readCustomWatchlist(), []);
+  const [watchlist, setWatchlist] = useState<string[]>(DEFAULT_WATCHLIST);
+  const [activePresetId, setActivePresetId] = useState<VietnamDashboardActivePresetId>('my');
+  const [customWatchlistInput, setCustomWatchlistInput] = useState(() => formatCustomWatchlistInput(initialCustomWatchlist));
+  const [customWatchlist, setCustomWatchlist] = useState<string[]>(initialCustomWatchlist);
   const [watchlistError, setWatchlistError] = useState<string | null>(null);
-  const [storageWarning, setStorageWarning] = useState<string | null>(
-    initialWatchlist.usedFallback ? 'Saved watchlist was invalid and default tickers were restored.' : null,
-  );
+  const [customNotice, setCustomNotice] = useState<string | null>(initialCustomWatchlist.length ? 'Saved locally in this browser.' : null);
   const [data, setData] = useState<VietnamWatchlistResponse | null>(null);
   const [realtimeQuotes, setRealtimeQuotes] = useState<Record<string, VietnamRealtimeQuote | undefined>>({});
   const [realtimeLoading, setRealtimeLoading] = useState(false);
@@ -2835,7 +2966,7 @@ const VietnamDashboardPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [forceLoading, setForceLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [selectedTicker, setSelectedTicker] = useState<string | null>(initialWatchlist.tickers[0] ?? DEFAULT_WATCHLIST[0]);
+  const [selectedTicker, setSelectedTicker] = useState<string | null>(DEFAULT_WATCHLIST[0]);
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(false);
   const [autoRefreshInterval, setAutoRefreshInterval] = useState(180);
   const [realtimeAutoRefreshEnabled, setRealtimeAutoRefreshEnabled] = useState(false);
@@ -2876,7 +3007,6 @@ const VietnamDashboardPage: React.FC = () => {
   const tradeTapeRefreshInFlightRef = useRef(false);
   const pendingRealtimeSnapshotTickersRef = useRef<string[] | null>(null);
   const pendingTradeTapeSymbolRef = useRef<string | null>(null);
-  const nextWatchlistLoadRef = useRef<{ tickers: string[]; forceRefresh: boolean; refreshKind: 'manual' | 'auto' | 'force live' } | null>(null);
 
   const loadObservability = useCallback(async () => {
     try {
@@ -2887,21 +3017,11 @@ const VietnamDashboardPage: React.FC = () => {
     }
   }, []);
 
-  const persistWatchlist = useCallback((nextTickers: string[]) => {
-    try {
-      writeVietnamWatchlist(nextTickers);
-      setStorageWarning(null);
-    } catch {
-      setStorageWarning('Watchlist changed for this session, but localStorage could not be updated.');
-    }
-  }, []);
-
-  const applyWatchlist = useCallback((nextTickers: string[], presetId: VietnamWatchlistPresetId = 'my', nextSelectedTicker?: string | null) => {
+  const applyWatchlist = useCallback((nextTickers: string[], presetId: VietnamDashboardActivePresetId = 'my', nextSelectedTicker?: string | null) => {
     setWatchlist(nextTickers);
     setActivePresetId(presetId);
     setSelectedTicker(nextSelectedTicker ?? nextTickers[0] ?? null);
-    persistWatchlist(nextTickers);
-  }, [persistWatchlist]);
+  }, []);
 
   const loadRealtimeQuotes = useCallback(async (tickers: string[]) => {
     const requestedTickers = tickers.filter(Boolean);
@@ -3112,60 +3232,75 @@ const VietnamDashboardPage: React.FC = () => {
     }
   }, [loadObservability, refreshRealtimeSnapshots]);
 
-  const handlePresetChange = useCallback((event: React.ChangeEvent<HTMLSelectElement>) => {
-    const presetId = event.target.value as VietnamWatchlistPresetId;
-    if (presetId === 'my') {
-      const storedWatchlist = readVietnamWatchlist(DEFAULT_WATCHLIST);
-      setStorageWarning(storedWatchlist.usedFallback ? 'Saved watchlist was invalid and default tickers were restored.' : null);
-      setWatchlist(storedWatchlist.tickers);
-      setActivePresetId('my');
-      setSelectedTicker(storedWatchlist.tickers[0] ?? null);
-      return;
-    }
-    const presetTickers = getVietnamPresetTickers(presetId);
+  const handlePresetSelect = useCallback((presetId: VietnamDashboardPresetId) => {
+    const presetTickers = getDashboardPresetTickers(presetId);
     if (!presetTickers) {
       setWatchlistError('Preset list is unavailable.');
       return;
     }
+    const nextSelectedTicker = selectedTicker && presetTickers.includes(selectedTicker) ? selectedTicker : presetTickers[0] ?? null;
     setWatchlistError(null);
-    applyWatchlist(presetTickers, presetId);
-  }, [applyWatchlist]);
+    applyWatchlist(presetTickers, presetId, nextSelectedTicker);
+  }, [applyWatchlist, selectedTicker]);
 
-  const handleAddTicker = useCallback((event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const result = validateVietnamTicker(watchlistInput, watchlist);
-    if (!result.valid) {
+  const applyCustomTickers = useCallback((tickers: string[]) => {
+    const nextSelectedTicker = selectedTicker && tickers.includes(selectedTicker) ? selectedTicker : tickers[0] ?? null;
+    applyWatchlist(tickers, 'custom', nextSelectedTicker);
+  }, [applyWatchlist, selectedTicker]);
+
+  const handleCustomPresetSelect = useCallback(() => {
+    if (!customWatchlist.length) {
+      setWatchlistError('Custom watchlist is empty.');
+      setCustomNotice(null);
+      return;
+    }
+    setWatchlistError(null);
+    setCustomNotice('Saved locally in this browser.');
+    applyCustomTickers(customWatchlist);
+  }, [applyCustomTickers, customWatchlist]);
+
+  const handleApplyCustom = useCallback(() => {
+    const result = parseCustomWatchlistInput(customWatchlistInput);
+    if (result.error) {
       setWatchlistError(result.error);
+      setCustomNotice(null);
       return;
     }
-    const nextTickers = [...watchlist, result.ticker];
-    nextWatchlistLoadRef.current = { tickers: nextTickers, forceRefresh: true, refreshKind: 'force live' };
-    applyWatchlist(nextTickers, 'my', result.ticker);
-    setWatchlistInput('');
+    setCustomWatchlist(result.tickers);
+    setCustomWatchlistInput(formatCustomWatchlistInput(result.tickers));
     setWatchlistError(null);
-  }, [applyWatchlist, watchlist, watchlistInput]);
+    setCustomNotice(result.messages.length ? result.messages.join(' ') : 'Saved locally in this browser.');
+    applyCustomTickers(result.tickers);
+  }, [applyCustomTickers, customWatchlistInput]);
 
-  const handleRemoveTicker = useCallback((ticker: string) => {
-    if (watchlist.length <= 1) {
-      setWatchlistError('Watchlist must contain at least one ticker.');
+  const handleSaveCustom = useCallback(() => {
+    const result = parseCustomWatchlistInput(customWatchlistInput);
+    if (result.error) {
+      setWatchlistError(result.error);
+      setCustomNotice(null);
       return;
     }
-    const nextTickers = watchlist.filter((item) => item !== ticker);
-    const nextSelectedTicker = selectedTicker === ticker ? nextTickers[0] ?? null : selectedTicker;
-    applyWatchlist(nextTickers, 'my', nextSelectedTicker);
+    setCustomWatchlist(result.tickers);
+    setCustomWatchlistInput(formatCustomWatchlistInput(result.tickers));
     setWatchlistError(null);
-  }, [applyWatchlist, selectedTicker, watchlist]);
+    const saved = writeCustomWatchlist(result.tickers);
+    const status = saved ? 'Saved locally in this browser.' : 'Saved for this session only.';
+    setCustomNotice([...result.messages, status].join(' '));
+  }, [customWatchlistInput]);
 
-  const handleMoveTicker = useCallback((ticker: string, direction: 'up' | 'down') => {
-    const nextTickers = moveVietnamTicker(watchlist, ticker, direction);
-    if (nextTickers === watchlist) return;
-    applyWatchlist(nextTickers, 'my', ticker);
+  const handleClearCustom = useCallback(() => {
+    clearCustomWatchlist();
+    setCustomWatchlist([]);
+    setCustomWatchlistInput('');
     setWatchlistError(null);
-  }, [applyWatchlist, watchlist]);
+    setCustomNotice(null);
+    if (activePresetId === 'custom') {
+      setActivePresetId('my');
+    }
+  }, [activePresetId]);
 
   const handleResetWatchlist = useCallback(() => {
     applyWatchlist(DEFAULT_WATCHLIST, 'my');
-    setWatchlistInput('');
     setWatchlistError(null);
   }, [applyWatchlist]);
 
@@ -3188,12 +3323,6 @@ const VietnamDashboardPage: React.FC = () => {
   }, [loadIndexCoverage]);
 
   useEffect(() => {
-    const queuedLoad = nextWatchlistLoadRef.current;
-    if (queuedLoad) {
-      nextWatchlistLoadRef.current = null;
-      void load(queuedLoad.forceRefresh, queuedLoad.refreshKind, queuedLoad.tickers);
-      return;
-    }
     void load(false, 'manual', logicalWatchlistRef.current);
   }, [load, logicalWatchlistKey]);
 
@@ -3525,7 +3654,7 @@ const VietnamDashboardPage: React.FC = () => {
               Saved locally in this browser. Changes refresh through the normal cached watchlist request.
             </p>
             <p className="mt-1 text-xs text-secondary-text">
-              Preset lists are convenience lists, not investment suggestions.
+              Preset groups are scan buckets only.
             </p>
           </div>
           <Button variant="ghost" size="sm" onClick={handleResetWatchlist}>
@@ -3533,87 +3662,95 @@ const VietnamDashboardPage: React.FC = () => {
             Reset to default
           </Button>
         </div>
-        <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,260px)_1fr] lg:items-end">
-          <label className="flex flex-col text-sm text-secondary-text">
-            Preset list
-            <select
-              value={activePresetId}
-              onChange={handlePresetChange}
-              className="mt-2 h-10 rounded-lg border border-border/70 bg-elevated px-3 text-sm text-foreground"
+        <div className="mt-4">
+          <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Preset groups">
+            <button
+              type="button"
+              aria-pressed={activePresetId === 'custom'}
+              onClick={handleCustomPresetSelect}
+              className={cn(
+                'h-9 rounded-lg border px-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan/25',
+                activePresetId === 'custom'
+                  ? 'border-cyan/50 bg-cyan/15 text-cyan'
+                  : 'border-border/70 bg-elevated text-secondary-text hover:bg-hover hover:text-foreground',
+              )}
             >
-              <option value="my">My Watchlist</option>
-              {VIETNAM_WATCHLIST_PRESETS.map((preset) => (
-                <option key={preset.id} value={preset.id}>{preset.label}</option>
-              ))}
-            </select>
-          </label>
-          <p className="text-xs text-secondary-text">
+              Custom
+            </button>
+            {VIETNAM_DASHBOARD_PRESETS.map((preset) => {
+              const isActive = activePresetId === preset.id;
+              return (
+                <button
+                  key={preset.id}
+                  type="button"
+                  aria-pressed={isActive}
+                  onClick={() => handlePresetSelect(preset.id)}
+                  className={cn(
+                    'h-9 rounded-lg border px-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan/25',
+                    isActive
+                      ? 'border-cyan/50 bg-cyan/15 text-cyan'
+                      : 'border-border/70 bg-elevated text-secondary-text hover:bg-hover hover:text-foreground',
+                  )}
+                >
+                  {preset.label}
+                </button>
+              );
+            })}
+          </div>
+          <p className="mt-2 text-xs text-secondary-text">
             Selecting a preset replaces the active list and refreshes normally through the cached watchlist endpoint.
           </p>
         </div>
-        <form className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-start" onSubmit={handleAddTicker}>
-          <Input
-            label="Ticker"
-            value={watchlistInput}
-            onChange={(event) => {
-              setWatchlistInput(event.target.value);
-              if (watchlistError) setWatchlistError(null);
-            }}
-            error={watchlistError ?? undefined}
-            placeholder="FPT or FPT.VN"
-            autoComplete="off"
-            autoCapitalize="characters"
-            className="uppercase"
-          />
-          <Button type="submit" variant="secondary" className="mt-0 sm:mt-7">
-            <Plus className="h-4 w-4" />
-            Add ticker
-          </Button>
-        </form>
-        {storageWarning ? (
-          <div className="mt-3 flex gap-2 rounded-lg border border-warning/20 bg-warning/10 p-3 text-xs text-warning">
-            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-            <span>{storageWarning}</span>
+        <div className="mt-4 rounded-lg border border-border/60 bg-elevated/30 p-3">
+          <label className="flex flex-col text-sm font-medium text-foreground">
+            Custom watchlist
+            <textarea
+              value={customWatchlistInput}
+              onChange={(event) => {
+                setCustomWatchlistInput(event.target.value);
+                if (watchlistError) setWatchlistError(null);
+              }}
+              placeholder="FPT, VPB, ACB"
+              rows={3}
+              className="mt-2 min-h-20 rounded-lg border border-border/70 bg-card px-3 py-2 text-sm font-normal uppercase text-foreground outline-none transition-colors placeholder:text-muted focus:border-cyan/50 focus:ring-2 focus:ring-cyan/15"
+            />
+          </label>
+          <p className="mt-2 text-xs text-secondary-text">Saved locally in this browser.</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button type="button" variant="secondary" size="sm" onClick={handleApplyCustom}>
+              Apply custom
+            </Button>
+            <Button type="button" variant="outline" size="sm" onClick={handleSaveCustom}>
+              Save custom
+            </Button>
+            <Button type="button" variant="ghost" size="sm" onClick={handleClearCustom}>
+              Clear custom
+            </Button>
           </div>
-        ) : null}
+          {watchlistError ? (
+            <div className="mt-3 flex gap-2 rounded-lg border border-warning/20 bg-warning/10 p-3 text-xs text-warning">
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>{watchlistError}</span>
+            </div>
+          ) : null}
+          {customNotice ? (
+            <div className="mt-3 rounded-lg border border-border/60 bg-card/70 p-3 text-xs text-secondary-text">
+              {customNotice}
+            </div>
+          ) : null}
+        </div>
         <div className="mt-4 flex flex-wrap gap-2">
-          {watchlist.map((ticker, index) => (
+          {watchlist.map((ticker) => (
             <span
               key={ticker}
-              className="inline-flex h-9 items-center gap-1 rounded-lg border border-border/70 bg-elevated px-2 text-sm font-medium text-foreground"
+              className="inline-flex h-9 items-center rounded-lg border border-border/70 bg-elevated px-3 text-sm font-medium text-foreground"
             >
-              <span className="px-1">{ticker}</span>
-              <button
-                type="button"
-                onClick={() => handleMoveTicker(ticker, 'up')}
-                disabled={index === 0}
-                className="inline-flex h-6 w-6 items-center justify-center rounded-md text-secondary-text transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan/25 disabled:pointer-events-none disabled:opacity-35"
-                aria-label={`Move ${ticker} up`}
-              >
-                <ArrowUp className="h-3.5 w-3.5" />
-              </button>
-              <button
-                type="button"
-                onClick={() => handleMoveTicker(ticker, 'down')}
-                disabled={index === watchlist.length - 1}
-                className="inline-flex h-6 w-6 items-center justify-center rounded-md text-secondary-text transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan/25 disabled:pointer-events-none disabled:opacity-35"
-                aria-label={`Move ${ticker} down`}
-              >
-                <ArrowDown className="h-3.5 w-3.5" />
-              </button>
-              <button
-                type="button"
-                onClick={() => handleRemoveTicker(ticker)}
-                className="inline-flex h-5 w-5 items-center justify-center rounded-md text-secondary-text transition-colors hover:bg-danger/10 hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/25"
-                aria-label={`Remove ${ticker}`}
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
+              {ticker}
             </span>
           ))}
         </div>
         <p className="mt-3 text-xs text-secondary-text">
-          Accepted symbols use letters and numbers only, up to 10 characters. A trailing .VN suffix is removed before saving.
+          Custom symbols use uppercase letters and numbers, 2 to 10 characters. Separators: comma, whitespace, semicolon, or newline.
         </p>
       </section>
 
