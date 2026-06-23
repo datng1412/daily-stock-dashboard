@@ -652,14 +652,13 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(header.getByText('FPT Listed Company')).toBeInTheDocument();
     expect(header.getByText('Daily close')).toBeInTheDocument();
     expect(screen.getAllByText('Daily OHLCV volume').length).toBeGreaterThan(0);
-    expect(header.getAllByText('SSI realtime').length).toBeGreaterThan(0);
-    expect(header.getByText('Vs SSI reference')).toBeInTheDocument();
-    expect(header.getByText('Realtime session volume')).toBeInTheDocument();
-    expect(header.getByText('20D avg volume')).toBeInTheDocument();
+    expect(header.getByText('Vs reference')).toBeInTheDocument();
+    expect(header.getByText('Foreign net volume')).toBeInTheDocument();
+    expect(header.getByText('Daily volume / 20D avg')).toBeInTheDocument();
     expect(header.getByText('Latest news')).toBeInTheDocument();
     expect(header.getAllByText('News disabled').length).toBeGreaterThan(0);
     expect(header.getByText('Daily source: SSI DailyOhlc')).toBeInTheDocument();
-    expect(header.getAllByText('SSI realtime').length).toBeGreaterThan(0);
+    expect(header.queryByText('SSI realtime')).not.toBeInTheDocument();
     expect(header.queryByText('SSI unavailable')).not.toBeInTheDocument();
   });
 
@@ -798,14 +797,22 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(header.getByText('Canonical price source: SSI DailyOhlc')).toBeInTheDocument();
     expect(header.getByText('Daily source: SSI DailyOhlc')).toBeInTheDocument();
     expect(header.getByText('No issues detected.')).toBeInTheDocument();
-    expect(header.getByText('Daily OHLCV: OK')).toBeInTheDocument();
-    expect(header.getByText('Intraday: disabled')).toBeInTheDocument();
-    expect(header.getByText('Realtime: OK')).toBeInTheDocument();
-    expect(header.getByText('Trade tape: OK')).toBeInTheDocument();
-    expect(header.getByText('Profile: OK')).toBeInTheDocument();
-    expect(header.getByText('News: disabled')).toBeInTheDocument();
+    expect(header.getByText('Section checks')).toBeInTheDocument();
     expect(screen.getByText('Stock detail')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Indicator table' })).toBeInTheDocument();
+  });
+
+  it('places the indicator table above the selected ticker and diagnostics', async () => {
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledWith(defaultTickers));
+
+    const indicator = screen.getByRole('heading', { name: 'Indicator table' }).closest('section') as HTMLElement;
+    const selected = screen.getByText('Selected ticker').closest('section') as HTMLElement;
+    const diagnostics = screen.getByRole('heading', { name: 'Data status' }).closest('section') as HTMLElement;
+
+    expect(Boolean(indicator.compareDocumentPosition(selected) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    expect(Boolean(selected.compareDocumentPosition(diagnostics) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
   });
 
   it('handles missing selected ticker data quality summary gracefully', async () => {
@@ -880,8 +887,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(header.queryByText('Daily source unavailable')).not.toBeInTheDocument();
     expect(header.getByText('DailyOhlc differs from DailyStockPrice for the same date.')).toBeInTheDocument();
     expect(header.getByText('Profile metadata partial.')).toBeInTheDocument();
-    expect(header.getByText('SSI realtime unavailable.')).toBeInTheDocument();
-    expect(header.getByText('1 more data-quality issue(s) hidden.')).toBeInTheDocument();
+    expect(header.getByText('2 more data-quality issue(s) hidden.')).toBeInTheDocument();
     expect(header.getByText('Intraday: unavailable')).toBeInTheDocument();
     expect(header.getByText('Realtime: unavailable')).toBeInTheDocument();
     expect(header.getByText('Trade tape: unavailable')).toBeInTheDocument();
@@ -1346,8 +1352,8 @@ describe('VietnamDashboardPage watchlist loading', () => {
     const header = within((await screen.findByText('Selected ticker')).closest('section') as HTMLElement);
     expect(header.getByText('FPT Listed Company')).toBeInTheDocument();
     expect(header.getByText('HOSE')).toBeInTheDocument();
-    expect(header.getByText('stock')).toBeInTheDocument();
-    expect(header.getByText('SSI metadata')).toBeInTheDocument();
+    expect(header.queryByText('stock')).not.toBeInTheDocument();
+    expect(header.queryByText('SSI metadata')).not.toBeInTheDocument();
 
     const detail = within(screen.getByText('Stock detail').closest('section') as HTMLElement);
     expect(detail.getByRole('heading', { name: 'SSI symbol metadata' })).toBeInTheDocument();

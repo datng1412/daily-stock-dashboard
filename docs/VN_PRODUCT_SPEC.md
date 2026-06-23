@@ -46,7 +46,8 @@ Purpose:
 Required first-order blocks:
 
 * Watchlist table/cards.
-* Selected ticker header.
+* Indicator table as the primary watchlist scan surface.
+* Compact selected ticker summary.
 * SSI DailyOhlc chart.
 * SSI DailyStockPrice quick facts.
 * Source and freshness summary.
@@ -130,6 +131,10 @@ News disabled.
 ### Diagnostics Separate From Primary UI
 
 Primary UI should show concise source/status copy. Endpoint attempts, HTTP status, retryability, stale-date details, and provider error summaries belong in diagnostics/logs.
+
+### Scan First, Detail Second
+
+On `/vietnam`, the indicator table should sit above the selected ticker detail so users can scan the watchlist first, then inspect the selected ticker. The selected ticker area should remain a compact summary, while diagnostics, index coverage, and deeper per-ticker detail stay lower on the page.
 
 ## MVP Scope
 

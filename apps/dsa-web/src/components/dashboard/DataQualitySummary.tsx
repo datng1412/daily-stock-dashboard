@@ -114,7 +114,7 @@ export const DataQualitySummary: React.FC<{
     .filter((check) => !compact || COMPACT_CHECK_KEYS.has(check.key))
     .map((check) => ({ ...check, status: checks[check.key] }))
     .filter((check) => check.status !== undefined && check.status !== null && check.status !== '');
-  const visibleIssues = compact ? issues.slice(0, 3) : issues;
+  const visibleIssues = compact ? issues.slice(0, 2) : issues;
   const noIssues = issues.length === 0;
 
   return (
@@ -177,7 +177,20 @@ export const DataQualitySummary: React.FC<{
         </ul>
       ) : null}
 
-      {visibleChecks.length > 0 ? (
+      {visibleChecks.length > 0 && compact ? (
+        <details className="mt-3 text-xs text-secondary-text">
+          <summary className="cursor-pointer font-medium text-foreground">Section checks</summary>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {visibleChecks.map((check) => (
+              <Badge key={check.key} variant={statusVariant(check.status)} className="capitalize">
+                {check.label}: {safeStatusLabel(check.status)}
+              </Badge>
+            ))}
+          </div>
+        </details>
+      ) : null}
+
+      {visibleChecks.length > 0 && !compact ? (
         <div className={cn('flex flex-wrap gap-2', compact ? 'mt-3' : 'mt-4')}>
           {visibleChecks.map((check) => (
             <Badge key={check.key} variant={statusVariant(check.status)} className="capitalize">

@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [improvement] Move the VN dashboard indicator table above the selected ticker and simplify the selected ticker summary hierarchy.
 - [fix] Clean legacy Mozyfin/KBS naming from active VN dashboard realtime/trade-tape UI labels and mark superseded VN runbooks.
 - [fix] Standardize VN company source labels for SSI DailyOhlc, DailyStockPrice, live contracts, and future external domains.
 - [fix] Make the VN dashboard top foreign-net card aggregate SSI DailyStockPrice foreign net volume in shares.

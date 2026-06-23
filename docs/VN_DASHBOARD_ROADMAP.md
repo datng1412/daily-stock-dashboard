@@ -788,13 +788,15 @@ These items remain useful, but they are not the near-term SSI migration sequence
 
 ### 1. Improve dashboard visual hierarchy and reduce clutter
 
-Status: partial in first roadmap batch.
+Status: partial in first roadmap batch; updated selected-ticker hierarchy in the scanability pass.
 
 Implemented so far:
 
 * Added a compact Data status summary near the top.
 * Moved selected ticker context and inspect chart ahead of secondary comparison cards.
 * Moved provider/cache/debug details behind collapsed diagnostics.
+* Moved the watchlist scan summary and indicator table above the selected ticker area so the table is the primary scan surface.
+* Simplified the selected ticker card into a compact identity, primary metrics, and compact data-quality summary.
 
 Goal:
 
@@ -817,13 +819,14 @@ Rules:
 
 ### 2. Improve selected ticker header
 
-Status: partial in first roadmap batch.
+Status: partial; compact summary pass implemented.
 
 Implemented so far:
 
 * Added a compact selected ticker header.
-* Shows symbol/company label, Daily close, SSI realtime, Vs SSI reference, Session volume, 20D avg volume, Latest news, and SSI source badges.
+* Shows symbol/company label, Daily close, price date, Vs SSI reference, foreign net volume, daily volume versus 20D average, Latest news, and SSI source badges.
 * Keeps SSI daily, SSI DailyStockPrice, SSI intraday, and SSI realtime labels visually separate.
+* Shows realtime/trade-tape status badges in the selected summary only when they need attention.
 
 Goal:
 
@@ -833,22 +836,21 @@ Suggested header content:
 
 * Symbol and company name
 * SSI daily close
-* SSI realtime snapshot price
 * Price vs SSI reference
-* Session volume
-* 20D average volume
+* Foreign net volume or value with clear units
+* Daily volume versus 20D average volume
 * News freshness
-* Data source badges
+* Daily source badge and meaningful live-status badges
 
 Example:
 
 ```text
 ACB — Asia Commercial Bank
 Daily close: 22.65
-SSI realtime: 22.65
 Price vs SSI reference: -0.88%
-Volume: 14.64M / 20D avg 31.43M
-Sources: SSI daily · SSI realtime
+Foreign net volume: -1.58M shares
+Daily volume: 14.64M / 20D avg 31.43M
+Source: SSI DailyOhlc
 ```
 
 Design rules:

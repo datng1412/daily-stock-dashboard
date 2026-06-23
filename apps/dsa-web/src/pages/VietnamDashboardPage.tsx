@@ -1104,6 +1104,19 @@ const DataStatusPanel: React.FC<{
   );
 };
 
+const SelectedTickerMetric: React.FC<{
+  label: string;
+  value: React.ReactNode;
+  detail?: React.ReactNode;
+  valueClassName?: string;
+}> = ({ label, value, detail, valueClassName }) => (
+  <div className="min-w-0 rounded-lg border border-border/50 bg-elevated/35 p-3">
+    <dt className="text-xs text-secondary-text">{label}</dt>
+    <dd className={cn('mt-1 truncate text-sm font-semibold text-foreground', valueClassName)}>{value}</dd>
+    {detail ? <dd className="mt-1 truncate text-xs text-secondary-text">{detail}</dd> : null}
+  </div>
+);
+
 const SelectedTickerHeader: React.FC<{
   item?: VietnamWatchItem | null;
   realtimeQuote?: VietnamRealtimeQuote | null;
@@ -1112,82 +1125,89 @@ const SelectedTickerHeader: React.FC<{
   if (!item) return null;
   const realtimeState = realtimeSnapshotState(realtimeQuote, marketPhase.code);
   const avgVolume20D = item.indicators.avgVolume20D ?? item.liquidity?.avgVolume20D;
-  const sessionVolume = currentSessionVolume(item, realtimeQuote, realtimeState);
-  const realtimeSnapshotPrice = realtimeQuote?.snapshotPrice ?? realtimeQuote?.realtimePrice;
   const hasRealtimeSnapshot = hasRealtimeSnapshotData(realtimeQuote);
-  const hasSessionVolume = hasDisplayValue(sessionVolume);
   const ssiReferencePrice = item.dailyStockPrice?.referencePrice ?? item.ssiReferencePrice ?? item.priceLimit?.referencePrice ?? null;
   const ssiDailyClose = item.dailyClose ?? item.latestPrice ?? item.close ?? null;
   const priceVsReference = ssiDailyClose != null && ssiReferencePrice != null ? ssiDailyClose - ssiReferencePrice : null;
   const priceVsReferencePct = priceVsReference != null && ssiReferencePrice ? priceVsReference / ssiReferencePrice * 100 : null;
   const metadataExchange = metadataValue(item, 'exchange');
-  const metadataSecurityType = metadataValue(item, 'securityType');
-  const metadataSource = item.symbolMetadata?.source ?? item.metadataSource;
+  const metadataMarket = metadataValue(item, 'market');
   const dailySourceLabel = officialDailySourceLabel(item);
   const dataQualitySummary = item.dataQualitySummary;
+  const foreignNetVolume = item.dailyStockPrice?.foreignNetVolume ?? item.ssiForeignNetVolume ?? null;
+  const dailyVolumeRatio = item.volume != null && avgVolume20D ? item.volume / avgVolume20D : null;
+  const realtimeStatus = realtimeQuote?.status ?? item.realtimeStatus?.status;
+  const showRealtimeStatus = !hasRealtimeSnapshot || realtimeStatus === 'unavailable' || realtimeStatus === 'disabled' || realtimeStatus === 'error' || realtimeState.severity === 'warning' || realtimeState.severity === 'error';
+  const tradeTapeStatus = item.tradeTapeStatus?.status;
+  const showTradeTapeStatus = tradeTapeStatus === 'unavailable' || tradeTapeStatus === 'disabled' || tradeTapeStatus === 'error';
 
   return (
-    <section className="rounded-lg border border-cyan/25 bg-card p-4 shadow-soft-card">
-      <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+    <section className="rounded-lg border border-border/70 bg-card p-4 shadow-soft-card">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(280px,360px)]">
         <div className="min-w-0">
-          <p className="label-uppercase text-cyan">Selected ticker</p>
-          <div className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            <h2 className="text-2xl font-semibold text-foreground">{item.ticker}</h2>
-            <p className="min-w-0 text-sm text-secondary-text">{companyDisplayName(item)}</p>
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div className="min-w-0">
+              <p className="label-uppercase text-cyan">Selected ticker</p>
+              <div className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                <h2 className="text-2xl font-semibold text-foreground">{item.ticker}</h2>
+                <p className="min-w-0 text-sm text-secondary-text">{companyDisplayName(item)}</p>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {metadataExchange ? <Badge variant="default">{metadataExchange}</Badge> : null}
+              {metadataMarket && metadataMarket !== metadataExchange ? <Badge variant="default">{metadataMarket}</Badge> : null}
+              <Badge variant="info">{dailySourceLabel}</Badge>
+              {showRealtimeStatus ? (
+                <Badge variant={realtimeSnapshotStateVariant(realtimeState)}>{realtimeStatusBadgeText(realtimeStatus)}</Badge>
+              ) : null}
+              {showTradeTapeStatus ? (
+                <Badge variant="warning">{tradeTapeStatusBadgeText(tradeTapeStatus)}</Badge>
+              ) : null}
+              {item.newsStatus?.status === 'disabled' ? <Badge variant="default">News disabled</Badge> : null}
+            </div>
           </div>
-          <div className="mt-2 flex flex-wrap gap-2 text-xs text-secondary-text">
-            {metadataExchange ? <Badge variant="default">{metadataExchange}</Badge> : null}
-            {metadataSecurityType ? <Badge variant="default">{metadataSecurityType}</Badge> : null}
-            {metadataSource ? <Badge variant="default">{metadataSource} metadata</Badge> : null}
-          </div>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <Badge variant="info">{dailySourceLabel}</Badge>
-            <Badge variant={realtimeSnapshotStateVariant(realtimeState)}>{realtimeStatusBadgeText(realtimeQuote?.status ?? item.realtimeStatus?.status)}</Badge>
-            <Badge variant={item.tradeTapeStatus?.status === 'unavailable' || item.tradeTapeStatus?.status === 'error' ? 'warning' : 'default'}>
-              {tradeTapeStatusBadgeText(item.tradeTapeStatus?.status)}
-            </Badge>
-            {item.newsStatus?.status === 'disabled' ? <Badge variant="default">News disabled</Badge> : null}
-          </div>
+
+          <dl className="mt-4 grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+            <SelectedTickerMetric
+              label="Daily close"
+              value={formatPrice(item.latestPrice ?? item.close)}
+              detail={item.latestPriceDate ?? item.priceDate ?? '-'}
+            />
+            <SelectedTickerMetric
+              label="Price date"
+              value={item.latestPriceDate ?? item.priceDate ?? '-'}
+              detail="SSI DailyOhlc"
+            />
+            <SelectedTickerMetric
+              label="Vs reference"
+              value={formatReferenceDelta(priceVsReference, priceVsReferencePct)}
+              detail="SSI DailyStockPrice"
+              valueClassName={signalTone(priceVsReference)}
+            />
+            <SelectedTickerMetric
+              label="Foreign net volume"
+              value={hasDisplayValue(foreignNetVolume) ? formatNumber(foreignNetVolume) : '-'}
+              detail="SSI DailyStockPrice · shares"
+              valueClassName={signalTone(foreignNetVolume)}
+            />
+            <SelectedTickerMetric
+              label="Daily volume / 20D avg"
+              value={`${formatNumber(item.volume)} / ${formatNumber(avgVolume20D)}`}
+              detail={dailyVolumeRatio == null ? 'Ratio unavailable' : formatRatio(dailyVolumeRatio)}
+            />
+            <SelectedTickerMetric
+              label="Latest news"
+              value={latestNewsAge(item)}
+              detail={item.newsStatus?.status === 'disabled' ? 'News disabled' : item.newsStatus?.source ?? undefined}
+            />
+          </dl>
         </div>
+
         <DataQualitySummary
           compact
           summary={dataQualitySummary}
-          className="w-full border-cyan/10 bg-elevated/20 xl:max-w-md"
+          className="w-full border-cyan/10 bg-elevated/20"
         />
-        <dl className="grid flex-1 gap-2 text-sm sm:grid-cols-2 xl:max-w-4xl xl:grid-cols-6">
-          <div className="rounded-lg bg-elevated/50 p-3">
-            <dt className="text-xs text-secondary-text">Daily close</dt>
-            <dd className="mt-1 font-semibold text-foreground">{formatPrice(item.latestPrice ?? item.close)}</dd>
-            <dd className="mt-1 text-xs text-secondary-text">{item.latestPriceDate ?? item.priceDate ?? '-'}</dd>
-          </div>
-          {hasRealtimeSnapshot ? (
-          <div className="rounded-lg bg-elevated/50 p-3">
-            <dt className="text-xs text-secondary-text">SSI realtime</dt>
-            <dd className="mt-1 font-semibold text-foreground">{formatPrice(realtimeSnapshotPrice)}</dd>
-            <dd className="mt-1 text-xs text-secondary-text">{realtimeState.label}</dd>
-          </div>
-          ) : null}
-          <div className="rounded-lg bg-elevated/50 p-3">
-            <dt className="text-xs text-secondary-text">Vs SSI reference</dt>
-            <dd className={cn('mt-1 font-semibold', signalTone(priceVsReference))}>
-              {formatReferenceDelta(priceVsReference, priceVsReferencePct)}
-            </dd>
-          </div>
-          {hasSessionVolume ? (
-          <div className="rounded-lg bg-elevated/50 p-3">
-            <dt className="text-xs text-secondary-text">Realtime session volume</dt>
-            <dd className="mt-1 font-semibold text-foreground">{formatNumber(sessionVolume)}</dd>
-          </div>
-          ) : null}
-          <div className="rounded-lg bg-elevated/50 p-3">
-            <dt className="text-xs text-secondary-text">20D avg volume</dt>
-            <dd className="mt-1 font-semibold text-foreground">{formatNumber(avgVolume20D)}</dd>
-          </div>
-          <div className="rounded-lg bg-elevated/50 p-3">
-            <dt className="text-xs text-secondary-text">Latest news</dt>
-            <dd className="mt-1 font-semibold text-foreground">{latestNewsAge(item)}</dd>
-          </div>
-        </dl>
       </div>
     </section>
   );
@@ -3548,27 +3568,6 @@ const VietnamDashboardPage: React.FC = () => {
         </div>
       </section>
 
-      <DataStatusPanel
-        data={data}
-        selectedItem={selectedItem}
-        indexList={indexList}
-        indexComponents={indexComponents}
-        indexCoverageError={indexCoverageError}
-        realtimeQuotes={realtimeQuotes}
-        realtimeTrades={realtimeTrades}
-        watchlist={watchlist}
-        realtimeError={realtimeError}
-        tradesError={tradesError}
-        lastRealtimeSnapshotRefreshAt={lastRealtimeSnapshotRefreshAt}
-        lastTradeTapeRefreshAt={lastTradeTapeRefreshAt}
-        lastRealtimeErrorAt={lastRealtimeErrorAt}
-        realtimeAutoRefreshEnabled={realtimeAutoRefreshEnabled}
-        realtimeSnapshotRefreshInterval={realtimeSnapshotRefreshInterval}
-        tradeTapeRefreshInterval={tradeTapeRefreshInterval}
-        marketPhase={marketPhase}
-        observability={observability}
-      />
-
       {error ? (
         <div className="rounded-lg border border-danger/30 bg-danger/10 p-4 text-sm text-danger">{error}</div>
       ) : null}
@@ -3577,6 +3576,20 @@ const VietnamDashboardPage: React.FC = () => {
         <Loading label="Loading Vietnam watchlist..." />
       ) : (
         <>
+          <WatchlistScanSummary
+            items={data?.watchlist ?? []}
+            realtimeQuotes={realtimeQuotes}
+            marketPhase={marketPhase}
+          />
+          <IndicatorTable
+            items={data?.watchlist ?? []}
+            realtimeQuotes={realtimeQuotes}
+            realtimeLoading={realtimeLoading}
+            realtimeError={realtimeError}
+            selectedTicker={selectedItem?.ticker}
+            marketPhase={marketPhase}
+            onSelect={setSelectedTicker}
+          />
           <SelectedTickerHeader
             item={selectedItem}
             realtimeQuote={selectedItem ? realtimeQuotes[selectedItem.ticker] : null}
@@ -3594,25 +3607,31 @@ const VietnamDashboardPage: React.FC = () => {
             tradesError={tradesError}
             marketPhase={marketPhase}
           />
-          <WatchlistScanSummary
-            items={data?.watchlist ?? []}
-            realtimeQuotes={realtimeQuotes}
-            marketPhase={marketPhase}
-          />
-          <IndicatorTable
-            items={data?.watchlist ?? []}
-            realtimeQuotes={realtimeQuotes}
-            realtimeLoading={realtimeLoading}
-            realtimeError={realtimeError}
-            selectedTicker={selectedItem?.ticker}
-            marketPhase={marketPhase}
-            onSelect={setSelectedTicker}
-          />
           <section className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
             {(data?.watchlist ?? []).map((item) => (
               <WatchCard key={item.ticker} item={item} realtimeQuote={realtimeQuotes[item.ticker]} marketPhase={marketPhase} />
             ))}
           </section>
+          <DataStatusPanel
+            data={data}
+            selectedItem={selectedItem}
+            indexList={indexList}
+            indexComponents={indexComponents}
+            indexCoverageError={indexCoverageError}
+            realtimeQuotes={realtimeQuotes}
+            realtimeTrades={realtimeTrades}
+            watchlist={watchlist}
+            realtimeError={realtimeError}
+            tradesError={tradesError}
+            lastRealtimeSnapshotRefreshAt={lastRealtimeSnapshotRefreshAt}
+            lastTradeTapeRefreshAt={lastTradeTapeRefreshAt}
+            lastRealtimeErrorAt={lastRealtimeErrorAt}
+            realtimeAutoRefreshEnabled={realtimeAutoRefreshEnabled}
+            realtimeSnapshotRefreshInterval={realtimeSnapshotRefreshInterval}
+            tradeTapeRefreshInterval={tradeTapeRefreshInterval}
+            marketPhase={marketPhase}
+            observability={observability}
+          />
         </>
       )}
 
