@@ -548,6 +548,18 @@ const inspectChartCard = () => {
   return within(chartCard as HTMLElement);
 };
 
+const clickChartControl = async (element: Element) => {
+  await act(async () => {
+    fireEvent.click(element);
+  });
+};
+
+const keyDownChartControl = async (target: Window | Document | Element, eventInit: KeyboardEventInit) => {
+  await act(async () => {
+    fireEvent.keyDown(target, eventInit);
+  });
+};
+
 const inspectDateLabels = (chartCard: ReturnType<typeof within>) =>
   chartCard.queryAllByTestId('inspect-chart-date-label').map((label: HTMLElement) => label.textContent ?? '');
 
@@ -1713,7 +1725,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     const initialLabels = inspectDateLabels(chartCard);
     expect(chartCard.getByTestId('inspect-chart-visible-count')).toHaveTextContent('Showing 70 of 70');
 
-    fireEvent.click(chartCard.getByRole('button', { name: 'Zoom in chart' }));
+    await clickChartControl(chartCard.getByRole('button', { name: 'Zoom in chart' }));
 
     expect(chartCard.getByTestId('inspect-chart-visible-count')).toHaveTextContent('Showing 48 of 70');
     expect(inspectDateLabels(chartCard)).not.toEqual(initialLabels);
@@ -1721,7 +1733,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(chartCard.queryByText('Jun 9')).not.toBeInTheDocument();
     expect(chartCard.getByRole('button', { name: 'Zoom out chart' })).toBeEnabled();
 
-    fireEvent.click(chartCard.getByRole('button', { name: 'Zoom out chart' }));
+    await clickChartControl(chartCard.getByRole('button', { name: 'Zoom out chart' }));
 
     expect(chartCard.getByTestId('inspect-chart-visible-count')).toHaveTextContent('Showing 70 of 70');
     expect(inspectDateLabels(chartCard)).toEqual(initialLabels);
@@ -1733,19 +1745,19 @@ describe('VietnamDashboardPage watchlist loading', () => {
     await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('FPT', '6M'));
 
     const chartCard = inspectChartCard();
-    fireEvent.click(chartCard.getByRole('button', { name: 'Zoom in chart' }));
+    await clickChartControl(chartCard.getByRole('button', { name: 'Zoom in chart' }));
     const zoomedLabels = inspectDateLabels(chartCard);
 
     expect(chartCard.getByRole('button', { name: 'Pan left' })).toBeEnabled();
     expect(chartCard.getByRole('button', { name: 'Pan right' })).toBeEnabled();
 
-    fireEvent.click(chartCard.getByRole('button', { name: 'Pan left' }));
+    await clickChartControl(chartCard.getByRole('button', { name: 'Pan left' }));
 
     const leftLabels = inspectDateLabels(chartCard);
     expect(leftLabels).not.toEqual(zoomedLabels);
     expect(chartCard.getByTestId('inspect-chart-visible-count')).toHaveTextContent('Showing 48 of 70');
 
-    fireEvent.click(chartCard.getByRole('button', { name: 'Pan right' }));
+    await clickChartControl(chartCard.getByRole('button', { name: 'Pan right' }));
 
     expect(inspectDateLabels(chartCard)).not.toEqual(leftLabels);
     expect(chartCard.getByTestId('inspect-chart-visible-count')).toHaveTextContent('Showing 48 of 70');
@@ -1757,10 +1769,10 @@ describe('VietnamDashboardPage watchlist loading', () => {
     await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('FPT', '6M'));
 
     const chartCard = inspectChartCard();
-    fireEvent.click(chartCard.getByRole('button', { name: 'Zoom in chart' }));
+    await clickChartControl(chartCard.getByRole('button', { name: 'Zoom in chart' }));
     expect(chartCard.getByTestId('inspect-chart-visible-count')).toHaveTextContent('Showing 48 of 70');
 
-    fireEvent.click(chartCard.getByRole('button', { name: 'Reset chart zoom' }));
+    await clickChartControl(chartCard.getByRole('button', { name: 'Reset chart zoom' }));
 
     expect(chartCard.getByTestId('inspect-chart-visible-count')).toHaveTextContent('Showing 70 of 70');
     expect(chartCard.getByText('Apr 1')).toBeInTheDocument();
@@ -1774,7 +1786,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('FPT', '6M'));
 
     const chartCard = inspectChartCard();
-    fireEvent.click(chartCard.getByRole('button', { name: 'Expand chart' }));
+    await clickChartControl(chartCard.getByRole('button', { name: 'Expand chart' }));
 
     const dialogElement = screen.getByRole('dialog', { name: 'Expanded inspect chart' });
     const dialog = within(dialogElement);
@@ -1789,21 +1801,21 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(dialog.getByTestId('inspect-chart-expanded-visible-count')).toHaveTextContent('Showing 70 of 70');
     expect(dialog.getByTestId('inspect-candlestick-chart')).toBeInTheDocument();
 
-    fireEvent.click(dialog.getByRole('button', { name: 'Zoom in chart' }));
+    await clickChartControl(dialog.getByRole('button', { name: 'Zoom in chart' }));
 
     expect(dialog.getByTestId('inspect-chart-expanded-visible-count')).toHaveTextContent('Showing 48 of 70');
     expect(chartCard.getByTestId('inspect-chart-visible-count')).toHaveTextContent('Showing 48 of 70');
 
-    fireEvent.click(dialog.getByLabelText('Bollinger'));
+    await clickChartControl(dialog.getByLabelText('Bollinger'));
     expect(dialog.getByText('Bollinger upper/mid/lower')).toBeInTheDocument();
     expect(dialog.queryByText(/buy|sell|hold|recommendation/i)).not.toBeInTheDocument();
 
-    fireEvent.click(dialog.getByRole('button', { name: 'Close expanded chart' }));
+    await clickChartControl(dialog.getByRole('button', { name: 'Close expanded chart' }));
     expect(screen.queryByRole('dialog', { name: 'Expanded inspect chart' })).not.toBeInTheDocument();
 
-    fireEvent.click(chartCard.getByRole('button', { name: 'Expand chart' }));
+    await clickChartControl(chartCard.getByRole('button', { name: 'Expand chart' }));
     expect(screen.getByRole('dialog', { name: 'Expanded inspect chart' })).toBeInTheDocument();
-    fireEvent.keyDown(window, { key: 'Escape' });
+    await keyDownChartControl(window, { key: 'Escape' });
     expect(screen.queryByRole('dialog', { name: 'Expanded inspect chart' })).not.toBeInTheDocument();
   });
 
@@ -1818,7 +1830,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     const chartCard = within(chartHeading.closest('div')?.parentElement?.parentElement as HTMLElement);
 
     expect(chartCard.queryByTestId('inspect-legend-bollinger')).not.toBeInTheDocument();
-    fireEvent.click(chartCard.getByLabelText('Bollinger'));
+    await clickChartControl(chartCard.getByLabelText('Bollinger'));
     expect(chartCard.getByTestId('inspect-legend-bollinger')).toHaveTextContent('Bollinger upper/mid/lower');
   });
 
@@ -1831,7 +1843,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     const chartHeading = detail.getByRole('heading', { name: 'Inspect chart' });
     const chartCard = within(chartHeading.closest('div')?.parentElement?.parentElement as HTMLElement);
 
-    fireEvent.click(chartCard.getByRole('button', { name: '1Y' }));
+    await clickChartControl(chartCard.getByRole('button', { name: '1Y' }));
 
     await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('FPT', '1Y'));
     expect(chartCard.getByRole('button', { name: '1Y' })).toHaveAttribute('aria-pressed', 'true');
@@ -1852,10 +1864,10 @@ describe('VietnamDashboardPage watchlist loading', () => {
     await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('FPT', '6M'));
 
     const chartCard = inspectChartCard();
-    fireEvent.click(chartCard.getByRole('button', { name: 'Zoom in chart' }));
+    await clickChartControl(chartCard.getByRole('button', { name: 'Zoom in chart' }));
     expect(chartCard.getByTestId('inspect-chart-visible-count')).toHaveTextContent('Showing 48 of 70');
 
-    fireEvent.click(chartCard.getByRole('button', { name: '1M' }));
+    await clickChartControl(chartCard.getByRole('button', { name: '1M' }));
 
     await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('FPT', '1M'));
     await waitFor(() => expect(chartCard.getByTestId('inspect-chart-visible-count')).toHaveTextContent('Showing 30 of 30'));
