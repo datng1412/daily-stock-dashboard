@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [improvement] Polish the VN dashboard indicator table with compact daily scan columns and client-side sorting.
 - [new feature] Add local-only custom VN dashboard watchlists with browser persistence.
 - [new feature] Add frontend-only VN dashboard watchlist preset groups for common scan buckets.
 - [test] Add a local VN dashboard smoke/regression harness for strict SSI contract checks.

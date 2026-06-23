@@ -733,14 +733,6 @@ const watchlistScanState = (
   return { label: 'Neutral', variant: 'default', reason: 'No strong directional condition' };
 };
 
-const realtimeSnapshotStateTone = (state: RealtimeSnapshotDisplayResult) => {
-  if (state.severity === 'ok') return 'text-success';
-  if (state.severity === 'info') return 'text-cyan';
-  if (state.severity === 'warning') return 'text-warning';
-  if (state.severity === 'error') return 'text-danger';
-  return 'text-secondary-text';
-};
-
 const scanTone = (label: WatchlistScanLabel) => {
   if (label === 'Strong') return 'text-success';
   if (label === 'Improving') return 'text-cyan';
@@ -1459,31 +1451,122 @@ const WatchlistScanSummary: React.FC<{
   );
 };
 
-const TableCaveatCell: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
-  const caveats = dataCaveatDetails(item);
-  const warnings = importantWarnings(item);
-  const total = caveats.length + warnings.length;
-  if (!total) return <span data-testid={`table-caveats-${item.ticker}`}><Badge variant="success">None</Badge></span>;
+type IndicatorSortKey = 'ticker' | 'dailyClose' | 'changePct' | 'rsi14' | 'volumeRatio' | 'foreignNetVolume' | 'dataQuality';
+type IndicatorSortDirection = 'asc' | 'desc';
+type IndicatorSortState = { key: IndicatorSortKey; direction: IndicatorSortDirection } | null;
 
-  return (
-    <details className="max-w-[220px]" data-testid={`table-caveats-${item.ticker}`} onClick={(event) => event.stopPropagation()}>
-      <summary className="cursor-pointer list-none">
-        <Badge variant="warning">{total} caveat{total === 1 ? '' : 's'}</Badge>
-      </summary>
-      <div className="mt-2 space-y-2 rounded-lg border border-border/60 bg-elevated/40 p-2 text-xs text-secondary-text">
-        {caveats.map((detail) => (
-          <div key={`${item.ticker}-caveat-${detail.label}`}>
-            <span className="font-medium text-foreground">{detail.label}</span>
-            <span> - {detail.reason}</span>
-          </div>
-        ))}
-        {warnings.map((warning) => (
-          <div key={`${item.ticker}-warning-${warning}`}>{warning}</div>
-        ))}
-      </div>
-    </details>
-  );
+const dailyCloseValue = (item: VietnamWatchItem) => (
+  finiteNumber(item.dailyClose)
+  ?? finiteNumber(item.ohlcvClose)
+  ?? finiteNumber(item.latestPrice)
+  ?? finiteNumber(item.close)
+);
+
+const rsi14Value = (item: VietnamWatchItem) => (
+  finiteNumber(item.indicators.rsi14Wilder) ?? finiteNumber(item.indicators.rsi14)
+);
+
+const volumeRatioValue = (item: VietnamWatchItem) => {
+  const explicitRatio = finiteNumber(item.indicators.volumeRatio);
+  if (explicitRatio !== null) return explicitRatio;
+  const volume = finiteNumber(item.volume);
+  const average = finiteNumber(item.indicators.avgVolume20D) ?? finiteNumber(item.liquidity?.avgVolume20D);
+  if (volume === null || average === null || average === 0) return null;
+  return volume / average;
 };
+
+const foreignNetVolumeValue = (item: VietnamWatchItem) => (
+  finiteNumber(item.dailyStockPrice?.foreignNetVolume) ?? finiteNumber(item.ssiForeignNetVolume)
+);
+
+const dataQualityStatus = (item: VietnamWatchItem): 'ok' | 'partial' | 'unavailable' => {
+  if (!hasOfficialDailyData(item)) return 'unavailable';
+  const status = item.dataQualitySummary?.overallStatus;
+  if (status === 'ok' || status === 'partial' || status === 'unavailable') return status;
+  return 'ok';
+};
+
+const dataQualityRank = (item: VietnamWatchItem) => {
+  const status = dataQualityStatus(item);
+  if (status === 'ok') return 0;
+  if (status === 'partial') return 1;
+  return 2;
+};
+
+const dataQualityBadge = (item: VietnamWatchItem) => {
+  const status = dataQualityStatus(item);
+  if (status === 'ok') return { label: 'OK', variant: 'success' as BadgeVariant };
+  if (status === 'partial') return { label: 'Partial', variant: 'warning' as BadgeVariant };
+  return { label: 'Unavailable', variant: 'danger' as BadgeVariant };
+};
+
+const maStateBadge = (item: VietnamWatchItem) => {
+  const close = dailyCloseValue(item);
+  const ma20 = finiteNumber(item.indicators.ma20);
+  const ma50 = finiteNumber(item.indicators.ma50);
+  if (close === null || ma20 === null) {
+    return { label: 'Insufficient data', variant: 'default' as BadgeVariant };
+  }
+  if (ma50 !== null && ((close >= ma20 && close < ma50) || (close < ma20 && close >= ma50))) {
+    return { label: 'Mixed', variant: 'info' as BadgeVariant };
+  }
+  if (close >= ma20) return { label: 'Above MA20', variant: 'success' as BadgeVariant };
+  return { label: 'Below MA20', variant: 'warning' as BadgeVariant };
+};
+
+const liveStatusBadge = (item: VietnamWatchItem, quote: VietnamRealtimeQuote | undefined, marketPhase: VietnamMarketPhase) => {
+  const status = quote?.status ?? item.realtimeStatus?.status ?? item.dataQualitySummary?.checks?.realtime;
+  const state = realtimeSnapshotState(quote, marketPhase.code);
+  if (status === 'disabled') return { label: 'Realtime disabled', variant: 'default' as BadgeVariant };
+  if (hasRealtimeSnapshotData(quote) && state.severity !== 'warning' && state.severity !== 'error') {
+    return { label: 'Realtime ok', variant: 'success' as BadgeVariant };
+  }
+  return { label: 'Realtime unavailable', variant: 'warning' as BadgeVariant };
+};
+
+const sortValueForItem = (item: VietnamWatchItem, key: IndicatorSortKey): string | number | null => {
+  switch (key) {
+    case 'ticker':
+      return item.ticker;
+    case 'dailyClose':
+      return dailyCloseValue(item);
+    case 'changePct':
+      return finiteNumber(item.changePct);
+    case 'rsi14':
+      return rsi14Value(item);
+    case 'volumeRatio':
+      return volumeRatioValue(item);
+    case 'foreignNetVolume':
+      return foreignNetVolumeValue(item);
+    case 'dataQuality':
+      return dataQualityRank(item);
+    default:
+      return null;
+  }
+};
+
+const compareIndicatorSortValues = (
+  left: string | number | null,
+  right: string | number | null,
+  direction: IndicatorSortDirection,
+) => {
+  if (left === null && right === null) return 0;
+  if (left === null) return 1;
+  if (right === null) return -1;
+  const result = typeof left === 'string' && typeof right === 'string'
+    ? left.localeCompare(right)
+    : Number(left) - Number(right);
+  return direction === 'asc' ? result : -result;
+};
+
+const nextIndicatorSortState = (
+  current: IndicatorSortState,
+  key: IndicatorSortKey,
+): IndicatorSortState => (
+  current?.key === key
+    ? { key, direction: current.direction === 'asc' ? 'desc' : 'asc' }
+    : { key, direction: 'asc' }
+);
 
 const IndicatorTable: React.FC<{
   items: VietnamWatchItem[];
@@ -1493,118 +1576,128 @@ const IndicatorTable: React.FC<{
   selectedTicker?: string | null;
   marketPhase: VietnamMarketPhase;
   onSelect: (ticker: string) => void;
-}> = ({ items, realtimeQuotes, realtimeLoading = false, realtimeError, selectedTicker, marketPhase, onSelect }) => (
-  <section className="rounded-lg border border-border/70 bg-card p-4">
-    <div className="mb-3 flex items-center justify-between gap-3">
-      <h2 className="text-base font-semibold text-foreground">Indicator table</h2>
-      <span className="text-xs text-secondary-text">
-        Neutral status labels only{realtimeLoading ? ' | loading SSI realtime' : ''}
-      </span>
-    </div>
-    {realtimeError ? (
-      <div className="mb-3 rounded-lg border border-warning/20 bg-warning/10 p-2 text-xs text-warning">
-        SSI realtime unavailable. Daily SSI data is still available.
+}> = ({ items, realtimeQuotes, realtimeLoading = false, realtimeError, selectedTicker, marketPhase, onSelect }) => {
+  const [sortState, setSortState] = useState<IndicatorSortState>(null);
+  const sortedItems = useMemo(() => {
+    if (!sortState) return items;
+    return items
+      .map((item, index) => ({ item, index }))
+      .sort((left, right) => {
+        const result = compareIndicatorSortValues(
+          sortValueForItem(left.item, sortState.key),
+          sortValueForItem(right.item, sortState.key),
+          sortState.direction,
+        );
+        return result || left.index - right.index;
+      })
+      .map(({ item }) => item);
+  }, [items, sortState]);
+  const sortDirectionLabel = (key: IndicatorSortKey) => (
+    sortState?.key === key ? (sortState.direction === 'asc' ? ' asc' : ' desc') : ''
+  );
+  const sortButton = (key: IndicatorSortKey, label: string, className = '') => (
+    <button
+      type="button"
+      className={cn('inline-flex items-center gap-1 text-left font-medium uppercase tracking-normal text-secondary-text hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan/25', className)}
+      onClick={() => setSortState((current) => nextIndicatorSortState(current, key))}
+      aria-label={`Sort by ${label}${sortDirectionLabel(key)}`}
+    >
+      {label}
+      {sortState?.key === key ? <span aria-hidden="true">{sortState.direction === 'asc' ? '↑' : '↓'}</span> : null}
+    </button>
+  );
+
+  return (
+    <section className="rounded-lg border border-border/70 bg-card p-4">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <h2 className="text-base font-semibold text-foreground">Indicator table</h2>
+        <span className="text-xs text-secondary-text">
+          Daily scan surface{realtimeLoading ? ' | loading SSI realtime' : ''}
+        </span>
       </div>
-    ) : null}
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-[1360px] text-left text-sm">
-        <thead className="border-b border-border/70 text-xs uppercase text-secondary-text">
-          <tr>
-            <th className="py-2 pr-3">Ticker</th>
-            <th className="px-3 py-2">Scan state</th>
-            <th className="px-3 py-2">Status</th>
-            <th className="px-3 py-2 text-right">Daily close</th>
-            <th className="px-3 py-2">Source</th>
-            <th className="px-3 py-2">Price date</th>
-            <th className="px-3 py-2 text-right">SSI realtime</th>
-            <th className="px-3 py-2 text-right">Realtime change</th>
-            <th className="px-3 py-2">SSI time</th>
-            <th className="px-3 py-2 text-right">Intraday change</th>
-            <th className="px-3 py-2">Final close</th>
-            <th className="px-3 py-2 text-right">MA20</th>
-            <th className="px-3 py-2 text-right">RSI14 Wilder/RMA</th>
-            <th className="px-3 py-2 text-right">Session vol / 20D avg</th>
-            <th className="px-3 py-2">Caveats</th>
-            <th className="px-3 py-2">Daily cache</th>
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((item) => {
-            const quote = realtimeQuotes[item.ticker];
-            const realtimeState = realtimeSnapshotState(quote, marketPhase.code);
-            const sessionVolumeRatioText = sessionVolumeToAvgDailyVolume(item, quote, realtimeState);
-            const scanState = watchlistScanState(item, quote, marketPhase.code);
-            const dailyFreshness = officialDailyCacheFreshness(item);
-            return (
-              <tr
-                key={item.ticker}
-                className={cn(
-                  'cursor-pointer border-b border-border/40 text-secondary-text hover:bg-elevated/40',
-                  selectedTicker === item.ticker && 'bg-elevated/60 text-foreground',
-                )}
-                onClick={() => onSelect(item.ticker)}
-              >
-                <td className="py-3 pr-3 font-semibold text-foreground">
-                  <a
-                    href={`/vietnam/company/${item.ticker}`}
-                    className="text-foreground hover:text-cyan"
-                    aria-label={`Open ${item.ticker} company research`}
-                    onClick={(event) => event.stopPropagation()}
-                  >
-                    {item.ticker}
-                  </a>
-                </td>
-                <td className="px-3 py-3">
-                  <Badge variant={scanState.variant} data-testid={`scan-state-${item.ticker}`}>{scanState.label}</Badge>
-                  <div className="mt-1 max-w-[180px] text-xs text-secondary-text">{scanState.reason}</div>
-                </td>
-                <td className="px-3 py-3">
-                  <div className="flex flex-wrap gap-1">
-                    {marketStatusLabels(item, 3).map((label) => (
-                      <Badge key={label} variant={statusVariant(label)}>{label}</Badge>
-                    ))}
-                    {marketStatusLabels(item, item.statusLabels?.length ?? 0).length > 3 ? <Badge variant="default">+{marketStatusLabels(item, item.statusLabels?.length ?? 0).length - 3}</Badge> : null}
-                  </div>
-                </td>
-                <td className="px-3 py-3 text-right">{formatPrice(item.latestPrice ?? item.close)}</td>
-                <td className="px-3 py-3">
-                  <Badge variant={priceSourceVariant(item.latestPriceSource)}>{(item.latestPriceSource ?? 'unknown').toUpperCase()}</Badge>
-                </td>
-                <td className="px-3 py-3">{item.latestPriceDate ?? item.priceDate ?? '-'}</td>
-                <td className="px-3 py-3 text-right">
-                  <div className="font-medium text-foreground">{formatPrice(quote?.realtimePrice)}</div>
-                  <div className={cn('mt-1 text-xs font-medium', realtimeSnapshotStateTone(realtimeState))}>{realtimeState.label}</div>
-                </td>
-                <td className={cn('px-3 py-3 text-right', signalTone(quote?.priceChange))}>
-                  {formatPrice(quote?.priceChange)} / {formatNumber(quote?.percentChange, 2)}%
-                </td>
-                <td className="px-3 py-3">{quote?.realtimeTimeDisplay ?? quote?.realtimeTime ?? '-'}</td>
-                <td className={cn('px-3 py-3 text-right', signalTone(intradayChange(item)))}>
-                  {formatNumber(intradayChangePercent(item), 2)}%
-                </td>
-                <td className="px-3 py-3">
-                  <Badge variant={item.finalCloseStatus === 'final' ? 'success' : item.finalCloseStatus === 'not_final' ? 'warning' : 'default'}>
-                    {finalCloseDisplayLabel(item.finalCloseStatus)}
-                  </Badge>
-                </td>
-                <td className="px-3 py-3 text-right">{formatPrice(item.indicators.ma20)}</td>
-                <td className="px-3 py-3 text-right">{formatNumber(item.indicators.rsi14Wilder ?? item.indicators.rsi14, 2)}</td>
-                <td className="px-3 py-3 text-right">{sessionVolumeRatioText}</td>
-                <td className="px-3 py-3">
-                  <TableCaveatCell item={item} />
-                </td>
-                <td className="px-3 py-3">
-                  <Badge variant={dailyFreshness.variant}>{dailyFreshness.label}</Badge>
-                  <div className="mt-1 text-xs text-secondary-text">{formatRelativeAge(latestFetchedValue(item))}</div>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
-  </section>
-);
+      {realtimeError ? (
+        <div className="mb-3 rounded-lg border border-warning/20 bg-warning/10 p-2 text-xs text-warning">
+          SSI realtime unavailable. Daily SSI data is still available.
+        </div>
+      ) : null}
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[1040px] text-left text-sm">
+          <thead className="border-b border-border/70 text-xs uppercase text-secondary-text">
+            <tr>
+              <th className="py-2 pr-3">{sortButton('ticker', 'Ticker')}</th>
+              <th className="px-3 py-2 text-right">{sortButton('dailyClose', 'Daily close', 'ml-auto')}</th>
+              <th className="px-3 py-2 text-right">{sortButton('changePct', '% change', 'ml-auto')}</th>
+              <th className="px-3 py-2 text-right">{sortButton('rsi14', 'RSI14', 'ml-auto')}</th>
+              <th className="px-3 py-2">MA state</th>
+              <th className="px-3 py-2 text-right">{sortButton('volumeRatio', 'Volume / 20D avg', 'ml-auto')}</th>
+              <th className="px-3 py-2 text-right">{sortButton('foreignNetVolume', 'Foreign net volume', 'ml-auto')}</th>
+              <th className="px-3 py-2">{sortButton('dataQuality', 'Data quality')}</th>
+              <th className="px-3 py-2">Realtime / live status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sortedItems.map((item) => {
+              const quote = realtimeQuotes[item.ticker];
+              const close = dailyCloseValue(item);
+              const volumeRatio = volumeRatioValue(item);
+              const foreignNetVolume = foreignNetVolumeValue(item);
+              const dataQuality = dataQualityBadge(item);
+              const maState = maStateBadge(item);
+              const liveStatus = liveStatusBadge(item, quote, marketPhase);
+              return (
+                <tr
+                  key={item.ticker}
+                  data-testid={`indicator-row-${item.ticker}`}
+                  className={cn(
+                    'cursor-pointer border-b border-border/40 text-secondary-text hover:bg-elevated/40',
+                    selectedTicker === item.ticker && 'bg-elevated/60 text-foreground',
+                  )}
+                  onClick={() => onSelect(item.ticker)}
+                >
+                  <td className="py-3 pr-3 font-semibold text-foreground">
+                    <a
+                      href={`/vietnam/company/${item.ticker}`}
+                      className="text-foreground hover:text-cyan"
+                      aria-label={`Open ${item.ticker} company research`}
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      {item.ticker}
+                    </a>
+                    <div className="mt-1 text-xs font-normal text-secondary-text">{companyDisplayName(item)}</div>
+                  </td>
+                  <td className="px-3 py-3 text-right">
+                    <div className="font-medium text-foreground">{formatPrice(close)}</div>
+                    <div className="mt-1 text-xs text-secondary-text">SSI DailyOhlc</div>
+                  </td>
+                  <td className={cn('px-3 py-3 text-right font-medium', signalTone(item.changePct))}>
+                    {hasDisplayValue(item.changePct) ? `${formatSignedNumber(item.changePct, 2)}%` : '-'}
+                  </td>
+                  <td className="px-3 py-3 text-right">{formatNumber(rsi14Value(item), 2)}</td>
+                  <td className="px-3 py-3">
+                    <Badge variant={maState.variant}>{maState.label}</Badge>
+                  </td>
+                  <td className="px-3 py-3 text-right">
+                    {volumeRatio === null ? '-' : `${formatNumber(volumeRatio, 2)}x`}
+                  </td>
+                  <td className={cn('px-3 py-3 text-right font-medium', signalTone(foreignNetVolume))}>
+                    <div>{hasDisplayValue(foreignNetVolume) ? formatSignedNumber(foreignNetVolume, 0) : '-'}</div>
+                    <div className="mt-1 text-xs font-normal text-secondary-text">SSI DailyStockPrice</div>
+                  </td>
+                  <td className="px-3 py-3">
+                    <Badge variant={dataQuality.variant}>{dataQuality.label}</Badge>
+                  </td>
+                  <td className="px-3 py-3">
+                    <Badge variant={liveStatus.variant}>{liveStatus.label}</Badge>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+};
 
 const CHART_WIDTH = 960;
 const PRICE_TOP = 24;

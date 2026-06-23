@@ -259,6 +259,14 @@ Phase 3.0B status:
 * Invalid or empty custom input does not replace the active watchlist.
 * Custom persistence is local-only: no backend storage, server sync, new endpoints, provider calls, polling changes, or source semantics changes.
 
+Phase 3.1 status:
+
+* Polished the `/vietnam` indicator table as the main daily scan surface.
+* Prioritized compact columns for ticker, SSI DailyOhlc daily close, percent change, RSI14, MA state, volume versus 20D average, SSI DailyStockPrice foreign net volume, data quality, and realtime/live status.
+* Added client-side sorting for ticker, daily close, percent change, RSI14, volume ratio, foreign net volume, and data quality.
+* Sorting keeps null values last, does not issue API calls, and does not change the selected ticker.
+* Realtime/live status remains a separate availability badge and does not replace daily data.
+
 Current issues:
 
 * Profile can show unavailable fields while source coverage says OK.

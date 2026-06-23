@@ -47,7 +47,7 @@ Required first-order blocks:
 
 * Watchlist table/cards.
 * Preset scan buckets for VN30, sectors, and common market groups.
-* Indicator table as the primary watchlist scan surface.
+* Sortable indicator table as the primary watchlist scan surface.
 * Compact selected ticker summary.
 * SSI DailyOhlc chart.
 * SSI DailyStockPrice quick facts.
@@ -186,6 +186,8 @@ Normalize unavailable public data to `intraday_pulse = null`, `intraday_candles 
 Phase 3.0A implemented a frontend-only watchlist preset-group pass before the company detail redesign. Preset groups are scan buckets only: switching a preset changes the requested ticker list, keeps the selected ticker when it remains in the group, otherwise selects the first ticker, and does not add provider calls, polling, or data-source changes.
 
 Phase 3.0B added a local Custom preset workflow. Users can apply, save, and clear a comma/whitespace/semicolon/newline-separated ticker list stored under `vnDashboard.customWatchlist.v1` in browser localStorage. Invalid or empty custom input does not replace the active watchlist. The feature is local-only and does not add backend storage, server sync, or new endpoints.
+
+Phase 3.1 polished the `/vietnam` indicator table into the main daily scan surface. The table prioritizes ticker, SSI DailyOhlc daily close, change percent, RSI14, MA state, daily volume versus 20D average, SSI DailyStockPrice foreign net volume, data quality, and realtime/live status. Sorting is client-side only and does not trigger watchlist reloads or change data-source semantics.
 
 Redesign the company detail page as a data-quality report with a strong header, Data Quality Summary, daily core data, lower-prominence live availability, grouped future modules, and collapsible diagnostics.
 

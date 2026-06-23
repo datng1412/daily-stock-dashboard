@@ -533,6 +533,21 @@ const clickTickerRow = (ticker: string) => {
   fireEvent.click(row);
 };
 
+const indicatorTableSection = () => {
+  const indicatorTable = screen.getByRole('heading', { name: 'Indicator table' }).closest('section');
+  if (!indicatorTable) throw new Error('Indicator table section not found');
+  return indicatorTable as HTMLElement;
+};
+
+const indicatorRowOrder = () => (
+  Array.from(indicatorTableSection().querySelectorAll('tbody tr'))
+    .map((row) => row.getAttribute('data-testid')?.replace('indicator-row-', '') ?? '')
+);
+
+const clickIndicatorSort = (name: RegExp | string) => {
+  fireEvent.click(within(indicatorTableSection()).getByRole('button', { name }));
+};
+
 const dataStatusPanel = () => {
   const panel = screen.getByRole('heading', { name: 'Data status' }).closest('section');
   if (!panel) throw new Error('Data status panel not found');
@@ -1348,15 +1363,138 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(scanSummary.getByText('Data unavailable').closest('div')).toHaveTextContent('2');
     expect(scanSummary.queryByText(/buy|sell|hold/i)).not.toBeInTheDocument();
 
-    const indicatorTable = within(screen.getByRole('heading', { name: 'Indicator table' }).closest('section') as HTMLElement);
-    expect(indicatorTable.getByText('Scan state')).toBeInTheDocument();
-    expect(indicatorTable.getByTestId('scan-state-FPT')).toHaveTextContent('Strong');
-    expect(indicatorTable.getByTestId('scan-state-VPB')).toHaveTextContent('Weakening');
-    expect(indicatorTable.getByTestId('scan-state-MSB')).toHaveTextContent('Neutral');
-    expect(indicatorTable.getByTestId('scan-state-SCS')).toHaveTextContent('Data unavailable');
-    expect(indicatorTable.getByTestId('scan-state-ACV')).toHaveTextContent('Data unavailable');
-    expect(indicatorTable.getByTestId('table-caveats-FPT')).toHaveTextContent('None');
-    expect(indicatorTable.getByTestId('table-caveats-MSB')).toHaveTextContent('4 caveats');
+    const indicatorTable = within(indicatorTableSection());
+    expect(indicatorTable.getByRole('button', { name: /Sort by Ticker/i })).toBeInTheDocument();
+    expect(indicatorTable.getByRole('button', { name: /Sort by Daily close/i })).toBeInTheDocument();
+    expect(indicatorTable.getByRole('button', { name: /Sort by % change/i })).toBeInTheDocument();
+    expect(indicatorTable.getByRole('button', { name: /Sort by RSI14/i })).toBeInTheDocument();
+    expect(indicatorTable.getByText('MA state')).toBeInTheDocument();
+    expect(indicatorTable.getByRole('button', { name: /Sort by Volume \/ 20D avg/i })).toBeInTheDocument();
+    expect(indicatorTable.getByRole('button', { name: /Sort by Foreign net volume/i })).toBeInTheDocument();
+    expect(indicatorTable.getByRole('button', { name: /Sort by Data quality/i })).toBeInTheDocument();
+    expect(indicatorTable.getByText('Realtime / live status')).toBeInTheDocument();
+    expect(indicatorTable.getByTestId('indicator-row-FPT')).toHaveTextContent('OK');
+    expect(indicatorTable.getByTestId('indicator-row-FPT')).toHaveTextContent('Above MA20');
+    expect(indicatorTable.getByTestId('indicator-row-SCS')).toHaveTextContent('Unavailable');
+  });
+
+  it('sorts the indicator table by ticker without reloading or changing selection', async () => {
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+    const watchlistCalls = mockedGetVietnamWatchlist.mock.calls.length;
+
+    clickIndicatorSort(/Sort by Ticker/i);
+
+    expect(indicatorRowOrder()).toEqual(['ACB', 'ACV', 'FPT', 'MSB', 'SCS', 'VPB']);
+    expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistCalls);
+    expect(selectedTickerHeader().getByRole('heading', { name: 'FPT' })).toBeInTheDocument();
+
+    clickIndicatorSort(/Sort by Ticker asc/i);
+
+    expect(indicatorRowOrder()).toEqual(['VPB', 'SCS', 'MSB', 'FPT', 'ACV', 'ACB']);
+    expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistCalls);
+    expect(selectedTickerHeader().getByRole('heading', { name: 'FPT' })).toBeInTheDocument();
+  });
+
+  it('sorts the indicator table by daily close with null values last', async () => {
+    const response = makeResponse(defaultTickers);
+    const prices: Record<string, number | null> = { FPT: 100, VPB: null, MSB: 50, SCS: 200, ACV: 75, ACB: null };
+    response.watchlist = response.watchlist.map((item) => ({
+      ...item,
+      latestPrice: prices[item.ticker],
+      dailyClose: prices[item.ticker],
+      ohlcvClose: prices[item.ticker],
+      close: prices[item.ticker],
+      validation: prices[item.ticker] === null
+        ? { valid: false, tradingDate: item.validation.tradingDate, missingFields: ['close'], errors: ['Missing daily close'] }
+        : item.validation,
+    }));
+    mockedGetVietnamWatchlist.mockResolvedValue(response);
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+
+    clickIndicatorSort(/Sort by Daily close/i);
+
+    expect(indicatorRowOrder()).toEqual(['MSB', 'ACV', 'FPT', 'SCS', 'VPB', 'ACB']);
+
+    clickIndicatorSort(/Sort by Daily close asc/i);
+
+    expect(indicatorRowOrder()).toEqual(['SCS', 'FPT', 'ACV', 'MSB', 'VPB', 'ACB']);
+  });
+
+  it('sorts the indicator table by RSI14', async () => {
+    const response = makeResponse(defaultTickers);
+    const rsiValues: Record<string, number> = { FPT: 55, VPB: 25, MSB: 70, SCS: 45, ACV: 10, ACB: 60 };
+    response.watchlist = response.watchlist.map((item) => ({
+      ...item,
+      indicators: { ...item.indicators, rsi14: rsiValues[item.ticker], rsi14Wilder: rsiValues[item.ticker] },
+    }));
+    mockedGetVietnamWatchlist.mockResolvedValue(response);
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+
+    clickIndicatorSort(/Sort by RSI14/i);
+
+    expect(indicatorRowOrder()).toEqual(['ACV', 'VPB', 'SCS', 'FPT', 'ACB', 'MSB']);
+  });
+
+  it('sorts the indicator table by foreign net volume', async () => {
+    const response = makeResponse(defaultTickers);
+    const foreignNet: Record<string, number | null> = { FPT: -5, VPB: 20, MSB: 0, SCS: -100, ACV: 15, ACB: null };
+    response.watchlist = response.watchlist.map((item) => ({
+      ...item,
+      ssiForeignNetVolume: foreignNet[item.ticker],
+      dailyStockPrice: { ...item.dailyStockPrice, foreignNetVolume: foreignNet[item.ticker] },
+    }));
+    mockedGetVietnamWatchlist.mockResolvedValue(response);
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+
+    clickIndicatorSort(/Sort by Foreign net volume/i);
+
+    expect(indicatorRowOrder()).toEqual(['SCS', 'FPT', 'MSB', 'ACV', 'VPB', 'ACB']);
+  });
+
+  it('sorts the indicator table by data quality', async () => {
+    const response = makeResponse(defaultTickers);
+    const quality: Record<string, 'ok' | 'partial' | 'unavailable'> = {
+      FPT: 'partial',
+      VPB: 'ok',
+      MSB: 'unavailable',
+      SCS: 'partial',
+      ACV: 'ok',
+      ACB: 'unavailable',
+    };
+    response.watchlist = response.watchlist.map((item) => ({
+      ...item,
+      dataQualitySummary: { ...item.dataQualitySummary, overallStatus: quality[item.ticker] },
+    }));
+    mockedGetVietnamWatchlist.mockResolvedValue(response);
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+
+    clickIndicatorSort(/Sort by Data quality/i);
+
+    expect(indicatorRowOrder()).toEqual(['VPB', 'ACV', 'FPT', 'SCS', 'MSB', 'ACB']);
+  });
+
+  it('selected ticker row click still updates selected ticker after table polish', async () => {
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+
+    clickTickerRow('ACB');
+
+    expect(selectedTickerHeader().getByRole('heading', { name: 'ACB' })).toBeInTheDocument();
   });
 
   it('does not mark rows unavailable for missing optional quote metadata or corporate action fields', async () => {
@@ -1416,9 +1554,8 @@ describe('VietnamDashboardPage watchlist loading', () => {
     await waitFor(() => expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledWith(defaultTickers));
 
     const indicatorTable = within(screen.getByRole('heading', { name: 'Indicator table' }).closest('section') as HTMLElement);
-    expect(indicatorTable.getByTestId('scan-state-FPT')).not.toHaveTextContent('Data unavailable');
-    expect(indicatorTable.getByTestId('scan-state-FPT')).toHaveTextContent('Neutral');
-    expect(indicatorTable.getByTestId('table-caveats-FPT')).toHaveTextContent('4 caveats');
+    expect(indicatorTable.getByTestId('indicator-row-FPT')).not.toHaveTextContent('Unavailable');
+    expect(indicatorTable.getByTestId('indicator-row-FPT')).toHaveTextContent('OK');
     expect(indicatorTable.queryByText('Data source error')).not.toBeInTheDocument();
   });
 
@@ -1470,7 +1607,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(screen.getByText('VN30 components unavailable from SSI.')).toBeInTheDocument();
 
     const indicatorTable = within(screen.getByRole('heading', { name: 'Indicator table' }).closest('section') as HTMLElement);
-    expect(indicatorTable.getByTestId('scan-state-FPT')).not.toHaveTextContent('Data unavailable');
+    expect(indicatorTable.getByTestId('indicator-row-FPT')).not.toHaveTextContent('Unavailable');
   });
 
   it('keeps selected ticker news visible when quote and metadata are limited', async () => {
@@ -1510,7 +1647,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect((await screen.findAllByText('FPT expands data center capacity')).length).toBeGreaterThan(0);
     expect(screen.getAllByText('News provider').length).toBeGreaterThan(0);
     const indicatorTable = within(screen.getByRole('heading', { name: 'Indicator table' }).closest('section') as HTMLElement);
-    expect(indicatorTable.getByTestId('scan-state-FPT')).not.toHaveTextContent('Data unavailable');
+    expect(indicatorTable.getByTestId('indicator-row-FPT')).not.toHaveTextContent('Unavailable');
   });
 
   it('renders disabled news placeholder without provider error text', async () => {
