@@ -237,11 +237,18 @@ Suggested commit:
 fix: clean VN live data contract and diagnostics
 ```
 
-### Phase 3 - Company Detail Product Redesign
+### Phase 3 - Progressive Dashboard Workspace
 
 Purpose:
 
-Turn the company detail page from a debug board into a product-quality data report.
+Turn `/vietnam` into a progressive, source-aware market inspection workspace:
+
+```text
+Daily scan first.
+Ticker explanation second.
+Live/diagnostics third.
+External/future data last.
+```
 
 Phase 3.0A status:
 
@@ -267,6 +274,136 @@ Phase 3.1 status:
 * Sorting keeps null values last, does not issue API calls, and does not change the selected ticker.
 * Realtime/live status remains a separate availability badge and does not replace daily data.
 
+### Phase 3.2 - Data Readiness and Progressive Loading UX
+
+Goal:
+
+* Add a compact data readiness strip.
+* Add section-level readiness states.
+* Keep previous successful data visible while refreshing.
+* Show `Updating...` instead of blanking the table.
+* Keep optional live failures from dominating the UI.
+
+Request-state vocabulary:
+
+* `idle`
+* `loading`
+* `refreshing`
+* `success`
+* `partial`
+* `failed`
+
+Clarification: `success` is frontend request-state vocabulary. The preferred user-facing section label is `ready`.
+
+Acceptance criteria:
+
+* First load and refresh are visually distinct.
+* Daily scan rows remain visible during refresh when prior data exists.
+* Optional realtime, trade-tape, news, or future-module failures do not erase valid daily SSI data.
+* Provider endpoint details remain in diagnostics, not the primary readiness strip.
+
+### Phase 3.3 - Selected Ticker Progressive Disclosure
+
+Goal:
+
+Keep the selected ticker top summary compact and move secondary fields into expandable groups:
+
+* Price context.
+* Flow context.
+* Technical context.
+* Live context.
+* Source coverage.
+* Diagnostics.
+
+Folded-in historical Phase 3/5 items:
+
+* Profile completeness and partial metadata belong in source coverage and Data Quality Summary.
+* Metadata follow-up should improve explanation quality without failing valid daily data.
+* Foreign-flow detail should remain DailyStockPrice-specific and source-labeled.
+
+Acceptance criteria:
+
+* Selected ticker explanation is compact by default.
+* Daily close, reference/limits, matched volume, foreign flow, chart, and compact Data Quality Summary remain easy to inspect.
+* Diagnostics are available but lower priority.
+* No full-page debug-board layout.
+
+### Phase 3.4 - Data Request Orchestration Cleanup
+
+Goal:
+
+Make frontend/UI request behavior explicit without changing public API contract fields:
+
+* `idle`
+* `loading`
+* `refreshing`
+* `success`
+* `partial`
+* `failed`
+
+Rules:
+
+* Ignore older or slower responses.
+* Abort or ignore obsolete requests on rapid preset switches.
+* Prevent duplicate requests from typing, sorting, or diagnostics expansion.
+* Do not document these request states as API response fields.
+
+Acceptance criteria:
+
+* Rapid preset changes cannot reapply stale watchlist responses.
+* Sorting and filtering remain client-side.
+* Typing in custom watchlist input does not trigger API calls.
+* Diagnostics expansion does not call providers unless a future task explicitly designs it.
+
+### Phase 3.5 - Table Filtering and Scan Presets
+
+Goal:
+
+Add local filters for the scan table:
+
+* Data quality.
+* Live status.
+* Foreign net positive/negative.
+* Volume ratio.
+* RSI range.
+* Ticker search.
+
+Rules:
+
+* Client-side only.
+* No recommendation wording.
+* Filtering must not trigger watchlist reloads.
+* Filtering must not hide unavailable tickers by default without a visible active filter.
+
+Acceptance criteria:
+
+* Existing preset and custom watchlist behavior remains intact.
+* Sorting and filtering compose predictably.
+* Null values stay visible unless filtered by an explicit state filter.
+
+### Phase 3.6 - Chart UX Upgrade
+
+Goal:
+
+Improve the daily chart as an inspection tool:
+
+* Better chart loading and empty states.
+* Source/freshness line.
+* Better tooltip.
+* Keep daily chart separate from realtime and intraday.
+
+Rules:
+
+* Chart candles remain SSI DailyOhlc.
+* Realtime snapshot and intraday pulse must not overwrite daily chart data.
+* Missing chart data should render a section state, not fake candles.
+
+Acceptance criteria:
+
+* Chart loading, refreshing, empty, and unavailable states are distinct.
+* Source and freshness are visible without clutter.
+* Tooltip values are source-aware and avoid fake precision.
+
 Current issues:
 
 * Profile can show unavailable fields while source coverage says OK.
@@ -284,7 +421,7 @@ Target layout:
    * price date
    * canonical source
    * overall data status
-   * badges: Daily OK, Profile partial, Live unavailable, News disabled, No recommendation
+   * badges: Daily OK, Profile partial, Live unavailable, News disabled, Inspect-only
 2. Data Quality Summary
    * DailyOhlc versus DailyStockPrice mismatch
    * final close status
@@ -329,11 +466,11 @@ Suggested commit:
 feat: redesign VN company detail as data quality report
 ```
 
-### Phase 4 - SSI Realtime and Trade Tape Investigation
+### Phase 4.0 - SSI Realtime and Trade-Tape Investigation
 
-Purpose:
+Goal:
 
-Determine whether SSI can provide usable realtime snapshot and trade tape through the available FastConnect Data account/endpoints.
+Verify SSI realtime and trade-tape contracts.
 
 Scope:
 
@@ -341,220 +478,168 @@ Scope:
 * Confirm entitlement/permission requirements.
 * Confirm response row shapes.
 * Classify provider errors:
-  * 404 endpoint unavailable/not found
-  * 401/403 auth or entitlement
-  * 200 empty
-  * timeout/network
+  * 404 endpoint unavailable/not found.
+  * 401/403 auth or entitlement.
+  * 200 empty.
+  * Timeout/network.
 * Decide retry/backoff behavior.
-* Keep unavailable state if endpoints remain unavailable.
+* Keep the clean unavailable contract if endpoints remain unavailable.
 
 Rules:
 
 * Do not fake realtime from daily close.
 * Do not use KBS fallback silently.
 * Do not use FC Trading/order/account APIs.
-* Do not claim live support until `realtime_snapshot` is non-null and status is `ok`.
+* Do not claim live support until verified rows exist with `realtime_status.status = ok` or `trade_tape_status.status = ok`.
 
 Acceptance criteria:
 
-* Either SSI realtime/trade tape works with clear status `ok` and data rows, or it remains clearly unavailable with diagnostics.
-* Non-retryable failures use longer TTL/backoff.
-* UI states stay concise.
+* Either SSI realtime/trade tape works with clear `ok` status and data rows, or it remains clearly unavailable with diagnostics.
+* Non-retryable failures use longer TTL/backoff only if implementation evidence justifies it.
+* UI states stay concise and daily scan data remains visible.
 
-Suggested commit:
+### Phase 4.1 - Intraday Cadence Clarity
 
-```text
-feat: investigate SSI realtime and trade tape endpoints
-```
+Goal:
 
-If no endpoint works:
-
-```text
-chore: document SSI realtime and trade tape unavailability
-```
-
-### Phase 5 - Metadata and Foreign Flow Enrichment
-
-Purpose:
-
-Improve company metadata and foreign-flow history quality.
+Detect actual returned intraday cadence and avoid overclaiming a fixed interval unless verified.
 
 Scope:
 
-* Improve SSI Securities/SecuritiesDetails mapping:
-  * `company_name`
-  * `name`
-  * `issuer`
-  * `lot_size`
-  * `listed_shares`
-  * `listed_date`
-  * `security_type`
-  * `industry` if available
-* Add profile completeness semantics:
-  * `ok`
-  * `partial`
-  * `unavailable`
-* Fetch SSI DailyStockPrice history if available.
-* Compute `foreign_net_5d` and `foreign_net_20d` only from matched-date historical DailyStockPrice rows.
-* If history is insufficient, expose `insufficient_history` rather than silent null.
+* Compare requested timeframe with returned candle spacing.
+* Label stale, mismatched, unavailable, and disabled intraday states clearly.
+* Keep intraday separate from daily close and realtime snapshot.
 
 Acceptance criteria:
 
-* Profile does not say OK when key fields are null.
-* Foreign 5D/20D is either computed from validated history or marked `insufficient_history`.
-* Missing optional metadata does not fail daily row.
+* UI labels describe the actual returned cadence or an unknown/unavailable state.
+* Stale intraday never appears as a fresh live signal.
+* Daily SSI rows remain valid when intraday is optional/unavailable.
 
-Suggested commit:
+### Phase 5.0 - External Provider Architecture
 
-```text
-feat: enrich VN metadata and foreign flow history
-```
+Goal:
 
-### Phase 6 - VN News Provider
+Define future provider contracts without mixing external domains into SSI market data.
 
-Purpose:
+Provider contracts:
 
-Add a separate news provider without Mozyfin dependency.
+* `NewsProvider`.
+* `FundamentalsProvider`.
+* `CorporateActionsProvider`.
+* `MacroProvider`.
+
+Rules:
+
+* Future providers must document auth, rate limits, timestamp semantics, source provenance, and data semantics before code changes.
+* Future provider failures must not block SSI daily scan data.
+* Do not infer external-domain facts from price gaps.
+* Do not reintroduce Mozyfin/KBS as normal VN runtime fallbacks.
+
+Acceptance criteria:
+
+* Provider contracts are explicit before implementation.
+* Future modules remain `disabled`, `not_implemented`, or `unavailable` until real provider rows exist.
+
+### Phase 5.1 - NewsProvider
+
+Goal:
+
+Add sourced watchlist/company news after a provider contract is selected.
 
 Scope:
 
 * Keep news disabled until implemented.
-* Implement a separate NewsProvider when source is chosen.
-* Candidate model:
-  * RSS or structured source
-  * cache 30-60 minutes
-  * dedupe by URL
-  * match by ticker/company name
-* News failure must not block daily SSI data.
+* Include source, title, URL, published time, and matched ticker/company evidence when implemented.
+* Cache and dedupe only after provider semantics are documented.
 
 Rules:
 
-* No Mozyfin news/social dependency.
+* No Mozyfin news/social fallback.
 * No heavy scraping unless explicitly approved.
-* News status:
-  * `ok`
-  * `disabled`
-  * `unavailable`
+* News failure must not block daily SSI data.
 
 Acceptance criteria:
 
 * `news = []` and `news_status.status = disabled` until provider exists.
-* When implemented, news has source, title, URL, published time, and matched tickers.
+* When implemented, news is source-labeled and matched transparently.
 * No fake news items.
 
-Suggested commit:
+### Phase 5.2 - Corporate Actions and Dividends
 
-```text
-feat: add VN news provider
-```
+Goal:
 
-### Phase 7 - Financials and Corporate Actions
-
-Purpose:
-
-Add explicit structured financial and corporate-action data.
+Add verified event data only.
 
 Scope:
 
-* Financial statements.
-* Ratios.
 * Dividends.
 * Rights.
 * Splits.
 * Event history.
+* Corporate-action source coverage.
 
 Rules:
 
 * Use only explicit structured sources.
-* Do not infer corporate actions from price gaps.
+* Do not infer dividends or corporate actions from price gaps.
 * Do not mutate raw OHLCV close.
 * Keep unavailable placeholders until provider semantics are validated.
 
 Acceptance criteria:
 
-* Financials/events are either available from explicit source or not implemented/unavailable.
-* Corporate action status remains unavailable until explicit event source exists.
+* Corporate-action status remains unavailable until explicit event source exists.
+* Event rows are source-labeled and date-labeled.
 * No adjusted-close inference.
 
-Suggested commit:
+### Phase 6.0 - Backend Performance and Caching
 
-```text
-feat: add VN corporate events provider
-```
+Goal:
 
-or
+Improve backend performance only when rate limits or latency justify it.
 
-```text
-feat: add VN financials provider
-```
+Use later:
 
-### Phase 8 - Local Persistence and Historical Cache
-
-Purpose:
-
-Move beyond API-only runtime cache if product needs durable local history.
-
-Scope:
-
-* Local DB/cache for:
-  * DailyOhlc
-  * DailyStockPrice
-  * foreign history
-  * metadata
-  * provider diagnostics
-* Backfill strategy.
-* Cache invalidation.
-* Reproducible offline tests.
+* Backend DB/cache.
+* Historical DailyOhlc/DailyStockPrice cache.
+* Provider diagnostics history.
+* Background jobs.
 
 Rules:
 
-* Do not hide source provenance.
-* Persist source, date, and `fetched_at`.
-* No stale data silently presented as current.
+* Do not add durable storage while current backend TTL cache is enough.
+* Persist source, date, and `fetched_at` if durable storage is introduced later.
+* Keep stale data clearly labeled.
 
 Acceptance criteria:
 
-* Dashboard can show historical data quality over time.
-* Foreign 5D/20D and mismatch checks become more robust.
+* Performance work has measured rate-limit or latency evidence.
 * Runtime cache and durable storage semantics are documented separately.
+* Daily source ownership remains SSI DailyOhlc for canonical daily fields.
 
-Suggested commit:
+### Phase 7.0 - Product Packaging
 
-```text
-feat: add VN market data persistence layer
-```
+Goal:
 
-### Phase 9 - Portfolio / Watchlist Workflow, Still No Recommendations
-
-Purpose:
-
-Improve user workflow without turning the dashboard into an advisor.
+Make the VN dashboard easier to operate and release.
 
 Scope:
 
-* Saved watchlists.
-* Watchlist groups.
-* Notes per ticker.
-* Data-quality alerts.
-* Source freshness alerts.
-* Export/report snapshot.
+* Clean runbooks.
+* Current startup scripts.
+* Clear smoke/test/release checklist.
+* Deprecated docs clearly marked.
 
 Rules:
 
-* No recommendation wording.
-* No target prices.
-* Alerts must be data-quality/status alerts, not trading advice.
+* Do not change provider semantics while packaging.
+* Keep live/fixture mode explicit.
+* Keep deprecated Mozyfin/KBS-era docs marked as historical or superseded.
 
 Acceptance criteria:
 
-* User can track tickers and data conditions.
-* Alerts are neutral and source-based.
-
-Suggested commit:
-
-```text
-feat: add VN watchlist workflow tools
-```
+* A maintainer can start, smoke-test, and validate the VN dashboard from current docs.
+* Deprecated docs no longer contradict the current SSI-strict, progressive workspace direction.
 
 ## Known data-quality TODOs
 

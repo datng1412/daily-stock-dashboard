@@ -13,6 +13,39 @@ Rules that apply to every state:
 - Endpoint attempts, HTTP status, raw provider error summaries, stale-date details, and retryability belong in diagnostics, not primary metric rows.
 - User-facing copy must stay neutral and must not become investment advice.
 
+## Section-Level State Vocabulary
+
+Use section-level states to describe what the user can do with each block without turning optional failures into full-page failures.
+
+| State | User-facing meaning | Typical use |
+| --- | --- | --- |
+| `ready` | Section has usable data and can be inspected. | Daily scan table, selected ticker summary, chart, or source-labeled detail block. |
+| `loading` | First request is in progress and no previous data exists for this section. | Initial watchlist load or first company-detail load. |
+| `refreshing` | A new request is in progress while previous successful data remains visible. | Preset switch, manual refresh, or retry where stale UI should not blank. |
+| `partial` | Core data exists, but one or more optional or quality checks have caveats. | Daily SSI data present while profile, live, index, or future modules are unavailable. |
+| `unavailable` | A section was attempted but has no usable data. | SSI realtime unavailable, trade tape unavailable, stale intraday, or index components unavailable. |
+| `disabled` | A future or optional module is intentionally off. | News until NewsProvider exists; future external modules before provider selection. |
+| `failed` | Required section cannot load and the user cannot inspect its data. | Daily scan fails with no previous rows or company daily data cannot load. |
+
+Clarification:
+
+- `success` is internal request-state vocabulary for frontend orchestration.
+- `ready` is the preferred user-facing section state label.
+- Do not introduce `success` as visible UI copy unless an existing screen already uses it that way.
+
+## Severity Model
+
+Daily SSI data availability is more important than optional live or future-module availability:
+
+- Daily data unavailable is serious because it blocks the core scan.
+- Realtime unavailable is optional/minor when DailyOhlc is valid.
+- Trade tape unavailable is optional/minor when DailyOhlc is valid.
+- News disabled is expected until a NewsProvider exists.
+- Optional live/future states should not erase valid daily scan data.
+- A `partial` dashboard or ticker state can mean optional sections are unavailable; it must not imply daily SSI data failed when required DailyOhlc fields are valid.
+
+Provider endpoint details, HTTP status, retryability, and raw provider summaries belong in diagnostics, not primary UI.
+
 ## State Matrix
 
 | State | API condition | Primary UI copy | Metric rows allowed | Must not show | Diagnostics behavior | Tests to add/update later |
@@ -41,9 +74,10 @@ Rules that apply to every state:
 - Keep primary copy short. Put technical details in diagnostics.
 - Do not use raw provider error text in primary cards.
 
-## Implementation Notes For Phase 1-3
+## Implementation Notes For Progressive Workspace Phases
 
 - Phase 1 adds the Data Quality Summary that surfaces mismatch, finality, adjusted-price, stale intraday, unavailable live data, and profile partial states.
 - Phase 2 cleans public contract shapes and moves provider/debug details to diagnostics.
 - Phase 2.2 frontend rendering consumes normalized `null`/`[]` live-section shapes and keeps live status diagnostics in collapsed diagnostics panels on dashboard and company detail views.
-- Phase 3 applies these states to the company detail layout so the page reads like a data-quality report rather than a debug board.
+- Phase 3.2 applies section-level readiness states so first load, refresh, partial data, unavailable optional sections, disabled future modules, and hard failures are visually distinct.
+- Phase 3.3 applies progressive disclosure to the selected ticker so daily explanation remains compact and diagnostics stay lower priority.

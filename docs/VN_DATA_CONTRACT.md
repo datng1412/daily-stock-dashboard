@@ -266,16 +266,16 @@ Cache errors and provider unavailable states are separate concepts. A provider 4
 
 * Phase 2: deprecate top-level `intraday_timeframe`.
 * Phase 2: move stale intraday latest-date/date-match metadata into status/diagnostics when no usable intraday data exists.
-* Phase 2 and Phase 4: add backoff or longer TTL for non-retryable SSI realtime/trade-tape 404 responses.
+* Phase 2 and Phase 4.0: add backoff or longer TTL for non-retryable SSI realtime/trade-tape 404 responses.
 
 ### P2
 
-* Phase 5: improve SSI metadata mapping for company name, issuer, security type, lot size, listed shares, listed date, and industry if available.
-* Phase 5: add historical SSI DailyStockPrice foreign-flow support if available.
+* Future selected-ticker/source-coverage work: improve SSI metadata mapping for company name, issuer, security type, lot size, listed shares, listed date, and industry if available.
+* Future DailyStockPrice history or caching work: add historical SSI DailyStockPrice foreign-flow support if available.
 * Phase 1 and Phase 2: clean quote metadata semantics when quote is disabled or unreliable.
 * Phase 1: improve `final_close_status` using VN session/calendar rules.
 
 ### P3
 
-* Phase 2 and Phase 8: clarify cache errors versus provider unavailable.
+* Phase 2 and Phase 6.0: clarify cache errors versus provider unavailable.
 * Phase 2: clarify units metadata versus data availability.

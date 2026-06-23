@@ -1,6 +1,6 @@
 # Decisions
 
-Last updated: 2026-06-22
+Last updated: 2026-06-23
 
 This file records current product and engineering decisions that should not be re-litigated without explicit user direction.
 
@@ -21,20 +21,24 @@ Operational rule:
 
 ## VN Product Phase Plan
 
-Decision: the VN dashboard roadmap uses an explicit Phase 0 through Phase 9 plan.
+Decision: the VN dashboard roadmap uses an explicit Phase 0 through Phase 7.0 plan, with Phase 3.2 through Phase 3.6 focused on the progressive workspace upgrade.
 
 Rationale:
 
 - The product needs to move beyond the SSI migration milestone without blurring current behavior and future work.
-- Later work should expand data quality, contract cleanliness, provider coverage, persistence, and workflow while preserving the current product boundary.
+- Later work should expand data quality, contract cleanliness, progressive disclosure, provider coverage, caching, and packaging while preserving the current product boundary.
+- The core product priority is daily scan first, ticker explanation second, live/diagnostics third, and external/future data last.
 
 Operational rule:
 
 - Phase 0 freezes the current SSI provider milestone.
 - Phase 1 and Phase 2 prioritize data-quality visibility and contract cleanup before broader provider expansion.
-- Phase 4 may investigate SSI realtime/trade-tape endpoints, but live support must not be claimed until actual rows exist with status `ok`.
-- Phase 6 and Phase 7 require separate explicit providers for news, financials, and corporate actions.
-- Phase 9 workflow tools remain neutral data-quality/watchlist tooling, not recommendation features.
+- Phase 3.2 through Phase 3.6 improve readiness states, selected ticker progressive disclosure, request orchestration, local filtering, and chart UX without changing API contracts.
+- Phase 4.0 may investigate SSI realtime/trade-tape endpoints, but live support must not be claimed until actual rows exist with status `ok`.
+- Phase 4.1 clarifies actual intraday cadence and stale/unavailable labeling.
+- Phase 5.0 through Phase 5.2 require separate explicit provider contracts for news, fundamentals, corporate actions, dividends, and macro data.
+- Phase 6.0 backend performance/caching work requires real rate-limit or latency evidence.
+- Phase 7.0 packaging work cleans runbooks, startup scripts, validation checklists, and deprecated docs without changing provider semantics.
 
 ## Vietnam Dashboard Data Source
 

@@ -137,6 +137,93 @@ Primary UI should show concise source/status copy. Endpoint attempts, HTTP statu
 
 On `/vietnam`, the indicator table should sit above the selected ticker detail so users can scan the watchlist first, then inspect the selected ticker. The selected ticker area should remain a compact summary, while diagnostics, index coverage, and deeper per-ticker detail stay lower on the page.
 
+## Progressive Data Workspace Direction
+
+`/vietnam` should become a progressive, source-aware market inspection workspace. It should not display all fields with equal priority. The dashboard should follow this order:
+
+1. Primary scan layer.
+2. Selected ticker explanation layer.
+3. Optional live layer.
+4. Diagnostics layer.
+5. Future external data layer.
+
+Core principle:
+
+```text
+Daily scan first.
+Ticker explanation second.
+Live/diagnostics third.
+External/future data last.
+```
+
+The primary scan layer should answer what the current daily SSI state is across the active watchlist. The selected ticker explanation layer should explain why the selected ticker looks that way. Optional live, diagnostics, and future external data should remain available, but they must not crowd out the daily scan or imply that unavailable optional sections invalidate valid daily SSI data.
+
+## Data Priority Model
+
+### Tier 1 - Core Scan Data
+
+Primary table/watchlist scan fields:
+
+* Ticker.
+* Daily close.
+* Percent change.
+* RSI14.
+* MA state.
+* Volume / 20D average.
+* Foreign net volume.
+* Data quality.
+* Live status.
+
+Source ownership:
+
+* Daily close, OHLCV, and chart: SSI DailyOhlc.
+* Foreign net volume: SSI DailyStockPrice.
+* Indicators: derived from SSI DailyOhlc.
+
+### Tier 2 - Selected Ticker Explanation
+
+Selected ticker fields should explain the scan result without expanding into a full debug board:
+
+* Daily close.
+* Reference price.
+* Ceiling / floor.
+* Volume / 20D average.
+* Matched volume.
+* Foreign buy/sell/net.
+* Chart.
+* Compact Data Quality Summary.
+
+### Tier 3 - Optional Live Layer
+
+Optional live fields:
+
+* Realtime snapshot.
+* Trade tape.
+* Intraday pulse.
+* Index coverage.
+
+Rules:
+
+* Optional live data must never block the daily scan.
+* Optional live failure should show a compact unavailable state.
+* Diagnostics remain available but lower priority.
+
+### Tier 4 - Future External Data
+
+Future external domains:
+
+* News.
+* Financials.
+* Corporate actions.
+* Dividends.
+* Macro.
+
+Rules:
+
+* These require separate provider contracts.
+* Do not mix them into SSI market data.
+* Do not infer corporate actions from price gaps.
+
 ## MVP Scope
 
 The current MVP is:
@@ -181,7 +268,7 @@ Turn source mismatch, finality uncertainty, stale intraday, unavailable live dat
 
 Normalize unavailable public data to `intraday_pulse = null`, `intraday_candles = []`, `realtime_snapshot = null`, and `trade_tape = []`; keep endpoint attempts, HTTP status, raw provider errors, retryability, and stale-date details in diagnostics.
 
-### Phase 3 - Company Detail Product Redesign
+### Phase 3 - Progressive Dashboard Workspace
 
 Phase 3.0A implemented a frontend-only watchlist preset-group pass before the company detail redesign. Preset groups are scan buckets only: switching a preset changes the requested ticker list, keeps the selected ticker when it remains in the group, otherwise selects the first ticker, and does not add provider calls, polling, or data-source changes.
 
@@ -189,28 +276,71 @@ Phase 3.0B added a local Custom preset workflow. Users can apply, save, and clea
 
 Phase 3.1 polished the `/vietnam` indicator table into the main daily scan surface. The table prioritizes ticker, SSI DailyOhlc daily close, change percent, RSI14, MA state, daily volume versus 20D average, SSI DailyStockPrice foreign net volume, data quality, and realtime/live status. Sorting is client-side only and does not trigger watchlist reloads or change data-source semantics.
 
-Redesign the company detail page as a data-quality report with a strong header, Data Quality Summary, daily core data, lower-prominence live availability, grouped future modules, and collapsible diagnostics.
+Next Phase 3 work makes the dashboard progressive: data readiness and refresh UX, selected ticker progressive disclosure, request-state orchestration, local filtering, and chart UX polish. The company detail page remains part of the same source-aware explanation layer, not a separate advisor experience.
 
-### Phase 4 - SSI Realtime and Trade Tape Investigation
+### Phase 4.0 - SSI Realtime and Trade Tape Investigation
 
 Confirm whether available SSI FastConnect Data endpoints and entitlements can provide usable realtime snapshot and trade tape. Do not claim live support until `realtime_snapshot` is non-null and status is `ok`.
 
-### Phase 5 - Metadata and Foreign Flow Enrichment
+### Phase 4.1 - Intraday Cadence Clarity
 
-Improve SSI Securities/SecuritiesDetails metadata mapping, add profile completeness semantics, and compute `foreign_net_5d`/`foreign_net_20d` only from validated DailyStockPrice history.
+Detect actual returned intraday cadence, avoid overclaiming a fixed interval unless verified, and label stale or unavailable intraday clearly.
 
-### Phase 6 - VN News Provider
+### Phase 5.0 - External Provider Architecture
 
-Add a separate VN NewsProvider when a source is chosen. Until then, keep `news = []` and `news_status.status = disabled`.
+Define NewsProvider, FundamentalsProvider, CorporateActionsProvider, and MacroProvider as separate contracts. Keep them separate from SSI market data.
 
-### Phase 7 - Financials and Corporate Actions
+### Phase 5.1 - NewsProvider
 
-Add explicit structured financial statement, ratio, dividend, rights, split, and event-history providers. Do not infer corporate actions from price gaps or mutate raw OHLCV.
+Add sourced watchlist/company news when a provider is selected. Until then, keep `news = []` and `news_status.status = disabled`.
 
-### Phase 8 - Local Persistence and Historical Cache
+### Phase 5.2 - Corporate Actions and Dividends
 
-Add durable local history only if product needs exceed process-local cache. Persist source, date, and fetch time, and keep stale data clearly labeled.
+Add verified event data only. Do not infer dividends or corporate actions from price gaps.
 
-### Phase 9 - Portfolio / Watchlist Workflow
+### Phase 6.0 - Backend Performance and Caching
 
-Add saved watchlists, groups, notes, neutral data-quality alerts, source freshness alerts, and exports without turning the product into an advisor.
+Improve backend cache, durable storage, or background jobs only when rate limits or latency justify the added complexity.
+
+### Phase 7.0 - Product Packaging
+
+Clean runbooks, startup scripts, smoke/test/release checklists, and deprecated docs so the VN dashboard can be operated consistently.
+
+## Use Now
+
+This is near-term architecture guidance for future implementation tasks, not code work in this documentation update.
+
+* React local state.
+* `useMemo` for sorted/filtered rows.
+* `useRef` request IDs for stale response protection.
+* `localStorage` for browser-only preferences.
+* Section-level status objects.
+* Existing backend TTL cache.
+* Smoke script per milestone.
+
+## Use Later
+
+Use these only when the trigger condition is met, documented, and implemented in a separate future task:
+
+* TanStack Query or SWR-style query manager if async state becomes too complex.
+* Table virtualization if watchlist size grows above 100+ rows.
+* Backend DB if SSI rate limits or latency become real.
+* Separate provider modules for news, fundamentals, events, and macro data.
+* Background jobs only after provider contracts stabilize.
+* Realtime streaming only after the SSI realtime contract is verified.
+
+## Avoid For Now
+
+Avoid these until their trigger condition is met, documented, and handled in a separate task:
+
+* WebSocket before SSI realtime contract is verified.
+* Table virtualization for 10-30 tickers.
+* Backend database before rate-limit or latency pressure is real.
+* One giant endpoint that returns everything.
+* One global loading spinner.
+* Raw provider errors in primary UI.
+* Mixing DailyOhlc, DailyStockPrice, realtime, and trade-tape values.
+* AI buy/sell/hold recommendation labels.
+* Mozyfin/KBS fallback.
+* Fake realtime or stale snapshots labeled as live.
+* Inferred dividends or corporate actions.

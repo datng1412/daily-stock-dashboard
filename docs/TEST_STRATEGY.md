@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This strategy defines the expected validation for VN dashboard documentation, API contracts, and UI states. It is scoped to SSI-first VN dashboard work and should be referenced before Phase 1-3 implementation tasks.
+This strategy defines the expected validation for VN dashboard documentation, API contracts, and UI states. It is scoped to SSI-first VN dashboard work and should be referenced before data-quality, contract, progressive workspace, live-section, provider, and packaging tasks.
 
 ## Required Backend Tests
 
@@ -99,6 +99,25 @@ Add or update frontend tests for:
 - Collapsible diagnostics contain source coverage and endpoint diagnostics.
 - Primary UI contains no endpoint dumps or raw provider errors.
 - Null metadata rows are hidden; profile partial is visible.
+
+## Future Progressive Loading Tests Needed
+
+Add focused frontend tests when implementing Phase 3.2 through Phase 3.4 request-state work:
+
+- Previous successful watchlist rows stay visible during refresh.
+- First load and refresh use distinct UI states.
+- Refresh uses user-facing `Updating...` or equivalent concise copy instead of blanking the table.
+- Sorting and filtering do not call the watchlist endpoint.
+- Typing in the custom watchlist input does not call the watchlist endpoint.
+- Saving a custom watchlist without applying does not call the watchlist endpoint.
+- Optional live failure does not erase daily table rows, daily chart data, or DailyStockPrice fields.
+- Diagnostics expansion does not trigger new provider calls unless a future task explicitly designs that behavior.
+- Rapid preset switches ignore stale or older responses.
+- Request-state transitions distinguish `idle`, `loading`, `refreshing`, internal `success`, `partial`, and `failed`.
+- User-facing section state uses `ready` rather than exposing internal `success` copy.
+- Disabled future modules do not appear as failures.
+- News disabled remains expected until a NewsProvider exists.
+- Realtime/trade-tape unavailable remains optional/minor when required DailyOhlc fields are valid.
 
 ## Manual Smoke Checklist
 

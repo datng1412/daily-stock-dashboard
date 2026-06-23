@@ -11,9 +11,9 @@ The product phase plan lives in `docs/VN_DASHBOARD_ROADMAP.md`. Data-quality TOD
 | Priority | Main phase | Notes |
 | --- | --- | --- |
 | P0 - contract/data correctness | Phase 1 and Phase 2 | Surface mismatches in Data Quality Summary, then clean public contracts and diagnostics split. |
-| P1 - live-section semantics | Phase 2 and Phase 4 | Clean stale/unavailable API shape first; investigate SSI realtime/trade-tape endpoints after contract cleanup. |
-| P2 - enrichment | Phase 5, with finality work started in Phase 1 | Improve metadata and foreign-flow history after the public data-quality summary exists. |
-| P3 - cleanup | Phase 2 and Phase 8 | Clarify cache/provider states now; revisit durable cache semantics if persistence is added. |
+| P1 - live-section semantics | Phase 2 and Phase 4.0/4.1 | Clean stale/unavailable API shape first; investigate SSI realtime/trade-tape endpoints and clarify intraday cadence after contract cleanup. |
+| P2 - enrichment | Phase 3.3 and Phase 6.0, with finality work started in Phase 1 | Improve metadata/source coverage in selected ticker explanation; add foreign-flow history only if validated DailyStockPrice history or caching work justifies it. |
+| P3 - cleanup | Phase 2 and Phase 6.0/7.0 | Clarify cache/provider states now; revisit durable cache semantics if performance work is justified; mark deprecated docs during packaging. |
 
 ## P0 - Contract/Data Correctness
 

@@ -25,7 +25,7 @@ Badges:
 - Profile partial.
 - Live unavailable.
 - News disabled or not implemented.
-- No recommendation.
+- Inspect-only.
 
 Rules:
 
