@@ -42,8 +42,14 @@ def test_vietnam_company_research_endpoint_returns_phase_one_contract(monkeypatc
                             "reference_price": 123.0,
                             "ceiling_price": 131.6,
                             "floor_price": 114.4,
+                            "open": 200.0,
+                            "high": 201.0,
+                            "low": 199.0,
+                            "close": 200.5,
                             "matched_volume": 1_234_567,
                             "matched_value": 123_456_789_000,
+                            "total_volume": 9_999_999,
+                            "total_value": 999_999_999_000,
                             "put_through_volume": 1000,
                             "put_through_value": 25_000_000,
                             "foreign_buy_volume": 100_000,
@@ -130,7 +136,13 @@ def test_vietnam_company_research_endpoint_returns_phase_one_contract(monkeypatc
     assert payload["ticker"] == "FPT"
     assert payload["status"] == "ok"
     assert payload["profile"]["source"] == "SSI"
+    assert payload["price"]["source"] == "SSI DailyOhlc + SSI DailyStockPrice"
+    assert payload["price"]["latest_price"] == 124.6
+    assert payload["price"]["daily_close"] == 124.6
     assert payload["price"]["reference_price"] == 123.0
+    assert payload["trading_stats"]["source"] == "SSI DailyOhlc"
+    assert payload["trading_stats"]["close"] == 124.6
+    assert payload["trading_stats"]["volume"] == 1_234_567
     assert payload["trading_stats"]["value"] == 123_456_789_000
     assert payload["foreign_flow"]["foreign_net_value"] == 200_000_000
     coverage = {item["block"]: item for item in payload["source_coverage"]}

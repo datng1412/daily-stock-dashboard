@@ -86,5 +86,6 @@ Conventions:
 
 ## Current Decision Points
 
-- Company price source: company endpoint can report price source as SSI DailyStockPrice while dashboard canonical `latest_price` is SSI DailyOhlc close. Phase 1 must either align company price with DailyOhlc or document the company price block as DailyStockPrice-specific.
+- Company shared daily fields: company `latest_price`, `daily_close`, daily OHLCV open/high/low/close/volume, and daily value align with the watchlist SSI DailyOhlc fields. Company reference, limits, foreign flow, matched/put-through, and adjusted-close values remain SSI DailyStockPrice-specific.
+- Dashboard top summary `Foreign net volume` sums `ssi_foreign_net_volume` from the latest successful complete watchlist response in shares. Do not mix this with `ssi_foreign_net_value`, which is VND and should be shown as a separate value-based metric if added.
 - Future module statuses: live-provider statuses remain `ok`, `unavailable`, `disabled`; future modules may use `not_implemented` until Phase 2 chooses a normalized shape.

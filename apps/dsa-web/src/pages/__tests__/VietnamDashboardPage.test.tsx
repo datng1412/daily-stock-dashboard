@@ -191,6 +191,8 @@ const makeItem = (ticker: string): VietnamWatchItem => ({
   },
   foreign: { buy: 10, sell: 5, net: 5, netValue: 200000, signal: 'foreign_net_positive' },
   foreignNetUnit: 'shares',
+  ssiForeignNetVolume: 5,
+  ssiForeignNetValue: 200000,
   foreignBuyRawField: 'foreign_buy',
   foreignSellRawField: 'foreign_sell',
   indicators: {
@@ -549,6 +551,20 @@ const inspectChartCard = () => {
 const inspectDateLabels = (chartCard: ReturnType<typeof within>) =>
   chartCard.queryAllByTestId('inspect-chart-date-label').map((label: HTMLElement) => label.textContent ?? '');
 
+const foreignNetVolumeSummaryCard = () => within(screen.getByTestId('foreign-net-volume-summary-card'));
+
+const withSsiForeignNetVolumes = (
+  response: VietnamWatchlistResponse,
+  values: Array<number | null | undefined>,
+) => {
+  response.watchlist = response.watchlist.map((item, index) => ({
+    ...item,
+    ssiForeignNetVolume: values[index],
+    foreign: { ...item.foreign, net: 999_999_999 },
+  }));
+  return response;
+};
+
 describe('VietnamDashboardPage watchlist loading', () => {
   beforeEach(() => {
     vi.useRealTimers();
@@ -644,6 +660,130 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(header.getByText('Daily source: SSI DailyOhlc')).toBeInTheDocument();
     expect(header.getAllByText('SSI realtime').length).toBeGreaterThan(0);
     expect(header.queryByText('SSI unavailable')).not.toBeInTheDocument();
+  });
+
+  it('sums the top foreign net volume card from SSI DailyStockPrice share volume', async () => {
+    const response = makeResponse(defaultTickers);
+    const sampleNetVolumes = [-2_920_457, -1_634_598, -818_100, -212_200, -2_600, -1_581_061];
+    withSsiForeignNetVolumes(response, sampleNetVolumes);
+    mockedGetVietnamWatchlist.mockResolvedValue(response);
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+
+    const foreignNetCard = foreignNetVolumeSummaryCard();
+    expect(foreignNetCard.getByText('Foreign net volume')).toBeInTheDocument();
+    expect(foreignNetCard.getByText('-7,169,016')).toBeInTheDocument();
+    expect(foreignNetCard.getByText('SSI DailyStockPrice · shares')).toBeInTheDocument();
+  });
+
+  it('ignores missing SSI foreign net volume values and does not fall back to legacy foreign net', async () => {
+    const response = makeResponse(defaultTickers);
+    const values = [null, undefined, 0, -10, null, undefined];
+    withSsiForeignNetVolumes(response, values);
+    mockedGetVietnamWatchlist.mockResolvedValue(response);
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+
+    const foreignNetCard = foreignNetVolumeSummaryCard();
+    expect(foreignNetCard.getByText('-10')).toBeInTheDocument();
+    expect(foreignNetCard.queryByText('999,999,999')).not.toBeInTheDocument();
+  });
+
+  it('keeps the previous successful aggregate when a refresh returns incomplete watchlist rows', async () => {
+    const previous = withSsiForeignNetVolumes(makeResponse(defaultTickers), [10, 20, 30, 40, 50, 60]);
+    const incomplete = withSsiForeignNetVolumes(makeResponse(['FPT']), [999_999]);
+    mockedGetVietnamWatchlist
+      .mockResolvedValueOnce(previous)
+      .mockResolvedValueOnce(incomplete);
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+    expect(foreignNetVolumeSummaryCard().getByText('210')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /force live refresh/i }));
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, true));
+    expect(await screen.findByText('Incomplete watchlist response; keeping previous successful snapshot.')).toBeInTheDocument();
+    expect(foreignNetVolumeSummaryCard().getByText('210')).toBeInTheDocument();
+    expect(foreignNetVolumeSummaryCard().queryByText('999,999')).not.toBeInTheDocument();
+  });
+
+  it('ignores an older slower watchlist response after a newer response updates the aggregate', async () => {
+    const previous = withSsiForeignNetVolumes(makeResponse(defaultTickers), [1, 2, 3, 4, 5, 6]);
+    const stale = withSsiForeignNetVolumes(makeResponse(defaultTickers), [-100, -100, -100, -100, -100, -100]);
+    const latest = withSsiForeignNetVolumes(makeResponse(defaultTickers), [50, 50, 50, 50, 50, 50]);
+    let resolveStale: ((response: VietnamWatchlistResponse) => void) | undefined;
+    let resolveLatest: ((response: VietnamWatchlistResponse) => void) | undefined;
+    mockedGetVietnamWatchlist
+      .mockResolvedValueOnce(previous)
+      .mockImplementationOnce(() => new Promise<VietnamWatchlistResponse>((resolve) => {
+        resolveStale = resolve;
+      }))
+      .mockImplementationOnce(() => new Promise<VietnamWatchlistResponse>((resolve) => {
+        resolveLatest = resolve;
+      }));
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(foreignNetVolumeSummaryCard().getByText('21')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: /force live refresh/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^refresh$/i }));
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(3));
+    await act(async () => {
+      resolveLatest?.(latest);
+    });
+    await waitFor(() => expect(foreignNetVolumeSummaryCard().getByText('300')).toBeInTheDocument());
+
+    await act(async () => {
+      resolveStale?.(stale);
+    });
+    expect(foreignNetVolumeSummaryCard().getByText('300')).toBeInTheDocument();
+    expect(foreignNetVolumeSummaryCard().queryByText('-600')).not.toBeInTheDocument();
+  });
+
+  it('keeps the previous successful aggregate when force refresh fails', async () => {
+    const previous = withSsiForeignNetVolumes(makeResponse(defaultTickers), [10, 20, 30, 40, 50, 60]);
+    mockedGetVietnamWatchlist
+      .mockResolvedValueOnce(previous)
+      .mockRejectedValueOnce(new Error('watchlist timeout'));
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(foreignNetVolumeSummaryCard().getByText('210')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: /force live refresh/i }));
+
+    expect(await screen.findByText('watchlist timeout')).toBeInTheDocument();
+    expect(foreignNetVolumeSummaryCard().getByText('210')).toBeInTheDocument();
+  });
+
+  it('keeps the foreign aggregate stable when auxiliary requests fail', async () => {
+    const previous = withSsiForeignNetVolumes(makeResponse(defaultTickers), [10, 20, 30, 40, 50, 60]);
+    mockedGetVietnamWatchlist.mockResolvedValue(previous);
+    mockedGetVietnamRealtimeQuotes.mockRejectedValue(new Error('realtime unavailable'));
+    mockedGetVietnamRealtimeTrades.mockRejectedValue(new Error('trade tape unavailable'));
+    mockedGetVietnamCorporateActions.mockRejectedValue(new Error('corporate actions unavailable'));
+    mockedGetVietnamIndexList.mockRejectedValue(new Error('index list unavailable'));
+    mockedGetVietnamIndexComponents.mockRejectedValue(new Error('index components unavailable'));
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+    expect(foreignNetVolumeSummaryCard().getByText('210')).toBeInTheDocument();
+    const watchlistCalls = mockedGetVietnamWatchlist.mock.calls.length;
+
+    fireEvent.click(screen.getByRole('button', { name: /refresh realtime/i }));
+
+    await waitFor(() => expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledTimes(2));
+    expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistCalls);
+    expect(foreignNetVolumeSummaryCard().getByText('210')).toBeInTheDocument();
   });
 
   it('renders selected ticker data quality summary when present', async () => {
@@ -849,7 +989,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
   });
 
   it('shows neutral watchlist scan states for faster table comparison', async () => {
-    const response = makeResponse(['FPT', 'VPB', 'MSB', 'SCS', 'ACV']);
+    const response = makeResponse(defaultTickers);
     response.watchlist = response.watchlist.map((item) => {
       if (item.ticker === 'FPT') {
         return {
@@ -888,6 +1028,9 @@ describe('VietnamDashboardPage watchlist loading', () => {
           validation: { valid: false, tradingDate: '2026-06-10', missingFields: ['close'], errors: ['Missing daily close'] },
         };
       }
+      if (item.ticker === 'ACB') {
+        return item;
+      }
       return {
         ...item,
         cacheStatus: { ...item.cacheStatus, ohlcvCache: 'error' },
@@ -903,7 +1046,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(scanSummary.getByRole('heading', { name: 'Watchlist scan' })).toBeInTheDocument();
     expect(scanSummary.getByText('Sector grouping unavailable')).toBeInTheDocument();
     expect(scanSummary.getByText('Strong').closest('div')).toHaveTextContent('1');
-    expect(scanSummary.getByText('Neutral').closest('div')).toHaveTextContent('1');
+    expect(scanSummary.getByText('Neutral').closest('div')).toHaveTextContent('2');
     expect(scanSummary.getByText('Weakening').closest('div')).toHaveTextContent('1');
     expect(scanSummary.getByText('Risk elevated').closest('div')).toHaveTextContent('0');
     expect(scanSummary.getByText('Data unavailable').closest('div')).toHaveTextContent('2');
@@ -1171,7 +1314,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(within(detail.getByText('Reference').closest('div') as HTMLElement).getByText('99')).toBeInTheDocument();
     expect(detail.getByText('Ceiling / floor')).toBeInTheDocument();
     expect(detail.getByText('106 / 92')).toBeInTheDocument();
-    expect(detail.getByText('Foreign net')).toBeInTheDocument();
+    expect(detail.getByText('Foreign net volume')).toBeInTheDocument();
     expect(detail.getByText('5 shares')).toBeInTheDocument();
     expect(detail.getByText('Foreign net value')).toBeInTheDocument();
     expect(detail.getByText('200,000')).toBeInTheDocument();
@@ -1263,6 +1406,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
         ...response.watchlist[0].foreign,
         netValue: null,
       },
+      ssiForeignNetValue: null,
     };
     mockedGetVietnamWatchlist.mockResolvedValue(response);
 

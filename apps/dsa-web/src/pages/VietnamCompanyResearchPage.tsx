@@ -222,11 +222,11 @@ const VietnamCompanyResearchPage: React.FC = () => {
   if (!snapshot) return null;
 
   const priceRows: MetricRow[] = [
-    { label: 'Latest price', value: snapshot.price.latestPrice, formatter: formatPrice },
+    { label: 'Canonical latest price', value: snapshot.price.latestPrice, formatter: formatPrice },
     { label: 'Daily close', value: snapshot.price.dailyClose, formatter: formatPrice },
-    { label: 'Reference', value: snapshot.price.referencePrice, formatter: formatPrice },
-    { label: 'Ceiling', value: snapshot.price.ceilingPrice, formatter: formatPrice },
-    { label: 'Floor', value: snapshot.price.floorPrice, formatter: formatPrice },
+    { label: 'SSI reference', value: snapshot.price.referencePrice, formatter: formatPrice },
+    { label: 'SSI ceiling', value: snapshot.price.ceilingPrice, formatter: formatPrice },
+    { label: 'SSI floor', value: snapshot.price.floorPrice, formatter: formatPrice },
     { label: 'Price date', value: snapshot.price.priceDate, formatter: (value) => formatNumber(value) },
   ];
   const tradingRows: MetricRow[] = [
@@ -234,8 +234,8 @@ const VietnamCompanyResearchPage: React.FC = () => {
     { label: 'High', value: snapshot.tradingStats.high, formatter: formatPrice },
     { label: 'Low', value: snapshot.tradingStats.low, formatter: formatPrice },
     { label: 'Close', value: snapshot.tradingStats.close, formatter: formatPrice },
-    { label: 'Volume', value: snapshot.tradingStats.volume },
-    { label: 'Value', value: snapshot.tradingStats.value },
+    { label: 'Daily OHLCV volume', value: snapshot.tradingStats.volume },
+    { label: 'Daily OHLCV value', value: snapshot.tradingStats.value },
   ];
   const foreignRows: MetricRow[] = [
     { label: 'Foreign buy volume', value: snapshot.foreignFlow.foreignBuyVolume },
@@ -286,14 +286,14 @@ const VietnamCompanyResearchPage: React.FC = () => {
     { label: 'Change', value: snapshot.realtime?.snapshot?.change ?? snapshot.realtime?.snapshot?.priceChange, formatter: formatSignedNumber },
     { label: 'Change %', value: snapshot.realtime?.snapshot?.changePct ?? snapshot.realtime?.snapshot?.percentChange, formatter: (value) => `${formatNumber(value, 2)}%` },
     { label: 'Reference', value: snapshot.realtime?.snapshot?.referencePrice, formatter: formatPrice },
-    { label: 'Volume', value: snapshot.realtime?.snapshot?.volume ?? snapshot.realtime?.snapshot?.volumeAccumulated },
+    { label: 'SSI realtime/session volume', value: snapshot.realtime?.snapshot?.volume ?? snapshot.realtime?.snapshot?.volumeAccumulated },
     { label: 'Fetched at', value: snapshot.realtime?.snapshot?.fetchedAt, formatter: (value) => formatNumber(value) },
   ];
   const tradeTapeRows: MetricRow[] = [
     { label: 'Trades loaded', value: snapshot.tradeTape?.trades?.length ?? 0 },
     { label: 'Latest time', value: snapshot.tradeTape?.trades?.[0]?.time, formatter: (value) => formatNumber(value) },
     { label: 'Latest price', value: snapshot.tradeTape?.trades?.[0]?.price, formatter: formatPrice },
-    { label: 'Latest volume', value: snapshot.tradeTape?.trades?.[0]?.volume },
+    { label: 'Latest trade tape volume', value: snapshot.tradeTape?.trades?.[0]?.volume },
     { label: 'Latest value', value: snapshot.tradeTape?.trades?.[0]?.value },
     { label: 'Source', value: snapshot.tradeTape?.source, formatter: (value) => formatNumber(value) },
   ];

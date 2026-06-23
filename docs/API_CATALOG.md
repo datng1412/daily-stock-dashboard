@@ -85,7 +85,7 @@ Current known caveats from handoff snapshots:
 
 Future changes:
 
-- Phase 1: add Data Quality Summary fields or a derived summary for mismatches and missingness.
+- Phase 1: keep dashboard top aggregates tied to the latest successful complete watchlist response; incomplete refreshes and auxiliary responses must not update summary cards.
 - Phase 2: normalize live public contract and diagnostics split.
 - Phase 3: ensure company detail consumes the same contract consistently.
 
@@ -144,8 +144,10 @@ Response sections:
 
 Source ownership:
 
-- Daily core values should align with SSI DailyOhlc canonical source unless a section is explicitly labeled as SSI DailyStockPrice-specific.
-- Trading stats/reference/limits/foreign flow use SSI DailyStockPrice.
+- Daily core values align with SSI DailyOhlc canonical source for shared watchlist/company fields.
+- Company `price.source` can be mixed (`SSI DailyOhlc + SSI DailyStockPrice`) because the block contains canonical daily price plus SSI DailyStockPrice reference/limit fields.
+- Company `trading_stats` uses SSI DailyOhlc daily open/high/low/close/volume/value.
+- Reference/limits, foreign flow, matched/put-through, and adjusted-close values use SSI DailyStockPrice when exposed.
 - Profile metadata uses SSI Securities/SecuritiesDetails when available.
 
 Null/empty rules:
@@ -159,7 +161,7 @@ Current known caveats from handoff snapshots:
 
 - Company intraday currently can report `status = unavailable`, `candles = []`, and `pulse = {}`; target is `pulse = null`.
 - Profile can have `name = null` and `industry = null` while provider status is `ok`; docs define this as provider OK plus profile completeness `partial`.
-- Company price can report `source = SSI DailyStockPrice`; Phase 1 must decide whether company price aligns with DailyOhlc canonical latest price or remains DailyStockPrice-specific with explicit label.
+- Company price and trading stats now align shared daily values with SSI DailyOhlc; remaining numeric differences versus DailyStockPrice are intentional when fields are explicitly labeled as reference, matched, put-through, adjusted, or foreign-flow values.
 - News/financials/events can use `not_implemented`; this is allowed for future modules, not live-provider statuses.
 
 Future changes:

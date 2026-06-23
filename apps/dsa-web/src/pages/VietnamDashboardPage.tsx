@@ -86,6 +86,10 @@ const formatSignedNumber = (value?: number | null, maximumFractionDigits = 2) =>
   return formatted;
 };
 
+const finiteNumber = (value?: number | null) => (
+  typeof value === 'number' && Number.isFinite(value) ? value : null
+);
+
 const formatReferenceDelta = (value?: number | null, percent?: number | null) => {
   if (value === null || value === undefined || percent === null || percent === undefined) {
     return 'Unavailable';
@@ -403,6 +407,22 @@ const latestNewsAge = (item?: VietnamWatchItem | null) => {
   if (item?.newsStatus?.status === 'disabled') return 'News disabled';
   const timestamp = item?.news?.map(newsTimestamp).find(Boolean);
   return timestamp ? formatRelativeTime(timestamp) : 'Unavailable';
+};
+
+const sumSsiForeignNetVolume = (items: VietnamWatchItem[]) => (
+  items.reduce((sum, item) => {
+    const value = finiteNumber(item.ssiForeignNetVolume);
+    return value === null ? sum : sum + value;
+  }, 0)
+);
+
+const isCompleteWatchlistResponse = (response: VietnamWatchlistResponse, requestedTickers: string[]) => {
+  const expectedTickers = requestedTickers
+    .map((ticker) => normalizeVietnamTicker(ticker))
+    .filter(Boolean);
+  if (!expectedTickers.length) return true;
+  const actualTickers = new Set((response.watchlist ?? []).map((item) => normalizeVietnamTicker(item.ticker)));
+  return expectedTickers.every((ticker) => actualTickers.has(ticker));
 };
 
 const newsUnavailableText = (item: VietnamWatchItem) => (
@@ -2146,7 +2166,7 @@ const StockDetailView: React.FC<{
   const ssiDailyRows = [
     { label: 'Reference', value: formatPrice(ssiReferencePrice), show: hasDisplayValue(ssiReferencePrice) },
     { label: 'Ceiling / floor', value: `${formatPrice(ssiCeilingPrice)} / ${formatPrice(ssiFloorPrice)}`, show: hasDisplayValue(ssiCeilingPrice) || hasDisplayValue(ssiFloorPrice) },
-    { label: 'Foreign net', value: `${formatNumber(ssiDailyStockPrice.foreignNetVolume ?? item.ssiForeignNetVolume ?? item.foreign?.net)} shares`, tone: signalTone(ssiDailyStockPrice.foreignNetVolume ?? item.ssiForeignNetVolume ?? item.foreign?.net), show: hasDisplayValue(ssiDailyStockPrice.foreignNetVolume ?? item.ssiForeignNetVolume ?? item.foreign?.net) },
+    { label: 'Foreign net volume', value: `${formatNumber(ssiDailyStockPrice.foreignNetVolume ?? item.ssiForeignNetVolume ?? item.foreign?.net)} shares`, tone: signalTone(ssiDailyStockPrice.foreignNetVolume ?? item.ssiForeignNetVolume ?? item.foreign?.net), show: hasDisplayValue(ssiDailyStockPrice.foreignNetVolume ?? item.ssiForeignNetVolume ?? item.foreign?.net) },
     { label: 'Foreign net value', value: formatNumber(ssiDailyStockPrice.foreignNetValue ?? item.ssiForeignNetValue ?? item.foreign?.netValue), tone: signalTone(ssiDailyStockPrice.foreignNetValue ?? item.ssiForeignNetValue ?? item.foreign?.netValue), show: hasDisplayValue(ssiDailyStockPrice.foreignNetValue ?? item.ssiForeignNetValue ?? item.foreign?.netValue) },
     { label: 'Matched volume', value: formatNumber(ssiDailyStockPrice.matchedVolume ?? item.ssiMatchedVolume), show: hasDisplayValue(ssiDailyStockPrice.matchedVolume ?? item.ssiMatchedVolume) },
     { label: 'Matched value', value: formatNumber(ssiDailyStockPrice.matchedValue ?? item.ssiMatchedValue), show: hasDisplayValue(ssiDailyStockPrice.matchedValue ?? item.ssiMatchedValue) },
@@ -2979,6 +2999,10 @@ const VietnamDashboardPage: React.FC = () => {
       const requestedTickers = tickersOverride ?? logicalWatchlistRef.current;
       const nextData = await stocksApi.getVietnamWatchlist(requestedTickers, forceRefresh);
       if (requestId !== requestIdRef.current) return;
+      if (!isCompleteWatchlistResponse(nextData, requestedTickers)) {
+        setError('Incomplete watchlist response; keeping previous successful snapshot.');
+        return;
+      }
       setData(nextData);
       setLastRefreshKind(refreshKind);
       setLastRefreshAt(new Date().toISOString());
@@ -3234,8 +3258,8 @@ const VietnamDashboardPage: React.FC = () => {
     const avgLiquidity = rows.length
       ? Math.round(rows.reduce((sum, item) => sum + (item.liquidity.score ?? 0), 0) / rows.length)
       : 0;
-    const foreignNet = rows.reduce((sum, item) => sum + (item.foreign.net ?? 0), 0);
-    return { count: rows.length, up, avgLiquidity, foreignNet };
+    const foreignNetVolume = sumSsiForeignNetVolume(rows);
+    return { count: rows.length, up, avgLiquidity, foreignNetVolume };
   }, [data]);
 
   const selectedItem = useMemo(
@@ -3516,10 +3540,11 @@ const VietnamDashboardPage: React.FC = () => {
           <p className="text-xs text-secondary-text">Avg liquidity</p>
           <p className="text-2xl font-semibold text-foreground">{summary.avgLiquidity}/100</p>
         </div>
-        <div className="rounded-lg border border-border/70 bg-card p-4">
+        <div className="rounded-lg border border-border/70 bg-card p-4" data-testid="foreign-net-volume-summary-card">
           <ShieldAlert className="mb-3 h-5 w-5 text-purple" />
-          <p className="text-xs text-secondary-text">Foreign net</p>
-          <p className={cn('text-2xl font-semibold', signalTone(summary.foreignNet))}>{formatNumber(summary.foreignNet)}</p>
+          <p className="text-xs text-secondary-text">Foreign net volume</p>
+          <p className={cn('text-2xl font-semibold', signalTone(summary.foreignNetVolume))}>{formatNumber(summary.foreignNetVolume)}</p>
+          <p className="mt-1 text-xs text-secondary-text">SSI DailyStockPrice · shares</p>
         </div>
       </section>
 

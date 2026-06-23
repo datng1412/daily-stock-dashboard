@@ -28,7 +28,7 @@ const makeCompanySnapshot = (): VietnamCompanyResearchResponse => ({
     ceilingPrice: 131.6,
     floorPrice: 114.4,
     priceDate: '2026-06-17',
-    source: 'SSI DailyStockPrice',
+    source: 'SSI DailyOhlc + SSI DailyStockPrice',
     status: 'ok',
   },
   tradingStats: {
@@ -38,7 +38,7 @@ const makeCompanySnapshot = (): VietnamCompanyResearchResponse => ({
     close: 124.6,
     volume: 1_234_567,
     value: 123_456_789_000,
-    source: 'SSI DailyStockPrice',
+    source: 'SSI DailyOhlc',
     status: 'ok',
   },
   foreignFlow: {
@@ -177,6 +177,11 @@ describe('VietnamCompanyResearchPage', () => {
     expect(screen.getByText('No data quality issues detected.')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Source coverage' })).toBeInTheDocument();
     expect(screen.getByText('Daily OHLCV')).toBeInTheDocument();
+    expect(screen.getByText('Canonical latest price')).toBeInTheDocument();
+    expect(screen.getByText('SSI reference')).toBeInTheDocument();
+    expect(screen.getByText('Daily OHLCV volume')).toBeInTheDocument();
+    expect(screen.getByText('SSI realtime/session volume')).toBeInTheDocument();
+    expect(screen.getByText('Latest trade tape volume')).toBeInTheDocument();
     expect(screen.getAllByText('SSI DailyStockPrice').length).toBeGreaterThan(0);
     expect(screen.getByRole('heading', { name: 'Intraday pulse' })).toBeInTheDocument();
     expect(screen.getByText('SSI IntradayOhlc')).toBeInTheDocument();

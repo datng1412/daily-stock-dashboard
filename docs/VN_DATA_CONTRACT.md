@@ -54,7 +54,7 @@ Daily finality must stay explicit:
 
 If daily SSI data is unavailable, the row should expose an unavailable status and null daily metrics rather than borrowing live, intraday, or legacy-provider values.
 
-Company detail currently has a source-alignment decision point: broader dashboard docs make `latest_price` canonical from SSI DailyOhlc close, while the company endpoint may still report a DailyStockPrice-specific `source`. Phase 1 must either align company `latest_price` with DailyOhlc or explicitly document a company-only DailyStockPrice field so the same label does not carry two meanings.
+Company detail aligns shared canonical daily fields with the watchlist row: `latest_price`, `daily_close`, daily OHLCV open/high/low/close/volume, and daily trading value use SSI DailyOhlc fields. Company reference, ceiling/floor, foreign-flow, matched, put-through, and adjusted-close fields remain SSI DailyStockPrice-specific and must be labeled as such when shown.
 
 ## Data Quality Summary Contract
 
@@ -214,6 +214,8 @@ Rules:
 ### Daily Data
 
 Render daily data when the row has valid SSI DailyOhlc fields and daily status is OK. Optional section failures should not hide daily close, chart, or DailyStockPrice fields.
+
+The dashboard top summary `Foreign net volume` aggregates `ssi_foreign_net_volume` from the latest successful complete watchlist response and labels the unit as shares. It must not aggregate legacy `foreign_net` fallbacks, incomplete refresh rows, auxiliary realtime/trade/index/corporate-action responses, or mix volume with `ssi_foreign_net_value` in VND.
 
 ### Optional Live Metrics
 

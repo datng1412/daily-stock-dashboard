@@ -263,7 +263,8 @@ def test_company_research_uses_ssi_and_not_implemented_placeholders():
     )
 
     assert snapshot["ticker"] == "FPT"
-    assert snapshot["price"]["source"] == "SSI DailyStockPrice"
+    assert snapshot["price"]["source"] == "SSI DailyOhlc + SSI DailyStockPrice"
+    assert snapshot["trading_stats"]["source"] == "SSI DailyOhlc"
     assert snapshot["news"]["status"] == "not_implemented"
     assert snapshot["financials"]["status"] == "not_implemented"
     assert snapshot["events"]["status"] == "not_implemented"

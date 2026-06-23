@@ -83,7 +83,7 @@ class VietnamCompanyResearchService:
         reference_price = _first_present(daily_stock_price.get("reference_price"), row.get("ssi_reference_price"), price_limit.get("reference_price"))
         ceiling_price = _first_present(daily_stock_price.get("ceiling_price"), row.get("ssi_ceiling_price"), price_limit.get("ceiling_price"))
         floor_price = _first_present(daily_stock_price.get("floor_price"), row.get("ssi_floor_price"), price_limit.get("floor_price"))
-        price_date = _first_present(daily_stock_price.get("date"), row.get("latest_price_date"), row.get("price_date"), row.get("date"))
+        price_date = _first_present(row.get("latest_price_date"), row.get("price_date"), row.get("ohlcv_date"), row.get("date"))
         price = {
             "latest_price": row.get("latest_price"),
             "daily_close": row.get("daily_close"),
@@ -91,19 +91,19 @@ class VietnamCompanyResearchService:
             "ceiling_price": ceiling_price,
             "floor_price": floor_price,
             "price_date": price_date,
-            "source": "SSI DailyStockPrice",
+            "source": "SSI DailyOhlc + SSI DailyStockPrice",
             "status": _status_for(row.get("latest_price"), row.get("daily_close"), reference_price, ceiling_price, floor_price),
         }
 
-        trading_value = _first_present(daily_stock_price.get("total_value"), daily_stock_price.get("matched_value"), row.get("amount"))
+        trading_value = row.get("amount")
         trading_stats = {
-            "open": _first_present(daily_stock_price.get("open"), row.get("open")),
-            "high": _first_present(daily_stock_price.get("high"), row.get("high")),
-            "low": _first_present(daily_stock_price.get("low"), row.get("low")),
-            "close": _first_present(daily_stock_price.get("close"), row.get("close")),
-            "volume": _first_present(daily_stock_price.get("total_volume"), daily_stock_price.get("matched_volume"), row.get("volume")),
+            "open": row.get("open"),
+            "high": row.get("high"),
+            "low": row.get("low"),
+            "close": row.get("close"),
+            "volume": row.get("volume"),
             "value": trading_value,
-            "source": "SSI DailyStockPrice",
+            "source": "SSI DailyOhlc",
             "status": _status_for(row.get("open"), row.get("high"), row.get("low"), row.get("close"), row.get("volume"), trading_value),
         }
 
@@ -114,7 +114,7 @@ class VietnamCompanyResearchService:
             "foreign_buy_value": _first_present(daily_stock_price.get("foreign_buy_value"), foreign.get("buy_value")),
             "foreign_sell_value": _first_present(daily_stock_price.get("foreign_sell_value"), foreign.get("sell_value")),
             "foreign_net_value": _first_present(daily_stock_price.get("foreign_net_value"), row.get("ssi_foreign_net_value"), foreign.get("net_value")),
-            "source": "SSI DailyStockPrice",
+            "source": "SSI DailyOhlc + SSI DailyStockPrice",
         }
         foreign_flow["status"] = _status_for(
             foreign_flow["foreign_buy_volume"],
@@ -246,7 +246,7 @@ class VietnamCompanyResearchService:
             "ceiling_price": None,
             "floor_price": None,
             "price_date": None,
-            "source": "SSI DailyStockPrice",
+            "source": "SSI DailyOhlc",
             "status": "missing",
         }
         missing_trading = {
