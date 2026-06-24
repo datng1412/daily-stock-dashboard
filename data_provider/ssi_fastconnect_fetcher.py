@@ -640,7 +640,8 @@ class SsiFastConnectFetcher:
         params: Dict[str, Any] = {"symbol": symbol.strip().upper()}
         if interval:
             params["timeFrame"] = str(interval).strip()
-        params = self._date_params(params, from_date, to_date, limit)
+        public_limit = max(int(limit or 0), 0)
+        params = self._date_params(params, from_date, to_date, SSI_PAGE_SIZE)
         variants = [self._alternate_param_case(params)]
         if interval:
             for interval_key in ("interval", "resolution", "timeframe", "TimeFrame"):
@@ -649,10 +650,10 @@ class SsiFastConnectFetcher:
                 variant[interval_key] = str(interval).strip()
                 variants.append(variant)
                 variants.append(self._alternate_param_case(variant))
-        payload = self._cached_normalized(
+        payload = self._cached_paged_normalized(
             "IntradayOhlc",
             params,
-            limit,
+            public_limit,
             lambda row: self._map_intraday_ohlcv(row, symbol),
             extra={"symbol": symbol.strip().upper(), "interval": interval},
             param_variants=variants,
@@ -1085,6 +1086,93 @@ class SsiFastConnectFetcher:
                 "count": 0,
             }
         return payload
+
+    def _cached_paged_normalized(
+        self,
+        endpoint: str,
+        params: Dict[str, Any],
+        limit: int,
+        mapper: Any,
+        *,
+        extra: Optional[Dict[str, Any]] = None,
+        param_variants: Optional[List[Dict[str, Any]]] = None,
+        required_any: Tuple[str, ...] = (),
+        page_size: int = SSI_PAGE_SIZE,
+    ) -> Dict[str, Any]:
+        cache_params = {**(params or {}), "pageSize": int(page_size), "paged": True, "limit": int(limit or 0)}
+        cache_key = (endpoint, tuple(sorted(cache_params.items())))
+        if self.cache_ttl_seconds > 0:
+            entry = self._cache.get(cache_key)
+            if entry and entry.expires_at > time.time():
+                return dict(entry.value)
+
+        param_sets = [params] + [variant for variant in (param_variants or []) if variant and variant != params]
+        first_unavailable: Optional[Dict[str, Any]] = None
+        rows: List[Dict[str, Any]] = []
+        pages_used = 0
+        for index, param_set in enumerate(param_sets):
+            candidate_rows: List[Dict[str, Any]] = []
+            fetched_raw_rows = 0
+            page_index = 1
+            unavailable: Optional[Dict[str, Any]] = None
+            while page_index <= SSI_MAX_PAGES:
+                page_params = dict(param_set)
+                page_params["pageIndex"] = page_index
+                page_params["pageSize"] = int(page_size)
+                if pages_used and self.request_delay_seconds:
+                    time.sleep(self.request_delay_seconds)
+                payload = self._request(endpoint, params=page_params)
+                pages_used += 1
+                if isinstance(payload, dict) and payload.get("status") == "unavailable":
+                    unavailable = payload
+                    break
+
+                raw_rows = _extract_rows(payload)
+                mapped_rows = [mapper(row) for row in raw_rows]
+                mapped_rows = [row for row in mapped_rows if row and _has_required_field(row, required_any)]
+                candidate_rows.extend(mapped_rows)
+                fetched_raw_rows += len(raw_rows)
+                total = _total_record(payload)
+                if total is not None and fetched_raw_rows >= total:
+                    break
+                if total is None and len(raw_rows) < page_size:
+                    break
+                page_index += 1
+
+            if unavailable:
+                if index == 0:
+                    first_unavailable = unavailable
+                    break
+                continue
+            if candidate_rows:
+                rows = candidate_rows
+                break
+
+        if first_unavailable:
+            return first_unavailable
+
+        if rows and "date_time" in rows[0]:
+            rows.sort(key=lambda item: (item.get("date_time") is None, item.get("date_time") or ""))
+        elif rows and "date" in rows[0]:
+            rows.sort(key=lambda item: (item.get("date") is None, item.get("date") or ""))
+        if limit and len(rows) > limit:
+            rows = rows[-limit:]
+
+        result = {
+            "status": "ok",
+            "source": SSI_SOURCE,
+            **{k: v for k, v in (extra or {}).items() if v is not None},
+            "rows": rows,
+            "count": len(rows),
+            "pages_used": pages_used,
+            "request_page_size": int(page_size),
+        }
+        if self.cache_ttl_seconds > 0:
+            self._cache[cache_key] = _CacheEntry(
+                value=dict(result),
+                expires_at=time.time() + self.cache_ttl_seconds,
+            )
+        return result
 
     def _cached_chunked_normalized(
         self,

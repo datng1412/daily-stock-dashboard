@@ -628,10 +628,13 @@ Rules:
 
 Result:
 
-* Existing SSI IntradayOhlc wiring is active; the live root cause is stale/mismatched provider data, not a missing backend call.
-* Current local force-refresh evidence for `FPT` reported `intraday_latest_date=2026-06-17`, `daily_price_date=2026-06-24`, `date_match=mismatched`, requested `1h`, observed `1m`/60s, public `intraday_candles=[]`, and `intraday_pulse=null`.
+* Existing SSI IntradayOhlc wiring is active; the root cause was a fetcher page-size/order bug, not a missing company route call.
+* Before the fix, the dashboard requested a 7-day IntradayOhlc window with public `intraday_limit` as SSI `pageSize` and `ascending=true`. With the default public limit of 8, SSI returned only oldest first-page rows from `2026-06-17`, so the service correctly marked intraday stale against SSI DailyOhlc `2026-06-24`.
+* The SSI fetcher now paginates IntradayOhlc internally with `pageSize=1000`, sorts normalized rows, and returns only the latest public limit to the service/API.
+* Direct patched-fetcher verification returned 8 FPT rows using 2 pages, from `2026-06-24T14:23:56` to `2026-06-24T14:45:00`.
+* Isolated patched-backend audit reported intraday as `partial`: FPT had `intraday_status=ok`, `intraday_latest_date=2026-06-24`, `daily_price_date=2026-06-24`, `date_match=matched`, public candle count 8, and non-null pulse, while some other audit tickers still returned unavailable/request-failed intraday.
 * The backend now filters normalized intraday rows that have no usable timestamp/date or close value so null-only malformed rows remain unavailable instead of becoming an `ok` pulse.
-* Live intraday remains `unavailable` until SSI returns current-date candles that pass the existing freshness check.
+* Intraday remains a partial capability until current-date coverage is observed across the broader ticker set.
 
 Acceptance criteria:
 

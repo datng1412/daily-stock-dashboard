@@ -280,13 +280,114 @@ def test_intraday_ohlcv_sends_ssi_params_and_maps_sorted_candles():
         "fromDate": "17/06/2026",
         "toDate": "17/06/2026",
         "pageIndex": 1,
-        "pageSize": 10,
+        "pageSize": 1000,
         "ascending": "true",
     }
     assert payload["status"] == "ok"
     assert payload["source"] == "SSI"
     assert [row["close"] for row in payload["rows"]] == [101.0, 102.0]
     assert payload["rows"][0]["ticker"] == "FPT"
+    assert payload["request_page_size"] == 1000
+
+
+def test_intraday_ohlcv_keeps_latest_rows_after_sorting_oldest_first_response():
+    session = _FakeSession(
+        post_items=[_token_response()],
+        get_items=[
+            _FakeResponse(
+                payload={
+                    "data": [
+                        {
+                            "TradingTime": "2026-06-17 09:00:00",
+                            "OpenPrice": "100",
+                            "HighPrice": "101",
+                            "LowPrice": "99",
+                            "ClosePrice": "100.5",
+                            "TotalVolume": "1000",
+                        },
+                        {
+                            "TradingTime": "2026-06-24 10:00:00",
+                            "OpenPrice": "110",
+                            "HighPrice": "111",
+                            "LowPrice": "109",
+                            "ClosePrice": "110.5",
+                            "TotalVolume": "2000",
+                        },
+                        {
+                            "TradingTime": "2026-06-24 10:01:00",
+                            "OpenPrice": "111",
+                            "HighPrice": "112",
+                            "LowPrice": "110",
+                            "ClosePrice": "111.5",
+                            "TotalVolume": "3000",
+                        },
+                    ]
+                }
+            )
+        ],
+    )
+    fetcher = _fetcher(session=session)
+
+    payload = fetcher.get_intraday_ohlcv("FPT", from_date="2026-06-17", to_date="2026-06-24", limit=2, interval="1h")
+
+    assert payload["status"] == "ok"
+    assert [row["date_time"] for row in payload["rows"]] == [
+        "2026-06-24T10:00:00",
+        "2026-06-24T10:01:00",
+    ]
+    assert [row["close"] for row in payload["rows"]] == [110.5, 111.5]
+
+
+def test_intraday_ohlcv_paginates_before_applying_public_limit():
+    old_rows = []
+    for index in range(1000):
+        old_rows.append(
+            {
+                "TradingTime": f"2026-06-17 09:{index % 60:02d}:00",
+                "OpenPrice": "100",
+                "HighPrice": "101",
+                "LowPrice": "99",
+                "ClosePrice": str(100 + index / 1000),
+                "TotalVolume": "1000",
+            }
+        )
+    latest_rows = [
+        {
+            "TradingTime": "2026-06-24 10:00:00",
+            "OpenPrice": "110",
+            "HighPrice": "111",
+            "LowPrice": "109",
+            "ClosePrice": "110.5",
+            "TotalVolume": "2000",
+        },
+        {
+            "TradingTime": "2026-06-24 10:01:00",
+            "OpenPrice": "111",
+            "HighPrice": "112",
+            "LowPrice": "110",
+            "ClosePrice": "111.5",
+            "TotalVolume": "3000",
+        },
+    ]
+    session = _FakeSession(
+        post_items=[_token_response()],
+        get_items=[
+            _FakeResponse(payload={"data": old_rows, "totalRecord": 1002}),
+            _FakeResponse(payload={"data": latest_rows, "totalRecord": 1002}),
+        ],
+    )
+    fetcher = _fetcher(session=session)
+
+    payload = fetcher.get_intraday_ohlcv("FPT", from_date="2026-06-17", to_date="2026-06-24", limit=2, interval="1h")
+
+    get_calls = [call for call in session.calls if call[0] == "GET"]
+    assert get_calls[0][2]["params"]["pageIndex"] == 1
+    assert get_calls[1][2]["params"]["pageIndex"] == 2
+    assert payload["pages_used"] == 2
+    assert [row["date_time"] for row in payload["rows"]] == [
+        "2026-06-24T10:00:00",
+        "2026-06-24T10:01:00",
+    ]
 
 
 def test_intraday_ohlcv_disabled_does_not_request_token():

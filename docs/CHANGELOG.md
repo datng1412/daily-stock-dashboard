@@ -9,7 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-- [fix] Keep malformed SSI intraday rows unavailable and document the Phase 4.0B stale-date root cause.
+- [fix] Show exact VN audit intraday usable-row ratios and mark all-ok intraday audits reliable.
+- [fix] Page SSI IntradayOhlc internally before applying the public candle limit and keep malformed intraday rows unavailable.
 - [documentation] Add a local VN data capability audit script and SSI capability matrix for conservative data-domain planning.
 - [documentation] Add a user-facing Vietnamese VN dashboard offering overview covering current features, limitations, and near-term direction.
 - [documentation] Pivot the VN dashboard roadmap to data-first implementation after Phase 3.5A, add the Phase 4.0A capability probe and reliability sequence, and defer further UI polish.
