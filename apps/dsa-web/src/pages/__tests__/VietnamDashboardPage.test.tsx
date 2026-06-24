@@ -576,11 +576,8 @@ const dataReadinessItem = (label: RegExp | string) => (
 );
 
 const inspectChartCard = () => {
-  const detail = within(screen.getByText('Stock detail').closest('section') as HTMLElement);
-  const chartHeading = detail.getByRole('heading', { name: 'Inspect chart' });
-  const chartCard = chartHeading.closest('div')?.parentElement?.parentElement;
-  if (!chartCard) throw new Error('Inspect chart card not found');
-  return within(chartCard as HTMLElement);
+  const chartCard = screen.getByTestId('inspect-chart-card');
+  return within(chartCard);
 };
 
 const clickChartControl = async (element: Element) => {
@@ -856,6 +853,78 @@ describe('VietnamDashboardPage watchlist loading', () => {
       'News: news is disabled because live news data/status is not implemented in this phase.',
     );
     expect(strip.queryByText(/Attempted endpoints|RealtimeQuote|TradeTape|HTTP status|raw provider/i)).not.toBeInTheDocument();
+  });
+
+  it('renders a serious daily data unavailable state when no daily rows are available', async () => {
+    mockedGetVietnamWatchlist.mockResolvedValue(makeResponse([]));
+    mockedGetVietnamRealtimeQuotes.mockResolvedValue(makeRealtimeResponse([]));
+    mockedGetVietnamRealtimeTrades.mockResolvedValue({
+      ...makeTradesResponse('FPT'),
+      status: 'unavailable',
+      trades: [],
+    });
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+
+    expect(dataReadinessStrip().getByText('Daily data unavailable')).toBeInTheDocument();
+    expect(screen.getByTestId('indicator-daily-unavailable-state')).toHaveTextContent('Daily data unavailable');
+    expect(screen.getByTestId('indicator-daily-unavailable-state')).toHaveTextContent('No daily SSI rows are available for the active watchlist.');
+    expect(screen.getByTestId('selected-ticker-empty-state')).toHaveTextContent('Selected ticker unavailable because no valid daily rows are loaded.');
+    expect(screen.getByText('No selected ticker detail can be shown until daily watchlist rows load.')).toBeInTheDocument();
+  });
+
+  it('keeps optional live unavailable states minor while valid daily rows remain visible', async () => {
+    const response = makeResponse(defaultTickers);
+    response.watchlist = response.watchlist.map((item) => ({
+      ...item,
+      intradayStatus: { status: 'unavailable', source: 'SSI IntradayOhlc', message: 'SSI intraday unavailable.' },
+      intradayCandles: [],
+      intradayPulse: null,
+      realtimeStatus: { status: 'unavailable', source: 'SSI realtime contract', message: 'SSI realtime unavailable.' },
+      realtimeSnapshot: null,
+      tradeTapeStatus: { status: 'unavailable', source: 'SSI trade-tape contract', message: 'SSI trade tape unavailable.' },
+      tradeTape: [],
+      dataQualitySummary: {
+        ...item.dataQualitySummary,
+        checks: {
+          ...item.dataQualitySummary?.checks,
+          intraday: 'unavailable',
+          realtime: 'unavailable',
+          tradeTape: 'unavailable',
+          news: 'disabled',
+        },
+      },
+    }));
+    mockedGetVietnamWatchlist.mockResolvedValue(response);
+    mockedGetVietnamRealtimeQuotes.mockImplementation(async (tickers) => makeRealtimeResponse(tickers, { unavailable: true }));
+    mockedGetVietnamRealtimeTrades.mockImplementation(async (symbol) => ({
+      ...makeTradesResponse(symbol),
+      status: 'unavailable',
+      error: null,
+      errorDetail: 'Attempted endpoints: TradeTape',
+      rawError: 'HTTP status 404',
+      trades: [],
+    }));
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledWith(defaultTickers));
+
+    expect(screen.getByTestId('indicator-row-FPT')).toBeInTheDocument();
+    expect(indicatorTableSection()).toHaveTextContent('Ready');
+    expect(indicatorTableSection()).toHaveTextContent('Realtime unavailable');
+    expect(selectedTickerHeader().getByText('Daily close')).toBeInTheDocument();
+
+    const detail = within(screen.getByText('Stock detail').closest('section') as HTMLElement);
+    expect(detail.getByText('SSI intraday unavailable.')).toBeInTheDocument();
+    expect(detail.getByText('SSI realtime unavailable. Daily SSI data is still available.')).toBeInTheDocument();
+    expect(detail.getByText('SSI trade tape unavailable.')).toBeInTheDocument();
+    expect(detail.queryByText(/TradeTape|HTTP status|Attempted endpoints/i)).not.toBeInTheDocument();
+
+    expect(screen.queryByText(/full-page failure/i)).not.toBeInTheDocument();
+    expect(screen.queryByText('SSI unavailable')).not.toBeInTheDocument();
   });
 
   it('does not add API calls for the data readiness strip', async () => {
@@ -1202,7 +1271,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     fireEvent.click(screen.getByRole('button', { name: /^refresh$/i }));
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(2));
-    expect(screen.getByText('Updating...')).toBeInTheDocument();
+    expect(screen.getAllByText('Updating...').length).toBeGreaterThan(0);
     expect(screen.getByText('Showing previous data')).toBeInTheDocument();
     expect(foreignNetVolumeSummaryCard().getByText('21')).toBeInTheDocument();
     expect(indicatorRowOrder()).toEqual(['ACB', 'ACV', 'FPT', 'MSB', 'SCS', 'VPB']);
@@ -1213,7 +1282,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     });
 
     await waitFor(() => expect(foreignNetVolumeSummaryCard().getByText('300')).toBeInTheDocument());
-    expect(screen.queryByText('Updating...')).not.toBeInTheDocument();
+    expect(screen.queryAllByText('Updating...')).toHaveLength(0);
     expect(indicatorRowOrder()).toEqual(['ACB', 'ACV', 'FPT', 'MSB', 'SCS', 'VPB']);
   });
 
@@ -1286,7 +1355,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Banks' }));
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith([...presetTickers.Banks], false));
-    expect(screen.getByText('Updating...')).toBeInTheDocument();
+    expect(screen.getAllByText('Updating...').length).toBeGreaterThan(0);
     expect(screen.getByTestId('indicator-row-FPT')).toBeInTheDocument();
 
     await act(async () => {
@@ -1316,7 +1385,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Apply custom' }));
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(['VPB', 'ACB'], false));
-    expect(screen.getByText('Updating...')).toBeInTheDocument();
+    expect(screen.getAllByText('Updating...').length).toBeGreaterThan(0);
 
     await act(async () => {
       rejectCustom?.(new Error('custom timeout'));
@@ -2417,9 +2486,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
     await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('FPT', '6M'));
 
-    const detail = within(screen.getByText('Stock detail').closest('section') as HTMLElement);
-    const chartHeading = detail.getByRole('heading', { name: 'Inspect chart' });
-    const chartCard = within(chartHeading.closest('div')?.parentElement?.parentElement as HTMLElement);
+    const chartCard = inspectChartCard();
 
     expect(chartCard.getByText('Daily OHLCV from SSI. SSI realtime remains separate.')).toBeInTheDocument();
     expect(chartCard.getByRole('button', { name: '1M' })).toBeInTheDocument();
@@ -2591,9 +2658,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
     await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('FPT', '6M'));
 
-    const detail = within(screen.getByText('Stock detail').closest('section') as HTMLElement);
-    const chartHeading = detail.getByRole('heading', { name: 'Inspect chart' });
-    const chartCard = within(chartHeading.closest('div')?.parentElement?.parentElement as HTMLElement);
+    const chartCard = inspectChartCard();
 
     expect(chartCard.queryByTestId('inspect-legend-bollinger')).not.toBeInTheDocument();
     await clickChartControl(chartCard.getByLabelText('Bollinger'));
@@ -2605,9 +2670,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('FPT', '6M'));
 
-    const detail = within(screen.getByText('Stock detail').closest('section') as HTMLElement);
-    const chartHeading = detail.getByRole('heading', { name: 'Inspect chart' });
-    const chartCard = within(chartHeading.closest('div')?.parentElement?.parentElement as HTMLElement);
+    const chartCard = inspectChartCard();
 
     await clickChartControl(chartCard.getByRole('button', { name: '1Y' }));
 
@@ -2648,9 +2711,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('FPT', '6M'));
 
-    const detail = within(screen.getByText('Stock detail').closest('section') as HTMLElement);
-    const chartHeading = detail.getByRole('heading', { name: 'Inspect chart' });
-    const chartCard = within(chartHeading.closest('div')?.parentElement?.parentElement as HTMLElement);
+    const chartCard = inspectChartCard();
     expect(chartCard.getByText('Chart data unavailable')).toBeInTheDocument();
     expect(chartCard.queryByRole('button', { name: 'Zoom in chart' })).not.toBeInTheDocument();
     expect(chartCard.queryByRole('button', { name: 'Zoom out chart' })).not.toBeInTheDocument();

@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [improvement] Add VN dashboard section-level loading and unavailable states while keeping optional live failures secondary.
 - [improvement] Keep previous VN dashboard watchlist rows visible during refresh and pending preset/custom list changes.
 - [improvement] Add frontend-only VN Data Readiness explanations without backend/API behavior changes.
 - [new feature] Add a visual VN dashboard Data Readiness strip derived from existing frontend data without backend/API changes.

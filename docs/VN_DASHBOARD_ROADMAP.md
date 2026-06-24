@@ -302,13 +302,14 @@ Phase 3.2C status:
 * Local request-id protection ignores older/slower responses so rapid preset/custom changes cannot overwrite newer intent or clear newer error/loading state.
 * No backend/API contract fields, provider calls, endpoints, polling, dependencies, or public contracts changed in Phase 3.2C.
 
-Phase 3.2D remaining:
+Phase 3.2D status:
 
-Goal:
-
-* Continue section-level readiness cleanup beyond the watchlist table.
-* Keep optional live failures from dominating lower-priority sections.
-* Tighten first-load versus refresh states across remaining detail panels.
+* Added compact section-level states to existing `/vietnam` areas, including refresh controls, watchlist controls, the indicator scan table, selected ticker summary, stock detail, inspect chart, intraday, realtime, trade tape, and diagnostics/source details.
+* Added serious daily-data-unavailable copy when no daily rows are available after first load.
+* Kept optional intraday, realtime, trade-tape, and disabled news states visually minor when valid daily SSI rows exist.
+* Preserved Phase 3.2C previous-data refresh behavior: prior rows remain visible during refresh and pending preset/custom changes.
+* Kept provider endpoint details, HTTP status, retryability, and sanitized raw provider summaries in diagnostics rather than primary UI.
+* No backend/API contract fields, provider calls, endpoints, polling, dependencies, or public contracts changed in Phase 3.2D.
 
 Request-state vocabulary:
 

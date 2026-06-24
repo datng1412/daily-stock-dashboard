@@ -53,6 +53,7 @@ type WatchlistScanLabel = 'Strong' | 'Improving' | 'Neutral' | 'Weakening' | 'Ri
 type VietnamDashboardPresetId = 'vn30' | 'banks' | 'securities' | 'real-estate' | 'consumer' | 'logistics' | 'tech' | 'oil-gas' | 'electricity';
 type VietnamDashboardActivePresetId = 'my' | 'custom' | VietnamDashboardPresetId;
 type ReadinessState = 'Ready' | 'Partial' | 'Unavailable' | 'Disabled' | 'Loading' | 'Not implemented';
+type SectionState = 'Ready' | 'Loading' | 'Updating...' | 'Partial' | 'Unavailable' | 'Disabled' | 'Failed';
 type ReadinessItemKey = 'daily' | 'referenceForeign' | 'indicators' | 'intraday' | 'realtime' | 'tradeTape' | 'news';
 
 interface WatchlistScanState {
@@ -247,6 +248,14 @@ const severityVariant = (severity?: string | null) => {
   if (severity === 'risk') return 'danger';
   if (severity === 'caution') return 'warning';
   return 'info';
+};
+
+const sectionStateVariant = (state: SectionState): BadgeVariant => {
+  if (state === 'Ready') return 'success';
+  if (state === 'Loading' || state === 'Updating...') return 'info';
+  if (state === 'Partial') return 'warning';
+  if (state === 'Failed') return 'danger';
+  return 'default';
 };
 
 const intradayVariant = (label?: string | null) => {
@@ -1527,6 +1536,15 @@ const DataStatusPanel: React.FC<{
     ...liveStatusDiagnosticRows('SSI realtime status', selectedItem?.realtimeStatus?.diagnostics),
     ...liveStatusDiagnosticRows('SSI trade tape status', selectedItem?.tradeTapeStatus?.diagnostics),
   ];
+  const diagnosticsAvailable = Boolean(
+    liveStatusDiagnostics.length
+    || data
+    || metadata
+    || realtimeError
+    || tradesError
+    || observability
+    || indexCoverageError,
+  );
 
   return (
     <section className="rounded-lg border border-border/70 bg-card p-4">
@@ -1536,6 +1554,7 @@ const DataStatusPanel: React.FC<{
             <DatabaseZap className="h-5 w-5 text-cyan" />
             <h2 className="text-base font-semibold text-foreground">Data status</h2>
             <Badge variant={dataStatusVariant}>Data status: {dataStatusLabel}</Badge>
+            {diagnosticsAvailable ? <Badge variant="default">Diagnostics available</Badge> : null}
           </div>
           <p className="mt-1 text-xs text-secondary-text">
             {marketPhase.phase} | core daily SSI data {data ? 'available' : 'pending'} | selected {selectedItem?.ticker ?? '-'}
@@ -1760,7 +1779,20 @@ const SelectedTickerHeader: React.FC<{
   realtimeQuote?: VietnamRealtimeQuote | null;
   marketPhase: VietnamMarketPhase;
 }> = ({ item, realtimeQuote, marketPhase }) => {
-  if (!item) return null;
+  if (!item) {
+    return (
+      <section className="rounded-lg border border-border/70 bg-card p-4 shadow-soft-card" data-testid="selected-ticker-empty-state">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="label-uppercase text-cyan">Selected ticker</p>
+            <h2 className="mt-1 text-xl font-semibold text-foreground">No ticker selected</h2>
+            <p className="mt-2 text-sm text-secondary-text">Selected ticker unavailable because no valid daily rows are loaded.</p>
+          </div>
+          <Badge variant={sectionStateVariant('Unavailable')}>Unavailable</Badge>
+        </div>
+      </section>
+    );
+  }
   const realtimeState = realtimeSnapshotState(realtimeQuote, marketPhase.code);
   const avgVolume20D = item.indicators.avgVolume20D ?? item.liquidity?.avgVolume20D;
   const hasRealtimeSnapshot = hasRealtimeSnapshotData(realtimeQuote);
@@ -1778,6 +1810,11 @@ const SelectedTickerHeader: React.FC<{
   const showRealtimeStatus = !hasRealtimeSnapshot || realtimeStatus === 'unavailable' || realtimeStatus === 'disabled' || realtimeStatus === 'error' || realtimeState.severity === 'warning' || realtimeState.severity === 'error';
   const tradeTapeStatus = item.tradeTapeStatus?.status;
   const showTradeTapeStatus = tradeTapeStatus === 'unavailable' || tradeTapeStatus === 'disabled' || tradeTapeStatus === 'error';
+  const dailySectionState: SectionState = hasOfficialDailyData(item)
+    ? dataQualityStatus(item) === 'partial'
+      ? 'Partial'
+      : 'Ready'
+    : 'Unavailable';
 
   return (
     <section className="rounded-lg border border-border/70 bg-card p-4 shadow-soft-card">
@@ -1792,6 +1829,7 @@ const SelectedTickerHeader: React.FC<{
               </div>
             </div>
             <div className="flex flex-wrap gap-2">
+              <Badge variant={sectionStateVariant(dailySectionState)}>{dailySectionState}</Badge>
               {metadataExchange ? <Badge variant="default">{metadataExchange}</Badge> : null}
               {metadataMarket && metadataMarket !== metadataExchange ? <Badge variant="default">{metadataMarket}</Badge> : null}
               <Badge variant="info">{dailySourceLabel}</Badge>
@@ -1873,7 +1911,10 @@ const WatchlistScanSummary: React.FC<{
     <section className="rounded-lg border border-border/70 bg-card p-4" data-testid="watchlist-scan-summary">
       <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
         <div>
-          <h2 className="text-base font-semibold text-foreground">Watchlist scan</h2>
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-base font-semibold text-foreground">Watchlist scan</h2>
+            <Badge variant={sectionStateVariant(items.length ? 'Ready' : 'Unavailable')}>{items.length ? 'Ready' : 'Unavailable'}</Badge>
+          </div>
           <p className="mt-1 text-xs text-secondary-text">
             Neutral ticker-level states derived from existing labels, SSI DailyOhlc cache freshness, and SSI realtime state. Warning counts remain secondary context in the table.
           </p>
@@ -2014,11 +2055,22 @@ const IndicatorTable: React.FC<{
   realtimeQuotes: Record<string, VietnamRealtimeQuote | undefined>;
   realtimeLoading?: boolean;
   realtimeError?: string | null;
+  isUpdating?: boolean;
+  hasRequestFailure?: boolean;
   selectedTicker?: string | null;
   marketPhase: VietnamMarketPhase;
   onSelect: (ticker: string) => void;
-}> = ({ items, realtimeQuotes, realtimeLoading = false, realtimeError, selectedTicker, marketPhase, onSelect }) => {
+}> = ({ items, realtimeQuotes, realtimeLoading = false, realtimeError, isUpdating = false, hasRequestFailure = false, selectedTicker, marketPhase, onSelect }) => {
   const [sortState, setSortState] = useState<IndicatorSortState>(null);
+  const sectionState: SectionState = isUpdating
+    ? 'Updating...'
+    : hasRequestFailure && items.length
+      ? 'Partial'
+      : items.length
+        ? 'Ready'
+        : hasRequestFailure
+          ? 'Failed'
+          : 'Unavailable';
   const sortedItems = useMemo(() => {
     if (!sortState) return items;
     return items
@@ -2051,7 +2103,15 @@ const IndicatorTable: React.FC<{
   return (
     <section className="rounded-lg border border-border/70 bg-card p-4">
       <div className="mb-3 flex items-center justify-between gap-3">
-        <h2 className="text-base font-semibold text-foreground">Indicator table</h2>
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-base font-semibold text-foreground">Indicator table</h2>
+            <Badge variant={sectionStateVariant(sectionState)}>{sectionState}</Badge>
+          </div>
+          {isUpdating ? (
+            <p className="mt-1 text-xs text-secondary-text">Showing previous data while the watchlist updates.</p>
+          ) : null}
+        </div>
         <span className="text-xs text-secondary-text">
           Daily scan surface{realtimeLoading ? ' | loading SSI realtime' : ''}
         </span>
@@ -2059,6 +2119,12 @@ const IndicatorTable: React.FC<{
       {realtimeError ? (
         <div className="mb-3 rounded-lg border border-warning/20 bg-warning/10 p-2 text-xs text-warning">
           SSI realtime unavailable. Daily SSI data is still available.
+        </div>
+      ) : null}
+      {!items.length ? (
+        <div className="rounded-lg border border-danger/25 bg-danger/10 p-4 text-sm text-danger" data-testid="indicator-daily-unavailable-state">
+          <p className="font-medium">Daily data unavailable</p>
+          <p className="mt-1 text-xs text-secondary-text">No daily SSI rows are available for the active watchlist.</p>
         </div>
       ) : null}
       <div className="overflow-x-auto">
@@ -2617,6 +2683,13 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
   const chartSourceLabel = chart?.status === 'unavailable'
     ? 'SSI unavailable'
     : chart?.source || 'SSI';
+  const chartSectionState: SectionState = loading
+    ? 'Loading'
+    : points.length
+      ? 'Ready'
+      : error
+        ? 'Failed'
+        : 'Unavailable';
 
   const updateVisibleWindow = (updater: (window: ChartVisibleWindow) => ChartVisibleWindow) => {
     setVisibleWindow((current) => clampChartWindow(updater(clampChartWindow(current, points.length)), points.length));
@@ -2655,10 +2728,13 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
   }, [item.ticker, rangeLabel]);
 
   return (
-    <div className="mt-4 rounded-lg border border-border/60 bg-elevated/30 p-4">
+    <div className="mt-4 rounded-lg border border-border/60 bg-elevated/30 p-4" data-testid="inspect-chart-card">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h3 className="text-sm font-semibold text-foreground">Inspect chart</h3>
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-sm font-semibold text-foreground">Inspect chart</h3>
+            <Badge variant={sectionStateVariant(chartSectionState)}>{chartSectionState}</Badge>
+          </div>
           <p className="mt-1 text-xs text-secondary-text">Daily OHLCV from {chartSourceLabel}. SSI realtime remains separate.</p>
         </div>
         <ChartRangeControls rangeLabel={rangeLabel} onRangeChange={setRangeLabel} />
@@ -2877,7 +2953,20 @@ const StockDetailView: React.FC<{
   tradesError,
   marketPhase,
 }) => {
-  if (!item) return null;
+  if (!item) {
+    return (
+      <section className="rounded-lg border border-border/70 bg-card p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="label-uppercase text-secondary-text">Stock detail</p>
+            <h2 className="mt-1 text-xl font-semibold text-foreground">Daily data unavailable</h2>
+            <p className="mt-2 text-sm text-secondary-text">No selected ticker detail can be shown until daily watchlist rows load.</p>
+          </div>
+          <Badge variant={sectionStateVariant('Unavailable')}>Unavailable</Badge>
+        </div>
+      </section>
+    );
+  }
   const indicators = item.indicators;
   const latestIntradayCandle = item.intradayCandles?.at(-1);
   const conditionSummary = buildVietnamConditionSummary({ item, fixtureMode });
@@ -2886,6 +2975,23 @@ const StockDetailView: React.FC<{
   const hasRealtimeSnapshot = hasRealtimeSnapshotData(realtimeQuote);
   const hasCurrentIntraday = hasCurrentIntradayData(item);
   const hasTradeTape = hasTradeTapeData(realtimeTrades);
+  const intradaySectionState: SectionState = hasCurrentIntraday
+    ? 'Ready'
+    : item.intradayStatus?.status === 'disabled'
+      ? 'Disabled'
+      : 'Unavailable';
+  const realtimeSectionState: SectionState = hasRealtimeSnapshot
+    ? 'Ready'
+    : realtimeQuote?.status === 'disabled' || item.realtimeStatus?.status === 'disabled'
+      ? 'Disabled'
+      : 'Unavailable';
+  const tradeTapeSectionState: SectionState = tradesLoading
+    ? 'Loading'
+    : hasTradeTape
+      ? 'Ready'
+      : item.tradeTapeStatus?.status === 'disabled'
+        ? 'Disabled'
+        : 'Unavailable';
   const sessionCandlesCount = item.intradayPulse?.sessionCandlesCount ?? 0;
   const hasSessionCandles = sessionCandlesCount > 0;
   const hasSessionHighLowFromIntraday = intradaySessionHigh(item) != null && intradaySessionLow(item) != null;
@@ -2956,6 +3062,9 @@ const StockDetailView: React.FC<{
           <h2 className="mt-1 text-xl font-semibold text-foreground">{item.ticker}</h2>
         </div>
         <div className="flex flex-wrap gap-1">
+          <Badge variant={sectionStateVariant(hasOfficialDailyData(item) ? 'Ready' : 'Unavailable')}>
+            {hasOfficialDailyData(item) ? 'Ready' : 'Unavailable'}
+          </Badge>
           {marketStatusLabels(item, item.statusLabels?.length ?? 0).map((label) => (
             <Badge key={label} variant={statusVariant(label)}>{label}</Badge>
           ))}
@@ -3183,6 +3292,7 @@ const StockDetailView: React.FC<{
             </p>
           </div>
           <div className="flex flex-wrap gap-1">
+            <Badge variant={sectionStateVariant(intradaySectionState)}>{intradaySectionState}</Badge>
             <Badge variant="default">{item.intradaySource ?? item.intradayStatus?.source ?? 'SSI'}</Badge>
             <Badge variant="default">{intradayGranularityText(item)}</Badge>
             <Badge variant={item.intradayIsRealtimeQuote ? 'success' : 'warning'}>
@@ -3291,7 +3401,10 @@ const StockDetailView: React.FC<{
       <div className="mt-4 rounded-lg border border-border/60 bg-elevated/30 p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-sm font-semibold text-foreground">SSI realtime</h3>
-          <Badge variant={realtimeSnapshotStateVariant(realtimeState)}>{realtimeState.label}</Badge>
+          <div className="flex flex-wrap gap-1">
+            <Badge variant={sectionStateVariant(realtimeSectionState)}>{realtimeSectionState}</Badge>
+            <Badge variant={realtimeSnapshotStateVariant(realtimeState)}>{realtimeState.label}</Badge>
+          </div>
         </div>
         {hasRealtimeSnapshot ? (
         <dl className="mt-3 grid gap-3 text-sm md:grid-cols-4">
@@ -3334,7 +3447,10 @@ const StockDetailView: React.FC<{
       <div className="mt-4 rounded-lg border border-border/60 bg-elevated/30 p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-sm font-semibold text-foreground">Trade tape</h3>
-          <Badge variant={tradesError ? 'warning' : 'info'}>{tradesLoading ? 'Loading' : 'SSI trade tape'}</Badge>
+          <div className="flex flex-wrap gap-1">
+            <Badge variant={sectionStateVariant(tradeTapeSectionState)}>{tradeTapeSectionState}</Badge>
+            <Badge variant={tradesError ? 'warning' : 'info'}>SSI trade tape</Badge>
+          </div>
         </div>
         <p className="mt-2 text-xs text-secondary-text">
           Trade tape may not include auction/ATC prints.
@@ -4114,6 +4230,9 @@ const VietnamDashboardPage: React.FC = () => {
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-base font-semibold text-foreground">Refresh control</h2>
+              <Badge variant={sectionStateVariant(isUpdatingWatchlist ? 'Updating...' : error && !hasCommittedData ? 'Failed' : 'Ready')}>
+                {isUpdatingWatchlist ? 'Updating...' : error && !hasCommittedData ? 'Failed' : 'Ready'}
+              </Badge>
               <Badge variant={autoRefreshEnabled ? 'success' : 'default'}>
                 Auto-refresh {autoRefreshEnabled ? 'ON' : 'OFF'}
               </Badge>
@@ -4236,6 +4355,9 @@ const VietnamDashboardPage: React.FC = () => {
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-base font-semibold text-foreground">Edit Watchlist</h2>
+              <Badge variant={sectionStateVariant(isUpdatingWatchlist ? 'Updating...' : 'Ready')}>
+                {isUpdatingWatchlist ? 'Updating...' : 'Ready'}
+              </Badge>
               <Badge variant="default">{watchlist.length}/{VIETNAM_WATCHLIST_MAX_SIZE}</Badge>
             </div>
             <p className="mt-1 text-xs text-secondary-text">
@@ -4384,6 +4506,8 @@ const VietnamDashboardPage: React.FC = () => {
             realtimeQuotes={realtimeQuotes}
             realtimeLoading={realtimeLoading}
             realtimeError={realtimeError}
+            isUpdating={isUpdatingWatchlist}
+            hasRequestFailure={Boolean(error)}
             selectedTicker={selectedItem?.ticker}
             marketPhase={marketPhase}
             onSelect={setSelectedTicker}

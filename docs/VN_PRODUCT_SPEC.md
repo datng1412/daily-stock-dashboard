@@ -282,7 +282,9 @@ Phase 3.2B adds lightweight explanations to the Data Readiness strip so each ite
 
 Phase 3.2C keeps the previous successful `/vietnam` watchlist visible while a refresh, preset switch, reset, or custom apply request is in flight. It adds frontend request-state UX only: `Updating...` and `Last update failed` copy, local stale-response protection for rapid list changes, and commit-on-success behavior for preset/custom list changes. It does not add backend fields, endpoints, provider calls, polling, or public contract changes. Request-level failures preserve the prior committed rows/list/preset, while successful responses that include unavailable ticker rows still commit and use existing row-level unavailable states.
 
-Next Phase 3 work makes the dashboard progressive: data readiness and refresh UX, selected ticker progressive disclosure, request-state orchestration, local filtering, and chart UX polish. The company detail page remains part of the same source-aware explanation layer, not a separate advisor experience.
+Phase 3.2D adds section-level loading and unavailable state cleanup across existing `/vietnam` sections. It keeps the daily scan primary, makes optional intraday/realtime/trade-tape/news unavailable states visually minor, keeps diagnostics lower priority, and preserves the Phase 3.2C previous-data refresh behavior. It does not add backend fields, endpoints, provider calls, polling, or public contract changes.
+
+Next Phase 3 work makes the dashboard progressive: selected ticker progressive disclosure, request-state orchestration cleanup, local filtering, and chart UX polish. The company detail page remains part of the same source-aware explanation layer, not a separate advisor experience.
 
 ### Phase 4.0 - SSI Realtime and Trade Tape Investigation
 
