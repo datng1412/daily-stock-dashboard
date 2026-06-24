@@ -566,6 +566,11 @@ const selectedTickerHeader = () => {
   return within(header);
 };
 
+const selectedDisclosure = (testId: string) => {
+  const disclosure = screen.getByTestId(testId);
+  return within(disclosure);
+};
+
 const dataReadinessStrip = () => {
   const strip = screen.getByTestId('data-readiness-strip');
   return within(strip);
@@ -1190,14 +1195,36 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(header.getByText('FPT Listed Company')).toBeInTheDocument();
     expect(header.getByText('Daily close')).toBeInTheDocument();
     expect(screen.getAllByText('Daily OHLCV volume').length).toBeGreaterThan(0);
-    expect(header.getByText('Vs reference')).toBeInTheDocument();
+    expect(header.getByText('% change')).toBeInTheDocument();
     expect(header.getByText('Foreign net volume')).toBeInTheDocument();
     expect(header.getByText('Daily volume / 20D avg')).toBeInTheDocument();
-    expect(header.getByText('Latest news')).toBeInTheDocument();
+    expect(header.getByText('RSI14 / MA state')).toBeInTheDocument();
+    expect(header.getByText('Live status')).toBeInTheDocument();
     expect(header.getAllByText('News disabled').length).toBeGreaterThan(0);
     expect(header.getByText('Daily source: SSI DailyOhlc')).toBeInTheDocument();
-    expect(header.queryByText('SSI realtime')).not.toBeInTheDocument();
+    expect(header.queryByText('Reference price')).not.toBeInTheDocument();
+    expect(header.queryByText('Matched value')).not.toBeInTheDocument();
     expect(header.queryByText('SSI unavailable')).not.toBeInTheDocument();
+  });
+
+  it('organizes selected ticker detail into progressive disclosure groups', async () => {
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+
+    expect(screen.getByText('Price context')).toBeInTheDocument();
+    expect(screen.getByText('Flow context')).toBeInTheDocument();
+    expect(screen.getByText('Technical context')).toBeInTheDocument();
+    expect(screen.getByText('Live context')).toBeInTheDocument();
+    expect(screen.getByText('Source coverage')).toBeInTheDocument();
+    expect(screen.getByText('Diagnostics')).toBeInTheDocument();
+
+    expect(selectedDisclosure('selected-disclosure-price-context').getByText('Reference price')).toBeInTheDocument();
+    expect(selectedDisclosure('selected-disclosure-flow-context').getByText('Matched value')).toBeInTheDocument();
+    expect(selectedDisclosure('selected-disclosure-technical-context').getByText('RSI14 Wilder/RMA')).toBeInTheDocument();
+    expect(selectedDisclosure('selected-disclosure-live-context').getByText('SSI realtime')).toBeInTheDocument();
+    expect(selectedDisclosure('selected-disclosure-source-coverage').getByText('SSI DailyStockPrice')).toBeInTheDocument();
+    expect(selectedDisclosure('selected-disclosure-diagnostics').getByText((content) => content.includes('latest_price_raw_field: close'))).toBeInTheDocument();
   });
 
   it('sums the top foreign net volume card from SSI DailyStockPrice share volume', async () => {

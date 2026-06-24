@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [improvement] Organize the VN dashboard selected ticker detail into compact summary and progressive disclosure groups.
 - [improvement] Add VN dashboard section-level loading and unavailable states while keeping optional live failures secondary.
 - [improvement] Keep previous VN dashboard watchlist rows visible during refresh and pending preset/custom list changes.
 - [improvement] Add frontend-only VN Data Readiness explanations without backend/API behavior changes.

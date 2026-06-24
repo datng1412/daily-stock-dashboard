@@ -284,7 +284,9 @@ Phase 3.2C keeps the previous successful `/vietnam` watchlist visible while a re
 
 Phase 3.2D adds section-level loading and unavailable state cleanup across existing `/vietnam` sections. It keeps the daily scan primary, makes optional intraday/realtime/trade-tape/news unavailable states visually minor, keeps diagnostics lower priority, and preserves the Phase 3.2C previous-data refresh behavior. It does not add backend fields, endpoints, provider calls, polling, or public contract changes.
 
-Next Phase 3 work makes the dashboard progressive: selected ticker progressive disclosure, request-state orchestration cleanup, local filtering, and chart UX polish. The company detail page remains part of the same source-aware explanation layer, not a separate advisor experience.
+Phase 3.3A organizes the `/vietnam` selected ticker detail into progressive disclosure groups without adding data or changing API behavior. The compact selected ticker header keeps daily close, change percent, volume versus 20D average, foreign net volume, RSI/MA state, live status, and compact Data Quality Summary visible. Secondary detail moves into Price context, Flow context, Technical context, Live context, Source coverage, News context, and Diagnostics groups. Price context is open by default; live, source, news, and diagnostics remain lower priority. Raw fields, cache internals, and rule inputs stay in Diagnostics.
+
+Next Phase 3 work continues the progressive workspace direction: selected ticker disclosure polish, request-state orchestration cleanup, local filtering, and chart UX polish. The company detail page remains part of the same source-aware explanation layer, not a separate advisor experience.
 
 ### Phase 4.0 - SSI Realtime and Trade Tape Investigation
 

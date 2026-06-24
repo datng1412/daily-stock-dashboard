@@ -896,12 +896,6 @@ const hasSsiSymbolMetadata = (item: VietnamWatchItem) => (
   ].some(hasDisplayValue)
 );
 
-const latestNewsAge = (item?: VietnamWatchItem | null) => {
-  if (item?.newsStatus?.status === 'disabled') return 'News disabled';
-  const timestamp = item?.news?.map(newsTimestamp).find(Boolean);
-  return timestamp ? formatRelativeTime(timestamp) : 'Unavailable';
-};
-
 const sumSsiForeignNetVolume = (items: VietnamWatchItem[]) => (
   items.reduce((sum, item) => {
     const value = finiteNumber(item.ssiForeignNetVolume);
@@ -1796,17 +1790,16 @@ const SelectedTickerHeader: React.FC<{
   const realtimeState = realtimeSnapshotState(realtimeQuote, marketPhase.code);
   const avgVolume20D = item.indicators.avgVolume20D ?? item.liquidity?.avgVolume20D;
   const hasRealtimeSnapshot = hasRealtimeSnapshotData(realtimeQuote);
-  const ssiReferencePrice = item.dailyStockPrice?.referencePrice ?? item.ssiReferencePrice ?? item.priceLimit?.referencePrice ?? null;
-  const ssiDailyClose = item.dailyClose ?? item.latestPrice ?? item.close ?? null;
-  const priceVsReference = ssiDailyClose != null && ssiReferencePrice != null ? ssiDailyClose - ssiReferencePrice : null;
-  const priceVsReferencePct = priceVsReference != null && ssiReferencePrice ? priceVsReference / ssiReferencePrice * 100 : null;
   const metadataExchange = metadataValue(item, 'exchange');
   const metadataMarket = metadataValue(item, 'market');
   const dailySourceLabel = officialDailySourceLabel(item);
   const dataQualitySummary = item.dataQualitySummary;
   const foreignNetVolume = item.dailyStockPrice?.foreignNetVolume ?? item.ssiForeignNetVolume ?? null;
   const dailyVolumeRatio = item.volume != null && avgVolume20D ? item.volume / avgVolume20D : null;
+  const rsiValue = rsi14Value(item);
+  const maState = maStateBadge(item);
   const realtimeStatus = realtimeQuote?.status ?? item.realtimeStatus?.status;
+  const liveState = liveStatusBadge(item, realtimeQuote ?? undefined, marketPhase);
   const showRealtimeStatus = !hasRealtimeSnapshot || realtimeStatus === 'unavailable' || realtimeStatus === 'disabled' || realtimeStatus === 'error' || realtimeState.severity === 'warning' || realtimeState.severity === 'error';
   const tradeTapeStatus = item.tradeTapeStatus?.status;
   const showTradeTapeStatus = tradeTapeStatus === 'unavailable' || tradeTapeStatus === 'disabled' || tradeTapeStatus === 'error';
@@ -1850,15 +1843,10 @@ const SelectedTickerHeader: React.FC<{
               detail={item.latestPriceDate ?? item.priceDate ?? '-'}
             />
             <SelectedTickerMetric
-              label="Price date"
-              value={item.latestPriceDate ?? item.priceDate ?? '-'}
+              label="% change"
+              value={`${formatSignedNumber(item.changePct, 2)}%`}
               detail="SSI DailyOhlc"
-            />
-            <SelectedTickerMetric
-              label="Vs reference"
-              value={formatReferenceDelta(priceVsReference, priceVsReferencePct)}
-              detail="SSI DailyStockPrice"
-              valueClassName={signalTone(priceVsReference)}
+              valueClassName={signalTone(item.changePct)}
             />
             <SelectedTickerMetric
               label="Foreign net volume"
@@ -1872,9 +1860,14 @@ const SelectedTickerHeader: React.FC<{
               detail={dailyVolumeRatio == null ? 'Ratio unavailable' : formatRatio(dailyVolumeRatio)}
             />
             <SelectedTickerMetric
-              label="Latest news"
-              value={latestNewsAge(item)}
-              detail={item.newsStatus?.status === 'disabled' ? 'News disabled' : item.newsStatus?.source ?? undefined}
+              label="RSI14 / MA state"
+              value={rsiValue == null ? '-' : formatNumber(rsiValue, 2)}
+              detail={maState.label}
+            />
+            <SelectedTickerMetric
+              label="Live status"
+              value={liveState.label}
+              detail={realtimeStatusBadgeText(realtimeStatus)}
             />
           </dl>
         </div>
@@ -2930,6 +2923,21 @@ const CorporateActionEventRow: React.FC<{ event: VietnamCorporateActionEvent }> 
   </div>
 );
 
+const SelectedTickerDisclosure: React.FC<{
+  title: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}> = ({ title, defaultOpen = false, children }) => (
+  <details
+    open={defaultOpen}
+    className="rounded-lg border border-border/60 bg-elevated/30 p-3 text-sm text-secondary-text"
+    data-testid={`selected-disclosure-${title.toLowerCase().replaceAll(' ', '-')}`}
+  >
+    <summary className="cursor-pointer text-sm font-semibold text-foreground">{title}</summary>
+    <div className="mt-3">{children}</div>
+  </details>
+);
+
 const StockDetailView: React.FC<{
   item?: VietnamWatchItem | null;
   fixtureMode?: boolean;
@@ -3073,7 +3081,105 @@ const StockDetailView: React.FC<{
       <div className="mt-3 rounded-lg border border-border/60 bg-elevated/30 p-3 text-xs text-secondary-text">
         Labels are neutral condition tags only.
       </div>
-      <div className="mt-4 rounded-lg border border-border/60 bg-elevated/30 p-4">
+      <div className="mt-4 grid gap-3">
+      <SelectedTickerDisclosure title="Price context" defaultOpen>
+        <dl className="grid gap-3 text-sm md:grid-cols-3 xl:grid-cols-4">
+          <div className="rounded-lg bg-card/60 p-3">
+            <dt className="text-xs text-secondary-text">Daily close / OHLCV close (VND)</dt>
+            <dd className="mt-1 font-medium text-foreground">{formatPrice(item.dailyClose ?? item.latestPrice ?? item.close)} / {formatPrice(item.ohlcvClose ?? item.close)}</dd>
+          </div>
+          <div className="rounded-lg bg-card/60 p-3">
+            <dt className="text-xs text-secondary-text">Daily price source</dt>
+            <dd className="mt-1 flex flex-wrap gap-1">
+              <Badge variant={priceSourceVariant(item.latestPriceSource)}>{item.latestPriceSource ?? 'unknown'}</Badge>
+            </dd>
+            <dd className="mt-2 text-xs text-secondary-text">
+              {item.latestPriceSource === 'ohlcv'
+                ? 'No reliable latest matched quote field is present, so daily OHLCV close is used.'
+                : isSsiDailyPriceSource(item.latestPriceSource)
+                  ? 'SSI DailyOhlc close is used because no reliable latest matched quote field is present.'
+                : 'Daily price comes from quote data when a reliable field is present.'}
+            </dd>
+          </div>
+          <div className="rounded-lg bg-card/60 p-3">
+            <dt className="text-xs text-secondary-text">Price date / final close</dt>
+            <dd className="mt-1 font-medium text-foreground">{item.latestPriceDate ?? item.priceDate ?? '-'} / {finalCloseLabel}</dd>
+          </div>
+          <div className="rounded-lg bg-card/60 p-3">
+            <dt className="text-xs text-secondary-text">Daily close vs reference</dt>
+            <dd className={cn('mt-1 font-medium', signalTone(priceVsReference))}>
+              {formatReferenceDelta(priceVsReference, priceVsReferencePct)}
+            </dd>
+          </div>
+          {ssiDailyRows.filter((row) => ['Reference price', 'Ceiling price / floor price', 'Adjusted close'].includes(row.label)).map((row) => (
+            <div key={`${item.ticker}-price-context-${row.label}`} className="rounded-lg bg-card/60 p-3">
+              <dt className="text-xs text-secondary-text">{row.label}</dt>
+              <dd className={cn('mt-1 font-medium text-foreground', row.tone)}>{row.value}</dd>
+            </div>
+          ))}
+          {ssiDailyStockPrice.date ? (
+            <div className="rounded-lg bg-card/60 p-3">
+              <dt className="text-xs text-secondary-text">SSI date</dt>
+              <dd className="mt-1 font-medium text-foreground">{ssiDailyStockPrice.date}</dd>
+            </div>
+          ) : null}
+          <div className="rounded-lg bg-card/60 p-3">
+            <dt className="text-xs text-secondary-text">Last fetched</dt>
+            <dd className="mt-1 font-medium text-foreground">{formatVietnamTime(latestFetchedValue(item))}</dd>
+            <dd className="mt-1 text-xs text-secondary-text">{formatRelativeAge(latestFetchedValue(item))}</dd>
+          </div>
+        </dl>
+      </SelectedTickerDisclosure>
+
+      <SelectedTickerDisclosure title="Flow context">
+        <dl className="grid gap-3 text-sm md:grid-cols-3 xl:grid-cols-4">
+          <div className="rounded-lg bg-card/60 p-3">
+            <dt className="text-xs text-secondary-text">20D average volume (shares)</dt>
+            <dd className="mt-1 font-medium text-foreground">{formatNumber(avgVolume20D)}</dd>
+          </div>
+          {sessionVolumeRatioText ? (
+          <div className="rounded-lg bg-card/60 p-3">
+            <dt className="text-xs text-secondary-text">Session volume / 20D avg daily volume</dt>
+            <dd className="mt-1 font-medium text-foreground">{sessionVolumeRatioText}</dd>
+          </div>
+          ) : null}
+          {ssiDailyRows.filter((row) => ['Foreign net volume', 'Foreign net value', 'Matched volume', 'Matched value', 'Put-through volume', 'Put-through value'].includes(row.label)).map((row) => (
+            <div key={`${item.ticker}-flow-context-${row.label}`} className="rounded-lg bg-card/60 p-3">
+              <dt className="text-xs text-secondary-text">{row.label}</dt>
+              <dd className={cn('mt-1 font-medium text-foreground', row.tone)}>{row.value}</dd>
+            </div>
+          ))}
+          {!hasSsiDailyStockPrice ? (
+            <>
+              <div className="rounded-lg bg-card/60 p-3">
+                <dt className="text-xs text-secondary-text">Foreign net 5D latest available</dt>
+                <dd className={cn('mt-1 font-medium', signalTone(foreignNet5dLatestAvailable))}>
+                  {foreignNet5dLatestAvailable == null && foreignHistoryCount < 5 ? 'Need 5 foreign rows' : formatNumber(foreignNet5dLatestAvailable)}
+                </dd>
+              </div>
+              <div className="rounded-lg bg-card/60 p-3">
+                <dt className="text-xs text-secondary-text">Foreign net 20D latest available</dt>
+                <dd className={cn('mt-1 font-medium', signalTone(foreignNet20dLatestAvailable))}>
+                  {foreignNet20dLatestAvailable == null && foreignHistoryCount < 20 ? 'Need 20 foreign rows' : formatNumber(foreignNet20dLatestAvailable)}
+                </dd>
+              </div>
+              <div className="rounded-lg bg-card/60 p-3">
+                <dt className="text-xs text-secondary-text">OHLCV / foreign dates</dt>
+                <dd className="mt-1 font-medium text-foreground">{item.ohlcvDate ?? '-'} / {item.foreignNetDate ?? '-'}</dd>
+              </div>
+              <div className="rounded-lg bg-card/60 p-3">
+                <dt className="text-xs text-secondary-text">Foreign date match</dt>
+                <dd className="mt-1">
+                  <Badge variant={dateMatchVariant(item.foreignDateMatch)}>{item.foreignDateMatch ?? 'unknown'}</Badge>
+                </dd>
+              </div>
+            </>
+          ) : null}
+        </dl>
+      </SelectedTickerDisclosure>
+
+      <SelectedTickerDisclosure title="Technical context">
+      <div className="rounded-lg border border-border/60 bg-elevated/30 p-4">
         <h3 className="text-sm font-semibold text-foreground">Condition Summary</h3>
         <p className="mt-1 text-xs text-secondary-text">{VIETNAM_CONDITION_SUMMARY_SUBTITLE}</p>
         <ul className="mt-3 list-disc space-y-2 pl-5 text-sm text-secondary-text">
@@ -3091,16 +3197,6 @@ const StockDetailView: React.FC<{
           </dd>
         </div>
         <div className="rounded-lg bg-elevated/50 p-3">
-          <dt className="text-xs text-secondary-text">20D average volume (shares)</dt>
-          <dd className="mt-1 font-medium text-foreground">{formatNumber(avgVolume20D)}</dd>
-        </div>
-        {sessionVolumeRatioText ? (
-        <div className="rounded-lg bg-elevated/50 p-3">
-          <dt className="text-xs text-secondary-text">Session volume / 20D avg daily volume</dt>
-          <dd className="mt-1 font-medium text-foreground">{sessionVolumeRatioText}</dd>
-        </div>
-        ) : null}
-        <div className="rounded-lg bg-elevated/50 p-3">
           <dt className="text-xs text-secondary-text">Distance to 20D high</dt>
           <dd className="mt-1 font-medium text-foreground">{formatNumber(indicators.distanceTo20dHighPct, 2)}%</dd>
         </div>
@@ -3116,62 +3212,29 @@ const StockDetailView: React.FC<{
           <dt className="text-xs text-secondary-text">RSI14 Wilder/RMA</dt>
           <dd className="mt-1 font-medium text-foreground">{formatNumber(indicators.rsi14Wilder ?? indicators.rsi14, 2)}</dd>
         </div>
-        <div className="rounded-lg bg-elevated/50 p-3">
-          <dt className="text-xs text-secondary-text">Daily close / OHLCV close (VND)</dt>
-          <dd className="mt-1 font-medium text-foreground">{formatPrice(item.dailyClose ?? item.latestPrice ?? item.close)} / {formatPrice(item.ohlcvClose ?? item.close)}</dd>
-        </div>
-        <div className="rounded-lg bg-elevated/50 p-3">
-          <dt className="text-xs text-secondary-text">Daily price source</dt>
-          <dd className="mt-1 flex flex-wrap gap-1">
-            <Badge variant={priceSourceVariant(item.latestPriceSource)}>{item.latestPriceSource ?? 'unknown'}</Badge>
-          </dd>
-          <dd className="mt-2 text-xs text-secondary-text">
-            {item.latestPriceSource === 'ohlcv'
-              ? 'No reliable latest matched quote field is present, so daily OHLCV close is used.'
-              : isSsiDailyPriceSource(item.latestPriceSource)
-                ? 'SSI DailyOhlc close is used because no reliable latest matched quote field is present.'
-              : 'Daily price comes from quote data when a reliable field is present.'}
-          </dd>
-        </div>
-        <div className="rounded-lg bg-elevated/50 p-3">
-          <dt className="text-xs text-secondary-text">Price date / final close</dt>
-          <dd className="mt-1 font-medium text-foreground">{item.latestPriceDate ?? item.priceDate ?? '-'} / {finalCloseLabel}</dd>
-        </div>
-        <div className="rounded-lg bg-elevated/50 p-3">
-          <dt className="text-xs text-secondary-text">Last fetched</dt>
-          <dd className="mt-1 font-medium text-foreground">{formatVietnamTime(latestFetchedValue(item))}</dd>
-          <dd className="mt-1 text-xs text-secondary-text">{formatRelativeAge(latestFetchedValue(item))}</dd>
-        </div>
-        {!hasSsiDailyStockPrice ? (
-          <>
-            <div className="rounded-lg bg-elevated/50 p-3">
-              <dt className="text-xs text-secondary-text">Foreign net 5D latest available</dt>
-              <dd className={cn('mt-1 font-medium', signalTone(foreignNet5dLatestAvailable))}>
-                {foreignNet5dLatestAvailable == null && foreignHistoryCount < 5 ? 'Need 5 foreign rows' : formatNumber(foreignNet5dLatestAvailable)}
-              </dd>
-            </div>
-            <div className="rounded-lg bg-elevated/50 p-3">
-              <dt className="text-xs text-secondary-text">Foreign net 20D latest available</dt>
-              <dd className={cn('mt-1 font-medium', signalTone(foreignNet20dLatestAvailable))}>
-                {foreignNet20dLatestAvailable == null && foreignHistoryCount < 20 ? 'Need 20 foreign rows' : formatNumber(foreignNet20dLatestAvailable)}
-              </dd>
-            </div>
-            <div className="rounded-lg bg-elevated/50 p-3">
-              <dt className="text-xs text-secondary-text">OHLCV / foreign dates</dt>
-              <dd className="mt-1 font-medium text-foreground">{item.ohlcvDate ?? '-'} / {item.foreignNetDate ?? '-'}</dd>
-            </div>
-            <div className="rounded-lg bg-elevated/50 p-3">
-              <dt className="text-xs text-secondary-text">Foreign date match</dt>
-              <dd className="mt-1">
-                <Badge variant={dateMatchVariant(item.foreignDateMatch)}>{item.foreignDateMatch ?? 'unknown'}</Badge>
-              </dd>
-            </div>
-          </>
-        ) : null}
       </dl>
       <InspectChartCard item={item} />
+      {marketStatusDetails.length ? (
+        <div className="mt-4">
+          <h3 className="text-sm font-semibold text-foreground">Label reasons</h3>
+          <div className="mt-2 grid gap-2">
+            {marketStatusDetails.map((detail) => (
+              <div key={`${detail.label}-${detail.reason}`} className="rounded-lg border border-border/60 bg-elevated/40 p-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant={severityVariant(detail.severity)}>{detail.label}</Badge>
+                  <span className="text-xs text-secondary-text">{detail.severity}</span>
+                </div>
+                <p className="mt-2 text-sm text-secondary-text">{detail.reason}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+      </SelectedTickerDisclosure>
+
+      <SelectedTickerDisclosure title="Source coverage">
       {hasSsiSymbolMetadata(item) && symbolMetadataRows.length ? (
-        <div className="mt-4 rounded-lg border border-border/60 bg-elevated/30 p-4">
+        <div className="rounded-lg border border-border/60 bg-elevated/30 p-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <h3 className="text-sm font-semibold text-foreground">SSI symbol metadata</h3>
@@ -3203,32 +3266,11 @@ const StockDetailView: React.FC<{
             <Badge variant="default">{ssiDailySource}</Badge>
           </div>
         </div>
-        {ssiDailyRows.length ? (
-          <dl className="mt-3 grid gap-3 text-sm md:grid-cols-3 xl:grid-cols-4">
-            <div>
-              <dt className="text-xs text-secondary-text">Daily close vs reference</dt>
-              <dd className={cn('mt-1 font-medium', signalTone(priceVsReference))}>
-                {formatReferenceDelta(priceVsReference, priceVsReferencePct)}
-              </dd>
-            </div>
-            {ssiDailyRows.map((row) => (
-              <div key={`${item.ticker}-ssi-daily-${row.label}`}>
-                <dt className="text-xs text-secondary-text">{row.label}</dt>
-                <dd className={cn('mt-1 font-medium text-foreground', row.tone)}>{row.value}</dd>
-              </div>
-            ))}
-            {ssiDailyStockPrice.date ? (
-              <div>
-                <dt className="text-xs text-secondary-text">SSI date</dt>
-                <dd className="mt-1 font-medium text-foreground">{ssiDailyStockPrice.date}</dd>
-              </div>
-            ) : null}
-          </dl>
-        ) : (
-          <p className="mt-3 text-sm text-secondary-text">
-            SSI DailyStockPrice fields are unavailable for this ticker.
-          </p>
-        )}
+        <p className="mt-3 text-sm text-secondary-text">
+          {ssiDailyRows.length
+            ? 'SSI DailyStockPrice values are organized under Price context and Flow context.'
+            : 'SSI DailyStockPrice fields are unavailable for this ticker.'}
+        </p>
         <p className="mt-3 text-xs text-secondary-text">
           Adjusted close is shown only when SSI provides it. Corporate actions are not inferred from reference or adjusted prices.
         </p>
@@ -3283,7 +3325,10 @@ const StockDetailView: React.FC<{
           Foreign data as of {item.foreignNetDate}; OHLCV date {item.ohlcvDate}.
         </p>
       ) : null}
-      <div className="mt-4 rounded-lg border border-border/60 bg-elevated/30 p-4">
+      </SelectedTickerDisclosure>
+
+      <SelectedTickerDisclosure title="Live context">
+      <div className="rounded-lg border border-border/60 bg-elevated/30 p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h3 className="text-sm font-semibold text-foreground">Intraday Pulse</h3>
@@ -3487,22 +3532,9 @@ const StockDetailView: React.FC<{
           </div>
         ) : null}
       </div>
-      {marketStatusDetails.length ? (
-        <div className="mt-4">
-          <h3 className="text-sm font-semibold text-foreground">Label reasons</h3>
-          <div className="mt-2 grid gap-2">
-            {marketStatusDetails.map((detail) => (
-              <div key={`${detail.label}-${detail.reason}`} className="rounded-lg border border-border/60 bg-elevated/40 p-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant={severityVariant(detail.severity)}>{detail.label}</Badge>
-                  <span className="text-xs text-secondary-text">{detail.severity}</span>
-                </div>
-                <p className="mt-2 text-sm text-secondary-text">{detail.reason}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      ) : null}
+      </SelectedTickerDisclosure>
+
+      <SelectedTickerDisclosure title="News context">
       <div className="mt-4 rounded-lg border border-border/60 bg-elevated/30 p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-sm font-semibold text-foreground">Latest news</h3>
@@ -3548,9 +3580,11 @@ const StockDetailView: React.FC<{
           </p>
         )}
       </div>
-      <details className="mt-4 rounded-lg border border-border/60 bg-elevated/30 p-3 text-xs text-secondary-text">
-        <summary className="cursor-pointer font-medium text-foreground">Advanced / Raw Data</summary>
-        <div className="mt-3 grid gap-3 md:grid-cols-2">
+      </SelectedTickerDisclosure>
+
+      <SelectedTickerDisclosure title="Diagnostics">
+        <p className="text-xs font-medium text-foreground">Advanced / Raw Data</p>
+        <div className="mt-3 grid gap-3 text-xs md:grid-cols-2">
           <div>
             <p className="font-medium text-foreground">Raw fields</p>
             <p>latest_price_raw_field: {item.latestPriceRawField ?? '-'}</p>
@@ -3582,7 +3616,8 @@ const StockDetailView: React.FC<{
             }, null, 2)}</pre>
           </div>
         </div>
-      </details>
+      </SelectedTickerDisclosure>
+      </div>
     </section>
   );
 };

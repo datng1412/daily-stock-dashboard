@@ -342,6 +342,14 @@ Keep the selected ticker top summary compact and move secondary fields into expa
 * Source coverage.
 * Diagnostics.
 
+Phase 3.3A status:
+
+* Reworked the `/vietnam` selected ticker header into a compact daily explanation surface: daily close, change percent, daily volume versus 20D average, SSI DailyStockPrice foreign net volume, RSI14/MA state, live status, and compact Data Quality Summary.
+* Moved secondary selected ticker details into disclosure groups: Price context, Flow context, Technical context, Live context, Source coverage, News context, and Diagnostics.
+* Kept Price context open by default and kept live/source/news/diagnostics lower priority.
+* Preserved existing data, source ownership, diagnostics, provider behavior, fetch paths, polling behavior, and API contracts.
+* Kept raw fields, cache internals, and rule inputs in Diagnostics rather than primary cards.
+
 Folded-in historical Phase 3/5 items:
 
 * Profile completeness and partial metadata belong in source coverage and Data Quality Summary.
