@@ -237,6 +237,7 @@ The current MVP is:
 * Company research page shell using the same source-aware market-data contract.
 * Frontend-only watchlist preset groups for VN30, Banks, Securities, Real estate, Consumer, Logistics, Tech, Oil & gas, and Electricity.
 * Local-only custom watchlist input using browser localStorage; no server sync.
+* Client-side scan filters for the `/vietnam` indicator table; no backend count, URL params, saved filter views, or filter persistence.
 * News disabled until a separate provider is implemented.
 
 ## Current Limitations
@@ -288,7 +289,9 @@ Phase 3.3A organizes the `/vietnam` selected ticker detail into progressive disc
 
 Phase 3.3B polishes selected ticker field copy and density without adding data, endpoints, provider calls, fetch paths, or contract fields. It shortens repeated labels, reduces duplicate visible source wording, keeps source coverage available at section level, uses neutral inspect-only copy, keeps optional live/news states calm, and keeps raw fields/cache/rule inputs inside Diagnostics.
 
-Next Phase 3 work continues the progressive workspace direction: selected ticker disclosure polish, request-state orchestration cleanup, local filtering, and chart UX polish. The company detail page remains part of the same source-aware explanation layer, not a separate advisor experience.
+Phase 3.5A adds lightweight local scan filters to the `/vietnam` indicator table. Filters are React local state only, are not persisted to localStorage, do not use URL query params, do not call backend APIs, combine with AND logic, and apply before existing client-side sorting. Reset filters clears only ticker search and filter select values; it does not clear the custom watchlist input, active preset, active watchlist, committed rows, or selected ticker. Positive/negative foreign net and elevated volume are neutral scan categories, not recommendations. Saved filter views are deferred to a later phase.
+
+Next Phase 3 work continues the progressive workspace direction: request-state orchestration cleanup, further scan filtering/preset polish, and chart UX polish. The company detail page remains part of the same source-aware explanation layer, not a separate advisor experience.
 
 ### Phase 4.0 - SSI Realtime and Trade Tape Investigation
 

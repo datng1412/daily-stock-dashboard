@@ -424,6 +424,18 @@ Acceptance criteria:
 * Sorting and filtering compose predictably.
 * Null values stay visible unless filtered by an explicit state filter.
 
+Phase 3.5A status:
+
+* Added compact local scan controls near the indicator table for ticker search, data quality, live status, foreign net, volume versus 20D average, and RSI14.
+* Filters are React local state only. They are not persisted to localStorage, do not use URL query params, do not create saved filter views, and do not call backend APIs or provider paths.
+* Filtering starts from the current committed watchlist rows, applies filters with AND logic, then applies the existing client-side sort to the filtered rows.
+* Data quality filters map existing `ok`/`ready`-like row status to `Ready`, partial/degraded row status to `Partial`, and missing, unavailable, disabled, or unknown row quality to `Unavailable` unless an existing row-level state is more precise. Raw diagnostics are not inspected for data-quality filtering.
+* Foreign net positive/negative, elevated volume, and RSI numeric ranges are neutral scan categories only.
+* Reset filters clears only ticker search and filter select values. It does not clear the custom watchlist input, active preset, active watchlist, committed rows, or selected ticker.
+* The table shows a client-derived `Showing X of Y rows` count and a compact `No rows match current filters.` empty state when filters exclude all rows.
+* If the selected ticker is hidden by active filters, the selected ticker summary remains visible when the row data still exists and the table shows `Selected ticker is hidden by filters.` No different ticker is auto-selected because of filters.
+* No backend/API contract fields, endpoints, provider calls, polling, dependencies, or source semantics changed in Phase 3.5A.
+
 ### Phase 3.6 - Chart UX Upgrade
 
 Goal:

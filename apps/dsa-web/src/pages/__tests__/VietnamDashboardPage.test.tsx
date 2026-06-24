@@ -548,6 +548,12 @@ const clickIndicatorSort = (name: RegExp | string) => {
   fireEvent.click(within(indicatorTableSection()).getByRole('button', { name }));
 };
 
+const indicatorFilters = () => within(screen.getByTestId('indicator-filter-controls'));
+
+const changeIndicatorFilter = (label: string, value: string) => {
+  fireEvent.change(indicatorFilters().getByLabelText(label), { target: { value } });
+};
+
 const dataStatusPanel = () => {
   const panel = screen.getByRole('heading', { name: 'Data status' }).closest('section');
   if (!panel) throw new Error('Data status panel not found');
@@ -611,6 +617,89 @@ const withSsiForeignNetVolumes = (
     ssiForeignNetVolume: values[index],
     foreign: { ...item.foreign, net: 999_999_999 },
   }));
+  return response;
+};
+
+const makeFilterResponse = () => {
+  const response = makeResponse(defaultTickers);
+  const quality: Record<string, 'ok' | 'partial' | 'unavailable'> = {
+    FPT: 'ok',
+    VPB: 'partial',
+    MSB: 'unavailable',
+    SCS: 'ok',
+    ACV: 'partial',
+    ACB: 'ok',
+  };
+  const foreignNet: Record<string, number | null> = {
+    FPT: 5,
+    VPB: -20,
+    MSB: 0,
+    SCS: -100,
+    ACV: 15,
+    ACB: null,
+  };
+  const volumeRatio: Record<string, number | null> = {
+    FPT: 1,
+    VPB: 2,
+    MSB: null,
+    SCS: 1.6,
+    ACV: 0.5,
+    ACB: null,
+  };
+  const rsi: Record<string, number | null> = {
+    FPT: 55,
+    VPB: 25,
+    MSB: null,
+    SCS: 75,
+    ACV: 30,
+    ACB: 70,
+  };
+  response.watchlist = response.watchlist.map((item) => ({
+    ...item,
+    status: quality[item.ticker],
+    liquidity: {
+      ...item.liquidity,
+      avgVolume20D: volumeRatio[item.ticker] === null ? null : item.liquidity.avgVolume20D,
+    },
+    dataQualitySummary: { ...item.dataQualitySummary, overallStatus: quality[item.ticker] },
+    ssiForeignNetVolume: foreignNet[item.ticker],
+    dailyStockPrice: { ...item.dailyStockPrice, foreignNetVolume: foreignNet[item.ticker] },
+    indicators: {
+      ...item.indicators,
+      avgVolume20D: volumeRatio[item.ticker] === null ? null : item.indicators.avgVolume20D,
+      volumeRatio: volumeRatio[item.ticker],
+      rsi14: rsi[item.ticker],
+      rsi14Wilder: rsi[item.ticker],
+    },
+  }));
+  return response;
+};
+
+const makeMixedRealtimeResponse = (tickers: string[]) => {
+  const response = makeRealtimeResponse(tickers);
+  response.quotes = response.quotes.map((quote) => {
+    if (quote.symbol === 'VPB' || quote.symbol === 'SCS') {
+      return {
+        ...quote,
+        status: 'unavailable',
+        snapshotPrice: null,
+        realtimePrice: null,
+        price: null,
+        error: 'SSI realtime unavailable',
+      };
+    }
+    if (quote.symbol === 'MSB') {
+      return {
+        ...quote,
+        status: 'disabled',
+        snapshotPrice: null,
+        realtimePrice: null,
+        price: null,
+        error: 'SSI realtime disabled',
+      };
+    }
+    return quote;
+  });
   return response;
 };
 
@@ -1925,6 +2014,208 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(indicatorTable.getByTestId('indicator-row-FPT')).toHaveTextContent('OK');
     expect(indicatorTable.getByTestId('indicator-row-FPT')).toHaveTextContent('Above MA20');
     expect(indicatorTable.getByTestId('indicator-row-SCS')).toHaveTextContent('Unavailable');
+  });
+
+  it('renders local scan filter controls and row count', async () => {
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+
+    const filters = indicatorFilters();
+    expect(filters.getByLabelText('Search ticker')).toBeInTheDocument();
+    expect(filters.getByLabelText('Data quality')).toBeInTheDocument();
+    expect(filters.getByLabelText('Live status')).toBeInTheDocument();
+    expect(filters.getByLabelText('Foreign net')).toBeInTheDocument();
+    expect(filters.getByLabelText('Volume / 20D')).toBeInTheDocument();
+    expect(filters.getByLabelText('RSI14')).toBeInTheDocument();
+    expect(filters.getByRole('button', { name: 'Reset filters' })).toBeInTheDocument();
+    expect(within(indicatorTableSection()).getByText('Showing 6 of 6 rows')).toBeInTheDocument();
+  });
+
+  it('ticker search filters rows case-insensitively without calling the watchlist endpoint', async () => {
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+    const watchlistCalls = mockedGetVietnamWatchlist.mock.calls.length;
+
+    fireEvent.change(indicatorFilters().getByLabelText('Search ticker'), { target: { value: 'ac' } });
+
+    expect(indicatorRowOrder()).toEqual(['ACV', 'ACB']);
+    expect(within(indicatorTableSection()).getByText('Showing 2 of 6 rows')).toBeInTheDocument();
+    expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistCalls);
+  });
+
+  it('filters rows by data quality and live status', async () => {
+    mockedGetVietnamWatchlist.mockResolvedValue(makeFilterResponse());
+    mockedGetVietnamRealtimeQuotes.mockImplementation(async (tickers) => makeMixedRealtimeResponse(tickers));
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledWith(defaultTickers));
+
+    changeIndicatorFilter('Data quality', 'partial');
+    expect(indicatorRowOrder()).toEqual(['VPB', 'ACV']);
+
+    changeIndicatorFilter('Data quality', 'all');
+    changeIndicatorFilter('Live status', 'unavailable');
+    expect(indicatorRowOrder()).toEqual(['VPB', 'SCS']);
+
+    changeIndicatorFilter('Live status', 'disabled');
+    expect(indicatorRowOrder()).toEqual(['MSB']);
+  });
+
+  it('filters rows by foreign net volume, volume ratio, and RSI ranges', async () => {
+    mockedGetVietnamWatchlist.mockResolvedValue(makeFilterResponse());
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+
+    changeIndicatorFilter('Foreign net', 'positive');
+    expect(indicatorRowOrder()).toEqual(['FPT', 'ACV']);
+
+    changeIndicatorFilter('Foreign net', 'negative');
+    expect(indicatorRowOrder()).toEqual(['VPB', 'SCS']);
+
+    changeIndicatorFilter('Foreign net', 'zero-missing');
+    expect(indicatorRowOrder()).toEqual(['MSB', 'ACB']);
+
+    changeIndicatorFilter('Foreign net', 'all');
+    changeIndicatorFilter('Volume / 20D', 'elevated');
+    expect(indicatorRowOrder()).toEqual(['VPB', 'SCS']);
+
+    changeIndicatorFilter('Volume / 20D', 'normal');
+    expect(indicatorRowOrder()).toEqual(['FPT', 'ACV']);
+
+    changeIndicatorFilter('Volume / 20D', 'missing');
+    expect(indicatorRowOrder()).toEqual(['MSB', 'ACB']);
+
+    changeIndicatorFilter('Volume / 20D', 'all');
+    changeIndicatorFilter('RSI14', 'lt30');
+    expect(indicatorRowOrder()).toEqual(['VPB']);
+
+    changeIndicatorFilter('RSI14', '30-70');
+    expect(indicatorRowOrder()).toEqual(['FPT', 'ACV', 'ACB']);
+
+    changeIndicatorFilter('RSI14', 'gt70');
+    expect(indicatorRowOrder()).toEqual(['SCS']);
+
+    changeIndicatorFilter('RSI14', 'missing');
+    expect(indicatorRowOrder()).toEqual(['MSB']);
+  });
+
+  it('combines filters with AND logic and sorts filtered rows only', async () => {
+    mockedGetVietnamWatchlist.mockResolvedValue(makeFilterResponse());
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+
+    changeIndicatorFilter('Foreign net', 'negative');
+    changeIndicatorFilter('Volume / 20D', 'elevated');
+    expect(indicatorRowOrder()).toEqual(['VPB', 'SCS']);
+
+    clickIndicatorSort(/Sort by RSI14/i);
+    expect(indicatorRowOrder()).toEqual(['VPB', 'SCS']);
+
+    clickIndicatorSort(/Sort by RSI14 asc/i);
+    expect(indicatorRowOrder()).toEqual(['SCS', 'VPB']);
+  });
+
+  it('reset filters restores rows without clearing preset, active watchlist, custom input, selected ticker, or calling the API', async () => {
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+    fireEvent.click(screen.getByRole('button', { name: 'Banks' }));
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith([...presetTickers.Banks], false));
+    clickTickerRow('ACB');
+    fireEvent.change(screen.getByLabelText('Custom watchlist'), { target: { value: 'FPT, VPB, ACB' } });
+    const watchlistCalls = mockedGetVietnamWatchlist.mock.calls.length;
+
+    fireEvent.change(indicatorFilters().getByLabelText('Search ticker'), { target: { value: 'VCB' } });
+    expect(indicatorRowOrder()).toEqual(['VCB']);
+
+    fireEvent.click(indicatorFilters().getByRole('button', { name: 'Reset filters' }));
+
+    expect(indicatorRowOrder()).toEqual([...presetTickers.Banks]);
+    expect(screen.getByRole('button', { name: 'Banks' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByLabelText('Custom watchlist')).toHaveValue('FPT, VPB, ACB');
+    expect(selectedTickerHeader().getByRole('heading', { name: 'ACB' })).toBeInTheDocument();
+    expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistCalls);
+  });
+
+  it('shows an empty filtered state with reset action distinct from daily load failure', async () => {
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+
+    fireEvent.change(indicatorFilters().getByLabelText('Search ticker'), { target: { value: 'ZZZ' } });
+
+    expect(screen.getByTestId('indicator-empty-filter-state')).toHaveTextContent('No rows match current filters.');
+    expect(screen.queryByTestId('indicator-daily-unavailable-state')).not.toBeInTheDocument();
+
+    fireEvent.click(within(screen.getByTestId('indicator-empty-filter-state')).getByRole('button', { name: 'Reset filters' }));
+    expect(indicatorRowOrder()).toEqual(defaultTickers);
+  });
+
+  it('keeps selected ticker visible in the summary when filters hide its row', async () => {
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+    clickTickerRow('ACB');
+
+    fireEvent.change(indicatorFilters().getByLabelText('Search ticker'), { target: { value: 'FPT' } });
+
+    expect(indicatorRowOrder()).toEqual(['FPT']);
+    expect(screen.getByText('Selected ticker is hidden by filters.')).toBeInTheDocument();
+    expect(selectedTickerHeader().getByRole('heading', { name: 'ACB' })).toBeInTheDocument();
+  });
+
+  it('clicking a visible filtered row still updates the selected ticker', async () => {
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+
+    fireEvent.change(indicatorFilters().getByLabelText('Search ticker'), { target: { value: 'AC' } });
+    clickTickerRow('ACB');
+
+    expect(selectedTickerHeader().getByRole('heading', { name: 'ACB' })).toBeInTheDocument();
+  });
+
+  it('keeps active filters across refresh and applies them to refreshed rows', async () => {
+    const previous = makeFilterResponse();
+    const latest = makeFilterResponse();
+    latest.watchlist = latest.watchlist.map((item) => ({
+      ...item,
+      dataQualitySummary: {
+        ...item.dataQualitySummary,
+        overallStatus: item.ticker === 'SCS' ? 'partial' : 'ok',
+      },
+      status: item.ticker === 'SCS' ? 'partial' : 'ok',
+    }));
+    let resolveRefresh: ((response: VietnamWatchlistResponse) => void) | undefined;
+    mockedGetVietnamWatchlist
+      .mockResolvedValueOnce(previous)
+      .mockImplementationOnce(() => new Promise<VietnamWatchlistResponse>((resolve) => {
+        resolveRefresh = resolve;
+      }));
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+    changeIndicatorFilter('Data quality', 'partial');
+    expect(indicatorRowOrder()).toEqual(['VPB', 'ACV']);
+
+    fireEvent.click(screen.getByRole('button', { name: /^refresh$/i }));
+    await waitFor(() => expect(screen.getAllByText('Updating...').length).toBeGreaterThan(0));
+    expect(indicatorRowOrder()).toEqual(['VPB', 'ACV']);
+
+    await act(async () => {
+      resolveRefresh?.(latest);
+    });
+
+    await waitFor(() => expect(screen.queryAllByText('Updating...')).toHaveLength(0));
+    expect(indicatorRowOrder()).toEqual(['SCS']);
   });
 
   it('sorts the indicator table by ticker without reloading or changing selection', async () => {

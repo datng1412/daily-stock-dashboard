@@ -1935,6 +1935,29 @@ const WatchlistScanSummary: React.FC<{
 type IndicatorSortKey = 'ticker' | 'dailyClose' | 'changePct' | 'rsi14' | 'volumeRatio' | 'foreignNetVolume' | 'dataQuality';
 type IndicatorSortDirection = 'asc' | 'desc';
 type IndicatorSortState = { key: IndicatorSortKey; direction: IndicatorSortDirection } | null;
+type IndicatorDataQualityFilter = 'all' | 'ready' | 'partial' | 'unavailable';
+type IndicatorLiveStatusFilter = 'all' | 'ready' | 'unavailable' | 'disabled';
+type IndicatorForeignNetFilter = 'all' | 'positive' | 'negative' | 'zero-missing';
+type IndicatorVolumeRatioFilter = 'all' | 'elevated' | 'normal' | 'missing';
+type IndicatorRsiRangeFilter = 'all' | 'lt30' | '30-70' | 'gt70' | 'missing';
+
+interface IndicatorFilters {
+  tickerSearch: string;
+  dataQuality: IndicatorDataQualityFilter;
+  liveStatus: IndicatorLiveStatusFilter;
+  foreignNet: IndicatorForeignNetFilter;
+  volumeRatio: IndicatorVolumeRatioFilter;
+  rsiRange: IndicatorRsiRangeFilter;
+}
+
+const INITIAL_INDICATOR_FILTERS: IndicatorFilters = {
+  tickerSearch: '',
+  dataQuality: 'all',
+  liveStatus: 'all',
+  foreignNet: 'all',
+  volumeRatio: 'all',
+  rsiRange: 'all',
+};
 
 const dailyCloseValue = (item: VietnamWatchItem) => (
   finiteNumber(item.dailyClose)
@@ -1960,23 +1983,47 @@ const foreignNetVolumeValue = (item: VietnamWatchItem) => (
   finiteNumber(item.dailyStockPrice?.foreignNetVolume) ?? finiteNumber(item.ssiForeignNetVolume)
 );
 
-const dataQualityStatus = (item: VietnamWatchItem): 'ok' | 'partial' | 'unavailable' => {
+const normalizeStatusToken = (status?: string | null) => (
+  String(status ?? '').trim().toLowerCase().replaceAll('_', '-')
+);
+
+const statusMapsToReady = (status?: string | null) => (
+  ['ok', 'ready', 'success', 'available', 'enabled'].includes(normalizeStatusToken(status))
+);
+
+const statusMapsToPartial = (status?: string | null) => (
+  ['partial', 'degraded', 'warning', 'caution', 'stale', 'provisional', 'limited'].includes(normalizeStatusToken(status))
+);
+
+const statusMapsToDisabled = (status?: string | null) => (
+  ['disabled', 'not-implemented'].includes(normalizeStatusToken(status))
+);
+
+const statusMapsToUnavailable = (status?: string | null) => (
+  ['unavailable', 'missing', 'unknown', 'failed', 'error', 'empty', 'not-found'].includes(normalizeStatusToken(status))
+);
+
+const dataQualityStatus = (item: VietnamWatchItem): 'ready' | 'partial' | 'unavailable' => {
   if (!hasOfficialDailyData(item)) return 'unavailable';
-  const status = item.dataQualitySummary?.overallStatus;
-  if (status === 'ok' || status === 'partial' || status === 'unavailable') return status;
-  return 'ok';
+  const explicitStatus = item.dataQualitySummary?.overallStatus ?? item.status;
+  if (statusMapsToReady(explicitStatus)) return 'ready';
+  if (statusMapsToPartial(explicitStatus)) return 'partial';
+  if (statusMapsToDisabled(explicitStatus) || statusMapsToUnavailable(explicitStatus)) return 'unavailable';
+  if (item.validation?.valid === false && (item.validation.errors?.length ?? 0) > 0) return 'partial';
+  if (item.validation?.valid === true) return 'ready';
+  return 'ready';
 };
 
 const dataQualityRank = (item: VietnamWatchItem) => {
   const status = dataQualityStatus(item);
-  if (status === 'ok') return 0;
+  if (status === 'ready') return 0;
   if (status === 'partial') return 1;
   return 2;
 };
 
 const dataQualityBadge = (item: VietnamWatchItem) => {
   const status = dataQualityStatus(item);
-  if (status === 'ok') return { label: 'OK', variant: 'success' as BadgeVariant };
+  if (status === 'ready') return { label: 'OK', variant: 'success' as BadgeVariant };
   if (status === 'partial') return { label: 'Partial', variant: 'warning' as BadgeVariant };
   return { label: 'Unavailable', variant: 'danger' as BadgeVariant };
 };
@@ -2003,6 +2050,55 @@ const liveStatusBadge = (item: VietnamWatchItem, quote: VietnamRealtimeQuote | u
     return { label: 'Realtime ok', variant: 'success' as BadgeVariant };
   }
   return { label: 'Realtime unavailable', variant: 'warning' as BadgeVariant };
+};
+
+const liveStatusFilterValue = (
+  item: VietnamWatchItem,
+  quote: VietnamRealtimeQuote | undefined,
+  marketPhase: VietnamMarketPhase,
+): IndicatorLiveStatusFilter => {
+  const status = quote?.status ?? item.realtimeStatus?.status ?? item.dataQualitySummary?.checks?.realtime;
+  const state = realtimeSnapshotState(quote, marketPhase.code);
+  if (statusMapsToDisabled(status)) return 'disabled';
+  if (statusMapsToReady(status) && hasRealtimeSnapshotData(quote) && state.severity !== 'warning' && state.severity !== 'error') return 'ready';
+  return 'unavailable';
+};
+
+const volumeRatioFilterValue = (item: VietnamWatchItem): Exclude<IndicatorVolumeRatioFilter, 'all'> => {
+  const ratio = volumeRatioValue(item);
+  if (ratio === null) return 'missing';
+  return ratio >= 1.5 ? 'elevated' : 'normal';
+};
+
+const rsiRangeFilterValue = (item: VietnamWatchItem): Exclude<IndicatorRsiRangeFilter, 'all'> => {
+  const rsi = rsi14Value(item);
+  if (rsi === null) return 'missing';
+  if (rsi < 30) return 'lt30';
+  if (rsi > 70) return 'gt70';
+  return '30-70';
+};
+
+const matchesIndicatorFilters = (
+  item: VietnamWatchItem,
+  filters: IndicatorFilters,
+  realtimeQuotes: Record<string, VietnamRealtimeQuote | undefined>,
+  marketPhase: VietnamMarketPhase,
+) => {
+  const search = filters.tickerSearch.trim().toUpperCase();
+  if (search && !item.ticker.toUpperCase().includes(search)) return false;
+
+  if (filters.dataQuality !== 'all' && dataQualityStatus(item) !== filters.dataQuality) return false;
+  if (filters.liveStatus !== 'all' && liveStatusFilterValue(item, realtimeQuotes[item.ticker], marketPhase) !== filters.liveStatus) return false;
+
+  const foreignNetVolume = foreignNetVolumeValue(item);
+  if (filters.foreignNet === 'positive' && !(foreignNetVolume !== null && foreignNetVolume > 0)) return false;
+  if (filters.foreignNet === 'negative' && !(foreignNetVolume !== null && foreignNetVolume < 0)) return false;
+  if (filters.foreignNet === 'zero-missing' && !(foreignNetVolume === null || foreignNetVolume === 0)) return false;
+
+  if (filters.volumeRatio !== 'all' && volumeRatioFilterValue(item) !== filters.volumeRatio) return false;
+  if (filters.rsiRange !== 'all' && rsiRangeFilterValue(item) !== filters.rsiRange) return false;
+
+  return true;
 };
 
 const sortValueForItem = (item: VietnamWatchItem, key: IndicatorSortKey): string | number | null => {
@@ -2061,6 +2157,7 @@ const IndicatorTable: React.FC<{
   onSelect: (ticker: string) => void;
 }> = ({ items, realtimeQuotes, realtimeLoading = false, realtimeError, isUpdating = false, hasRequestFailure = false, selectedTicker, marketPhase, onSelect }) => {
   const [sortState, setSortState] = useState<IndicatorSortState>(null);
+  const [filters, setFilters] = useState<IndicatorFilters>(INITIAL_INDICATOR_FILTERS);
   const sectionState: SectionState = isUpdating
     ? 'Updating...'
     : hasRequestFailure && items.length
@@ -2070,9 +2167,13 @@ const IndicatorTable: React.FC<{
         : hasRequestFailure
           ? 'Failed'
           : 'Unavailable';
+  const filteredItems = useMemo(
+    () => items.filter((item) => matchesIndicatorFilters(item, filters, realtimeQuotes, marketPhase)),
+    [filters, items, marketPhase, realtimeQuotes],
+  );
   const sortedItems = useMemo(() => {
-    if (!sortState) return items;
-    return items
+    if (!sortState) return filteredItems;
+    return filteredItems
       .map((item, index) => ({ item, index }))
       .sort((left, right) => {
         const result = compareIndicatorSortValues(
@@ -2083,7 +2184,15 @@ const IndicatorTable: React.FC<{
         return result || left.index - right.index;
       })
       .map(({ item }) => item);
-  }, [items, sortState]);
+  }, [filteredItems, sortState]);
+  const selectedTickerHiddenByFilters = Boolean(
+    selectedTicker
+    && items.some((item) => item.ticker === selectedTicker)
+    && !filteredItems.some((item) => item.ticker === selectedTicker),
+  );
+  const setFilter = <K extends keyof IndicatorFilters>(key: K, value: IndicatorFilters[K]) => {
+    setFilters((current) => ({ ...current, [key]: value }));
+  };
   const sortDirectionLabel = (key: IndicatorSortKey) => (
     sortState?.key === key ? (sortState.direction === 'asc' ? ' asc' : ' desc') : ''
   );
@@ -2110,14 +2219,108 @@ const IndicatorTable: React.FC<{
           {isUpdating ? (
             <p className="mt-1 text-xs text-secondary-text">Showing previous data while the watchlist updates.</p>
           ) : null}
+          {items.length ? (
+            <p className="mt-1 text-xs text-secondary-text">Showing {filteredItems.length} of {items.length} rows</p>
+          ) : null}
         </div>
         <span className="text-xs text-secondary-text">
           Daily scan surface{realtimeLoading ? ' | loading SSI realtime' : ''}
         </span>
       </div>
+      {items.length ? (
+        <div className="mb-3 rounded-lg border border-border/60 bg-elevated/30 p-3" data-testid="indicator-filter-controls">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-7">
+            <label className="flex flex-col gap-1 text-xs font-medium text-secondary-text">
+              Search ticker
+              <input
+                value={filters.tickerSearch}
+                onChange={(event) => setFilter('tickerSearch', event.target.value)}
+                className="h-9 rounded-lg border border-border/70 bg-card px-3 text-sm font-normal uppercase text-foreground outline-none transition-colors placeholder:text-muted focus:border-cyan/50 focus:ring-2 focus:ring-cyan/15"
+                placeholder="FPT"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-xs font-medium text-secondary-text">
+              Data quality
+              <select
+                value={filters.dataQuality}
+                onChange={(event) => setFilter('dataQuality', event.target.value as IndicatorDataQualityFilter)}
+                className="h-9 rounded-lg border border-border/70 bg-card px-3 text-sm font-normal text-foreground outline-none transition-colors focus:border-cyan/50 focus:ring-2 focus:ring-cyan/15"
+              >
+                <option value="all">All</option>
+                <option value="ready">Ready</option>
+                <option value="partial">Partial</option>
+                <option value="unavailable">Unavailable</option>
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-xs font-medium text-secondary-text">
+              Live status
+              <select
+                value={filters.liveStatus}
+                onChange={(event) => setFilter('liveStatus', event.target.value as IndicatorLiveStatusFilter)}
+                className="h-9 rounded-lg border border-border/70 bg-card px-3 text-sm font-normal text-foreground outline-none transition-colors focus:border-cyan/50 focus:ring-2 focus:ring-cyan/15"
+              >
+                <option value="all">All</option>
+                <option value="ready">Ready</option>
+                <option value="unavailable">Unavailable</option>
+                <option value="disabled">Disabled</option>
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-xs font-medium text-secondary-text">
+              Foreign net
+              <select
+                value={filters.foreignNet}
+                onChange={(event) => setFilter('foreignNet', event.target.value as IndicatorForeignNetFilter)}
+                className="h-9 rounded-lg border border-border/70 bg-card px-3 text-sm font-normal text-foreground outline-none transition-colors focus:border-cyan/50 focus:ring-2 focus:ring-cyan/15"
+              >
+                <option value="all">All</option>
+                <option value="positive">Foreign net positive</option>
+                <option value="negative">Foreign net negative</option>
+                <option value="zero-missing">Zero / missing</option>
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-xs font-medium text-secondary-text">
+              Volume / 20D
+              <select
+                value={filters.volumeRatio}
+                onChange={(event) => setFilter('volumeRatio', event.target.value as IndicatorVolumeRatioFilter)}
+                className="h-9 rounded-lg border border-border/70 bg-card px-3 text-sm font-normal text-foreground outline-none transition-colors focus:border-cyan/50 focus:ring-2 focus:ring-cyan/15"
+              >
+                <option value="all">All</option>
+                <option value="elevated">Elevated</option>
+                <option value="normal">Normal</option>
+                <option value="missing">Missing</option>
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-xs font-medium text-secondary-text">
+              RSI14
+              <select
+                value={filters.rsiRange}
+                onChange={(event) => setFilter('rsiRange', event.target.value as IndicatorRsiRangeFilter)}
+                className="h-9 rounded-lg border border-border/70 bg-card px-3 text-sm font-normal text-foreground outline-none transition-colors focus:border-cyan/50 focus:ring-2 focus:ring-cyan/15"
+              >
+                <option value="all">All</option>
+                <option value="lt30">&lt; 30</option>
+                <option value="30-70">30 - 70</option>
+                <option value="gt70">&gt; 70</option>
+                <option value="missing">Missing</option>
+              </select>
+            </label>
+            <div className="flex items-end">
+              <Button type="button" variant="outline" size="sm" onClick={() => setFilters(INITIAL_INDICATOR_FILTERS)}>
+                Reset filters
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {realtimeError ? (
         <div className="mb-3 rounded-lg border border-warning/20 bg-warning/10 p-2 text-xs text-warning">
           SSI realtime unavailable. Daily SSI data is still available.
+        </div>
+      ) : null}
+      {selectedTickerHiddenByFilters ? (
+        <div className="mb-3 rounded-lg border border-cyan/20 bg-cyan/10 p-2 text-xs text-secondary-text">
+          Selected ticker is hidden by filters.
         </div>
       ) : null}
       {!items.length ? (
@@ -2126,6 +2329,15 @@ const IndicatorTable: React.FC<{
           <p className="mt-1 text-xs text-secondary-text">No daily SSI rows are available for the active watchlist.</p>
         </div>
       ) : null}
+      {items.length && !filteredItems.length ? (
+        <div className="rounded-lg border border-border/60 bg-elevated/30 p-4 text-sm text-secondary-text" data-testid="indicator-empty-filter-state">
+          <p className="font-medium text-foreground">No rows match current filters.</p>
+          <Button type="button" variant="outline" size="sm" className="mt-3" onClick={() => setFilters(INITIAL_INDICATOR_FILTERS)}>
+            Reset filters
+          </Button>
+        </div>
+      ) : null}
+      {filteredItems.length ? (
       <div className="overflow-x-auto">
         <table className="w-full min-w-[1040px] text-left text-sm">
           <thead className="border-b border-border/70 text-xs uppercase text-secondary-text">
@@ -2201,6 +2413,7 @@ const IndicatorTable: React.FC<{
           </tbody>
         </table>
       </div>
+      ) : null}
     </section>
   );
 };
