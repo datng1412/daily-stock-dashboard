@@ -220,7 +220,7 @@ function Get-OptionalStatusFromEndpoint {
     return $DisabledStatus
   }
   if ($status -eq "ok") {
-    $rows = Convert-ToList (Get-Value $Payload @($RowsProperty))
+    $rows = @(Convert-ToList (Get-Value $Payload @($RowsProperty)))
     if ($rows.Count -gt 0) {
       return "reliable"
     }
@@ -281,7 +281,7 @@ $tradesResponse = Get-AuditJson $tradesUrl "GET /api/v1/stocks/vn/realtime/trade
 $indexListResponse = Get-AuditJson $indexListUrl "GET /api/v1/stocks/vn/index-list" $false
 $indexComponentsResponse = Get-AuditJson $indexComponentsUrl "GET /api/v1/stocks/vn/index-components" $false
 
-$rows = Convert-ToList (Get-Value $watchlistResponse @("watchlist"))
+$rows = @(Convert-ToList (Get-Value $watchlistResponse @("watchlist")))
 $rowCount = $rows.Count
 if ($rowCount -eq 0) {
   throw "Required watchlist response completed but returned no watchlist rows."
@@ -338,14 +338,14 @@ $indicatorRows = Count-Matching $rows { param($row)
 }
 $intradayOkRows = Count-Matching $rows { param($row)
   $status = Get-Status (Get-Value $row @("intraday_status"))
-  $candles = Convert-ToList (Get-Value $row @("intraday_candles"))
+  $candles = @(Convert-ToList (Get-Value $row @("intraday_candles")))
   $pulse = Get-Value $row @("intraday_pulse")
   $dateMatch = Get-Value $row @("date_match")
   ($status -eq "ok") -and ($candles.Count -gt 0) -and ($null -ne $pulse) -and ($dateMatch -eq "matched")
 }
 $intradayStatusValues = @($rows | ForEach-Object { Get-Status (Get-Value $_ @("intraday_status")) } | Where-Object { $_ })
 $intradayPulseRows = Count-Matching $rows { param($row) $null -ne (Get-Value $row @("intraday_pulse")) }
-$intradayCandleCounts = @($rows | ForEach-Object { (Convert-ToList (Get-Value $_ @("intraday_candles"))).Count })
+$intradayCandleCounts = @($rows | ForEach-Object { @(Convert-ToList (Get-Value $_ @("intraday_candles"))).Count })
 $intradayDateMatches = @($rows | ForEach-Object {
   $status = Get-Value $_ @("intraday_status")
   $value = Get-Value $status @("date_match")
@@ -382,7 +382,7 @@ $intradayMessages = @($rows | ForEach-Object {
 })
 $intradayTimestamps = @()
 foreach ($row in $rows) {
-  foreach ($candle in (Convert-ToList (Get-Value $row @("intraday_candles")))) {
+  foreach ($candle in @(Convert-ToList (Get-Value $row @("intraday_candles")))) {
     $value = Get-Value $candle @("date_time", "timestamp")
     if (Has-Value $value) {
       $intradayTimestamps += [string]$value
@@ -399,7 +399,7 @@ $realtimeOkRows = Count-Matching $rows { param($row)
   ($null -ne (Get-Value $row @("realtime_snapshot")))
 }
 $tradeTapeOkRows = Count-Matching $rows { param($row)
-  $trades = Convert-ToList (Get-Value $row @("trade_tape"))
+  $trades = @(Convert-ToList (Get-Value $row @("trade_tape")))
   ((Get-Status (Get-Value $row @("trade_tape_status"))) -eq "ok") -and ($trades.Count -gt 0)
 }
 
@@ -431,7 +431,8 @@ $capabilities += New-CapabilityRow "Foreign buy/sell/net value" $foreignValueSta
 $indicatorStatus = if ($indicatorRows -eq $rowCount) { "reliable" } elseif ($indicatorRows -gt 0) { "partial" } else { "unavailable" }
 $capabilities += New-CapabilityRow "Technical indicators derived from daily OHLCV" $indicatorStatus "derived from SSI DailyOhlc" ("{0}/{1} rows include RSI14 and MA20/MA50" -f $indicatorRows, $rowCount) "rsi14, ma20, ma50, Bollinger when present, volume ratio" "RSI14 remains Wilder/RMA."
 
-$intradayStatus = if ($intradayOkRows -gt 0) { "partial" } elseif ($intradayStatusValues -contains "disabled") { "disabled" } elseif ($intradayStatusValues -contains "unavailable") { "unavailable" } else { "unknown-needs-verification" }
+$intradayUsableRatio = "{0}/{1}" -f $intradayOkRows, $rowCount
+$intradayStatus = if ($intradayOkRows -eq $rowCount) { "reliable" } elseif ($intradayOkRows -gt 0) { "partial" } elseif ($intradayStatusValues -contains "disabled") { "disabled" } elseif ($intradayStatusValues -contains "unavailable") { "unavailable" } else { "unknown-needs-verification" }
 $intradayEvidence = "usable current pulse rows {0}/{1}; pulse rows {2}/{1}; public candle counts {3}; statuses {4}; date_match {5}; intraday_latest_date {6}; daily_price_date {7}; requested_timeframe {8}; observed_granularity {9}; observed_granularity_seconds {10}; timestamp_range {11}; messages {12}" -f `
   $intradayOkRows,
   $rowCount,
@@ -450,16 +451,16 @@ $capabilities += New-CapabilityRow "Intraday OHLCV / intraday pulse" $intradaySt
 
 $realtimeEndpointStatus = Get-OptionalStatusFromEndpoint $realtimeResponse "quotes"
 $realtimeStatus = if ($realtimeEndpointStatus -eq "reliable" -and $realtimeOkRows -gt 0) { "reliable" } elseif ($realtimeEndpointStatus -eq "disabled") { "disabled" } elseif ($realtimeOkRows -gt 0) { "partial" } elseif ($realtimeEndpointStatus -eq "unavailable") { "unavailable" } else { "unknown-needs-verification" }
-$realtimeQuoteCount = (Convert-ToList (Get-Value $realtimeResponse @("quotes"))).Count
+$realtimeQuoteCount = @(Convert-ToList (Get-Value $realtimeResponse @("quotes"))).Count
 $capabilities += New-CapabilityRow "Realtime snapshot" $realtimeStatus "SSI realtime contract" ("endpoint status={0}; endpoint quote rows={1}; watchlist usable snapshots={2}/{3}" -f (Get-Status $realtimeResponse), $realtimeQuoteCount, $realtimeOkRows, $rowCount) "realtime_snapshot fields only when status ok and snapshot is non-null" "Do not use realtime snapshot as official daily close."
 
 $tradeEndpointStatus = Get-OptionalStatusFromEndpoint $tradesResponse "trades"
 $tradeStatus = if ($tradeEndpointStatus -eq "reliable" -and $tradeTapeOkRows -gt 0) { "reliable" } elseif ($tradeEndpointStatus -eq "disabled") { "disabled" } elseif ($tradeTapeOkRows -gt 0) { "partial" } elseif ($tradeEndpointStatus -eq "unavailable") { "unavailable" } else { "unknown-needs-verification" }
-$tradeCount = (Convert-ToList (Get-Value $tradesResponse @("trades"))).Count
+$tradeCount = @(Convert-ToList (Get-Value $tradesResponse @("trades"))).Count
 $capabilities += New-CapabilityRow "Trade tape" $tradeStatus "SSI trade-tape contract" ("endpoint status={0}; endpoint trade rows={1}; watchlist usable trade rows={2}/{3}" -f (Get-Status $tradesResponse), $tradeCount, $tradeTapeOkRows, $rowCount) "trade_tape rows only when status ok and rows exist" "Do not use trade tape as official daily close."
 
-$indexListRows = (Convert-ToList (Get-Value $indexListResponse @("rows"))).Count
-$indexComponentRows = (Convert-ToList (Get-Value $indexComponentsResponse @("rows"))).Count
+$indexListRows = @(Convert-ToList (Get-Value $indexListResponse @("rows"))).Count
+$indexComponentRows = @(Convert-ToList (Get-Value $indexComponentsResponse @("rows"))).Count
 $indexStatus = if ((Get-Status $indexListResponse) -eq "ok" -and $indexListRows -gt 0 -and (Get-Status $indexComponentsResponse) -eq "ok" -and $indexComponentRows -gt 0) { "reliable" } elseif ((Get-Status $indexListResponse) -eq "ok" -and $indexListRows -gt 0) { "partial" } elseif ((Get-Status $indexListResponse) -eq "disabled" -or (Get-Status $indexComponentsResponse) -eq "disabled") { "disabled" } elseif ((Get-Status $indexListResponse) -eq "unavailable" -or (Get-Status $indexComponentsResponse) -eq "unavailable") { "unavailable" } else { "unknown-needs-verification" }
 $capabilities += New-CapabilityRow "Index data / index components" $indexStatus "SSI IndexList / SSI IndexComponents" ("index-list status={0}, rows={1}; VN30 components status={2}, rows={3}" -f (Get-Status $indexListResponse), $indexListRows, (Get-Status $indexComponentsResponse), $indexComponentRows) "index identifiers and component rows when returned" "Use SSI-returned identifiers; do not hardcode components."
 
@@ -510,11 +511,23 @@ Write-Host "- Evidence source: current app API response fields; SSI is not calle
 
 Write-Host ""
 Write-Host "Observed reliable domains for this audit run:"
-@($capabilities | Where-Object { $_.Status -eq "reliable" } | ForEach-Object { "- {0}" -f $_.Domain }) | ForEach-Object { Write-Host $_ }
+@($capabilities | Where-Object { $_.Status -eq "reliable" } | ForEach-Object {
+  if ($_.Domain -eq "Intraday OHLCV / intraday pulse") {
+    "- {0}: {1} usable current pulse rows" -f $_.Domain, $intradayUsableRatio
+  } else {
+    "- {0}" -f $_.Domain
+  }
+}) | ForEach-Object { Write-Host $_ }
 
 Write-Host ""
 Write-Host "Partial/unavailable/disabled domains:"
-@($capabilities | Where-Object { $_.Status -in @("partial", "unavailable", "disabled", "unknown-needs-verification") } | ForEach-Object { "- {0}: {1}" -f $_.Domain, $_.Status }) | ForEach-Object { Write-Host $_ }
+@($capabilities | Where-Object { $_.Status -in @("partial", "unavailable", "disabled", "unknown-needs-verification") } | ForEach-Object {
+  if ($_.Domain -eq "Intraday OHLCV / intraday pulse") {
+    "- {0}: {1} ({2} usable current pulse rows)" -f $_.Domain, $_.Status, $intradayUsableRatio
+  } else {
+    "- {0}: {1}" -f $_.Domain, $_.Status
+  }
+}) | ForEach-Object { Write-Host $_ }
 
 Write-Host ""
 Write-Host "Future-provider domains:"
