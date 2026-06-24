@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [improvement] Polish VN dashboard selected ticker field labels and density while keeping diagnostics and source coverage separate.
 - [improvement] Organize the VN dashboard selected ticker detail into compact summary and progressive disclosure groups.
 - [improvement] Add VN dashboard section-level loading and unavailable states while keeping optional live failures secondary.
 - [improvement] Keep previous VN dashboard watchlist rows visible during refresh and pending preset/custom list changes.

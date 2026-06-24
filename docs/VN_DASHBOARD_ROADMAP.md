@@ -350,6 +350,14 @@ Phase 3.3A status:
 * Preserved existing data, source ownership, diagnostics, provider behavior, fetch paths, polling behavior, and API contracts.
 * Kept raw fields, cache internals, and rule inputs in Diagnostics rather than primary cards.
 
+Phase 3.3B status:
+
+* Shortened selected ticker labels and reduced visible duplication across the compact header and disclosure groups.
+* Kept source ownership clear at section level without repeating `SSI DailyOhlc` or `SSI DailyStockPrice` on every field.
+* Kept News context optional and used `News available`, `News disabled`, or `News not implemented` based on already loaded data/status only.
+* Kept raw fields, endpoint/provider diagnostics, cache internals, and rule inputs inside Diagnostics.
+* Added no data fields, endpoints, provider calls, polling, dependencies, fetch paths, or API contract changes.
+
 Folded-in historical Phase 3/5 items:
 
 * Profile completeness and partial metadata belong in source coverage and Data Quality Summary.

@@ -286,6 +286,8 @@ Phase 3.2D adds section-level loading and unavailable state cleanup across exist
 
 Phase 3.3A organizes the `/vietnam` selected ticker detail into progressive disclosure groups without adding data or changing API behavior. The compact selected ticker header keeps daily close, change percent, volume versus 20D average, foreign net volume, RSI/MA state, live status, and compact Data Quality Summary visible. Secondary detail moves into Price context, Flow context, Technical context, Live context, Source coverage, News context, and Diagnostics groups. Price context is open by default; live, source, news, and diagnostics remain lower priority. Raw fields, cache internals, and rule inputs stay in Diagnostics.
 
+Phase 3.3B polishes selected ticker field copy and density without adding data, endpoints, provider calls, fetch paths, or contract fields. It shortens repeated labels, reduces duplicate visible source wording, keeps source coverage available at section level, uses neutral inspect-only copy, keeps optional live/news states calm, and keeps raw fields/cache/rule inputs inside Diagnostics.
+
 Next Phase 3 work continues the progressive workspace direction: selected ticker disclosure polish, request-state orchestration cleanup, local filtering, and chart UX polish. The company detail page remains part of the same source-aware explanation layer, not a separate advisor experience.
 
 ### Phase 4.0 - SSI Realtime and Trade Tape Investigation
