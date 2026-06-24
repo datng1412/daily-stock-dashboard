@@ -603,7 +603,46 @@ Acceptance criteria:
 * Future-provider domains are reported explicitly as future-provider or disabled.
 * Phase 4.0B through Phase 4.4A can use the matrix to choose scoped reliability work.
 
-### Phase 4.0B - SSI Realtime and Trade-Tape Verification
+### Phase 4.0B - Intraday Root-Cause and Implementation
+
+Status: completed on 2026-06-24.
+
+Goal:
+
+Find the root cause for Phase 4.0A intraday unavailability and fix only the existing SSI intraday path when the evidence supports a backend/provider correction.
+
+Scope:
+
+* Trace the watchlist and company intraday path through `VietnamMarketService` and SSI IntradayOhlc.
+* Verify whether the endpoint is called, wired, parsed, freshness-checked, and exposed through the existing public fields.
+* Keep `intraday_pulse = null` and `intraday_candles = []` when SSI intraday rows are stale, mismatched, empty, disabled, failed, or malformed.
+* Improve audit evidence for intraday status, public candle count, timestamp range when public candles exist, requested timeframe, observed granularity, date match, and unavailable reason.
+* Keep daily OHLCV, `latest_price`, DailyStockPrice, realtime, trade tape, news, index, financials, corporate actions/dividends, macro, provider credentials, and frontend UI polish out of scope.
+
+Rules:
+
+* Do not infer intraday from daily data.
+* Do not use realtime snapshot or trade tape as intraday fallback.
+* Do not add Mozyfin/KBS or new provider fallback.
+* Do not weaken the freshness guard that compares SSI IntradayOhlc date with SSI DailyOhlc date.
+
+Result:
+
+* Existing SSI IntradayOhlc wiring is active; the live root cause is stale/mismatched provider data, not a missing backend call.
+* Current local force-refresh evidence for `FPT` reported `intraday_latest_date=2026-06-17`, `daily_price_date=2026-06-24`, `date_match=mismatched`, requested `1h`, observed `1m`/60s, public `intraday_candles=[]`, and `intraday_pulse=null`.
+* The backend now filters normalized intraday rows that have no usable timestamp/date or close value so null-only malformed rows remain unavailable instead of becoming an `ok` pulse.
+* Live intraday remains `unavailable` until SSI returns current-date candles that pass the existing freshness check.
+
+Acceptance criteria:
+
+* Root cause documented in `docs/SSI_DATA_CAPABILITY_MATRIX.md`.
+* Mocked backend tests cover available, stale/mismatched, empty, malformed, failure, and disabled intraday paths.
+* Audit script reports intraday status and evidence without direct SSI calls or full raw payload dumps.
+* Daily SSI rows remain valid when intraday is optional/unavailable.
+
+### Phase 4.0C - SSI Realtime and Trade-Tape Verification
+
+Status: deferred.
 
 Goal:
 

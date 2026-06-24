@@ -116,6 +116,23 @@ function Count-Matching {
   return $count
 }
 
+function Format-UniqueValues {
+  param([object[]]$Values)
+
+  $normalized = @(
+    $Values |
+      Where-Object { Has-Value $_ } |
+      ForEach-Object { [string]$_ } |
+      Select-Object -Unique
+  )
+
+  if ($normalized.Count -eq 0) {
+    return "none"
+  }
+
+  return ($normalized -join ",")
+}
+
 function Get-Status {
   param([object]$Object)
 
@@ -327,6 +344,56 @@ $intradayOkRows = Count-Matching $rows { param($row)
   ($status -eq "ok") -and ($candles.Count -gt 0) -and ($null -ne $pulse) -and ($dateMatch -eq "matched")
 }
 $intradayStatusValues = @($rows | ForEach-Object { Get-Status (Get-Value $_ @("intraday_status")) } | Where-Object { $_ })
+$intradayPulseRows = Count-Matching $rows { param($row) $null -ne (Get-Value $row @("intraday_pulse")) }
+$intradayCandleCounts = @($rows | ForEach-Object { (Convert-ToList (Get-Value $_ @("intraday_candles"))).Count })
+$intradayDateMatches = @($rows | ForEach-Object {
+  $status = Get-Value $_ @("intraday_status")
+  $value = Get-Value $status @("date_match")
+  if (Has-Value $value) { $value } else { Get-Value $_ @("date_match") }
+})
+$intradayLatestDates = @($rows | ForEach-Object {
+  $status = Get-Value $_ @("intraday_status")
+  $value = Get-Value $status @("intraday_latest_date")
+  if (Has-Value $value) { $value } else { Get-Value $_ @("intraday_latest_date") }
+})
+$intradayDailyDates = @($rows | ForEach-Object {
+  $status = Get-Value $_ @("intraday_status")
+  $value = Get-Value $status @("daily_price_date")
+  if (Has-Value $value) { $value } else { Get-Value $_ @("daily_price_date", "latest_price_date", "ohlcv_date") }
+})
+$intradayRequestedTimeframes = @($rows | ForEach-Object {
+  $status = Get-Value $_ @("intraday_status")
+  $value = Get-Value $status @("intraday_requested_timeframe")
+  if (Has-Value $value) { $value } else { Get-Value $_ @("intraday_requested_timeframe", "intraday_timeframe") }
+})
+$intradayGranularities = @($rows | ForEach-Object {
+  $status = Get-Value $_ @("intraday_status")
+  $value = Get-Value $status @("intraday_actual_granularity", "intraday_granularity")
+  if (Has-Value $value) { $value } else { Get-Value $_ @("intraday_actual_granularity", "intraday_granularity") }
+})
+$intradayGranularitySeconds = @($rows | ForEach-Object {
+  $status = Get-Value $_ @("intraday_status")
+  $value = Get-Value $status @("intraday_actual_granularity_seconds", "intraday_granularity_seconds")
+  if (Has-Value $value) { $value } else { Get-Value $_ @("intraday_actual_granularity_seconds", "intraday_granularity_seconds") }
+})
+$intradayMessages = @($rows | ForEach-Object {
+  $status = Get-Value $_ @("intraday_status")
+  Get-Value $status @("message", "reason")
+})
+$intradayTimestamps = @()
+foreach ($row in $rows) {
+  foreach ($candle in (Convert-ToList (Get-Value $row @("intraday_candles")))) {
+    $value = Get-Value $candle @("date_time", "timestamp")
+    if (Has-Value $value) {
+      $intradayTimestamps += [string]$value
+    }
+  }
+}
+$intradayTimestampRange = "none"
+if ($intradayTimestamps.Count -gt 0) {
+  $orderedIntradayTimestamps = @($intradayTimestamps | Sort-Object)
+  $intradayTimestampRange = "{0} to {1}" -f $orderedIntradayTimestamps[0], $orderedIntradayTimestamps[$orderedIntradayTimestamps.Count - 1]
+}
 $realtimeOkRows = Count-Matching $rows { param($row)
   ((Get-Status (Get-Value $row @("realtime_status"))) -eq "ok") -and
   ($null -ne (Get-Value $row @("realtime_snapshot")))
@@ -365,7 +432,21 @@ $indicatorStatus = if ($indicatorRows -eq $rowCount) { "reliable" } elseif ($ind
 $capabilities += New-CapabilityRow "Technical indicators derived from daily OHLCV" $indicatorStatus "derived from SSI DailyOhlc" ("{0}/{1} rows include RSI14 and MA20/MA50" -f $indicatorRows, $rowCount) "rsi14, ma20, ma50, Bollinger when present, volume ratio" "RSI14 remains Wilder/RMA."
 
 $intradayStatus = if ($intradayOkRows -gt 0) { "partial" } elseif ($intradayStatusValues -contains "disabled") { "disabled" } elseif ($intradayStatusValues -contains "unavailable") { "unavailable" } else { "unknown-needs-verification" }
-$capabilities += New-CapabilityRow "Intraday OHLCV / intraday pulse" $intradayStatus "SSI IntradayOhlc" ("usable current pulse rows {0}/{1}; statuses: {2}" -f $intradayOkRows, $rowCount, (($intradayStatusValues | Select-Object -Unique) -join ",")) "intraday_candles, intraday_pulse only when status ok and date matched" "At most partial until cadence and freshness are fully verified."
+$intradayEvidence = "usable current pulse rows {0}/{1}; pulse rows {2}/{1}; public candle counts {3}; statuses {4}; date_match {5}; intraday_latest_date {6}; daily_price_date {7}; requested_timeframe {8}; observed_granularity {9}; observed_granularity_seconds {10}; timestamp_range {11}; messages {12}" -f `
+  $intradayOkRows,
+  $rowCount,
+  $intradayPulseRows,
+  (Format-UniqueValues $intradayCandleCounts),
+  (Format-UniqueValues $intradayStatusValues),
+  (Format-UniqueValues $intradayDateMatches),
+  (Format-UniqueValues $intradayLatestDates),
+  (Format-UniqueValues $intradayDailyDates),
+  (Format-UniqueValues $intradayRequestedTimeframes),
+  (Format-UniqueValues $intradayGranularities),
+  (Format-UniqueValues $intradayGranularitySeconds),
+  $intradayTimestampRange,
+  (Format-UniqueValues $intradayMessages)
+$capabilities += New-CapabilityRow "Intraday OHLCV / intraday pulse" $intradayStatus "SSI IntradayOhlc" $intradayEvidence "intraday_candles, intraday_pulse only when status ok and date matched" "Evidence is from current API response fields; public candles stay empty when stale or mismatched."
 
 $realtimeEndpointStatus = Get-OptionalStatusFromEndpoint $realtimeResponse "quotes"
 $realtimeStatus = if ($realtimeEndpointStatus -eq "reliable" -and $realtimeOkRows -gt 0) { "reliable" } elseif ($realtimeEndpointStatus -eq "disabled") { "disabled" } elseif ($realtimeOkRows -gt 0) { "partial" } elseif ($realtimeEndpointStatus -eq "unavailable") { "unavailable" } else { "unknown-needs-verification" }
@@ -412,6 +493,20 @@ Write-Host ""
 
 Write-Host "Capability summary:"
 $capabilities | Format-Table -AutoSize -Wrap
+
+Write-Host ""
+Write-Host "Intraday evidence:"
+Write-Host ("- Statuses: {0}" -f (Format-UniqueValues $intradayStatusValues))
+Write-Host ("- Usable current pulse rows: {0}/{1}" -f $intradayOkRows, $rowCount)
+Write-Host ("- Public candle counts: {0}" -f (Format-UniqueValues $intradayCandleCounts))
+Write-Host ("- Public timestamp range: {0}" -f $intradayTimestampRange)
+Write-Host ("- Date match: {0}" -f (Format-UniqueValues $intradayDateMatches))
+Write-Host ("- Intraday latest date: {0}" -f (Format-UniqueValues $intradayLatestDates))
+Write-Host ("- Daily price date: {0}" -f (Format-UniqueValues $intradayDailyDates))
+Write-Host ("- Requested timeframe: {0}" -f (Format-UniqueValues $intradayRequestedTimeframes))
+Write-Host ("- Observed granularity: {0} ({1} seconds)" -f (Format-UniqueValues $intradayGranularities), (Format-UniqueValues $intradayGranularitySeconds))
+Write-Host ("- Reason: {0}" -f (Format-UniqueValues $intradayMessages))
+Write-Host "- Evidence source: current app API response fields; SSI is not called directly by this script."
 
 Write-Host ""
 Write-Host "Observed reliable domains for this audit run:"

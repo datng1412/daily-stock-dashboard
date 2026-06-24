@@ -313,6 +313,60 @@ def test_ssi_intraday_failure_does_not_downgrade_daily_row():
     assert item["intraday_pulse"] is None
 
 
+def test_ssi_intraday_empty_rows_are_optional_and_do_not_fake_daily_data():
+    fetcher = FakeSsiFetcher(
+        {
+            "status": "ok",
+            "source": "SSI",
+            "rows": [],
+        }
+    )
+
+    item = _service(fetcher).build_watchlist(["FPT"], force_refresh=True, include_intraday=True)["watchlist"][0]
+
+    assert item["status"] == "ok"
+    assert item["latest_price_source"] == "SSI DailyOhlc"
+    assert item["daily_stock_price"]["status"] == "ok"
+    assert item["intraday_status"]["status"] == "unavailable"
+    assert item["intraday_status"]["message"] == "SSI IntradayOhlc returned no candles."
+    assert item["intraday_candles"] == []
+    assert item["intraday_pulse"] is None
+    assert item["realtime_snapshot"] is None
+    assert item["trade_tape"] == []
+
+
+def test_ssi_intraday_malformed_rows_are_unavailable_without_daily_fallback():
+    fetcher = FakeSsiFetcher(
+        {
+            "status": "ok",
+            "source": "SSI",
+            "rows": [
+                {
+                    "date_time": None,
+                    "open": None,
+                    "high": None,
+                    "low": None,
+                    "close": None,
+                    "volume": None,
+                    "ticker": "FPT",
+                    "source": "SSI",
+                }
+            ],
+        }
+    )
+
+    item = _service(fetcher).build_watchlist(["FPT"], force_refresh=True, include_intraday=True)["watchlist"][0]
+
+    assert item["status"] == "ok"
+    assert item["latest_price"] == item["daily_close"]
+    assert item["latest_price_source"] == "SSI DailyOhlc"
+    assert item["intraday_status"]["status"] == "unavailable"
+    assert item["intraday_status"]["message"] == "SSI IntradayOhlc returned no candles."
+    assert item["intraday_candles"] == []
+    assert item["intraday_pulse"] is None
+    assert item["intraday_labels"] == []
+
+
 def test_ssi_intraday_can_be_disabled_without_mozyfin_fallback():
     fetcher = FakeSsiFetcher()
 

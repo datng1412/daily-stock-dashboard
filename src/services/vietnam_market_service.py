@@ -926,16 +926,30 @@ def normalize_intraday_candles(df: Optional[pd.DataFrame], limit: int = 8) -> Li
     """Normalize intraday OHLCV rows for API output."""
     if df is None or df.empty:
         return []
+
+    def is_missing_intraday_value(value: Any) -> bool:
+        if value in (None, ""):
+            return True
+        try:
+            return bool(pd.isna(value))
+        except (TypeError, ValueError):
+            return False
+
     rows = []
     for raw in df.tail(limit).to_dict("records"):
+        timestamp = raw.get("timestamp")
+        date_time = raw.get("date_time") or raw.get("datetime") or raw.get("date")
+        close = _safe_float(raw.get("close"))
+        if (is_missing_intraday_value(timestamp) and is_missing_intraday_value(date_time)) or close is None:
+            continue
         rows.append(
             {
-                "timestamp": raw.get("timestamp"),
-                "date_time": raw.get("date_time") or raw.get("datetime") or raw.get("date"),
+                "timestamp": timestamp,
+                "date_time": date_time,
                 "open": _safe_float(raw.get("open")),
                 "high": _safe_float(raw.get("high")),
                 "low": _safe_float(raw.get("low")),
-                "close": _safe_float(raw.get("close")),
+                "close": close,
                 "volume": _safe_float(raw.get("volume")),
                 "ticker": raw.get("ticker"),
             }
@@ -1704,6 +1718,12 @@ class VietnamMarketService:
         if not df.empty and "date_time" in df.columns:
             df = df.sort_values("date_time").reset_index(drop=True)
         candles = normalize_intraday_candles(df, intraday_limit)
+        if not candles:
+            return self._ssi_intraday_unavailable_payload(
+                intraday_timeframe,
+                status="unavailable",
+                reason="SSI IntradayOhlc returned no candles.",
+            )
         granularity = _detect_intraday_granularity(candles)
         intraday_latest_date = _intraday_candle_vn_date(candles[-1]) if candles else None
         pulse = calculate_intraday_pulse(candles)
