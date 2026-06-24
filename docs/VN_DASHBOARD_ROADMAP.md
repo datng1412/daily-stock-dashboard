@@ -16,6 +16,7 @@ Companion product docs:
 
 * `docs/VN_PRODUCT_SPEC.md` defines the product goal, screens, UX principles, MVP scope, and milestones.
 * `docs/VN_DATA_CONTRACT.md` defines public statuses, null/empty missing-data rules, live-section contracts, source ownership, and UI rendering rules.
+* `docs/SSI_DATA_CAPABILITY_MATRIX.md` records current audit evidence for displayable data domains and should be consulted before adding fields or UI modules.
 * `docs/VN_DATA_QUALITY_TODOS.md` tracks prioritized data correctness, live-section semantics, enrichment, and cleanup work.
 
 ## Core data rules
@@ -456,7 +457,7 @@ Each next task must answer:
 * Which exact fields are safe to display?
 * What should remain unavailable, disabled, or future-provider only?
 
-Phase 4.0A is the next recommended task. Additional table-filter polish, saved filter views, further selected-ticker copy polish, broader dashboard layout changes, chart UX polish, and new visual badges are paused. They are deferred, not cancelled, until the data-capability matrix and priority data fixes are complete.
+Phase 4.0A adds the local capability audit and matrix. Additional table-filter polish, saved filter views, further selected-ticker copy polish, broader dashboard layout changes, chart UX polish, and new visual badges are paused. They are deferred, not cancelled, until the data-capability matrix and priority data fixes are complete.
 
 ## Priority data domains
 
@@ -579,8 +580,8 @@ Audit actual VN dashboard data capability before changing production behavior.
 
 Scope:
 
-* Add a local audit script.
-* Build an SSI/data-capability matrix.
+* Add local audit script `scripts/audit_vn_data_capability.ps1`.
+* Build SSI/data-capability matrix `docs/SSI_DATA_CAPABILITY_MATRIX.md`.
 * Inspect domain presence, source ownership, freshness, row coverage, and safe display fields.
 * Classify each domain as:
   * reliable
@@ -591,10 +592,12 @@ Scope:
   * unknown-needs-verification
 * Keep audit output secret-safe.
 * Make no production behavior, API contract, provider-call, or UI change.
+* Require future UI/data work to consult the matrix before adding fields.
 
 Acceptance criteria:
 
 * The matrix covers all priority data domains.
+* The audit script consumes existing app endpoints only.
 * Evidence distinguishes data absence from request failure.
 * Optional unavailable domains are reported without making the audit fail when the audit request succeeds.
 * Future-provider domains are reported explicitly as future-provider or disabled.

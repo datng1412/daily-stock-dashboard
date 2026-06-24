@@ -1,0 +1,430 @@
+param(
+  [string]$ApiTarget = "http://127.0.0.1:8000",
+  [string]$Tickers = "FPT,VPB,ACB,SSI,GMD,GAS,POW,VNM",
+  [string]$SelectedTicker = "FPT",
+  [switch]$ForceRefresh
+)
+
+$ErrorActionPreference = "Stop"
+
+$allowedStatuses = @(
+  "reliable",
+  "partial",
+  "unavailable",
+  "disabled",
+  "future-provider",
+  "unknown-needs-verification"
+)
+
+function Normalize-Ticker {
+  param([string]$Ticker)
+
+  if ($null -eq $Ticker) {
+    return ""
+  }
+  $normalized = $Ticker.Trim().ToUpperInvariant()
+  if ($normalized.EndsWith(".VN")) {
+    $normalized = $normalized.Substring(0, $normalized.Length - 3)
+  }
+  return $normalized
+}
+
+function Get-Value {
+  param(
+    [object]$Object,
+    [string[]]$Names
+  )
+
+  if ($null -eq $Object) {
+    return $null
+  }
+
+  foreach ($name in $Names) {
+    if ($Object -is [System.Collections.IDictionary] -and $Object.Contains($name)) {
+      return $Object[$name]
+    }
+
+    $property = $Object.PSObject.Properties[$name]
+    if ($null -ne $property) {
+      return $property.Value
+    }
+  }
+
+  return $null
+}
+
+function Has-Value {
+  param([object]$Value)
+
+  if ($null -eq $Value) {
+    return $false
+  }
+
+  if ($Value -is [string]) {
+    return -not [string]::IsNullOrWhiteSpace($Value)
+  }
+
+  return $true
+}
+
+function Convert-ToList {
+  param([object]$Value)
+
+  if ($null -eq $Value) {
+    return @()
+  }
+
+  if ($Value -is [System.Array]) {
+    return @($Value)
+  }
+
+  if ($Value -is [System.Collections.IList] -and -not ($Value -is [string])) {
+    return @($Value)
+  }
+
+  return @($Value)
+}
+
+function Test-SourceContains {
+  param(
+    [object]$Object,
+    [string[]]$Names,
+    [string]$Expected
+  )
+
+  foreach ($name in $Names) {
+    $value = Get-Value $Object @($name)
+    if ($null -ne $value -and ([string]$value) -match [regex]::Escape($Expected)) {
+      return $true
+    }
+  }
+  return $false
+}
+
+function Count-Matching {
+  param(
+    [object[]]$Rows,
+    [scriptblock]$Predicate
+  )
+
+  $count = 0
+  foreach ($row in $Rows) {
+    if (& $Predicate $row) {
+      $count += 1
+    }
+  }
+  return $count
+}
+
+function Get-Status {
+  param([object]$Object)
+
+  $value = Get-Value $Object @("status")
+  if ($null -eq $value) {
+    return $null
+  }
+  return ([string]$value).Trim().ToLowerInvariant()
+}
+
+function New-CapabilityRow {
+  param(
+    [string]$Domain,
+    [string]$Status,
+    [string]$SourceOwner,
+    [string]$Evidence,
+    [string]$SafeUiFields,
+    [string]$Notes
+  )
+
+  if ($allowedStatuses -notcontains $Status) {
+    $Status = "unknown-needs-verification"
+  }
+
+  [PSCustomObject]@{
+    Domain = $Domain
+    Status = $Status
+    "Source owner" = $SourceOwner
+    Evidence = $Evidence
+    "Safe UI fields" = $SafeUiFields
+    Notes = $Notes
+  }
+}
+
+function Get-AuditJson {
+  param(
+    [string]$Uri,
+    [string]$Label,
+    [bool]$Required
+  )
+
+  try {
+    $script:EndpointsCalled += $Label
+    return Invoke-RestMethod -Method Get -Uri $Uri -TimeoutSec 90
+  } catch {
+    $statusCode = $null
+    if ($_.Exception.Response -and $_.Exception.Response.StatusCode) {
+      $statusCode = [int]$_.Exception.Response.StatusCode
+    }
+
+    if ($Required -or ($statusCode -notin @(404, 405, 501))) {
+      throw ("Audit request failed ({0}). Backend unreachable or request failed: {1}" -f $Label, $_.Exception.Message)
+    }
+
+    return [PSCustomObject]@{
+      status = "unavailable"
+      audit_request_failed = $true
+      audit_status_code = $statusCode
+      audit_label = $Label
+    }
+  }
+}
+
+function Get-OptionalStatusFromEndpoint {
+  param(
+    [object]$Payload,
+    [string]$RowsProperty,
+    [string]$DisabledStatus = "disabled"
+  )
+
+  if ($null -eq $Payload) {
+    return "unknown-needs-verification"
+  }
+
+  if (Get-Value $Payload @("audit_request_failed")) {
+    $code = Get-Value $Payload @("audit_status_code")
+    if ($code -eq 404) {
+      return "unknown-needs-verification"
+    }
+    return "unavailable"
+  }
+
+  $status = Get-Status $Payload
+  if ($status -eq "disabled") {
+    return $DisabledStatus
+  }
+  if ($status -eq "ok") {
+    $rows = Convert-ToList (Get-Value $Payload @($RowsProperty))
+    if ($rows.Count -gt 0) {
+      return "reliable"
+    }
+    return "partial"
+  }
+  if ($status -eq "unavailable") {
+    return "unavailable"
+  }
+  return "unknown-needs-verification"
+}
+
+$apiBase = $ApiTarget.TrimEnd("/")
+$requestedTickers = @(
+  $Tickers.Split(",") |
+    ForEach-Object { Normalize-Ticker $_ } |
+    Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+)
+$selected = Normalize-Ticker $SelectedTicker
+
+if ($requestedTickers.Count -eq 0) {
+  throw "At least one ticker is required."
+}
+
+if ([string]::IsNullOrWhiteSpace($selected)) {
+  throw "SelectedTicker is required."
+}
+
+$tickersQuery = [System.Uri]::EscapeDataString(($requestedTickers -join ","))
+$selectedQuery = [System.Uri]::EscapeDataString($selected)
+$forceSuffix = ""
+if ($ForceRefresh) {
+  $forceSuffix = "&force_refresh=true"
+}
+
+$script:EndpointsCalled = @()
+
+Write-Host "VN data capability audit"
+Write-Host ("API target: {0}" -f $apiBase)
+Write-Host ("Tickers: {0}" -f ($requestedTickers -join ","))
+Write-Host ("Selected ticker: {0}" -f $selected)
+Write-Host ("Force refresh: {0}" -f [bool]$ForceRefresh)
+Write-Host "Secrets: not printed"
+Write-Host ""
+
+$watchlistUrl = "{0}/api/v1/stocks/vn/watchlist?tickers={1}&include_intraday=true{2}" -f $apiBase, $tickersQuery, $forceSuffix
+$companyUrl = "{0}/api/v1/stocks/vn/company/{1}?force_refresh={2}" -f $apiBase, $selectedQuery, ([bool]$ForceRefresh).ToString().ToLowerInvariant()
+$observabilityUrl = "{0}/api/v1/stocks/vn/observability" -f $apiBase
+$realtimeUrl = "{0}/api/v1/stocks/vn/realtime?tickers={1}" -f $apiBase, $tickersQuery
+$tradesUrl = "{0}/api/v1/stocks/vn/realtime/trades?symbol={1}&limit=100" -f $apiBase, $selectedQuery
+$indexListUrl = "{0}/api/v1/stocks/vn/index-list?market=HOSE" -f $apiBase
+$indexComponentsUrl = "{0}/api/v1/stocks/vn/index-components?index_code=VN30" -f $apiBase
+
+$watchlistResponse = Get-AuditJson $watchlistUrl "GET /api/v1/stocks/vn/watchlist" $true
+$companyResponse = Get-AuditJson $companyUrl "GET /api/v1/stocks/vn/company/{ticker}" $true
+$observabilityResponse = Get-AuditJson $observabilityUrl "GET /api/v1/stocks/vn/observability" $false
+$realtimeResponse = Get-AuditJson $realtimeUrl "GET /api/v1/stocks/vn/realtime" $false
+$tradesResponse = Get-AuditJson $tradesUrl "GET /api/v1/stocks/vn/realtime/trades" $false
+$indexListResponse = Get-AuditJson $indexListUrl "GET /api/v1/stocks/vn/index-list" $false
+$indexComponentsResponse = Get-AuditJson $indexComponentsUrl "GET /api/v1/stocks/vn/index-components" $false
+
+$rows = Convert-ToList (Get-Value $watchlistResponse @("watchlist"))
+$rowCount = $rows.Count
+if ($rowCount -eq 0) {
+  throw "Required watchlist response completed but returned no watchlist rows."
+}
+
+$dailyRows = Count-Matching $rows { param($row)
+  (Has-Value (Get-Value $row @("latest_price_date", "ohlcv_date", "date"))) -and
+  (Has-Value (Get-Value $row @("daily_close", "ohlcv_close", "close", "latest_price"))) -and
+  (Has-Value (Get-Value $row @("volume"))) -and
+  (
+    (Test-SourceContains $row @("latest_price_source") "SSI DailyOhlc") -or
+    (Test-SourceContains $row @("actual_source", "source", "primary_source") "SSI")
+  )
+}
+$latestCloseRows = Count-Matching $rows { param($row)
+  (Has-Value (Get-Value $row @("latest_price"))) -and
+  (Test-SourceContains $row @("latest_price_source") "SSI DailyOhlc")
+}
+$dailyValueRows = Count-Matching $rows { param($row) Has-Value (Get-Value $row @("amount", "value")) }
+$volumeRows = Count-Matching $rows { param($row) Has-Value (Get-Value $row @("volume")) }
+
+$dspRows = Count-Matching $rows { param($row)
+  $dsp = Get-Value $row @("daily_stock_price", "dailyStockPrice")
+  (Get-Status $dsp) -eq "ok"
+}
+$limitRows = Count-Matching $rows { param($row)
+  (Has-Value (Get-Value $row @("ssi_reference_price"))) -and
+  (Has-Value (Get-Value $row @("ssi_ceiling_price"))) -and
+  (Has-Value (Get-Value $row @("ssi_floor_price")))
+}
+$matchedRows = Count-Matching $rows { param($row)
+  (Has-Value (Get-Value $row @("ssi_matched_volume"))) -and
+  (Has-Value (Get-Value $row @("ssi_matched_value")))
+}
+$foreignVolumeRows = Count-Matching $rows { param($row)
+  $foreign = Get-Value $row @("foreign")
+  (Has-Value (Get-Value $foreign @("buy"))) -and
+  (Has-Value (Get-Value $foreign @("sell"))) -and
+  (Has-Value (Get-Value $foreign @("net", "foreign_net_volume"))) -and
+  ((Get-Value $foreign @("source")) -match "SSI DailyStockPrice")
+}
+$foreignValueRows = Count-Matching $rows { param($row)
+  $foreign = Get-Value $row @("foreign")
+  (Has-Value (Get-Value $foreign @("buy_value"))) -and
+  (Has-Value (Get-Value $foreign @("sell_value"))) -and
+  (Has-Value (Get-Value $foreign @("net_value"))) -and
+  ((Get-Value $foreign @("source")) -match "SSI DailyStockPrice")
+}
+$indicatorRows = Count-Matching $rows { param($row)
+  $indicators = Get-Value $row @("indicators")
+  (Has-Value (Get-Value $indicators @("rsi14_wilder", "rsi14"))) -and
+  (Has-Value (Get-Value $indicators @("ma20"))) -and
+  (Has-Value (Get-Value $indicators @("ma50")))
+}
+$intradayOkRows = Count-Matching $rows { param($row)
+  $status = Get-Status (Get-Value $row @("intraday_status"))
+  $candles = Convert-ToList (Get-Value $row @("intraday_candles"))
+  $pulse = Get-Value $row @("intraday_pulse")
+  $dateMatch = Get-Value $row @("date_match")
+  ($status -eq "ok") -and ($candles.Count -gt 0) -and ($null -ne $pulse) -and ($dateMatch -eq "matched")
+}
+$intradayStatusValues = @($rows | ForEach-Object { Get-Status (Get-Value $_ @("intraday_status")) } | Where-Object { $_ })
+$realtimeOkRows = Count-Matching $rows { param($row)
+  ((Get-Status (Get-Value $row @("realtime_status"))) -eq "ok") -and
+  ($null -ne (Get-Value $row @("realtime_snapshot")))
+}
+$tradeTapeOkRows = Count-Matching $rows { param($row)
+  $trades = Convert-ToList (Get-Value $row @("trade_tape"))
+  ((Get-Status (Get-Value $row @("trade_tape_status"))) -eq "ok") -and ($trades.Count -gt 0)
+}
+
+$newsStatuses = @($rows | ForEach-Object { Get-Status (Get-Value $_ @("news_status")) } | Where-Object { $_ })
+
+$capabilities = @()
+
+$dailyStatus = if ($dailyRows -eq $rowCount) { "reliable" } elseif ($dailyRows -gt 0) { "partial" } else { "unavailable" }
+$capabilities += New-CapabilityRow "Daily OHLCV" $dailyStatus "SSI DailyOhlc" ("{0}/{1} rows include date, close, volume, and SSI daily source evidence" -f $dailyRows, $rowCount) "date, open, high, low, close, daily_close, volume, amount when present" "Reliable means observed for this audit run and input set."
+
+$latestStatus = if ($latestCloseRows -eq $rowCount) { "reliable" } elseif ($latestCloseRows -gt 0) { "partial" } else { "unavailable" }
+$capabilities += New-CapabilityRow "Latest daily close" $latestStatus "SSI DailyOhlc" ("{0}/{1} rows expose latest_price with SSI DailyOhlc source" -f $latestCloseRows, $rowCount) "latest_price, latest_price_date, latest_price_source" "Do not infer realtime from this field."
+
+$dailyVolumeStatus = if ($volumeRows -eq $rowCount -and $dailyValueRows -eq $rowCount) { "reliable" } elseif ($volumeRows -gt 0 -or $dailyValueRows -gt 0) { "partial" } else { "unavailable" }
+$capabilities += New-CapabilityRow "Daily volume/value" $dailyVolumeStatus "SSI DailyOhlc" ("volume {0}/{1}; value/amount {2}/{1}" -f $volumeRows, $rowCount, $dailyValueRows) "volume; amount/value only when present" "Daily volume is separate from matched volume."
+
+$limitStatus = if ($limitRows -eq $rowCount -and $dspRows -eq $rowCount) { "reliable" } elseif ($limitRows -gt 0 -or $dspRows -gt 0) { "partial" } else { "unavailable" }
+$capabilities += New-CapabilityRow "DailyStockPrice reference/ceiling/floor" $limitStatus "SSI DailyStockPrice" ("DailyStockPrice ok {0}/{1}; limits present {2}/{1}" -f $dspRows, $rowCount, $limitRows) "reference_price, ceiling_price, floor_price" "Does not change canonical daily close ownership."
+
+$matchedStatus = if ($matchedRows -eq $rowCount) { "reliable" } elseif ($matchedRows -gt 0) { "partial" } else { "unavailable" }
+$capabilities += New-CapabilityRow "Matched volume/value" $matchedStatus "SSI DailyStockPrice" ("{0}/{1} rows include matched_volume and matched_value" -f $matchedRows, $rowCount) "matched_volume, matched_value" "Keep separate from SSI DailyOhlc volume/value."
+
+$foreignVolStatus = if ($foreignVolumeRows -eq $rowCount) { "reliable" } elseif ($foreignVolumeRows -gt 0) { "partial" } else { "unavailable" }
+$capabilities += New-CapabilityRow "Foreign buy/sell/net volume" $foreignVolStatus "SSI DailyStockPrice" ("{0}/{1} rows include foreign buy/sell/net volume from SSI DailyStockPrice" -f $foreignVolumeRows, $rowCount) "foreign_buy_volume, foreign_sell_volume, foreign_net_volume" "Null is not zero."
+
+$foreignValueStatus = if ($foreignValueRows -eq $rowCount) { "reliable" } elseif ($foreignValueRows -gt 0) { "partial" } else { "unavailable" }
+$capabilities += New-CapabilityRow "Foreign buy/sell/net value" $foreignValueStatus "SSI DailyStockPrice" ("{0}/{1} rows include foreign buy/sell/net value from SSI DailyStockPrice" -f $foreignValueRows, $rowCount) "foreign_buy_value, foreign_sell_value, foreign_net_value" "Use value fields separately from share volume fields."
+
+$indicatorStatus = if ($indicatorRows -eq $rowCount) { "reliable" } elseif ($indicatorRows -gt 0) { "partial" } else { "unavailable" }
+$capabilities += New-CapabilityRow "Technical indicators derived from daily OHLCV" $indicatorStatus "derived from SSI DailyOhlc" ("{0}/{1} rows include RSI14 and MA20/MA50" -f $indicatorRows, $rowCount) "rsi14, ma20, ma50, Bollinger when present, volume ratio" "RSI14 remains Wilder/RMA."
+
+$intradayStatus = if ($intradayOkRows -gt 0) { "partial" } elseif ($intradayStatusValues -contains "disabled") { "disabled" } elseif ($intradayStatusValues -contains "unavailable") { "unavailable" } else { "unknown-needs-verification" }
+$capabilities += New-CapabilityRow "Intraday OHLCV / intraday pulse" $intradayStatus "SSI IntradayOhlc" ("usable current pulse rows {0}/{1}; statuses: {2}" -f $intradayOkRows, $rowCount, (($intradayStatusValues | Select-Object -Unique) -join ",")) "intraday_candles, intraday_pulse only when status ok and date matched" "At most partial until cadence and freshness are fully verified."
+
+$realtimeEndpointStatus = Get-OptionalStatusFromEndpoint $realtimeResponse "quotes"
+$realtimeStatus = if ($realtimeEndpointStatus -eq "reliable" -and $realtimeOkRows -gt 0) { "reliable" } elseif ($realtimeEndpointStatus -eq "disabled") { "disabled" } elseif ($realtimeOkRows -gt 0) { "partial" } elseif ($realtimeEndpointStatus -eq "unavailable") { "unavailable" } else { "unknown-needs-verification" }
+$realtimeQuoteCount = (Convert-ToList (Get-Value $realtimeResponse @("quotes"))).Count
+$capabilities += New-CapabilityRow "Realtime snapshot" $realtimeStatus "SSI realtime contract" ("endpoint status={0}; endpoint quote rows={1}; watchlist usable snapshots={2}/{3}" -f (Get-Status $realtimeResponse), $realtimeQuoteCount, $realtimeOkRows, $rowCount) "realtime_snapshot fields only when status ok and snapshot is non-null" "Do not use realtime snapshot as official daily close."
+
+$tradeEndpointStatus = Get-OptionalStatusFromEndpoint $tradesResponse "trades"
+$tradeStatus = if ($tradeEndpointStatus -eq "reliable" -and $tradeTapeOkRows -gt 0) { "reliable" } elseif ($tradeEndpointStatus -eq "disabled") { "disabled" } elseif ($tradeTapeOkRows -gt 0) { "partial" } elseif ($tradeEndpointStatus -eq "unavailable") { "unavailable" } else { "unknown-needs-verification" }
+$tradeCount = (Convert-ToList (Get-Value $tradesResponse @("trades"))).Count
+$capabilities += New-CapabilityRow "Trade tape" $tradeStatus "SSI trade-tape contract" ("endpoint status={0}; endpoint trade rows={1}; watchlist usable trade rows={2}/{3}" -f (Get-Status $tradesResponse), $tradeCount, $tradeTapeOkRows, $rowCount) "trade_tape rows only when status ok and rows exist" "Do not use trade tape as official daily close."
+
+$indexListRows = (Convert-ToList (Get-Value $indexListResponse @("rows"))).Count
+$indexComponentRows = (Convert-ToList (Get-Value $indexComponentsResponse @("rows"))).Count
+$indexStatus = if ((Get-Status $indexListResponse) -eq "ok" -and $indexListRows -gt 0 -and (Get-Status $indexComponentsResponse) -eq "ok" -and $indexComponentRows -gt 0) { "reliable" } elseif ((Get-Status $indexListResponse) -eq "ok" -and $indexListRows -gt 0) { "partial" } elseif ((Get-Status $indexListResponse) -eq "disabled" -or (Get-Status $indexComponentsResponse) -eq "disabled") { "disabled" } elseif ((Get-Status $indexListResponse) -eq "unavailable" -or (Get-Status $indexComponentsResponse) -eq "unavailable") { "unavailable" } else { "unknown-needs-verification" }
+$capabilities += New-CapabilityRow "Index data / index components" $indexStatus "SSI IndexList / SSI IndexComponents" ("index-list status={0}, rows={1}; VN30 components status={2}, rows={3}" -f (Get-Status $indexListResponse), $indexListRows, (Get-Status $indexComponentsResponse), $indexComponentRows) "index identifiers and component rows when returned" "Use SSI-returned identifiers; do not hardcode components."
+
+$profile = Get-Value $companyResponse @("profile")
+$profileStatusRaw = Get-Status $profile
+$profileFields = 0
+foreach ($field in @("name", "exchange", "industry")) {
+  if (Has-Value (Get-Value $profile @($field))) {
+    $profileFields += 1
+  }
+}
+$profileStatus = if ($profileStatusRaw -eq "ok" -and $profileFields -ge 3) { "reliable" } elseif ($profileStatusRaw -eq "ok" -or $profileFields -gt 0) { "partial" } elseif ($profileStatusRaw -eq "missing") { "partial" } elseif ($profileStatusRaw -eq "unavailable") { "unavailable" } else { "unknown-needs-verification" }
+$capabilities += New-CapabilityRow "Profile / securities metadata" $profileStatus "SSI Securities / SSI SecuritiesDetails" ("company profile status={0}; name/exchange/industry fields present={1}/3" -f $profileStatusRaw, $profileFields) "ticker, name, exchange, industry only when present" "Profile can be partial even when SSI metadata status is ok."
+
+$newsStatus = if ($newsStatuses -contains "ok") { "partial" } elseif ($newsStatuses -contains "disabled") { "disabled" } else { "future-provider" }
+$capabilities += New-CapabilityRow "News" $newsStatus "NewsProvider future" ("watchlist news statuses: {0}; company news status={1}" -f (($newsStatuses | Select-Object -Unique) -join ","), (Get-Status (Get-Value $companyResponse @("news")))) "news rows only after separate provider exists" "Current VN runtime must not use Mozyfin news fallback."
+
+$financials = Get-Value $companyResponse @("financials")
+$capabilities += New-CapabilityRow "Financials" "future-provider" "external provider future" ("company financials status={0}" -f (Get-Status $financials)) "none yet" "Requires a separate future provider contract."
+
+$events = Get-Value $companyResponse @("events")
+$capabilities += New-CapabilityRow "Corporate actions / dividends" "future-provider" "external provider future" ("company events status={0}; no explicit dividend/corporate-action provider observed" -f (Get-Status $events)) "none yet" "Do not infer dividends or corporate actions from price gaps."
+
+$capabilities += New-CapabilityRow "Macro/events" "future-provider" "external provider future" "no macro provider block in current dashboard/company responses" "none yet" "Requires a separate future provider contract."
+
+Write-Host "Endpoints called:"
+foreach ($endpoint in ($script:EndpointsCalled | Select-Object -Unique)) {
+  Write-Host ("- {0}" -f $endpoint)
+}
+Write-Host ""
+
+Write-Host "Capability summary:"
+$capabilities | Format-Table -AutoSize -Wrap
+
+Write-Host ""
+Write-Host "Observed reliable domains for this audit run:"
+@($capabilities | Where-Object { $_.Status -eq "reliable" } | ForEach-Object { "- {0}" -f $_.Domain }) | ForEach-Object { Write-Host $_ }
+
+Write-Host ""
+Write-Host "Partial/unavailable/disabled domains:"
+@($capabilities | Where-Object { $_.Status -in @("partial", "unavailable", "disabled", "unknown-needs-verification") } | ForEach-Object { "- {0}: {1}" -f $_.Domain, $_.Status }) | ForEach-Object { Write-Host $_ }
+
+Write-Host ""
+Write-Host "Future-provider domains:"
+@($capabilities | Where-Object { $_.Status -eq "future-provider" } | ForEach-Object { "- {0}" -f $_.Domain }) | ForEach-Object { Write-Host $_ }
+
+Write-Host ""
+Write-Host "Audit completed. Optional unavailable, disabled, partial, and future-provider domains are reported without failing the script."
+exit 0

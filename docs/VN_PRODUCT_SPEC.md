@@ -182,6 +182,8 @@ Every next data task should answer:
 * Which exact fields are safe to display?
 * What should remain unavailable, disabled, or future-provider only?
 
+Use `docs/SSI_DATA_CAPABILITY_MATRIX.md` as the planning and audit source for displayable data domains before adding fields or UI modules. The matrix records current evidence and conservative capability status; it does not replace the public API and rendering rules in `docs/VN_DATA_CONTRACT.md`.
+
 Additional table-filter polish, saved filter views, further selected-ticker copy polish, broader dashboard layout changes, chart UX polish, and new visual badges are paused. They are not cancelled; they are deferred until the data-capability matrix and priority reliability work are complete. A visual change may move forward earlier only when it is required to expose verified data safely.
 
 ## Data Priority Model
@@ -351,7 +353,7 @@ After Phase 3.5A, additional filter polish, saved filter views, selected-ticker 
 
 ### Phase 4.0A - VN Data Capability Probe
 
-Add a local audit script and produce an SSI/data-capability matrix without changing production behavior. Classify each data domain as reliable, partial, unavailable, disabled, future-provider, or unknown-needs-verification. This is the next recommended task.
+Add a local audit script and produce an SSI/data-capability matrix without changing production behavior. Classify each data domain as reliable, partial, unavailable, disabled, future-provider, or unknown-needs-verification. Future UI/data work should consult `docs/SSI_DATA_CAPABILITY_MATRIX.md` before adding fields, and should continue to treat `docs/VN_DATA_CONTRACT.md` as the source of truth for public contract semantics.
 
 ### Phase 4.0B - SSI Realtime and Trade-Tape Verification
 
