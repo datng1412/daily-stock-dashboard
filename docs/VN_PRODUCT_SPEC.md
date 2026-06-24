@@ -280,6 +280,8 @@ Phase 3.2A adds a compact `/vietnam` Data Readiness strip near the top of the da
 
 Phase 3.2B adds lightweight explanations to the Data Readiness strip so each item has factual source/status context. The explanations are frontend-only, derive from the same already loaded response/status data, and do not add backend fields, endpoints, provider calls, polling, request orchestration, or refresh-preservation behavior.
 
+Phase 3.2C keeps the previous successful `/vietnam` watchlist visible while a refresh, preset switch, reset, or custom apply request is in flight. It adds frontend request-state UX only: `Updating...` and `Last update failed` copy, local stale-response protection for rapid list changes, and commit-on-success behavior for preset/custom list changes. It does not add backend fields, endpoints, provider calls, polling, or public contract changes. Request-level failures preserve the prior committed rows/list/preset, while successful responses that include unavailable ticker rows still commit and use existing row-level unavailable states.
+
 Next Phase 3 work makes the dashboard progressive: data readiness and refresh UX, selected ticker progressive disclosure, request-state orchestration, local filtering, and chart UX polish. The company detail page remains part of the same source-aware explanation layer, not a separate advisor experience.
 
 ### Phase 4.0 - SSI Realtime and Trade Tape Investigation

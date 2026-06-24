@@ -69,6 +69,15 @@ interface DataReadinessItem {
   explanation: string;
 }
 
+interface WatchlistCommitIntent {
+  tickers: string[];
+  presetId: VietnamDashboardActivePresetId;
+  selectedTicker: string | null;
+  customWatchlist?: string[];
+  customWatchlistInput?: string;
+  customNotice?: string | null;
+}
+
 const WATCHLIST_SCAN_ORDER: WatchlistScanLabel[] = ['Strong', 'Improving', 'Neutral', 'Weakening', 'Risk elevated', 'Data unavailable'];
 const DATA_CAVEAT_LABELS = new Set(['Foreign data stale', 'Indicator caution', 'Price finality unknown', 'Adjusted price unknown']);
 const VIETNAM_DASHBOARD_PRESETS: Array<{ id: VietnamDashboardPresetId; label: string; tickers: string[] }> = [
@@ -3522,6 +3531,7 @@ const VietnamDashboardPage: React.FC = () => {
   const selectedTickerRef = useRef(selectedTicker);
   selectedTickerRef.current = selectedTicker;
   const requestIdRef = useRef(0);
+  const initialWatchlistLoadStartedRef = useRef(false);
   const realtimeRequestIdRef = useRef(0);
   const tradesRequestIdRef = useRef(0);
   const corporateActionsRequestIdRef = useRef(0);
@@ -3540,12 +3550,6 @@ const VietnamDashboardPage: React.FC = () => {
     } catch {
       // Observability is diagnostic only; keep dashboard data flows independent.
     }
-  }, []);
-
-  const applyWatchlist = useCallback((nextTickers: string[], presetId: VietnamDashboardActivePresetId = 'my', nextSelectedTicker?: string | null) => {
-    setWatchlist(nextTickers);
-    setActivePresetId(presetId);
-    setSelectedTicker(nextSelectedTicker ?? nextTickers[0] ?? null);
   }, []);
 
   const loadRealtimeQuotes = useCallback(async (tickers: string[]) => {
@@ -3727,6 +3731,7 @@ const VietnamDashboardPage: React.FC = () => {
     forceRefresh = false,
     refreshKind: 'manual' | 'auto' | 'force live' = forceRefresh ? 'force live' : 'manual',
     tickersOverride?: string[],
+    commitIntent?: WatchlistCommitIntent,
   ) => {
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
@@ -3742,6 +3747,20 @@ const VietnamDashboardPage: React.FC = () => {
         return;
       }
       setData(nextData);
+      if (commitIntent) {
+        setWatchlist(commitIntent.tickers);
+        setActivePresetId(commitIntent.presetId);
+        setSelectedTicker(commitIntent.selectedTicker);
+        if (commitIntent.customWatchlist) {
+          setCustomWatchlist(commitIntent.customWatchlist);
+        }
+        if (commitIntent.customWatchlistInput !== undefined) {
+          setCustomWatchlistInput(commitIntent.customWatchlistInput);
+        }
+        if (commitIntent.customNotice !== undefined) {
+          setCustomNotice(commitIntent.customNotice);
+        }
+      }
       setLastRefreshKind(refreshKind);
       setLastRefreshAt(new Date().toISOString());
       void loadObservability();
@@ -3763,15 +3782,27 @@ const VietnamDashboardPage: React.FC = () => {
       setWatchlistError('Preset list is unavailable.');
       return;
     }
-    const nextSelectedTicker = selectedTicker && presetTickers.includes(selectedTicker) ? selectedTicker : presetTickers[0] ?? null;
+    const nextSelectedTicker = selectedTickerRef.current && presetTickers.includes(selectedTickerRef.current) ? selectedTickerRef.current : presetTickers[0] ?? null;
     setWatchlistError(null);
-    applyWatchlist(presetTickers, presetId, nextSelectedTicker);
-  }, [applyWatchlist, selectedTicker]);
+    void load(false, 'manual', presetTickers, {
+      tickers: presetTickers,
+      presetId,
+      selectedTicker: nextSelectedTicker,
+    });
+  }, [load]);
 
-  const applyCustomTickers = useCallback((tickers: string[]) => {
-    const nextSelectedTicker = selectedTicker && tickers.includes(selectedTicker) ? selectedTicker : tickers[0] ?? null;
-    applyWatchlist(tickers, 'custom', nextSelectedTicker);
-  }, [applyWatchlist, selectedTicker]);
+  const applyCustomTickers = useCallback((tickers: string[], successNotice = 'Saved locally in this browser.') => {
+    const formattedInput = formatCustomWatchlistInput(tickers);
+    const nextSelectedTicker = selectedTickerRef.current && tickers.includes(selectedTickerRef.current) ? selectedTickerRef.current : tickers[0] ?? null;
+    void load(false, 'manual', tickers, {
+      tickers,
+      presetId: 'custom',
+      selectedTicker: nextSelectedTicker,
+      customWatchlist: tickers,
+      customWatchlistInput: formattedInput,
+      customNotice: successNotice,
+    });
+  }, [load]);
 
   const handleCustomPresetSelect = useCallback(() => {
     if (!customWatchlist.length) {
@@ -3780,7 +3811,6 @@ const VietnamDashboardPage: React.FC = () => {
       return;
     }
     setWatchlistError(null);
-    setCustomNotice('Saved locally in this browser.');
     applyCustomTickers(customWatchlist);
   }, [applyCustomTickers, customWatchlist]);
 
@@ -3791,11 +3821,10 @@ const VietnamDashboardPage: React.FC = () => {
       setCustomNotice(null);
       return;
     }
-    setCustomWatchlist(result.tickers);
     setCustomWatchlistInput(formatCustomWatchlistInput(result.tickers));
     setWatchlistError(null);
-    setCustomNotice(result.messages.length ? result.messages.join(' ') : 'Saved locally in this browser.');
-    applyCustomTickers(result.tickers);
+    setCustomNotice(result.messages.length ? result.messages.join(' ') : null);
+    applyCustomTickers(result.tickers, result.messages.length ? result.messages.join(' ') : 'Saved locally in this browser.');
   }, [applyCustomTickers, customWatchlistInput]);
 
   const handleSaveCustom = useCallback(() => {
@@ -3825,9 +3854,14 @@ const VietnamDashboardPage: React.FC = () => {
   }, [activePresetId]);
 
   const handleResetWatchlist = useCallback(() => {
-    applyWatchlist(DEFAULT_WATCHLIST, 'my');
+    const nextSelectedTicker = selectedTickerRef.current && DEFAULT_WATCHLIST.includes(selectedTickerRef.current) ? selectedTickerRef.current : DEFAULT_WATCHLIST[0] ?? null;
+    void load(false, 'manual', DEFAULT_WATCHLIST, {
+      tickers: DEFAULT_WATCHLIST,
+      presetId: 'my',
+      selectedTicker: nextSelectedTicker,
+    });
     setWatchlistError(null);
-  }, [applyWatchlist]);
+  }, [load]);
 
   const handleRefreshRealtimeData = useCallback(() => {
     void Promise.allSettled([
@@ -3848,8 +3882,10 @@ const VietnamDashboardPage: React.FC = () => {
   }, [loadIndexCoverage]);
 
   useEffect(() => {
+    if (initialWatchlistLoadStartedRef.current) return;
+    initialWatchlistLoadStartedRef.current = true;
     void load(false, 'manual', logicalWatchlistRef.current);
-  }, [load, logicalWatchlistKey]);
+  }, [load]);
 
   useEffect(() => {
     void refreshTradeTape(selectedTicker);
@@ -4013,6 +4049,8 @@ const VietnamDashboardPage: React.FC = () => {
     () => (data?.watchlist ?? []).find((item) => item.ticker === selectedTicker) ?? data?.watchlist?.[0] ?? null,
     [data, selectedTicker],
   );
+  const hasCommittedData = Boolean(data);
+  const isUpdatingWatchlist = loading && hasCommittedData;
 
   return (
     <AppPage className="space-y-5">
@@ -4057,6 +4095,19 @@ const VietnamDashboardPage: React.FC = () => {
         tradesError={tradesError}
         marketPhase={marketPhase}
       />
+
+      {isUpdatingWatchlist || (hasCommittedData && error) ? (
+        <div
+          className={cn(
+            'flex flex-wrap items-center gap-2 rounded-lg border p-3 text-xs',
+            error ? 'border-warning/25 bg-warning/10 text-warning' : 'border-cyan/20 bg-cyan/10 text-cyan',
+          )}
+          data-testid="watchlist-request-status"
+        >
+          <Badge variant={error ? 'warning' : 'info'}>{error ? 'Last update failed' : 'Updating...'}</Badge>
+          <span className={error ? 'text-warning' : 'text-secondary-text'}>Showing previous data</span>
+        </div>
+      ) : null}
 
       <section className="rounded-lg border border-border/70 bg-card p-4">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -4315,7 +4366,7 @@ const VietnamDashboardPage: React.FC = () => {
         </div>
       </section>
 
-      {error ? (
+      {error && !hasCommittedData ? (
         <div className="rounded-lg border border-danger/30 bg-danger/10 p-4 text-sm text-danger">{error}</div>
       ) : null}
 

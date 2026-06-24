@@ -292,14 +292,23 @@ Phase 3.2B status:
 * No backend/API contract fields, provider calls, endpoints, polling, or request-orchestration behavior changed in Phase 3.2B.
 * Explanations do not expose endpoint details, HTTP status, retryability, raw provider summaries, or advisory labels.
 
-Phase 3.2C remaining:
+Phase 3.2C status:
+
+* Kept previous successful watchlist rows visible while refresh, preset, reset, or custom apply requests are in flight.
+* Added compact `Updating...` and `Last update failed` states with `Showing previous data` helper copy.
+* Preset/custom/reset changes are pending intents and commit only after the existing watchlist request succeeds.
+* Request-level failures preserve the previous committed rows, list/preset, and selected ticker.
+* Successful responses still commit when requested tickers return unavailable rows, because unavailable rows are row-level states rather than request-level failures.
+* Local request-id protection ignores older/slower responses so rapid preset/custom changes cannot overwrite newer intent or clear newer error/loading state.
+* No backend/API contract fields, provider calls, endpoints, polling, dependencies, or public contracts changed in Phase 3.2C.
+
+Phase 3.2D remaining:
 
 Goal:
 
-* Add section-level readiness states.
-* Keep previous successful data visible while refreshing.
-* Show `Updating...` instead of blanking the table.
-* Keep optional live failures from dominating the UI.
+* Continue section-level readiness cleanup beyond the watchlist table.
+* Keep optional live failures from dominating lower-priority sections.
+* Tighten first-load versus refresh states across remaining detail panels.
 
 Request-state vocabulary:
 

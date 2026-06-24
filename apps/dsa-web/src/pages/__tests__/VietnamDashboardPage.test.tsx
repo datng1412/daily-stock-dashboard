@@ -704,6 +704,8 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     render(<VietnamDashboardPage />);
 
+    expect(screen.getByText('Loading Vietnam watchlist...')).toBeInTheDocument();
+    expect(screen.queryByTestId('watchlist-request-status')).not.toBeInTheDocument();
     await waitFor(() => expect(dataReadinessStrip().getByText('Loading daily data')).toBeInTheDocument());
     expect(dataReadinessItem(/Daily data: current watchlist is loading and no usable daily rows are loaded yet\./)).toHaveAttribute(
       'title',
@@ -1175,9 +1177,44 @@ describe('VietnamDashboardPage watchlist loading', () => {
     fireEvent.click(screen.getByRole('button', { name: /force live refresh/i }));
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, true));
-    expect(await screen.findByText('Incomplete watchlist response; keeping previous successful snapshot.')).toBeInTheDocument();
+    expect(await screen.findByText('Last update failed')).toBeInTheDocument();
+    expect(screen.getByText('Showing previous data')).toBeInTheDocument();
     expect(foreignNetVolumeSummaryCard().getByText('210')).toBeInTheDocument();
     expect(foreignNetVolumeSummaryCard().queryByText('999,999')).not.toBeInTheDocument();
+  });
+
+  it('keeps previous rows visible while refresh is pending and preserves sorting', async () => {
+    const previous = withSsiForeignNetVolumes(makeResponse(defaultTickers), [1, 2, 3, 4, 5, 6]);
+    const latest = withSsiForeignNetVolumes(makeResponse(defaultTickers), [50, 50, 50, 50, 50, 50]);
+    let resolveRefresh: ((response: VietnamWatchlistResponse) => void) | undefined;
+    mockedGetVietnamWatchlist
+      .mockResolvedValueOnce(previous)
+      .mockImplementationOnce(() => new Promise<VietnamWatchlistResponse>((resolve) => {
+        resolveRefresh = resolve;
+      }));
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(foreignNetVolumeSummaryCard().getByText('21')).toBeInTheDocument());
+    clickIndicatorSort(/Sort by Ticker/i);
+    expect(indicatorRowOrder()).toEqual(['ACB', 'ACV', 'FPT', 'MSB', 'SCS', 'VPB']);
+
+    fireEvent.click(screen.getByRole('button', { name: /^refresh$/i }));
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(2));
+    expect(screen.getByText('Updating...')).toBeInTheDocument();
+    expect(screen.getByText('Showing previous data')).toBeInTheDocument();
+    expect(foreignNetVolumeSummaryCard().getByText('21')).toBeInTheDocument();
+    expect(indicatorRowOrder()).toEqual(['ACB', 'ACV', 'FPT', 'MSB', 'SCS', 'VPB']);
+    expect(dataReadinessStrip().getByRole('heading', { name: 'Data readiness' })).toBeInTheDocument();
+
+    await act(async () => {
+      resolveRefresh?.(latest);
+    });
+
+    await waitFor(() => expect(foreignNetVolumeSummaryCard().getByText('300')).toBeInTheDocument());
+    expect(screen.queryByText('Updating...')).not.toBeInTheDocument();
+    expect(indicatorRowOrder()).toEqual(['ACB', 'ACV', 'FPT', 'MSB', 'SCS', 'VPB']);
   });
 
   it('ignores an older slower watchlist response after a newer response updates the aggregate', async () => {
@@ -1227,8 +1264,161 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /force live refresh/i }));
 
-    expect(await screen.findByText('watchlist timeout')).toBeInTheDocument();
+    expect(await screen.findByText('Last update failed')).toBeInTheDocument();
+    expect(screen.getByText('Showing previous data')).toBeInTheDocument();
     expect(foreignNetVolumeSummaryCard().getByText('210')).toBeInTheDocument();
+  });
+
+  it('keeps previous committed rows and selection when a preset request fails', async () => {
+    let rejectPreset: ((error: Error) => void) | undefined;
+    mockedGetVietnamWatchlist
+      .mockResolvedValueOnce(makeResponse(defaultTickers))
+      .mockImplementationOnce(() => new Promise<VietnamWatchlistResponse>((_resolve, reject) => {
+        rejectPreset = reject;
+      }));
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+    clickTickerRow('ACB');
+    expect(selectedTickerHeader().getByRole('heading', { name: 'ACB' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Banks' }));
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith([...presetTickers.Banks], false));
+    expect(screen.getByText('Updating...')).toBeInTheDocument();
+    expect(screen.getByTestId('indicator-row-FPT')).toBeInTheDocument();
+
+    await act(async () => {
+      rejectPreset?.(new Error('preset timeout'));
+    });
+
+    expect(await screen.findByText('Last update failed')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Banks' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByTestId('indicator-row-FPT')).toBeInTheDocument();
+    expect(selectedTickerHeader().getByRole('heading', { name: 'ACB' })).toBeInTheDocument();
+  });
+
+  it('keeps previous committed rows and selection when a custom apply request fails', async () => {
+    let rejectCustom: ((error: Error) => void) | undefined;
+    mockedGetVietnamWatchlist
+      .mockResolvedValueOnce(makeResponse(defaultTickers))
+      .mockImplementationOnce(() => new Promise<VietnamWatchlistResponse>((_resolve, reject) => {
+        rejectCustom = reject;
+      }));
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+    clickTickerRow('ACB');
+
+    fireEvent.change(screen.getByLabelText('Custom watchlist'), { target: { value: 'vpb acb' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Apply custom' }));
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(['VPB', 'ACB'], false));
+    expect(screen.getByText('Updating...')).toBeInTheDocument();
+
+    await act(async () => {
+      rejectCustom?.(new Error('custom timeout'));
+    });
+
+    expect(await screen.findByText('Last update failed')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Custom' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByTestId('indicator-row-FPT')).toBeInTheDocument();
+    expect(selectedTickerHeader().getByRole('heading', { name: 'ACB' })).toBeInTheDocument();
+  });
+
+  it('commits a successful preset response even when one requested ticker row is unavailable', async () => {
+    const banksResponse = makeResponse([...presetTickers.Banks]);
+    banksResponse.watchlist[0] = {
+      ...banksResponse.watchlist[0],
+      status: 'unavailable',
+      error: 'Ticker temporarily unavailable',
+      latestPrice: null,
+      dailyClose: null,
+      ohlcvClose: null,
+      close: null,
+    };
+    mockedGetVietnamWatchlist
+      .mockResolvedValueOnce(makeResponse(defaultTickers))
+      .mockResolvedValueOnce(banksResponse);
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+    fireEvent.click(screen.getByRole('button', { name: 'Banks' }));
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith([...presetTickers.Banks], false));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Banks' })).toHaveAttribute('aria-pressed', 'true'));
+    expect(screen.getByTestId('indicator-row-VCB')).toBeInTheDocument();
+    expect(screen.getByTestId('indicator-row-VCB')).toHaveTextContent('Unavailable');
+    expect(selectedTickerHeader().getByRole('heading', { name: 'VCB' })).toBeInTheDocument();
+  });
+
+  it('ignores stale older preset responses after a newer preset succeeds', async () => {
+    let resolveVn30: ((response: VietnamWatchlistResponse) => void) | undefined;
+    let resolveBanks: ((response: VietnamWatchlistResponse) => void) | undefined;
+    mockedGetVietnamWatchlist
+      .mockResolvedValueOnce(makeResponse(defaultTickers))
+      .mockImplementationOnce(() => new Promise<VietnamWatchlistResponse>((resolve) => {
+        resolveVn30 = resolve;
+      }))
+      .mockImplementationOnce(() => new Promise<VietnamWatchlistResponse>((resolve) => {
+        resolveBanks = resolve;
+      }));
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+    fireEvent.click(screen.getByRole('button', { name: 'VN30' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Banks' }));
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(3));
+
+    await act(async () => {
+      resolveBanks?.(makeResponse([...presetTickers.Banks]));
+    });
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Banks' })).toHaveAttribute('aria-pressed', 'true'));
+    expect(screen.getByTestId('indicator-row-EIB')).toBeInTheDocument();
+    expect(selectedTickerHeader().getByRole('heading', { name: 'VCB' })).toBeInTheDocument();
+
+    await act(async () => {
+      resolveVn30?.(makeResponse([...presetTickers.VN30]));
+    });
+
+    expect(screen.getByRole('button', { name: 'Banks' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'VN30' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByTestId('indicator-row-EIB')).toBeInTheDocument();
+    expect(screen.queryByTestId('indicator-row-BCM')).not.toBeInTheDocument();
+  });
+
+  it('keeps newer failed state when an older preset response resolves late', async () => {
+    let resolveVn30: ((response: VietnamWatchlistResponse) => void) | undefined;
+    mockedGetVietnamWatchlist
+      .mockResolvedValueOnce(makeResponse(defaultTickers))
+      .mockImplementationOnce(() => new Promise<VietnamWatchlistResponse>((resolve) => {
+        resolveVn30 = resolve;
+      }))
+      .mockRejectedValueOnce(new Error('banks timeout'));
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+    fireEvent.click(screen.getByRole('button', { name: 'VN30' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Banks' }));
+
+    expect(await screen.findByText('Last update failed')).toBeInTheDocument();
+    expect(screen.getByTestId('indicator-row-MSB')).toBeInTheDocument();
+
+    await act(async () => {
+      resolveVn30?.(makeResponse([...presetTickers.VN30]));
+    });
+
+    expect(screen.getByText('Last update failed')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'VN30' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('button', { name: 'Banks' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByTestId('indicator-row-MSB')).toBeInTheDocument();
+    expect(screen.queryByTestId('indicator-row-BCM')).not.toBeInTheDocument();
   });
 
   it('keeps the foreign aggregate stable when auxiliary requests fail', async () => {
@@ -1242,8 +1432,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     render(<VietnamDashboardPage />);
 
-    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
-    expect(foreignNetVolumeSummaryCard().getByText('210')).toBeInTheDocument();
+    await waitFor(() => expect(foreignNetVolumeSummaryCard().getByText('210')).toBeInTheDocument());
     const watchlistCalls = mockedGetVietnamWatchlist.mock.calls.length;
 
     fireEvent.click(screen.getByRole('button', { name: /refresh realtime/i }));
