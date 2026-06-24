@@ -1,5 +1,7 @@
 # Vietnam Dashboard Product Spec
 
+For a non-technical, product-facing overview in Vietnamese, see `docs/VN_PRODUCT_OFFERING.md`.
+
 ## Product Goal
 
 The Vietnam dashboard is a data-quality-first market inspection workspace for VN tickers. It helps users inspect official daily market data, source coverage, freshness, and unavailable provider states without turning the product into a trading-decision tool.
@@ -158,6 +160,30 @@ External/future data last.
 
 The primary scan layer should answer what the current daily SSI state is across the active watchlist. The selected ticker explanation layer should explain why the selected ticker looks that way. Optional live, diagnostics, and future external data should remain available, but they must not crowd out the daily scan or imply that unavailable optional sections invalidate valid daily SSI data.
 
+## Data-first implementation pivot
+
+The dashboard has enough UI structure after Phase 3.5A. The next implementation sequence should prioritize actual data capability and provider correctness before additional visual refinement.
+
+Core implementation order:
+
+```text
+Data capability first.
+Then reliability.
+Then contract/status normalization.
+Then UI rendering.
+```
+
+Every next data task should answer:
+
+* Does the data exist?
+* Is it reliable?
+* Is it fresh?
+* Which source owns it?
+* Which exact fields are safe to display?
+* What should remain unavailable, disabled, or future-provider only?
+
+Additional table-filter polish, saved filter views, further selected-ticker copy polish, broader dashboard layout changes, chart UX polish, and new visual badges are paused. They are not cancelled; they are deferred until the data-capability matrix and priority reliability work are complete. A visual change may move forward earlier only when it is required to expose verified data safely.
+
 ## Data Priority Model
 
 ### Tier 1 - Core Scan Data
@@ -223,6 +249,36 @@ Rules:
 * These require separate provider contracts.
 * Do not mix them into SSI market data.
 * Do not infer corporate actions from price gaps.
+
+## Priority data domains
+
+Implement and verify data capability in this order:
+
+1. SSI DailyOhlc: daily OHLCV and canonical latest daily close.
+2. SSI DailyStockPrice: reference, matched statistics, and foreign flow.
+3. Technical indicators derived from SSI DailyOhlc.
+4. Intraday OHLCV cadence and freshness.
+5. Realtime snapshot.
+6. Trade tape.
+7. Index and index components.
+8. Profile and securities metadata.
+9. News future provider.
+10. Financials future provider.
+11. Corporate actions and dividends future provider.
+12. Macro and events future provider.
+
+The order expresses implementation priority, not a claim that every domain is currently available. Realtime, trade tape, index components, metadata, and future-provider domains must retain their current unavailable, partial, disabled, or future-provider state until verified.
+
+## Do not implement yet
+
+Defer:
+
+* News UI expansion before a NewsProvider exists.
+* Financials UI before a provider contract exists.
+* Corporate actions or dividends before a provider contract exists.
+* WebSocket or realtime streaming before SSI realtime is verified.
+* Backend database or cache expansion before measured latency or rate-limit evidence exists.
+* More UI polish unless it is required to expose verified data safely.
 
 ## MVP Scope
 
@@ -291,29 +347,45 @@ Phase 3.3B polishes selected ticker field copy and density without adding data, 
 
 Phase 3.5A adds lightweight local scan filters to the `/vietnam` indicator table. Filters are React local state only, are not persisted to localStorage, do not use URL query params, do not call backend APIs, combine with AND logic, and apply before existing client-side sorting. Reset filters clears only ticker search and filter select values; it does not clear the custom watchlist input, active preset, active watchlist, committed rows, or selected ticker. Positive/negative foreign net and elevated volume are neutral scan categories, not recommendations. Saved filter views are deferred to a later phase.
 
-Next Phase 3 work continues the progressive workspace direction: request-state orchestration cleanup, further scan filtering/preset polish, and chart UX polish. The company detail page remains part of the same source-aware explanation layer, not a separate advisor experience.
+After Phase 3.5A, additional filter polish, saved filter views, selected-ticker copy polish, layout changes, chart UX polish, and new visual badges are deferred until priority data capability and reliability are verified. The company detail page remains part of the same source-aware explanation layer, not a separate advisor experience.
 
-### Phase 4.0 - SSI Realtime and Trade Tape Investigation
+### Phase 4.0A - VN Data Capability Probe
+
+Add a local audit script and produce an SSI/data-capability matrix without changing production behavior. Classify each data domain as reliable, partial, unavailable, disabled, future-provider, or unknown-needs-verification. This is the next recommended task.
+
+### Phase 4.0B - SSI Realtime and Trade-Tape Verification
 
 Confirm whether available SSI FastConnect Data endpoints and entitlements can provide usable realtime snapshot and trade tape. Do not claim live support until `realtime_snapshot` is non-null and status is `ok`.
 
-### Phase 4.1 - Intraday Cadence Clarity
+### Phase 4.1A - Intraday Cadence and Freshness Correctness
 
 Detect actual returned intraday cadence, avoid overclaiming a fixed interval unless verified, and label stale or unavailable intraday clearly.
 
-### Phase 5.0 - External Provider Architecture
+### Phase 4.2A - DailyStockPrice Enrichment Reliability
+
+Verify reference, ceiling, floor, matched volume/value, and foreign buy/sell/net volume. Verify foreign-flow value fields only when returned, and normalize missing or partial status without changing canonical daily close ownership.
+
+### Phase 4.3A - Profile and Securities Metadata Reliability
+
+Verify ticker name, exchange, industry or sector, security type, and listing metadata when SSI provides them. Metadata partial state remains separate from daily-row validity.
+
+### Phase 4.4A - Index Data Capability
+
+Verify VNINDEX, VN30, and index-component capability when existing SSI contracts support them. Classify source, cadence, and status while keeping index unavailability separate from watchlist daily data.
+
+### Phase 5.0A - External Provider Contract Design
 
 Define NewsProvider, FundamentalsProvider, CorporateActionsProvider, and MacroProvider as separate contracts. Keep them separate from SSI market data.
 
-### Phase 5.1 - NewsProvider
+### Phase 5.1A - NewsProvider Implementation
 
 Add sourced watchlist/company news when a provider is selected. Until then, keep `news = []` and `news_status.status = disabled`.
 
-### Phase 5.2 - Corporate Actions and Dividends
+### Phase 5.2A - Corporate Actions and Dividends Provider
 
 Add verified event data only. Do not infer dividends or corporate actions from price gaps.
 
-### Phase 6.0 - Backend Performance and Caching
+### Phase 6.0A - Backend Performance and Caching After Data Reliability
 
 Improve backend cache, durable storage, or background jobs only when rate limits or latency justify the added complexity.
 

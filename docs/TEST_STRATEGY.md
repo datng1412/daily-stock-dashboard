@@ -119,6 +119,34 @@ Add focused frontend tests when implementing Phase 3.2 through Phase 3.4 request
 - News disabled remains expected until a NewsProvider exists.
 - Realtime/trade-tape unavailable remains optional/minor when required DailyOhlc fields are valid.
 
+## Capability Audit And Smoke Roles
+
+Phase 4.0A should add a local capability-audit script that complements, rather than replaces, the existing VN dashboard smoke harness.
+
+The smoke harness checks:
+
+- Current application contracts and baseline behavior.
+- Required watchlist/company response shapes.
+- Source ownership and null/empty missing-data rules.
+- Concise public status messages and diagnostics separation.
+- Regression protection for currently implemented behavior.
+
+The capability audit checks:
+
+- Whether each priority data domain returns usable fields.
+- Source ownership, row coverage, timestamps, cadence, and freshness.
+- Which exact fields are reliable, partial, unavailable, disabled, future-provider, or unknown-needs-verification.
+- Whether available rows are safe to use in later contract or UI tasks.
+
+Audit outcome rules:
+
+- An optional unavailable data domain should be reported as unavailable and should not fail the audit when the audit request itself succeeds.
+- A disabled domain should be reported as disabled.
+- News, financials, corporate actions, dividends, macro, and other unselected external domains should be reported as future-provider or disabled.
+- Request, authentication, parsing, or audit-script failures should remain distinguishable from a valid unavailable-domain result.
+- Audit output must remain secret-safe and must not print credentials, tokens, auth headers, account IDs, or full raw provider payloads.
+- Capability evidence should guide later reliability and contract/status tasks before UI rendering work.
+
 ## Manual Smoke Checklist
 
 With backend running:

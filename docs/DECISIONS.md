@@ -1,6 +1,6 @@
 # Decisions
 
-Last updated: 2026-06-23
+Last updated: 2026-06-24
 
 This file records current product and engineering decisions that should not be re-litigated without explicit user direction.
 
@@ -21,23 +21,26 @@ Operational rule:
 
 ## VN Product Phase Plan
 
-Decision: the VN dashboard roadmap uses an explicit Phase 0 through Phase 7.0 plan, with Phase 3.2 through Phase 3.6 focused on the progressive workspace upgrade.
+Decision: after Phase 3.5A, the VN dashboard pivots from additional UI refinement to data-first implementation. Phase 4.0A is the next recommended task.
 
 Rationale:
 
 - The product needs to move beyond the SSI migration milestone without blurring current behavior and future work.
-- Later work should expand data quality, contract cleanliness, progressive disclosure, provider coverage, caching, and packaging while preserving the current product boundary.
+- The dashboard now has enough scan, readiness, refresh, filtering, and progressive-disclosure UI structure to support data investigation.
+- Later work should establish data capability, reliability, freshness, and provider correctness before adding more visual refinement.
 - The core product priority is daily scan first, ticker explanation second, live/diagnostics third, and external/future data last.
 
 Operational rule:
 
 - Phase 0 freezes the current SSI provider milestone.
 - Phase 1 and Phase 2 prioritize data-quality visibility and contract cleanup before broader provider expansion.
-- Phase 3.2 through Phase 3.6 improve readiness states, selected ticker progressive disclosure, request orchestration, local filtering, and chart UX without changing API contracts.
-- Phase 4.0 may investigate SSI realtime/trade-tape endpoints, but live support must not be claimed until actual rows exist with status `ok`.
-- Phase 4.1 clarifies actual intraday cadence and stale/unavailable labeling.
-- Phase 5.0 through Phase 5.2 require separate explicit provider contracts for news, fundamentals, corporate actions, dividends, and macro data.
-- Phase 6.0 backend performance/caching work requires real rate-limit or latency evidence.
+- Phase 3.2 through Phase 3.5A establish readiness states, refresh preservation, selected-ticker disclosure, sorting, and local filtering.
+- Additional table-filter polish, saved filter views, selected-ticker copy polish, layout changes, chart UX polish, and new visual badges are deferred until priority data capability and reliability work is complete.
+- Phase 4.0A adds a local capability audit and data-domain matrix without production behavior changes.
+- Phase 4.0B verifies SSI realtime/trade-tape endpoints, permissions, payloads, and statuses; live support must not be claimed until usable rows exist with status `ok`.
+- Phase 4.1A through Phase 4.4A verify intraday freshness, DailyStockPrice enrichment, profile metadata, and index capability.
+- Phase 5.0A through Phase 5.2A require separate explicit provider contracts before news, financials, corporate actions, dividends, or macro implementation.
+- Phase 6.0A backend performance/caching work requires measured rate-limit or latency evidence after data reliability work.
 - Phase 7.0 packaging work cleans runbooks, startup scripts, validation checklists, and deprecated docs without changing provider semantics.
 
 ## Vietnam Dashboard Data Source

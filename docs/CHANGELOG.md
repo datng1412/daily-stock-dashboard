@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [documentation] Add a user-facing Vietnamese VN dashboard offering overview covering current features, limitations, and near-term direction.
+- [documentation] Pivot the VN dashboard roadmap to data-first implementation after Phase 3.5A, add the Phase 4.0A capability probe and reliability sequence, and defer further UI polish.
 - [new feature] Add local VN dashboard indicator-table filters without backend/API changes.
 - [improvement] Polish VN dashboard selected ticker field labels and density while keeping diagnostics and source coverage separate.
 - [improvement] Organize the VN dashboard selected ticker detail into compact summary and progressive disclosure groups.

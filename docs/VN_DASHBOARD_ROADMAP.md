@@ -436,7 +436,57 @@ Phase 3.5A status:
 * If the selected ticker is hidden by active filters, the selected ticker summary remains visible when the row data still exists and the table shows `Selected ticker is hidden by filters.` No different ticker is auto-selected because of filters.
 * No backend/API contract fields, endpoints, provider calls, polling, dependencies, or source semantics changed in Phase 3.5A.
 
+## Data-first implementation pivot
+
+The dashboard has enough UI foundation after Phase 3.5A. The recommended implementation order is now:
+
+```text
+Data capability first.
+Then reliability.
+Then contract/status normalization.
+Then UI rendering.
+```
+
+Each next task must answer:
+
+* Does the data exist?
+* Is it reliable?
+* Is it fresh?
+* Which source owns it?
+* Which exact fields are safe to display?
+* What should remain unavailable, disabled, or future-provider only?
+
+Phase 4.0A is the next recommended task. Additional table-filter polish, saved filter views, further selected-ticker copy polish, broader dashboard layout changes, chart UX polish, and new visual badges are paused. They are deferred, not cancelled, until the data-capability matrix and priority data fixes are complete.
+
+## Priority data domains
+
+1. SSI DailyOhlc: daily OHLCV and canonical latest daily close.
+2. SSI DailyStockPrice: reference, matched statistics, and foreign flow.
+3. Technical indicators derived from SSI DailyOhlc.
+4. Intraday OHLCV cadence and freshness.
+5. Realtime snapshot.
+6. Trade tape.
+7. Index and index components.
+8. Profile and securities metadata.
+9. News future provider.
+10. Financials future provider.
+11. Corporate actions and dividends future provider.
+12. Macro and events future provider.
+
+This ordering does not claim availability. Every domain must be classified from evidence before implementation relies on it.
+
+## Do not implement yet
+
+* News UI expansion before a NewsProvider exists.
+* Financials UI before a provider contract exists.
+* Corporate actions or dividends before a provider contract exists.
+* WebSocket or realtime streaming before SSI realtime is verified.
+* Backend database or cache expansion before measured latency or rate-limit evidence exists.
+* More UI polish unless it is required to expose verified data safely.
+
 ### Phase 3.6 - Chart UX Upgrade
+
+Status: deferred after Phase 3.5A pending the data-capability matrix and priority reliability work.
 
 Goal:
 
@@ -521,7 +571,36 @@ Suggested commit:
 feat: redesign VN company detail as data quality report
 ```
 
-### Phase 4.0 - SSI Realtime and Trade-Tape Investigation
+### Phase 4.0A - VN Data Capability Probe
+
+Goal:
+
+Audit actual VN dashboard data capability before changing production behavior.
+
+Scope:
+
+* Add a local audit script.
+* Build an SSI/data-capability matrix.
+* Inspect domain presence, source ownership, freshness, row coverage, and safe display fields.
+* Classify each domain as:
+  * reliable
+  * partial
+  * unavailable
+  * disabled
+  * future-provider
+  * unknown-needs-verification
+* Keep audit output secret-safe.
+* Make no production behavior, API contract, provider-call, or UI change.
+
+Acceptance criteria:
+
+* The matrix covers all priority data domains.
+* Evidence distinguishes data absence from request failure.
+* Optional unavailable domains are reported without making the audit fail when the audit request succeeds.
+* Future-provider domains are reported explicitly as future-provider or disabled.
+* Phase 4.0B through Phase 4.4A can use the matrix to choose scoped reliability work.
+
+### Phase 4.0B - SSI Realtime and Trade-Tape Verification
 
 Goal:
 
@@ -553,7 +632,7 @@ Acceptance criteria:
 * Non-retryable failures use longer TTL/backoff only if implementation evidence justifies it.
 * UI states stay concise and daily scan data remains visible.
 
-### Phase 4.1 - Intraday Cadence Clarity
+### Phase 4.1A - Intraday Cadence and Freshness Correctness
 
 Goal:
 
@@ -571,7 +650,75 @@ Acceptance criteria:
 * Stale intraday never appears as a fresh live signal.
 * Daily SSI rows remain valid when intraday is optional/unavailable.
 
-### Phase 5.0 - External Provider Architecture
+### Phase 4.2A - DailyStockPrice Enrichment Reliability
+
+Goal:
+
+Verify SSI DailyStockPrice enrichment fields and normalize missing or partial coverage.
+
+Scope:
+
+* Reference, ceiling, and floor.
+* Matched volume and matched value.
+* Foreign buy, sell, and net volume.
+* Foreign buy, sell, and net value when SSI returns them.
+* Date alignment, units, source labels, and row completeness.
+
+Rules:
+
+* Keep canonical daily close on SSI DailyOhlc.
+* Do not substitute DailyOhlc volume for matched volume.
+* Missing fields remain missing or partial; do not create synthetic values.
+
+Acceptance criteria:
+
+* Each enrichment field has verified source, unit, date, and missing-state behavior.
+* Partial DailyStockPrice coverage does not invalidate usable DailyOhlc rows.
+
+### Phase 4.3A - Profile and Securities Metadata Reliability
+
+Goal:
+
+Verify SSI profile and securities metadata coverage without conflating metadata completeness with daily-row validity.
+
+Scope:
+
+* Ticker name.
+* Exchange and market.
+* Industry or sector when available.
+* Security type.
+* Issuer, lot size, listed shares, and listed date when available.
+
+Acceptance criteria:
+
+* Available fields have explicit SSI source ownership.
+* Missing optional metadata remains null and produces partial metadata state.
+* Metadata partial state does not make valid daily data unavailable.
+
+### Phase 4.4A - Index Data Capability
+
+Goal:
+
+Verify index and component capability from existing SSI contracts.
+
+Scope:
+
+* VNINDEX and VN30 identifiers/rows when returned.
+* Index cadence and freshness.
+* Index components and membership rows when returned.
+* Source/status classification for unavailable or partial coverage.
+
+Rules:
+
+* Do not hardcode component membership as provider output.
+* Index failure must remain separate from watchlist daily validity.
+
+Acceptance criteria:
+
+* Index domains have explicit source, cadence, freshness, and status classification.
+* Unavailable components remain `[]` with concise unavailable state and diagnostics.
+
+### Phase 5.0A - External Provider Contract Design
 
 Goal:
 
@@ -596,7 +743,7 @@ Acceptance criteria:
 * Provider contracts are explicit before implementation.
 * Future modules remain `disabled`, `not_implemented`, or `unavailable` until real provider rows exist.
 
-### Phase 5.1 - NewsProvider
+### Phase 5.1A - NewsProvider Implementation
 
 Goal:
 
@@ -620,7 +767,7 @@ Acceptance criteria:
 * When implemented, news is source-labeled and matched transparently.
 * No fake news items.
 
-### Phase 5.2 - Corporate Actions and Dividends
+### Phase 5.2A - Corporate Actions and Dividends Provider
 
 Goal:
 
@@ -647,7 +794,7 @@ Acceptance criteria:
 * Event rows are source-labeled and date-labeled.
 * No adjusted-close inference.
 
-### Phase 6.0 - Backend Performance and Caching
+### Phase 6.0A - Backend Performance and Caching After Data Reliability
 
 Goal:
 
@@ -934,7 +1081,7 @@ External providers are required for:
 
 ## Current product issues
 
-The dashboard has many useful blocks, but the next improvements should focus on hierarchy and usability.
+The dashboard still has UI opportunities, but they are not the next implementation priority after Phase 3.5A. Keep these as deferred product observations until the Phase 4.0A capability matrix and priority reliability work are complete.
 
 Current weak points:
 
@@ -948,7 +1095,7 @@ Current weak points:
 
 ## Product and UI backlog
 
-These items remain useful, but they are not the near-term SSI migration sequence. Use the `Near-term SSI implementation sequence` section for provider work order.
+These items remain useful but are deferred. Use the Phase 4.0A through Phase 6.0A data-first sequence for current implementation order. Revisit this UI backlog when verified data capability requires rendering changes or after the priority reliability work is complete.
 
 ### 1. Improve dashboard visual hierarchy and reduce clutter
 
@@ -964,7 +1111,7 @@ Implemented so far:
 
 Goal:
 
-Make the dashboard easier to scan before adding more data features.
+Make the dashboard easier to scan when this deferred UI work resumes.
 
 Target layout:
 
@@ -1277,6 +1424,8 @@ Rules:
 * Keep card hidden or compact when unavailable.
 
 ## Near-term SSI implementation sequence
+
+This section records the earlier SSI migration sequence and implementation history. It is not the current next-task order. The current next task is Phase 4.0A, followed by the data-reliability phases above.
 
 ### Priority 0 - Finalize current SSI strict migration
 
