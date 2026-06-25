@@ -34,7 +34,7 @@ Last local audit baseline: 2026-06-24, using `FPT,VPB,ACB,SSI,GMD,GAS,POW,VNM` a
 | Foreign buy/sell/net value | SSI DailyStockPrice | `daily_stock_price`, `foreign`, `ssi_foreign_net_value` | `reliable` | `foreign_buy_value`, `foreign_sell_value`, `foreign_net_value` | Value fields can be absent while volume fields exist | Latest DailyStockPrice row; date alignment matters | Future value-based foreign-flow display | Baseline observed buy/sell/net value on 8/8 rows; do not mix with share-volume summaries. |
 | Technical indicators | Derived from SSI DailyOhlc | `indicators`, `calculate_vietnam_indicators` | `reliable` | `rsi14_wilder`/`rsi14`, `ma20`, `ma50`, Bollinger fields when present, volume ratio | Missing history yields unavailable indicator fields | Derived from daily history window | Scan table, selected ticker technical context | Baseline observed RSI14 and MA20/MA50 on 8/8 rows; RSI14 remains Wilder/RMA. |
 | Intraday OHLCV / intraday pulse | SSI IntradayOhlc | `intraday_status`, `intraday_candles`, `intraday_pulse`, company `intraday` | `partial` | `intraday_candles`, `intraday_pulse`, granularity fields only when status is `ok` and dates match | Stale, disabled, mismatched, empty, malformed, or request-failed rows remain unavailable/disabled | Provider-returned cadence; freshness must match daily trading date | Optional live layer only | Phase 4.0B root cause was a fetcher page-size/order bug: the dashboard requested `pageSize=8` with `ascending=true` over a 7-day window, so SSI returned only the oldest first-page rows. The fetcher now paginates internally with `pageSize=1000`, sorts rows, and returns the latest public limit. Isolated patched-backend audit observed partial live support: 1/8 usable current pulse rows, FPT `intraday_latest_date=2026-06-24`, `date_match=matched`, public candle count 8, requested `1h`, observed `1m`/61s; other tickers can still be unavailable/request-failed. |
-| Realtime snapshot | SSI realtime contract | `GET /api/v1/stocks/vn/realtime`, `realtime_status`, `realtime_snapshot` | `unavailable` | Snapshot fields only with `status=ok` and non-null snapshot | Supported SSI realtime endpoint not identified in repository discovery | Realtime cadence not proven until current `ok` response exists | Optional live layer only | Phase 4.0C found route/service wiring and config gates correct. Phase 4.0C-2 found no supported SSI FastConnect realtime endpoint, SDK method, enum, or hidden repo contract. Candidate names `RealtimeQuote`, `RealtimePrice`, `RealtimeSnapshot`, and `SecuritiesRealtime` are discovery evidence only and are no longer probed as runtime provider contracts. Keep `realtime_snapshot=null`; do not infer from daily OHLCV or intraday. |
+| Realtime snapshot | SSI FastConnect streaming realtime contract | `GET /api/v1/stocks/vn/realtime`, `realtime_status`, `realtime_snapshot` | `unknown-needs-verification` | Deterministic parser coverage for buffered `X`, `X-QUOTE`, and `X-TRADE` envelopes; snapshot fields only with `status=ok` and non-null snapshot | Runtime request path remains unavailable because a bounded SSI streaming adapter is not implemented | Realtime cadence not proven until current stream messages are connected, parsed, and surfaced safely | Optional live layer only | Phase 4.0C-3 confirmed realtime is an SSI streaming contract, not a REST candidate endpoint. The fetcher keeps `get_realtime_snapshot()` unavailable with reason `SSI realtime requires FastConnect streaming adapter; connection semantics not implemented.` Keep `realtime_snapshot=null`; do not infer from daily OHLCV or intraday. |
 | Trade tape | SSI trade-tape contract | `GET /api/v1/stocks/vn/realtime/trades`, `trade_tape_status`, `trade_tape` | `unavailable` | Trade rows only with `status=ok` and non-empty rows | Endpoint permissions, row shape, and live availability can be unavailable | Trade-list cadence not proven until current `ok` response exists | Optional live layer only | Baseline observed endpoint `unavailable`, 0 trade rows, and 0/8 usable watchlist trade rows. |
 | Index data / index components | SSI IndexList / SSI IndexComponents | `GET /api/v1/stocks/vn/index-list`, `GET /api/v1/stocks/vn/index-components`, `build_index_list`, `build_index_components` | `partial` | SSI-returned index identifiers and component rows | VN30 components can be unavailable depending on endpoint/permission | SSI endpoint response cadence; not tied to watchlist daily validity | Diagnostics and future index context | Baseline observed IndexList `ok` with 10 rows and VN30 components `unavailable` with 0 rows. |
 | Profile / securities metadata | SSI Securities / SSI SecuritiesDetails | `symbol_metadata`, company `profile`, `source_coverage` | `partial` | Ticker, exchange, market, name, issuer, security type, lot size, listed shares/date when present | Optional fields can remain null while provider status is `ok` | Metadata cadence is provider-specific and not daily price cadence | Header/profile/source coverage | Baseline company profile status was `ok`, but only 1 of name/exchange/industry was present. |
@@ -112,7 +112,91 @@ Candidate endpoints/methods found:
 
 No verified SSI FastConnect SDK package, wrapper, enum, or documented method named `GetRealtime`, `GetQuote`, `RealtimeQuote`, `StockQuote`, `MarketData`, `TradingData`, or equivalent was found. The iBoard note in `docs/resources/realtime-data/ssi-iboard.md` is reference-only and has unknown authentication, API contract, rate-limit, timestamp, and price semantics; it is not wired into the dashboard.
 
-Conclusion: a supported SSI realtime endpoint is not identified in this repository. The realtime fetcher now returns an explicit unavailable discovery state instead of probing unverified REST candidate names. Daily OHLCV, DailyStockPrice, and IntradayOhlc behavior is unchanged.
+Conclusion: a supported SSI REST realtime endpoint is not identified in this repository. Phase 4.0C-3 supersedes REST probing with the SSI streaming direction. Daily OHLCV, DailyStockPrice, and IntradayOhlc behavior is unchanged.
+
+## Phase 4.0C-3 SSI Streaming Realtime Adapter Direction
+
+Official SSI FastConnect Data docs describe realtime as a streaming feed, not a REST quote endpoint. The documented realtime stream message families relevant to dashboard quote semantics are:
+
+- `X`: combined quote/trade context.
+- `X-QUOTE`: best bid/ask and quote context only.
+- `X-TRADE`: latest matched trade context.
+
+The current implementation adds deterministic parser coverage for buffered SSI streaming envelopes shaped like:
+
+```text
+DataType = X, X-QUOTE, or X-TRADE
+Content = JSON object or JSON string containing RType, Symbol, and stream fields
+```
+
+Parser rules:
+
+- Ignore malformed envelopes and unsupported data types.
+- Ignore symbols outside the requested ticker set.
+- Normalize ticker symbols before returning rows.
+- Parse `Content` safely when SSI sends it as a JSON string.
+- Preserve provider timestamps from `TradingDate` and `Time` when present.
+- Treat `X-QUOTE` as quote-only context. Do not synthesize `LastPrice` or a matched trade from bid/ask fields.
+- Treat `X` and `X-TRADE` as latest-trade snapshot candidates only when `LastPrice` is present.
+- Do not turn a single `X-TRADE` message into full trade-tape history.
+
+Runtime state remains unavailable because the repository still does not implement a bounded SSI streaming client, subscription lifecycle, reconnection/backoff policy, or request-safe cache handoff. `SsiFastConnectFetcher.get_realtime_snapshot()` does not open a streaming connection and does not probe REST realtime candidates. It returns:
+
+```text
+status = unavailable
+reason = SSI realtime requires FastConnect streaming adapter; connection semantics not implemented.
+rest_status = unsupported
+streaming_status = not_implemented
+```
+
+Future implementation should run streaming outside request handlers, subscribe only to requested symbol scopes, avoid `X: ALL` in runtime, and surface rows only after current stream messages are parsed into the existing public realtime response shape.
+
+## Phase 4.0C-4 Official Python Client Inspection
+
+The official Python package was installed in the local development environment for inspection:
+
+```text
+package name: ssi-fc-data
+import module: ssi_fc_data
+installed version: 2.2.2
+home page: https://github.com/SSI-Securities-Corporation/python-fcdata
+dependencies: requests, websocket-client
+```
+
+Import/module discovery found these relevant official modules:
+
+- `ssi_fc_data.fc_md_client`
+- `ssi_fc_data.fc_md_stream`
+- `ssi_fc_data.model.api`
+- `ssi_fc_data.signalr._connection`
+- `ssi_fc_data.signalr.transports._transport`
+
+Official streaming API surface found:
+
+- `MarketDataClient(config)` retrieves and caches an access token from `config.url + api/v2/Market/AccessToken`.
+- The installed package metadata config sample uses `auth_type`, `consumerID`, `consumerSecret`, `url`, and `stream_url`. No `PrivateKey` reference was found in the installed `ssi_fc_data 2.2.2` package source.
+- `MarketDataStream(config, MarketDataClient(config), on_close=None, on_open=None)` owns the streaming connection.
+- `MarketDataStream.start(on_message, on_error, selected_channel)`:
+  - calls the market-data client access-token path;
+  - creates an `Authorization` header from `config.auth_type` plus the access token;
+  - connects to `config.stream_url + v2.0/signalr`;
+  - registers hub `FcMarketDataV2Hub`;
+  - subscribes client handlers for `Broadcast` and `Error`;
+  - invokes hub method `SwitchChannels` with the selected channel on open;
+  - starts the websocket transport on a daemon thread.
+- `MarketDataStream.swith_channel(channel)` invokes `SwitchChannels` again. The method name is spelled `swith_channel` in the installed package.
+
+Official sample metadata shows the subscription value is a plain channel string supplied by the caller. That matches the documented channel shape such as `X-TRADE: ACB`, `X-QUOTE: ACB`, or `X: ACB`. Runtime code must not subscribe to `X: ALL`.
+
+Safe bounded one-shot adapter feasibility:
+
+- Not implemented in this phase.
+- The official client exposes connection and subscription primitives, but not a public bounded receive/wait API.
+- The transport starts a background daemon websocket thread and does not expose a documented join/timeout lifecycle.
+- The bundled SignalR negotiation path contains a `print(self.headers)` statement, which would print the `Authorization` header if used directly. Runtime code must not use it without a wrapper or patch that prevents secret output.
+- `Connection.close()` calls `self.__transport.close()`, while the bundled transport exposes `stop()`; this needs wrapper-level close handling before runtime use.
+
+Conclusion: a minimal future adapter is feasible only as a background service, not inside request handlers. It should wrap the official client, subscribe to symbol-scoped channels only, collect messages into a thread-safe cache, call the parser added in Phase 4.0C-3, suppress or patch header printing, and provide an explicit stop path that uses the transport `stop()` method if the official `close()` path is not functional. `get_realtime_snapshot()` remains unavailable until that adapter is implemented and validated.
 
 ## Required Guardrails
 

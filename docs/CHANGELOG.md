@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [documentation] Document official SSI Python FC Data streaming client semantics and keep live realtime deferred behind a safe adapter.
+- [fix] Add SSI streaming realtime parser coverage while keeping live realtime unavailable until a bounded streaming adapter exists.
 - [fix] Stop probing unverified SSI realtime candidate endpoints and report unsupported realtime discovery explicitly.
 - [fix] Improve VN SSI realtime snapshot audit diagnostics and keep unavailable realtime separate from daily and intraday data.
 - [fix] Show exact VN audit intraday usable-row ratios and mark all-ok intraday audits reliable.
