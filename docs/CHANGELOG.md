@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [fix] Add SSI IntradayOhlc rate-limit cooldown guardrails with sanitized diagnostics and no daily-price ownership changes.
 - [fix] Classify SSI IntradayOhlc live request failures with sanitized diagnostics while preserving daily price ownership.
 - [new feature] Add a config-disabled SSI streaming realtime manager and cache skeleton with deterministic tests.
 - [documentation] Document official SSI Python FC Data streaming client semantics and keep live realtime deferred behind a safe adapter.

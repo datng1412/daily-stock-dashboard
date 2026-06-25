@@ -15,6 +15,7 @@ Current phase:
 * Mocked tests and an optional local smoke script.
 * Dashboard detail rendering for SSI DailyStockPrice fields when SSI provides them.
 * SSI IntradayOhlc candles for compact watchlist/company intraday pulse.
+* SSI IntradayOhlc provider-rate-limit cooldown guardrails.
 * SSI realtime snapshot and trade-tape contracts for dashboard/company realtime blocks.
 * SSI realtime REST endpoint discovery concluded that no supported FastConnect realtime snapshot endpoint is identified in this repository.
 * SSI streaming realtime parser coverage for buffered `X`, `X-QUOTE`, and `X-TRADE` messages.
@@ -130,6 +131,8 @@ ascending = true
 
 Live evidence on 2026-06-25 showed SSI returning HTTP 200 with provider code `429` for IntradayOhlc, which is classified as `rate_limited`. This is a provider-side throttle/error response, not a route, parser, public limit, or stale-row filtering failure. Intraday therefore remains unavailable for that response, with `intraday_candles=[]` and `intraday_pulse=null`.
 
+Phase 4.0B-3 added a per-process, thread-safe cooldown for SSI IntradayOhlc after a `rate_limited` classification. The cooldown key is symbol plus requested timeframe, so `FPT` `1h` throttling does not suppress another symbol or another timeframe. While active, the fetcher returns unavailable before requesting a token or calling `GET /Market/IntradayOhlc`, including when a caller force-refreshes the watchlist/company path. The guard only applies to IntradayOhlc; DailyOhlc and DailyStockPrice remain independent. The default window is configured by `SSI_INTRADAY_RATE_LIMIT_COOLDOWN_SECONDS=60`, and `0` disables the cooldown.
+
 Sanitized intraday diagnostics may include:
 
 * `failure_class`, such as `rate_limited`, `bad_request_params`, `auth_failed`, `permission_denied`, `timeout`, `network_error`, `parse_failed`, `provider_unavailable`, or `empty_response`.
@@ -138,6 +141,7 @@ Sanitized intraday diagnostics may include:
 * `provider_code`.
 * `error_type`.
 * symbol, date range, requested timeframe, page size, public limit, and ascending flag.
+* cooldown fields such as `cooldown_active`, `cooldown_recorded`, `cooldown_seconds`, `cooldown_remaining_seconds`, and `cooldown_until`.
 
 Diagnostics must not include raw response bodies, tokens, auth headers, account IDs, consumer IDs, consumer secrets, or raw auth responses.
 
@@ -202,6 +206,7 @@ SSI_FASTCONNECT_TIMEOUT_SECONDS=10
 SSI_FASTCONNECT_CACHE_TTL_SECONDS=300
 SSI_FASTCONNECT_TOKEN_TTL_SECONDS=900
 SSI_FASTCONNECT_INTRADAY_ENABLED=true
+SSI_INTRADAY_RATE_LIMIT_COOLDOWN_SECONDS=60
 SSI_FASTCONNECT_REALTIME_ENABLED=true
 SSI_FASTCONNECT_TRADE_TAPE_ENABLED=true
 SSI_STREAMING_REALTIME_ENABLED=false
@@ -291,6 +296,7 @@ Strict IntradayOhlc behavior:
 * `VN_INTRADAY_DATA_PROVIDER=ssi` and `SSI_FASTCONNECT_INTRADAY_ENABLED=true` route VN intraday candles through SSI FastConnect `IntradayOhlc`.
 * Watchlist rows expose `intraday_source=SSI` and `intraday_status.status=ok` when SSI returns normalized candles.
 * If SSI IntradayOhlc is disabled, fails, or returns no candles, the intraday block returns `disabled` or `unavailable` while the SSI DailyOhlc row remains valid when daily data is present.
+* After SSI returns a rate-limit signal for a symbol/timeframe, `SSI_INTRADAY_RATE_LIMIT_COOLDOWN_SECONDS` suppresses repeat IntradayOhlc provider calls for that same symbol/timeframe and returns sanitized cooldown diagnostics instead.
 * The service validates latest intraday candle date against the latest SSI daily trading date. If the dates mismatch, intraday is marked unavailable and no intraday pulse labels are derived from stale candles.
 * Returned candle cadence is detected from timestamps when possible and labeled as provider-returned granularity. `intraday_requested_timeframe` records the request hint, while `intraday_actual_granularity` and `intraday_actual_granularity_seconds` record detected returned cadence. The compatibility field `intraday_timeframe` must be read as the requested timeframe, not the actual candle interval.
 * The dashboard should use neutral labels such as latest intraday close and intraday change instead of assuming the requested timeframe describes the returned rows.

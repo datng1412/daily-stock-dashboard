@@ -658,6 +658,7 @@ class Config:
     ssi_fastconnect_cache_ttl_seconds: int = 300
     ssi_fastconnect_token_ttl_seconds: int = 900
     ssi_fastconnect_intraday_enabled: bool = True
+    ssi_intraday_rate_limit_cooldown_seconds: int = 60
     ssi_fastconnect_realtime_enabled: bool = True
     ssi_fastconnect_trade_tape_enabled: bool = True
     ssi_streaming_realtime_enabled: bool = False
@@ -1880,6 +1881,12 @@ class Config:
             ssi_fastconnect_intraday_enabled=parse_env_bool(
                 os.getenv('SSI_FASTCONNECT_INTRADAY_ENABLED'),
                 default=True,
+            ),
+            ssi_intraday_rate_limit_cooldown_seconds=parse_env_int(
+                os.getenv('SSI_INTRADAY_RATE_LIMIT_COOLDOWN_SECONDS'),
+                60,
+                field_name='SSI_INTRADAY_RATE_LIMIT_COOLDOWN_SECONDS',
+                minimum=0,
             ),
             ssi_fastconnect_realtime_enabled=parse_env_bool(
                 os.getenv('SSI_FASTCONNECT_REALTIME_ENABLED'),

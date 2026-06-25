@@ -26,6 +26,7 @@ Expected protection:
 - SSI streaming realtime stays disabled by default, does not instantiate the official client when disabled, never starts on import, and reads only from a running manager plus fresh cache.
 - SSI intraday stale/unavailable returns `intraday_pulse = null` and `intraday_candles = []`.
 - SSI intraday provider failures are classified into sanitized diagnostics such as `rate_limited`, without raw payloads or credentials, and without changing DailyOhlc `latest_price` ownership.
+- SSI intraday provider-code/HTTP `429` starts a deterministic symbol/timeframe cooldown; active cooldown skips IntradayOhlc provider requests and remains unavailable without blocking DailyOhlc or DailyStockPrice.
 - SSI trade tape unavailable returns public `trade_tape = []`.
 - Observability separates disabled provider, provider unavailable, and cache state.
 

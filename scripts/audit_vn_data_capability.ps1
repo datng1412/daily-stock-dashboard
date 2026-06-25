@@ -401,6 +401,11 @@ $intradayErrorTypes = @($intradayDiagnostics | ForEach-Object { Get-Value $_ @("
 $intradayEndpoints = @($intradayDiagnostics | ForEach-Object { Get-Value $_ @("endpoint") })
 $intradayPageSizes = @($intradayDiagnostics | ForEach-Object { Get-Value $_ @("pageSize", "request_page_size") })
 $intradayPublicLimits = @($intradayDiagnostics | ForEach-Object { Get-Value $_ @("public_limit") })
+$intradayCooldownActive = @($intradayDiagnostics | ForEach-Object { Get-Value $_ @("cooldown_active") })
+$intradayCooldownRecorded = @($intradayDiagnostics | ForEach-Object { Get-Value $_ @("cooldown_recorded") })
+$intradayCooldownSeconds = @($intradayDiagnostics | ForEach-Object { Get-Value $_ @("cooldown_seconds") })
+$intradayCooldownRemaining = @($intradayDiagnostics | ForEach-Object { Get-Value $_ @("cooldown_remaining_seconds") })
+$intradayCooldownUntil = @($intradayDiagnostics | ForEach-Object { Get-Value $_ @("cooldown_until") })
 $intradayTimestamps = @()
 foreach ($row in $rows) {
   foreach ($candle in @(Convert-ToList (Get-Value $row @("intraday_candles")))) {
@@ -462,7 +467,7 @@ $capabilities += New-CapabilityRow "Technical indicators derived from daily OHLC
 
 $intradayUsableRatio = "{0}/{1}" -f $intradayOkRows, $rowCount
 $intradayStatus = if ($intradayOkRows -eq $rowCount) { "reliable" } elseif ($intradayOkRows -gt 0) { "partial" } elseif ($intradayStatusValues -contains "disabled") { "disabled" } elseif ($intradayStatusValues -contains "unavailable") { "unavailable" } else { "unknown-needs-verification" }
-$intradayEvidence = "usable current pulse rows {0}/{1}; pulse rows {2}/{1}; public candle counts {3}; statuses {4}; date_match {5}; intraday_latest_date {6}; daily_price_date {7}; requested_timeframe {8}; observed_granularity {9}; observed_granularity_seconds {10}; timestamp_range {11}; failure_mode {12}; http_status {13}; provider_code {14}; error_type {15}; endpoint {16}; messages {17}" -f `
+$intradayEvidence = "usable current pulse rows {0}/{1}; pulse rows {2}/{1}; public candle counts {3}; statuses {4}; date_match {5}; intraday_latest_date {6}; daily_price_date {7}; requested_timeframe {8}; observed_granularity {9}; observed_granularity_seconds {10}; timestamp_range {11}; failure_mode {12}; http_status {13}; provider_code {14}; error_type {15}; endpoint {16}; cooldown_active {17}; cooldown_remaining_seconds {18}; messages {19}" -f `
   $intradayOkRows,
   $rowCount,
   $intradayPulseRows,
@@ -480,6 +485,8 @@ $intradayEvidence = "usable current pulse rows {0}/{1}; pulse rows {2}/{1}; publ
   (Format-UniqueValues $intradayProviderCodes),
   (Format-UniqueValues $intradayErrorTypes),
   (Format-UniqueValues $intradayEndpoints),
+  (Format-UniqueValues $intradayCooldownActive),
+  (Format-UniqueValues $intradayCooldownRemaining),
   (Format-UniqueValues $intradayMessages)
 $capabilities += New-CapabilityRow "Intraday OHLCV / intraday pulse" $intradayStatus "SSI IntradayOhlc" $intradayEvidence "intraday_candles, intraday_pulse only when status ok and date matched" "Evidence is from current API response fields; public candles stay empty when stale or mismatched."
 
@@ -599,6 +606,11 @@ Write-Host ("- Error type: {0}" -f (Format-UniqueValues $intradayErrorTypes))
 Write-Host ("- Endpoint: {0}" -f (Format-UniqueValues $intradayEndpoints))
 Write-Host ("- Request page size: {0}" -f (Format-UniqueValues $intradayPageSizes))
 Write-Host ("- Public limit: {0}" -f (Format-UniqueValues $intradayPublicLimits))
+Write-Host ("- Cooldown active: {0}" -f (Format-UniqueValues $intradayCooldownActive))
+Write-Host ("- Cooldown recorded: {0}" -f (Format-UniqueValues $intradayCooldownRecorded))
+Write-Host ("- Cooldown seconds: {0}" -f (Format-UniqueValues $intradayCooldownSeconds))
+Write-Host ("- Cooldown remaining seconds: {0}" -f (Format-UniqueValues $intradayCooldownRemaining))
+Write-Host ("- Cooldown until: {0}" -f (Format-UniqueValues $intradayCooldownUntil))
 Write-Host ("- Reason: {0}" -f (Format-UniqueValues $intradayMessages))
 Write-Host "- Evidence source: current app API response fields; SSI is not called directly by this script."
 

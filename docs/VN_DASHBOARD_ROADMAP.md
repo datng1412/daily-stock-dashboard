@@ -86,7 +86,7 @@ If SSI-owned data is unavailable, show unavailable. Do not silently fallback.
 * IndexList is exposed through `/api/v1/stocks/vn/index-list` and should be used to discover SSI-returned index codes.
 * IndexComponents is exposed through `/api/v1/stocks/vn/index-components?index_code=...`, but the current local SSI environment returned a clean unavailable state for `VN30`; do not hardcode components or fallback to another provider.
 * SSI IntradayOhlc is implemented for the watchlist/company intraday pulse through the same SSI auth/cache path. If SSI returns no candles, stale rows, malformed rows, provider code `429`, or the endpoint is disabled, expose a clean SSI `disabled`/`unavailable` intraday status and keep daily rows OK.
-* Phase 4.0B fixed the IntradayOhlc paging bug by using internal `pageSize=1000`, sorting provider rows, and applying the public candle limit afterward. Phase 4.0B-2 added sanitized failure classification for current live failures; the observed FPT failure was SSI provider code `429` with HTTP 200, classified as `rate_limited`.
+* Phase 4.0B fixed the IntradayOhlc paging bug by using internal `pageSize=1000`, sorting provider rows, and applying the public candle limit afterward. Phase 4.0B-2 added sanitized failure classification for current live failures; the observed FPT failure was SSI provider code `429` with HTTP 200, classified as `rate_limited`. Phase 4.0B-3 added a symbol/timeframe-scoped cooldown after IntradayOhlc rate-limit signals so repeat requests return unavailable without hitting SSI.
 * `/api/v1/stocks/vn/chart` should be SSI-backed and should return SSI source metadata.
 * `/api/v1/stocks/vn/watchlist` must remain SSI-backed for SSI-owned fields, including daily close, reference, ceiling/floor, matched value, put-through value, foreign flow, and source metadata.
 * `/api/v1/stocks/vn/company/{ticker}` is the current company research contract/page shell that reuses the SSI-backed watchlist row for market-data blocks.
@@ -646,6 +646,23 @@ Acceptance criteria:
 * Mocked backend tests cover available, stale/mismatched, empty, malformed, failure, and disabled intraday paths.
 * Audit script reports intraday status and evidence without direct SSI calls or full raw payload dumps.
 * Daily SSI rows remain valid when intraday is optional/unavailable.
+
+### Phase 4.0B-3 - Intraday Rate-Limit Guardrails
+
+Status: completed on 2026-06-25.
+
+Goal:
+
+Reduce repeated SSI IntradayOhlc calls after provider-side rate-limit signals while keeping the public intraday contract explicit and unavailable.
+
+Result:
+
+* Added `SSI_INTRADAY_RATE_LIMIT_COOLDOWN_SECONDS=60` as the default per-process cooldown window; `0` disables the guard.
+* The SSI fetcher records cooldown only after `rate_limited` classifications from HTTP `429` or SSI provider code `429`.
+* Cooldown keys are scoped by normalized ticker and requested timeframe.
+* Active cooldown returns `intraday_status.status=unavailable`, `failure_class=rate_limited`, `intraday_candles=[]`, and `intraday_pulse=null` without requesting a token or calling `GET /Market/IntradayOhlc`.
+* Force-refresh callers still respect the fetcher cooldown because suppression happens before provider request construction.
+* DailyOhlc, DailyStockPrice, `latest_price`, realtime snapshot, and trade tape behavior are unchanged.
 
 ### Phase 4.0C - SSI Realtime and Trade-Tape Verification
 

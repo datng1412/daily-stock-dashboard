@@ -307,6 +307,11 @@ def test_ssi_intraday_failure_does_not_downgrade_daily_row():
                 "error_type": "ssi_error",
                 "pageSize": "1000",
                 "public_limit": "8",
+                "cooldown_active": True,
+                "cooldown_recorded": False,
+                "cooldown_seconds": 60,
+                "cooldown_remaining_seconds": 43,
+                "cooldown_until": "2026-06-25T10:00:43+00:00",
             },
             "rows": [],
         }
@@ -325,6 +330,11 @@ def test_ssi_intraday_failure_does_not_downgrade_daily_row():
     assert item["intraday_status"]["diagnostics"]["endpoint"] == "IntradayOhlc"
     assert item["intraday_status"]["diagnostics"]["provider_code"] == "429"
     assert item["intraday_status"]["diagnostics"]["pageSize"] == "1000"
+    assert item["intraday_status"]["diagnostics"]["cooldown_active"] is True
+    assert item["intraday_status"]["diagnostics"]["cooldown_recorded"] is False
+    assert item["intraday_status"]["diagnostics"]["cooldown_seconds"] == 60
+    assert item["intraday_status"]["diagnostics"]["cooldown_remaining_seconds"] == 43
+    assert item["intraday_status"]["diagnostics"]["cooldown_until"] == "2026-06-25T10:00:43+00:00"
     assert item["intraday_candles"] == []
     assert item["intraday_pulse"] is None
 

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -9,6 +9,7 @@ import requests
 
 from data_provider.ssi_fastconnect_fetcher import (
     DISABLED_REASON,
+    INTRADAY_RATE_LIMIT_COOLDOWN_REASON,
     MISSING_CREDENTIALS_REASON,
     REQUEST_FAILED_REASON,
     SSI_REALTIME_ENDPOINT_CANDIDATES,
@@ -23,6 +24,13 @@ from src.config import Config
 
 
 SECRET_TOKEN = "SECRET_ACCESS_TOKEN_DO_NOT_EXPOSE"
+
+
+@pytest.fixture(autouse=True)
+def clear_ssi_intraday_rate_limit_cooldowns():
+    SsiFastConnectFetcher.clear_intraday_rate_limit_cooldowns()
+    yield
+    SsiFastConnectFetcher.clear_intraday_rate_limit_cooldowns()
 
 
 class _FakeResponse:
@@ -56,6 +64,25 @@ class _FakeSession:
         if isinstance(item, Exception):
             raise item
         return item
+
+
+class _FakeClock:
+    def __init__(self):
+        self.current = 1_000.0
+        self.wall = datetime(2026, 6, 25, 10, 0, 0, tzinfo=timezone.utc)
+
+    def monotonic(self):
+        return self.current
+
+    def utcnow(self):
+        return self.wall + timedelta(seconds=self.current - 1_000.0)
+
+    def advance(self, seconds):
+        self.current += seconds
+
+
+def _get_call_count(session):
+    return len([call for call in session.calls if call[0] == "GET"])
 
 
 def _token_response():
@@ -129,6 +156,7 @@ def test_config_defaults_keep_ssi_disabled(monkeypatch):
     assert config.ssi_fastconnect_cache_ttl_seconds == 300
     assert config.ssi_fastconnect_token_ttl_seconds == 900
     assert config.ssi_fastconnect_intraday_enabled is True
+    assert config.ssi_intraday_rate_limit_cooldown_seconds == 60
     assert config.ssi_fastconnect_realtime_enabled is True
     assert config.ssi_fastconnect_trade_tape_enabled is True
     assert config.ssi_streaming_realtime_enabled is False
@@ -384,6 +412,179 @@ def test_intraday_request_exceptions_are_classified_without_secrets(exception, e
     assert payload["diagnostics"]["error_type"] == expected_error_type
     assert payload["diagnostics"]["endpoint"] == "IntradayOhlc"
     assert SECRET_TOKEN not in str(payload)
+
+
+def test_intraday_provider_code_429_records_cooldown_and_skips_provider_request():
+    clock = _FakeClock()
+    session = _FakeSession(
+        post_items=[_token_response()],
+        get_items=[
+            _FakeResponse(
+                payload={
+                    "status": "error",
+                    "code": "429",
+                    "message": "provider rejected request",
+                }
+            )
+        ],
+    )
+    fetcher = _fetcher(session=session, monotonic_clock=clock.monotonic, utcnow=clock.utcnow)
+
+    first = fetcher.get_intraday_ohlcv("FPT", from_date="2026-06-17", to_date="2026-06-17", limit=8, interval="1h")
+    second = fetcher.get_intraday_ohlcv("FPT", from_date="2026-06-17", to_date="2026-06-17", limit=8, interval="1h")
+
+    assert first["failure_class"] == "rate_limited"
+    assert first["diagnostics"]["cooldown_recorded"] is True
+    assert first["diagnostics"]["cooldown_active"] is False
+    assert first["diagnostics"]["cooldown_seconds"] == 60
+    assert first["diagnostics"]["cooldown_remaining_seconds"] == 60
+    assert second["status"] == "unavailable"
+    assert second["reason"] == INTRADAY_RATE_LIMIT_COOLDOWN_REASON
+    assert second["failure_class"] == "rate_limited"
+    assert second["diagnostics"]["cooldown_active"] is True
+    assert second["diagnostics"]["cooldown_recorded"] is False
+    assert second["diagnostics"]["cooldown_remaining_seconds"] == 60
+    assert _get_call_count(session) == 1
+    assert SECRET_TOKEN not in str(first)
+    assert SECRET_TOKEN not in str(second)
+
+
+def test_intraday_http_429_records_cooldown_and_skips_provider_request():
+    clock = _FakeClock()
+    session = _FakeSession(
+        post_items=[_token_response()],
+        get_items=[_FakeResponse(status_code=429, payload={"message": "too many requests"})],
+    )
+    fetcher = _fetcher(session=session, monotonic_clock=clock.monotonic, utcnow=clock.utcnow)
+
+    first = fetcher.get_intraday_ohlcv("FPT", from_date="2026-06-17", to_date="2026-06-17", limit=8, interval="1h")
+    second = fetcher.get_intraday_ohlcv("FPT", from_date="2026-06-17", to_date="2026-06-17", limit=8, interval="1h")
+
+    assert first["failure_class"] == "rate_limited"
+    assert first["diagnostics"]["http_status"] == "429"
+    assert first["diagnostics"]["cooldown_recorded"] is True
+    assert second["reason"] == INTRADAY_RATE_LIMIT_COOLDOWN_REASON
+    assert second["diagnostics"]["cooldown_active"] is True
+    assert _get_call_count(session) == 1
+
+
+def test_intraday_rate_limit_cooldown_is_scoped_by_symbol_and_timeframe():
+    clock = _FakeClock()
+    ok_row = {
+        "TradingTime": "2026-06-17 10:00:00",
+        "OpenPrice": "101",
+        "HighPrice": "103",
+        "LowPrice": "100",
+        "ClosePrice": "102",
+        "TotalVolume": "2000",
+    }
+    session = _FakeSession(
+        post_items=[_token_response()],
+        get_items=[
+            _FakeResponse(payload={"status": "error", "code": "429", "message": "provider rejected request"}),
+            _FakeResponse(payload={"data": [ok_row]}),
+            _FakeResponse(payload={"data": [ok_row]}),
+        ],
+    )
+    fetcher = _fetcher(session=session, monotonic_clock=clock.monotonic, utcnow=clock.utcnow)
+
+    blocked_key = fetcher.get_intraday_ohlcv("FPT", from_date="2026-06-17", to_date="2026-06-17", limit=8, interval="1h")
+    other_timeframe = fetcher.get_intraday_ohlcv("FPT", from_date="2026-06-17", to_date="2026-06-17", limit=8, interval="5m")
+    other_symbol = fetcher.get_intraday_ohlcv("ACB", from_date="2026-06-17", to_date="2026-06-17", limit=8, interval="1h")
+    still_blocked_key = fetcher.get_intraday_ohlcv("FPT", from_date="2026-06-17", to_date="2026-06-17", limit=8, interval="1h")
+
+    assert blocked_key["failure_class"] == "rate_limited"
+    assert other_timeframe["status"] == "ok"
+    assert other_symbol["status"] == "ok"
+    assert still_blocked_key["reason"] == INTRADAY_RATE_LIMIT_COOLDOWN_REASON
+    assert _get_call_count(session) == 3
+
+
+def test_intraday_rate_limit_cooldown_expires_without_sleeping():
+    clock = _FakeClock()
+    ok_row = {
+        "TradingTime": "2026-06-17 10:00:00",
+        "OpenPrice": "101",
+        "HighPrice": "103",
+        "LowPrice": "100",
+        "ClosePrice": "102",
+        "TotalVolume": "2000",
+    }
+    session = _FakeSession(
+        post_items=[_token_response()],
+        get_items=[
+            _FakeResponse(payload={"status": "error", "code": "429", "message": "provider rejected request"}),
+            _FakeResponse(payload={"data": [ok_row]}),
+        ],
+    )
+    fetcher = _fetcher(session=session, monotonic_clock=clock.monotonic, utcnow=clock.utcnow)
+
+    first = fetcher.get_intraday_ohlcv("FPT", from_date="2026-06-17", to_date="2026-06-17", limit=8, interval="1h")
+    clock.advance(61)
+    after_expiry = fetcher.get_intraday_ohlcv("FPT", from_date="2026-06-17", to_date="2026-06-17", limit=8, interval="1h")
+
+    assert first["failure_class"] == "rate_limited"
+    assert after_expiry["status"] == "ok"
+    assert _get_call_count(session) == 2
+
+
+def test_intraday_non_rate_limited_failures_do_not_start_cooldown():
+    session = _FakeSession(
+        post_items=[_token_response()],
+        get_items=[
+            _FakeResponse(payload={"status": "error", "code": "500", "message": "provider unavailable"}),
+            _FakeResponse(payload={"status": "error", "code": "500", "message": "provider unavailable"}),
+        ],
+    )
+    fetcher = _fetcher(session=session)
+
+    first = fetcher.get_intraday_ohlcv("FPT", from_date="2026-06-17", to_date="2026-06-17", limit=8, interval="1h")
+    second = fetcher.get_intraday_ohlcv("FPT", from_date="2026-06-17", to_date="2026-06-17", limit=8, interval="1h")
+
+    assert first["failure_class"] == "provider_unavailable"
+    assert second["failure_class"] == "provider_unavailable"
+    assert "cooldown_active" not in first["diagnostics"]
+    assert "cooldown_active" not in second["diagnostics"]
+    assert _get_call_count(session) == 2
+
+
+def test_intraday_rate_limit_cooldown_does_not_block_daily_endpoints():
+    clock = _FakeClock()
+    session = _FakeSession(
+        post_items=[_token_response()],
+        get_items=[
+            _FakeResponse(payload={"status": "error", "code": "429", "message": "provider rejected request"}),
+            _FakeResponse(payload={"data": [{"TradingDate": "2026-06-17", "Close": "124.6"}]}),
+            _FakeResponse(
+                payload={
+                    "data": [
+                        {
+                            "TradingDate": "2026-06-17",
+                            "RefPrice": "123",
+                            "CeilingPrice": "131.6",
+                            "FloorPrice": "114.4",
+                            "Close": "124.6",
+                        }
+                    ]
+                }
+            ),
+        ],
+    )
+    fetcher = _fetcher(session=session, monotonic_clock=clock.monotonic, utcnow=clock.utcnow)
+
+    intraday = fetcher.get_intraday_ohlcv("FPT", from_date="2026-06-17", to_date="2026-06-17", limit=8, interval="1h")
+    daily_ohlc = fetcher.get_daily_ohlcv("FPT", from_date="2026-06-17", to_date="2026-06-17", limit=8)
+    daily_stock_price = fetcher.get_daily_stock_price("FPT", from_date="2026-06-17", to_date="2026-06-17", limit=8)
+    get_urls = [call[1] for call in session.calls if call[0] == "GET"]
+
+    assert intraday["failure_class"] == "rate_limited"
+    assert daily_ohlc["status"] == "ok"
+    assert daily_stock_price["status"] == "ok"
+    assert get_urls == [
+        "https://example.test/Market/IntradayOhlc",
+        "https://example.test/Market/DailyOhlc",
+        "https://example.test/Market/DailyStockPrice",
+    ]
 
 
 def test_intraday_empty_response_has_explicit_diagnostics_without_fallback():

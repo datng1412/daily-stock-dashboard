@@ -13,6 +13,7 @@ import os
 import time
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
+from threading import RLock
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import requests
@@ -34,6 +35,7 @@ DISABLED_REASON = "SSI FastConnect disabled"
 MISSING_CREDENTIALS_REASON = "SSI FastConnect credentials missing"
 REQUEST_FAILED_REASON = "SSI FastConnect request failed"
 INTRADAY_DISABLED_REASON = "SSI FastConnect IntradayOhlc disabled"
+INTRADAY_RATE_LIMIT_COOLDOWN_REASON = "SSI IntradayOhlc rate limit cooldown active."
 REALTIME_DISABLED_REASON = "SSI FastConnect realtime disabled"
 REALTIME_ENDPOINT_NOT_IDENTIFIED_REASON = "Supported SSI realtime endpoint not identified in repository."
 REALTIME_STREAMING_NOT_IMPLEMENTED_REASON = "SSI realtime requires FastConnect streaming adapter; connection semantics not implemented."
@@ -43,6 +45,7 @@ SSI_REALTIME_STREAMING_DATA_TYPES = ("X", "X-QUOTE", "X-TRADE")
 SSI_CHUNK_MAX_DAYS = 29
 SSI_PAGE_SIZE = 1000
 SSI_MAX_PAGES = 20
+DEFAULT_INTRADAY_RATE_LIMIT_COOLDOWN_SECONDS = 60
 
 
 def _endpoint_attempt_reason(
@@ -165,6 +168,12 @@ def build_ssi_date_windows(
 class _CacheEntry:
     value: Dict[str, Any]
     expires_at: float
+
+
+@dataclass
+class _IntradayRateLimitCooldown:
+    expires_at: float
+    cooldown_until: Optional[str]
 
 
 def _unavailable(reason: str) -> Dict[str, str]:
@@ -499,6 +508,9 @@ def _expiry_from_payload(payload: Any, default_ttl_seconds: int) -> float:
 class SsiFastConnectFetcher:
     """Small FC Data client with secret-safe failures and row normalization."""
 
+    _intraday_rate_limit_lock = RLock()
+    _intraday_rate_limit_cooldowns: Dict[Tuple[str, str], _IntradayRateLimitCooldown] = {}
+
     def __init__(
         self,
         *,
@@ -517,6 +529,9 @@ class SsiFastConnectFetcher:
         streaming_realtime_channel_template: Optional[str] = None,
         streaming_realtime_client_factory: Optional[Callable[[], SsiRealtimeStreamClient]] = None,
         streaming_realtime_manager: Optional[SsiStreamingRealtimeManager] = None,
+        intraday_rate_limit_cooldown_seconds: Optional[int] = None,
+        monotonic_clock: Optional[Callable[[], float]] = None,
+        utcnow: Optional[Callable[[], datetime]] = None,
         request_delay_seconds: float = 0,
         session: Optional[requests.Session] = None,
         config: Any = None,
@@ -575,6 +590,19 @@ class SsiFastConnectFetcher:
             if intraday_enabled is not None
             else bool(getattr(config, "ssi_fastconnect_intraday_enabled", parse_env_bool(os.getenv("SSI_FASTCONNECT_INTRADAY_ENABLED"), default=True)))
         )
+        configured_intraday_cooldown = getattr(config, "ssi_intraday_rate_limit_cooldown_seconds", None)
+        if intraday_rate_limit_cooldown_seconds is not None:
+            cooldown_seconds = intraday_rate_limit_cooldown_seconds
+        elif configured_intraday_cooldown is not None:
+            cooldown_seconds = configured_intraday_cooldown
+        else:
+            cooldown_seconds = parse_env_int(
+                os.getenv("SSI_INTRADAY_RATE_LIMIT_COOLDOWN_SECONDS"),
+                DEFAULT_INTRADAY_RATE_LIMIT_COOLDOWN_SECONDS,
+                field_name="SSI_INTRADAY_RATE_LIMIT_COOLDOWN_SECONDS",
+                minimum=0,
+            )
+        self.intraday_rate_limit_cooldown_seconds = max(0, int(cooldown_seconds or 0))
         self.realtime_enabled = (
             bool(realtime_enabled)
             if realtime_enabled is not None
@@ -623,9 +651,122 @@ class SsiFastConnectFetcher:
         )
         self.session = session or requests.Session()
         self.request_delay_seconds = max(0.0, float(request_delay_seconds or 0))
+        self._monotonic_clock = monotonic_clock or time.monotonic
+        self._utcnow = utcnow or (lambda: datetime.now(timezone.utc))
         self._access_token: Optional[str] = None
         self._token_expires_at: float = 0
         self._cache: Dict[Tuple[str, Tuple[Tuple[str, Any], ...]], _CacheEntry] = {}
+
+    @classmethod
+    def clear_intraday_rate_limit_cooldowns(cls) -> None:
+        with cls._intraday_rate_limit_lock:
+            cls._intraday_rate_limit_cooldowns.clear()
+
+    @staticmethod
+    def _intraday_rate_limit_cooldown_key(symbol: str, interval: Optional[str]) -> Tuple[str, str]:
+        normalized_symbol = str(symbol or "").strip().upper()
+        normalized_interval = str(interval or "").strip().lower() or "default"
+        return normalized_symbol, normalized_interval
+
+    def _get_intraday_rate_limit_cooldown(
+        self,
+        key: Tuple[str, str],
+    ) -> Optional[_IntradayRateLimitCooldown]:
+        now = self._monotonic_clock()
+        with self._intraday_rate_limit_lock:
+            cooldown = self._intraday_rate_limit_cooldowns.get(key)
+            if cooldown and cooldown.expires_at > now:
+                return cooldown
+            if cooldown:
+                self._intraday_rate_limit_cooldowns.pop(key, None)
+        return None
+
+    def _record_intraday_rate_limit_cooldown(
+        self,
+        key: Tuple[str, str],
+    ) -> Optional[_IntradayRateLimitCooldown]:
+        cooldown_seconds = self.intraday_rate_limit_cooldown_seconds
+        if cooldown_seconds <= 0:
+            return None
+
+        now = self._monotonic_clock()
+        try:
+            cooldown_until = (self._utcnow() + timedelta(seconds=cooldown_seconds)).isoformat()
+        except Exception:
+            cooldown_until = None
+        cooldown = _IntradayRateLimitCooldown(
+            expires_at=now + cooldown_seconds,
+            cooldown_until=cooldown_until,
+        )
+        with self._intraday_rate_limit_lock:
+            self._intraday_rate_limit_cooldowns[key] = cooldown
+        return cooldown
+
+    def _intraday_cooldown_remaining_seconds(self, cooldown: _IntradayRateLimitCooldown) -> int:
+        remaining = max(0.0, cooldown.expires_at - self._monotonic_clock())
+        return int(remaining) if remaining == int(remaining) else int(remaining) + 1
+
+    @staticmethod
+    def _is_intraday_rate_limited_payload(payload: Dict[str, Any]) -> bool:
+        if not isinstance(payload, dict):
+            return False
+        diagnostics = payload.get("diagnostics") if isinstance(payload.get("diagnostics"), dict) else {}
+        failure_class = payload.get("failure_class") or diagnostics.get("failure_class")
+        return str(failure_class or "").strip().lower() == "rate_limited"
+
+    def _with_intraday_cooldown_diagnostics(
+        self,
+        payload: Dict[str, Any],
+        *,
+        cooldown: _IntradayRateLimitCooldown,
+        active: bool,
+        recorded: bool,
+    ) -> Dict[str, Any]:
+        result = dict(payload)
+        diagnostics = dict(result.get("diagnostics") or {})
+        diagnostics.update(
+            {
+                "cooldown_active": bool(active),
+                "cooldown_recorded": bool(recorded),
+                "cooldown_seconds": self.intraday_rate_limit_cooldown_seconds,
+                "cooldown_remaining_seconds": self._intraday_cooldown_remaining_seconds(cooldown),
+            }
+        )
+        if cooldown.cooldown_until:
+            diagnostics["cooldown_until"] = cooldown.cooldown_until
+        result["diagnostics"] = diagnostics
+        return result
+
+    def _intraday_cooldown_payload(
+        self,
+        *,
+        symbol: str,
+        params: Dict[str, Any],
+        public_limit: int,
+        interval: Optional[str],
+        cooldown: _IntradayRateLimitCooldown,
+    ) -> Dict[str, Any]:
+        payload = {
+            "status": "unavailable",
+            "source": SSI_SOURCE,
+            "symbol": symbol,
+            "reason": INTRADAY_RATE_LIMIT_COOLDOWN_REASON,
+            "failure_class": "rate_limited",
+            "rows": [],
+            "count": 0,
+        }
+        payload = self._with_intraday_failure_diagnostics(
+            payload,
+            params=params,
+            public_limit=public_limit,
+            interval=interval,
+        )
+        return self._with_intraday_cooldown_diagnostics(
+            payload,
+            cooldown=cooldown,
+            active=True,
+            recorded=False,
+        )
 
     def is_enabled(self) -> bool:
         return self.enabled
@@ -802,25 +943,60 @@ class SsiFastConnectFetcher:
                 "count": 0,
             }
 
-        params: Dict[str, Any] = {"symbol": symbol.strip().upper()}
-        if interval:
-            params["timeFrame"] = str(interval).strip()
+        normalized_symbol = str(symbol or "").strip().upper()
+        normalized_interval = str(interval).strip() if interval else None
+        params: Dict[str, Any] = {"symbol": normalized_symbol}
+        if normalized_interval:
+            params["timeFrame"] = normalized_interval
         public_limit = max(int(limit or 0), 0)
         params = self._date_params(params, from_date, to_date, SSI_PAGE_SIZE)
+        if not self.enabled:
+            return self._with_intraday_failure_diagnostics(
+                {
+                    **_unavailable(DISABLED_REASON),
+                    "rows": [],
+                    "count": 0,
+                },
+                params=params,
+                public_limit=public_limit,
+                interval=normalized_interval,
+            )
+        if not self._has_credentials():
+            return self._with_intraday_failure_diagnostics(
+                {
+                    **_unavailable(MISSING_CREDENTIALS_REASON),
+                    "rows": [],
+                    "count": 0,
+                },
+                params=params,
+                public_limit=public_limit,
+                interval=normalized_interval,
+            )
+        cooldown_key = self._intraday_rate_limit_cooldown_key(normalized_symbol, normalized_interval)
+        active_cooldown = self._get_intraday_rate_limit_cooldown(cooldown_key)
+        if active_cooldown:
+            return self._intraday_cooldown_payload(
+                symbol=normalized_symbol,
+                params=params,
+                public_limit=public_limit,
+                interval=normalized_interval,
+                cooldown=active_cooldown,
+            )
+
         variants = [self._alternate_param_case(params)]
-        if interval:
+        if normalized_interval:
             for interval_key in ("interval", "resolution", "timeframe", "TimeFrame"):
                 variant = dict(params)
                 variant.pop("timeFrame", None)
-                variant[interval_key] = str(interval).strip()
+                variant[interval_key] = normalized_interval
                 variants.append(variant)
                 variants.append(self._alternate_param_case(variant))
         payload = self._cached_paged_normalized(
             "IntradayOhlc",
             params,
             public_limit,
-            lambda row: self._map_intraday_ohlcv(row, symbol),
-            extra={"symbol": symbol.strip().upper(), "interval": interval},
+            lambda row: self._map_intraday_ohlcv(row, normalized_symbol),
+            extra={"symbol": normalized_symbol, "interval": normalized_interval},
             param_variants=variants,
             required_any=("date_time", "timestamp", "open", "high", "low", "close", "volume"),
         )
@@ -829,12 +1005,22 @@ class SsiFastConnectFetcher:
             reason="SSI IntradayOhlc returned no candles.",
             failure_class="empty_response",
         )
-        return self._with_intraday_failure_diagnostics(
+        payload = self._with_intraday_failure_diagnostics(
             payload,
             params=params,
             public_limit=public_limit,
-            interval=interval,
+            interval=normalized_interval,
         )
+        if self._is_intraday_rate_limited_payload(payload):
+            cooldown = self._record_intraday_rate_limit_cooldown(cooldown_key)
+            if cooldown:
+                payload = self._with_intraday_cooldown_diagnostics(
+                    payload,
+                    cooldown=cooldown,
+                    active=False,
+                    recorded=True,
+                )
+        return payload
 
     def get_realtime_snapshot(self, symbols: List[str]) -> Dict[str, Any]:
         """Return the current SSI realtime contract state.
