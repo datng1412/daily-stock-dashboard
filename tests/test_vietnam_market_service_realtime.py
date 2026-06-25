@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from data_provider.ssi_fastconnect_fetcher import REALTIME_ENDPOINT_NOT_IDENTIFIED_REASON
+from data_provider.ssi_fastconnect_fetcher import REALTIME_STREAMING_NOT_IMPLEMENTED_REASON
 from src.services.vietnam_market_service import (
     VietnamDashboardConfig,
     VietnamMarketService,
@@ -179,9 +179,11 @@ def test_ssi_realtime_failure_is_separate_from_daily_row():
         realtime_payload={
             "status": "unavailable",
             "source": "SSI",
-            "reason": REALTIME_ENDPOINT_NOT_IDENTIFIED_REASON,
-            "candidate_endpoints": ["RealtimeQuote", "RealtimePrice", "RealtimeSnapshot", "SecuritiesRealtime"],
-            "discovery_status": "unsupported_endpoint_not_identified",
+            "reason": REALTIME_STREAMING_NOT_IMPLEMENTED_REASON,
+            "rest_candidate_endpoints": ["RealtimeQuote", "RealtimePrice", "RealtimeSnapshot", "SecuritiesRealtime"],
+            "discovery_status": "streaming_adapter_not_implemented",
+            "streaming_status": "not_implemented",
+            "rest_status": "unsupported",
             "requested_tickers": ["FPT"],
             "quotes": [],
         }
@@ -196,7 +198,7 @@ def test_ssi_realtime_failure_is_separate_from_daily_row():
     assert item["realtime_snapshot"] is None
     assert item["realtime_status"]["message"] == "SSI realtime unavailable."
     assert "RealtimeQuote" not in item["realtime_status"]["message"]
-    assert item["realtime_status"]["diagnostics"]["provider_message"] == REALTIME_ENDPOINT_NOT_IDENTIFIED_REASON
+    assert item["realtime_status"]["diagnostics"]["provider_message"] == REALTIME_STREAMING_NOT_IMPLEMENTED_REASON
 
 
 class IntradayAvailableRealtimeUnavailableFetcher(FakeSsiFetcher):

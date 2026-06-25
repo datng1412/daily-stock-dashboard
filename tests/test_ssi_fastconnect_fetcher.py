@@ -11,8 +11,9 @@ from data_provider.ssi_fastconnect_fetcher import (
     DISABLED_REASON,
     MISSING_CREDENTIALS_REASON,
     REQUEST_FAILED_REASON,
-    REALTIME_ENDPOINT_NOT_IDENTIFIED_REASON,
+    REALTIME_STREAMING_NOT_IMPLEMENTED_REASON,
     SSI_REALTIME_ENDPOINT_CANDIDATES,
+    SSI_REALTIME_STREAMING_DATA_TYPES,
     SSI_CHUNK_MAX_DAYS,
     SsiFastConnectFetcher,
     build_ssi_date_windows,
@@ -463,7 +464,136 @@ def test_realtime_snapshot_accepts_safe_field_aliases():
     assert row["bid_levels"][0] == {"price": 130.4, "volume": 1000.0}
 
 
-def test_realtime_snapshot_returns_unsupported_discovery_state_without_http_calls():
+def test_streaming_x_trade_content_maps_latest_trade_snapshot():
+    fetcher = _fetcher()
+
+    rows = fetcher.normalize_streaming_realtime_messages(
+        [
+            {
+                "DataType": "X-TRADE",
+                "Content": (
+                    '{"RType":"X-TRADE","TradingDate":"14/08/2023","Time":"14:07:53",'
+                    '"Symbol":"ACB","LastPrice":"22.45","LastVol":"1000","TotalVol":"123456",'
+                    '"TotalVal":"2760000000","Change":"0.15","RatioChange":"0.67","Side":"B"}'
+                ),
+            }
+        ],
+        ["ACB"],
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["ticker"] == "ACB"
+    assert rows[0]["stream_data_type"] == "X-TRADE"
+    assert rows[0]["price"] == 22.45
+    assert rows[0]["last_volume"] == 1000.0
+    assert rows[0]["volume"] == 123456
+    assert rows[0]["value"] == 2760000000.0
+    assert rows[0]["has_last_trade"] is True
+    assert rows[0]["quote_only"] is False
+    assert rows[0]["stream_timestamp"] == "2023-08-14T14:07:53"
+    assert "trades" not in rows[0]
+
+
+def test_streaming_x_content_maps_combined_quote_and_trade():
+    fetcher = _fetcher()
+
+    rows = fetcher.normalize_streaming_realtime_messages(
+        [
+            {
+                "DataType": "X",
+                "Content": {
+                    "RType": "X",
+                    "TradingDate": "14/08/2023",
+                    "Time": "14:07:53",
+                    "Symbol": "ACB",
+                    "LastPrice": "22.45",
+                    "BidPrice1": "22.4",
+                    "BidVol1": "2000",
+                    "AskPrice1": "22.5",
+                    "AskVol1": "3000",
+                },
+            }
+        ],
+        ["ACB"],
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["stream_data_type"] == "X"
+    assert rows[0]["price"] == 22.45
+    assert rows[0]["bid_levels"][0] == {"price": 22.4, "volume": 2000.0}
+    assert rows[0]["ask_levels"][0] == {"price": 22.5, "volume": 3000.0}
+    assert rows[0]["has_last_trade"] is True
+
+
+def test_streaming_x_quote_maps_quote_context_without_last_trade():
+    fetcher = _fetcher()
+
+    rows = fetcher.normalize_streaming_realtime_messages(
+        [
+            {
+                "DataType": "X-QUOTE",
+                "Content": (
+                    '{"RType":"X-QUOTE","TradingDate":"14/08/2023","Time":"14:07:53",'
+                    '"Symbol":"ACB","RefPrice":"22.3","BidPrice1":"22.4","BidVol1":"2000",'
+                    '"AskPrice1":"22.5","AskVol1":"3000"}'
+                ),
+            }
+        ],
+        ["ACB"],
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["stream_data_type"] == "X-QUOTE"
+    assert rows[0]["price"] is None
+    assert rows[0]["realtime_price"] is None
+    assert rows[0]["snapshot_price"] is None
+    assert rows[0]["reference_price"] == 22.3
+    assert rows[0]["bid_levels"][0] == {"price": 22.4, "volume": 2000.0}
+    assert rows[0]["ask_levels"][0] == {"price": 22.5, "volume": 3000.0}
+    assert rows[0]["has_last_trade"] is False
+    assert rows[0]["quote_only"] is True
+
+
+def test_streaming_parser_ignores_malformed_and_unrequested_messages():
+    fetcher = _fetcher()
+
+    rows = fetcher.normalize_streaming_realtime_messages(
+        [
+            {"DataType": "X-TRADE", "Content": '{"RType":"X-TRADE",'},
+            {"DataType": "MI", "Content": {"RType": "MI", "Symbol": "ACB", "LastPrice": "22.45"}},
+            {"DataType": "X-TRADE", "Content": {"RType": "X-TRADE", "Symbol": "SSI", "LastPrice": "32"}},
+            {"DataType": "X-TRADE", "Content": {"RType": "X-TRADE", "Symbol": "ACB"}},
+        ],
+        ["ACB"],
+    )
+
+    assert rows == []
+
+
+def test_streaming_quote_after_trade_does_not_clear_last_trade_price():
+    fetcher = _fetcher()
+
+    rows = fetcher.normalize_streaming_realtime_messages(
+        [
+            {
+                "DataType": "X-TRADE",
+                "Content": {"RType": "X-TRADE", "Symbol": "ACB", "LastPrice": "22.45"},
+            },
+            {
+                "DataType": "X-QUOTE",
+                "Content": {"RType": "X-QUOTE", "Symbol": "ACB", "BidPrice1": "22.4", "AskPrice1": "22.5"},
+            },
+        ],
+        ["ACB"],
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["price"] == 22.45
+    assert rows[0]["has_last_trade"] is True
+    assert rows[0]["bid_levels"][0]["price"] == 22.4
+
+
+def test_realtime_snapshot_returns_streaming_not_implemented_state_without_http_calls():
     session = _FakeSession(post_items=[_token_response()])
     fetcher = _fetcher(session=session)
 
@@ -471,14 +601,19 @@ def test_realtime_snapshot_returns_unsupported_discovery_state_without_http_call
 
     assert payload["status"] == "unavailable"
     assert payload["source"] == "SSI"
-    assert payload["reason"] == REALTIME_ENDPOINT_NOT_IDENTIFIED_REASON
+    assert payload["reason"] == REALTIME_STREAMING_NOT_IMPLEMENTED_REASON
     assert payload["requested_tickers"] == ["FPT", "VPB"]
     assert payload["quotes"] == []
     assert payload["count"] == 0
     assert payload["attempted_endpoints"] == []
-    assert payload["candidate_endpoints"] == list(SSI_REALTIME_ENDPOINT_CANDIDATES)
+    assert payload["candidate_endpoints"] == []
+    assert payload["rest_candidate_endpoints"] == list(SSI_REALTIME_ENDPOINT_CANDIDATES)
     assert payload["endpoint_attempts"] == []
-    assert payload["discovery_status"] == "unsupported_endpoint_not_identified"
+    assert payload["discovery_status"] == "streaming_adapter_not_implemented"
+    assert payload["rest_status"] == "unsupported"
+    assert payload["streaming_status"] == "not_implemented"
+    assert payload["streaming_data_types"] == list(SSI_REALTIME_STREAMING_DATA_TYPES)
+    assert payload["parsed_streaming_rows"] == 0
     assert session.calls == []
     assert SECRET_TOKEN not in str(payload)
 

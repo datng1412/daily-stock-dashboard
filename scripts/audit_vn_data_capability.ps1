@@ -398,6 +398,14 @@ $realtimeOkRows = Count-Matching $rows { param($row)
   ((Get-Status (Get-Value $row @("realtime_status"))) -eq "ok") -and
   ($null -ne (Get-Value $row @("realtime_snapshot")))
 }
+$realtimeMessages = @($rows | ForEach-Object {
+  $status = Get-Value $_ @("realtime_status")
+  $diagnostics = Get-Value $status @("diagnostics")
+  $message = Get-Value $status @("message", "reason")
+  $providerMessage = Get-Value $diagnostics @("provider_message")
+  if (Has-Value $providerMessage) { $providerMessage }
+  elseif (Has-Value $message) { $message }
+})
 $tradeTapeOkRows = Count-Matching $rows { param($row)
   $trades = @(Convert-ToList (Get-Value $row @("trade_tape")))
   ((Get-Status (Get-Value $row @("trade_tape_status"))) -eq "ok") -and ($trades.Count -gt 0)
@@ -452,7 +460,26 @@ $capabilities += New-CapabilityRow "Intraday OHLCV / intraday pulse" $intradaySt
 $realtimeEndpointStatus = Get-OptionalStatusFromEndpoint $realtimeResponse "quotes"
 $realtimeStatus = if ($realtimeEndpointStatus -eq "reliable" -and $realtimeOkRows -gt 0) { "reliable" } elseif ($realtimeEndpointStatus -eq "disabled") { "disabled" } elseif ($realtimeOkRows -gt 0) { "partial" } elseif ($realtimeEndpointStatus -eq "unavailable") { "unavailable" } else { "unknown-needs-verification" }
 $realtimeQuoteCount = @(Convert-ToList (Get-Value $realtimeResponse @("quotes"))).Count
-$capabilities += New-CapabilityRow "Realtime snapshot" $realtimeStatus "SSI realtime contract" ("endpoint status={0}; endpoint quote rows={1}; watchlist usable snapshots={2}/{3}" -f (Get-Status $realtimeResponse), $realtimeQuoteCount, $realtimeOkRows, $rowCount) "realtime_snapshot fields only when status ok and snapshot is non-null" "Do not use realtime snapshot as official daily close."
+$realtimeEndpointDetail = Get-Value $realtimeResponse @("error_detail", "error")
+if (-not (Has-Value $realtimeEndpointDetail)) {
+  $realtimeEndpointDetail = "none"
+}
+$realtimeClassificationDetail = "{0}; watchlist_messages={1}" -f $realtimeEndpointDetail, (Format-UniqueValues $realtimeMessages)
+$realtimeFailureMode = "unknown-needs-verification"
+if ($realtimeQuoteCount -gt 0 -or $realtimeOkRows -gt 0) {
+  $realtimeFailureMode = "streaming_parsed_rows"
+} elseif ($realtimeClassificationDetail -match "streaming adapter|connection semantics not implemented") {
+  $realtimeFailureMode = "streaming_adapter_not_implemented"
+} elseif ($realtimeClassificationDetail -match "no streaming message") {
+  $realtimeFailureMode = "streaming_no_message"
+} elseif ($realtimeClassificationDetail -match "REST|endpoint not identified|unsupported realtime endpoint|RealtimeQuote|RealtimePrice|RealtimeSnapshot|SecuritiesRealtime") {
+  $realtimeFailureMode = "rest_unsupported"
+} elseif ($realtimeEndpointStatus -eq "disabled") {
+  $realtimeFailureMode = "disabled"
+} elseif ($realtimeEndpointStatus -eq "unavailable") {
+  $realtimeFailureMode = "unavailable"
+}
+$capabilities += New-CapabilityRow "Realtime snapshot" $realtimeStatus "SSI realtime contract" ("endpoint status={0}; endpoint quote rows={1}; watchlist usable snapshots={2}/{3}; failure_mode={4}" -f (Get-Status $realtimeResponse), $realtimeQuoteCount, $realtimeOkRows, $rowCount, $realtimeFailureMode) "realtime_snapshot fields only when status ok and snapshot is non-null" "Do not use realtime snapshot as official daily close."
 
 $tradeEndpointStatus = Get-OptionalStatusFromEndpoint $tradesResponse "trades"
 $tradeStatus = if ($tradeEndpointStatus -eq "reliable" -and $tradeTapeOkRows -gt 0) { "reliable" } elseif ($tradeEndpointStatus -eq "disabled") { "disabled" } elseif ($tradeTapeOkRows -gt 0) { "partial" } elseif ($tradeEndpointStatus -eq "unavailable") { "unavailable" } else { "unknown-needs-verification" }
@@ -507,6 +534,17 @@ Write-Host ("- Daily price date: {0}" -f (Format-UniqueValues $intradayDailyDate
 Write-Host ("- Requested timeframe: {0}" -f (Format-UniqueValues $intradayRequestedTimeframes))
 Write-Host ("- Observed granularity: {0} ({1} seconds)" -f (Format-UniqueValues $intradayGranularities), (Format-UniqueValues $intradayGranularitySeconds))
 Write-Host ("- Reason: {0}" -f (Format-UniqueValues $intradayMessages))
+Write-Host "- Evidence source: current app API response fields; SSI is not called directly by this script."
+
+Write-Host ""
+Write-Host "Realtime evidence:"
+Write-Host ("- Realtime endpoint status: {0}" -f (Get-Status $realtimeResponse))
+Write-Host ("- Endpoint quote row count: {0}" -f $realtimeQuoteCount)
+Write-Host ("- Parsed streaming row count: {0}" -f $realtimeQuoteCount)
+Write-Host ("- Watchlist usable snapshot ratio: {0}/{1}" -f $realtimeOkRows, $rowCount)
+Write-Host ("- Failure mode: {0}" -f $realtimeFailureMode)
+Write-Host ("- Endpoint detail: {0}" -f $realtimeEndpointDetail)
+Write-Host ("- Watchlist detail: {0}" -f (Format-UniqueValues $realtimeMessages))
 Write-Host "- Evidence source: current app API response fields; SSI is not called directly by this script."
 
 Write-Host ""

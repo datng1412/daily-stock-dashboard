@@ -8,6 +8,7 @@ headers in returned payloads.
 
 from __future__ import annotations
 
+import json
 import os
 import time
 from dataclasses import dataclass
@@ -27,8 +28,10 @@ REQUEST_FAILED_REASON = "SSI FastConnect request failed"
 INTRADAY_DISABLED_REASON = "SSI FastConnect IntradayOhlc disabled"
 REALTIME_DISABLED_REASON = "SSI FastConnect realtime disabled"
 REALTIME_ENDPOINT_NOT_IDENTIFIED_REASON = "Supported SSI realtime endpoint not identified in repository."
+REALTIME_STREAMING_NOT_IMPLEMENTED_REASON = "SSI realtime requires FastConnect streaming adapter; connection semantics not implemented."
 TRADE_TAPE_DISABLED_REASON = "SSI FastConnect trade tape disabled"
 SSI_REALTIME_ENDPOINT_CANDIDATES = ("RealtimeQuote", "RealtimePrice", "RealtimeSnapshot", "SecuritiesRealtime")
+SSI_REALTIME_STREAMING_DATA_TYPES = ("X", "X-QUOTE", "X-TRADE")
 SSI_CHUNK_MAX_DAYS = 29
 SSI_PAGE_SIZE = 1000
 SSI_MAX_PAGES = 20
@@ -697,9 +700,9 @@ class SsiFastConnectFetcher:
     def get_realtime_snapshot(self, symbols: List[str]) -> Dict[str, Any]:
         """Return the current SSI realtime contract state.
 
-        Phase 4.0C-2 repository discovery found no supported FastConnect
-        realtime endpoint, SDK method, or enum. Keep mapper helpers for future
-        verified rows, but do not probe speculative REST names at runtime.
+        Phase 4.0C-3 found SSI realtime is a streaming contract. Keep parser
+        helpers for future verified stream messages, but do not open a
+        long-running stream or probe speculative REST names at request time.
         """
         normalized_symbols = [str(symbol or "").strip().upper() for symbol in symbols or [] if str(symbol or "").strip()]
         if not self.realtime_enabled:
@@ -730,18 +733,166 @@ class SsiFastConnectFetcher:
         result = {
             "status": "unavailable",
             "source": SSI_SOURCE,
-            "reason": REALTIME_ENDPOINT_NOT_IDENTIFIED_REASON,
+            "reason": REALTIME_STREAMING_NOT_IMPLEMENTED_REASON,
             "requested_tickers": normalized_symbols,
             "quotes": [],
             "count": 0,
             "attempted_endpoints": [],
-            "candidate_endpoints": list(SSI_REALTIME_ENDPOINT_CANDIDATES),
+            "candidate_endpoints": [],
+            "rest_candidate_endpoints": list(SSI_REALTIME_ENDPOINT_CANDIDATES),
             "endpoint_attempts": [],
-            "discovery_status": "unsupported_endpoint_not_identified",
+            "discovery_status": "streaming_adapter_not_implemented",
+            "rest_status": "unsupported",
+            "streaming_status": "not_implemented",
+            "streaming_data_types": list(SSI_REALTIME_STREAMING_DATA_TYPES),
+            "parsed_streaming_rows": 0,
         }
         if self.cache_ttl_seconds > 0:
             self._cache[cache_key] = _CacheEntry(value=dict(result), expires_at=time.time() + self.cache_ttl_seconds)
         return result
+
+    def normalize_streaming_realtime_messages(
+        self,
+        messages: List[Any],
+        symbols: List[str],
+    ) -> List[Dict[str, Any]]:
+        """Normalize buffered SSI realtime stream messages for requested symbols.
+
+        This parser is deterministic and side-effect free. It does not connect
+        to SSI streaming or turn a single trade update into trade-tape history.
+        """
+        requested_symbols = [
+            str(symbol or "").strip().upper()
+            for symbol in symbols or []
+            if str(symbol or "").strip()
+        ]
+        requested_set = set(requested_symbols)
+        latest_by_symbol: Dict[str, Dict[str, Any]] = {}
+
+        for message in messages or []:
+            parsed = self._parse_streaming_realtime_message(message)
+            if not parsed:
+                continue
+            content = parsed["content"]
+            symbol = str(_first_value(content, "Symbol", "Ticker", "StockCode", "SecurityCode", "Code") or "").strip().upper()
+            if not symbol or symbol not in requested_set:
+                continue
+            row = self._map_streaming_realtime_snapshot(content, parsed["data_type"], fallback_symbol=symbol)
+            if not row:
+                continue
+            latest_by_symbol[symbol] = self._merge_streaming_realtime_rows(latest_by_symbol.get(symbol), row)
+
+        return [latest_by_symbol[symbol] for symbol in requested_symbols if symbol in latest_by_symbol]
+
+    def _parse_streaming_realtime_message(self, message: Any) -> Optional[Dict[str, Any]]:
+        if not isinstance(message, dict):
+            return None
+
+        envelope_type = self._normalize_streaming_data_type(
+            _first_value(message, "DataType", "dataType", "datatype")
+        )
+        content = _first_value(message, "Content", "content")
+        if isinstance(content, str):
+            text = content.strip()
+            if not text:
+                return None
+            if text.endswith(","):
+                text = text[:-1].rstrip()
+            try:
+                content = json.loads(text)
+            except (TypeError, ValueError, json.JSONDecodeError):
+                return None
+        if not isinstance(content, dict):
+            return None
+
+        nested_type = self._normalize_streaming_data_type(_first_value(content, "RType", "rtype"))
+        data_type = nested_type or envelope_type
+        if data_type not in SSI_REALTIME_STREAMING_DATA_TYPES:
+            return None
+        return {"data_type": data_type, "envelope_type": envelope_type, "content": content}
+
+    @staticmethod
+    def _normalize_streaming_data_type(value: Any) -> Optional[str]:
+        text = str(value or "").strip().upper()
+        if not text:
+            return None
+        compact = text.replace("_", "-")
+        aliases = {
+            "QUOTE": "X-QUOTE",
+            "XQUOTE": "X-QUOTE",
+            "X-QUOTE": "X-QUOTE",
+            "TRADE": "X-TRADE",
+            "XTRADE": "X-TRADE",
+            "X-TRADE": "X-TRADE",
+            "X": "X",
+        }
+        return aliases.get(compact)
+
+    def _map_streaming_realtime_snapshot(
+        self,
+        row: Dict[str, Any],
+        data_type: str,
+        *,
+        fallback_symbol: str,
+    ) -> Optional[Dict[str, Any]]:
+        mapped = self._map_realtime_snapshot(row, fallback_symbol=fallback_symbol)
+        last_price = _to_float(_first_value(row, "LastPrice", "lastPrice"))
+        has_last_trade = data_type in {"X", "X-TRADE"} and last_price is not None
+        bid_levels = mapped.get("bid_levels") or []
+        ask_levels = mapped.get("ask_levels") or []
+        if not has_last_trade and not bid_levels and not ask_levels:
+            return None
+
+        if not has_last_trade:
+            mapped["price"] = None
+            mapped["realtime_price"] = None
+            mapped["snapshot_price"] = None
+        else:
+            mapped["price"] = last_price
+            mapped["realtime_price"] = last_price
+            mapped["snapshot_price"] = last_price
+
+        trading_date = _first_value(row, "TradingDate", "Date", "tradingDate")
+        time_value = _first_value(row, "Time", "TradingTime", "MatchedTime", "time", "tradingTime")
+        combined_datetime = None
+        if trading_date and time_value:
+            combined_datetime = f"{trading_date} {time_value}"
+        stream_timestamp = _parse_datetime(combined_datetime or time_value or trading_date)
+
+        mapped.update(
+            {
+                "stream_data_type": data_type,
+                "r_type": _safe_text(_first_value(row, "RType", "rtype")) or data_type,
+                "has_last_trade": has_last_trade,
+                "quote_only": data_type == "X-QUOTE" and not has_last_trade,
+                "trading_date": _parse_date(trading_date),
+                "time": _safe_text(time_value),
+                "stream_timestamp": stream_timestamp,
+                "last_volume": _to_float(_first_value(row, "LastVol", "LastVolume", "MatchedVolume", "MatchVolume")),
+                "side_if_available": _safe_text(_first_value(row, "Side", "MatchType", "BuySell", "side", "matchType", "buySell")),
+            }
+        )
+        return mapped
+
+    @staticmethod
+    def _merge_streaming_realtime_rows(
+        existing: Optional[Dict[str, Any]],
+        row: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        if not existing:
+            return dict(row)
+        merged = dict(existing)
+        for key, value in row.items():
+            if key in {"price", "realtime_price", "snapshot_price"} and not row.get("has_last_trade"):
+                continue
+            if key in {"has_last_trade", "quote_only"} and not row.get("has_last_trade"):
+                continue
+            if value not in (None, "", [], {}):
+                merged[key] = value
+        if row.get("has_last_trade"):
+            merged["has_last_trade"] = True
+            merged["quote_only"] = False
+        return merged
 
     def get_trade_tape(self, symbol: str, limit: int = 100) -> Dict[str, Any]:
         """Return SSI trade tape rows when an account exposes them."""
