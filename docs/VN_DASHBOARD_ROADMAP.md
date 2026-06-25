@@ -1547,7 +1547,7 @@ This section records the earlier SSI migration sequence and implementation histo
 Status: implemented in the current working tree.
 
 * Added SSI-only symbol metadata coverage through `SecuritiesDetails`, with `Securities` as a same-provider metadata fallback.
-* Added company name, exchange, market, security type, issuer, lot size, listed shares, and listed date when SSI returns them.
+* Added company name, exchange, market, industry/sector, security type, issuer, lot size, listed shares, and listed date when SSI returns them.
 * Added compact selected-ticker metadata display.
 * Missing metadata fields remain unavailable/null; Mozyfin is not used for SSI-owned symbol metadata.
 
@@ -1556,9 +1556,9 @@ Status: implemented in the current working tree.
 Status: provider, service, API, and mocked parser coverage added in the current working tree.
 
 * Added SSI-only index list coverage through `/api/v1/stocks/vn/index-list`.
-* Added SSI-only index component coverage through `/api/v1/stocks/vn/index-components?index_code=...`.
-* Added compact dashboard diagnostics for SSI index coverage so IndexList and VN30 component availability are visible.
-* Avoid hardcoded index assumptions; use SSI-returned index codes from IndexList.
+* Added SSI-only index component coverage through `/api/v1/stocks/vn/index-components?index_code=...`; the endpoint also accepts the legacy `index=...` query alias.
+* Added compact dashboard diagnostics for SSI index coverage so IndexList identifier resolution, provider identifier, and VN30 component availability are visible.
+* Avoid hardcoded index assumptions; use SSI-returned index identifiers from IndexList before calling IndexComponents.
 * Live IndexList works in the current SSI environment.
 * Live IndexComponents for `VN30` currently returns clean unavailable; verify SSI endpoint permission/path/parameter shape before relying on component rows.
 

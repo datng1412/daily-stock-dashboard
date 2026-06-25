@@ -2118,6 +2118,7 @@ class SsiFastConnectFetcher:
             "security_type": _first_value(row, "SecurityType", "SecuritiesType", "Type", "StockType", "securityType", "securitiesType", "security_type", "stockType", "type"),
             "name": _first_value(row, "Name", "CompanyName", "CompanyNameVi", "SecurityName", "VietnameseName", "IssuerNameVn", "name", "companyName", "company_name", "securityName", "vietnameseName", "issuerNameVn"),
             "name_en": _first_value(row, "NameEn", "EnglishName", "CompanyNameEn", "SecurityNameEn", "IssuerNameEn", "nameEn", "name_en", "englishName", "companyNameEn", "securityNameEn", "issuerNameEn"),
+            "industry": _first_value(row, "Industry", "IndustryName", "Sector", "SectorName", "BusinessLine", "ICBName", "IcbName", "industry", "industryName", "industry_name", "sector", "sectorName", "sector_name", "businessLine", "business_line", "icbName", "icb_name"),
             "issuer": _first_value(row, "Issuer", "IssuerName", "OrganizationName", "OrganName", "issuer", "issuerName", "organizationName", "organName"),
             "lot_size": _to_int(_first_value(row, "LotSize", "TradingUnit", "RoundLot", "lotSize", "lot_size", "tradingUnit", "roundLot")),
             "listed_shares": _to_int(_first_value(row, "ListedShares", "ListedShare", "TotalListedShares", "SharesOutstanding", "listedShares", "listedShare", "totalListedShares", "listed_shares", "sharesOutstanding")),

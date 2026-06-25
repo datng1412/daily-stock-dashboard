@@ -205,9 +205,9 @@ Rules:
 | Put-through volume/value | SSI DailyStockPrice | Use when available |
 | Latest foreign flow | SSI DailyStockPrice | Use latest matched-date row when available |
 | Foreign 5D/20D flow | Future enhancement | Compute only from matched-date historical DailyStockPrice rows |
-| Index list | SSI IndexList | Use SSI-returned index codes |
-| Index components | SSI IndexComponents | Use only when SSI returns rows |
-| Symbol metadata | SSI Securities/SecuritiesDetails | Optional fields may remain null |
+| Index list | SSI IndexList | Use SSI-returned index codes and identifiers |
+| Index components | SSI IndexComponents | Resolve through SSI IndexList identifiers; use only when SSI returns rows |
+| Symbol metadata | SSI Securities/SecuritiesDetails | Optional fields, including industry, may remain null |
 | Intraday candles | SSI IntradayOhlc | Strict source; no fallback |
 | Realtime snapshot | SSI FastConnect streaming realtime contract | Parser and disabled background manager/cache skeleton covered for buffered `X`, `X-QUOTE`, and `X-TRADE`; live official-client adapter not enabled |
 | Trade tape | SSI trade-tape contract | Contract exists; live list/history semantics not confirmed |

@@ -1702,6 +1702,7 @@ def test_securities_maps_symbol_metadata():
                             "SecurityType": "stock",
                             "CompanyName": "FPT Corp",
                             "EnglishName": "FPT Corporation",
+                            "IndustryName": "Information Technology",
                             "Issuer": "FPT",
                             "LotSize": "100",
                             "ListedShares": "123456789",
@@ -1724,6 +1725,7 @@ def test_securities_maps_symbol_metadata():
         "security_type": "stock",
         "name": "FPT Corp",
         "name_en": "FPT Corporation",
+        "industry": "Information Technology",
         "issuer": "FPT",
         "lot_size": 100,
         "listed_shares": 123456789,
@@ -1746,6 +1748,7 @@ def test_securities_details_maps_symbol_metadata():
                                 "exchange": "HOSE",
                                 "type": "stock",
                                 "securityName": "FPT Corp",
+                                "sectorName": "Technology",
                                 "issuerName": "FPT",
                                 "tradingUnit": "100",
                                 "sharesOutstanding": "123456789",
@@ -1769,6 +1772,7 @@ def test_securities_details_maps_symbol_metadata():
     assert row["security_type"] == "stock"
     assert row["name"] == "FPT Corp"
     assert row["name_en"] is None
+    assert row["industry"] == "Technology"
     assert row["issuer"] == "FPT"
     assert row["lot_size"] == 100
     assert row["listed_shares"] == 123456789
@@ -1798,6 +1802,7 @@ def test_securities_details_missing_metadata_fields_become_none():
     row = fetcher.get_securities_details("FPT", market="HOSE")["rows"][0]
 
     assert row["symbol"] == "FPT"
+    assert row["industry"] is None
     assert row["exchange"] == "HOSE"
     assert row["market"] == "HOSE"
     assert row["security_type"] is None

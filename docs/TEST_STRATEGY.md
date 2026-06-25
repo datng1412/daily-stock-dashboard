@@ -80,6 +80,8 @@ Add focused tests when implementing Data Quality Summary:
 - `adjusted_price_status = unknown` does not infer corporate actions.
 - Profile provider `ok` plus missing `name`/`industry` produces profile completeness `partial`.
 - Company price source decision is reflected consistently in API and UI.
+- SSI profile metadata maps industry/sector aliases through `symbol_metadata`, watchlist rows, and company profile only when provider data exists.
+- SSI index components resolve provider-owned identifiers from IndexList, keep the public requested code stable, and expose sanitized diagnostics for unavailable component rows.
 
 ## Phase 2 Contract Tests Needed
 

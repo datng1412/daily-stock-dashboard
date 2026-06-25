@@ -2326,6 +2326,7 @@ class VietnamMarketService:
             "security_type": row.get("security_type"),
             "name": row.get("name"),
             "name_en": row.get("name_en"),
+            "industry": row.get("industry"),
             "issuer": row.get("issuer"),
             "lot_size": _safe_int(row.get("lot_size")),
             "listed_shares": _safe_int(row.get("listed_shares")),
@@ -2374,6 +2375,7 @@ class VietnamMarketService:
             "security_type": None,
             "name": None,
             "name_en": None,
+            "industry": None,
             "issuer": None,
             "lot_size": None,
             "listed_shares": None,
@@ -2404,6 +2406,7 @@ class VietnamMarketService:
             "security_type": None,
             "name": None,
             "name_en": None,
+            "industry": None,
             "issuer": None,
             "lot_size": None,
             "listed_shares": None,
@@ -2701,29 +2704,98 @@ class VietnamMarketService:
             "count": len(payload.get("rows") or []),
         }
 
+    @staticmethod
+    def _normalize_index_value(value: Any) -> Optional[str]:
+        text = str(value or "").strip().upper()
+        return text or None
+
+    def _resolve_ssi_index_identifier(
+        self,
+        index_code: str,
+        market: Optional[str],
+    ) -> Tuple[str, str, Dict[str, Any]]:
+        normalized_index = self._normalize_index_value(index_code) or ""
+        diagnostics: Dict[str, Any] = {
+            "requested_index_code": normalized_index,
+            "provider_index_identifier": normalized_index,
+            "index_identifier_source": "request",
+            "index_list_status": None,
+            "index_list_rows": 0,
+        }
+        fetcher = self._get_ssi_fetcher()
+        get_index_list = getattr(fetcher, "get_index_list", None)
+        if not callable(get_index_list):
+            diagnostics["index_list_status"] = "unavailable"
+            diagnostics["index_list_reason"] = "SSI IndexList method unavailable."
+            return normalized_index, normalized_index, diagnostics
+        payload = get_index_list(market)
+        diagnostics["index_list_status"] = payload.get("status")
+        rows = payload.get("rows") if isinstance(payload, dict) else None
+        if not isinstance(rows, list):
+            diagnostics["index_list_reason"] = self._safe_provider_reason(payload)
+            return normalized_index, normalized_index, diagnostics
+        diagnostics["index_list_rows"] = len(rows)
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            row_id = self._normalize_index_value(row.get("index_id"))
+            row_code = self._normalize_index_value(row.get("index_code"))
+            if normalized_index in {row_id, row_code}:
+                provider_identifier = row_id or row_code or normalized_index
+                public_index_code = row_code or row_id or normalized_index
+                diagnostics.update(
+                    {
+                        "provider_index_identifier": provider_identifier,
+                        "resolved_index_code": public_index_code,
+                        "index_identifier_source": "IndexList",
+                    }
+                )
+                return provider_identifier, public_index_code, diagnostics
+        if payload.get("status") != "ok":
+            diagnostics["index_list_reason"] = self._safe_provider_reason(payload)
+        return normalized_index, normalized_index, diagnostics
+
     def build_index_components(self, index_code: str, market: Optional[str] = None) -> Dict[str, Any]:
         """Return strict SSI index component rows for a discovered index code."""
         normalized_index = str(index_code or "").strip().upper()
         normalized_market = str(market or "").strip().upper() or None
-        payload = self._get_ssi_fetcher().get_index_components(normalized_index, market=normalized_market)
+        provider_index, public_index, diagnostics = self._resolve_ssi_index_identifier(normalized_index, normalized_market)
+        payload = self._get_ssi_fetcher().get_index_components(provider_index, market=normalized_market)
+        diagnostics.update(
+            {
+                "index_components_status": payload.get("status"),
+                "index_components_reason": self._safe_provider_reason(payload) if payload.get("status") != "ok" else None,
+            }
+        )
         if payload.get("status") != "ok":
             return {
                 "status": "unavailable",
                 "source": SSI_INDEX_COMPONENTS_SOURCE,
                 "reason": self._safe_provider_reason(payload),
-                "index_code": normalized_index,
+                "index_code": public_index,
                 "market": normalized_market,
                 "rows": [],
                 "count": 0,
                 "fallback_used": False,
+                "diagnostics": diagnostics,
             }
+        rows = []
+        for row in payload.get("rows") or []:
+            if not isinstance(row, dict):
+                continue
+            normalized_row_index = self._normalize_index_value(row.get("index_code"))
+            row_payload = dict(row)
+            if not normalized_row_index or normalized_row_index == provider_index:
+                row_payload["index_code"] = public_index
+            rows.append(row_payload)
         return {
             **payload,
             "source": SSI_INDEX_COMPONENTS_SOURCE,
             "fallback_used": False,
-            "index_code": payload.get("index_code") or normalized_index,
-            "rows": payload.get("rows") or [],
-            "count": len(payload.get("rows") or []),
+            "index_code": public_index,
+            "rows": rows,
+            "count": len(rows),
+            "diagnostics": diagnostics,
         }
 
     def _build_cache_metadata(self, rows: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -3065,6 +3137,7 @@ class VietnamMarketService:
                 "name": company_name,
                 "company_name": company_name,
                 "security_type": symbol_metadata.get("security_type"),
+                "industry": symbol_metadata.get("industry"),
                 "market": symbol_metadata.get("market"),
                 "metadata_source": metadata_source,
                 "symbol_metadata": symbol_metadata,
@@ -3371,6 +3444,7 @@ class VietnamMarketService:
             "exchange": exchange,
             "market": symbol_metadata.get("market"),
             "security_type": symbol_metadata.get("security_type"),
+            "industry": symbol_metadata.get("industry"),
             "metadata_source": metadata_source,
             "symbol_metadata": symbol_metadata,
             "issuer": symbol_metadata.get("issuer"),

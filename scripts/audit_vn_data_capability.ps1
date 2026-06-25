@@ -554,19 +554,31 @@ $capabilities += New-CapabilityRow "Trade tape" $tradeStatus "SSI trade-tape con
 
 $indexListRows = @(Convert-ToList (Get-Value $indexListResponse @("rows"))).Count
 $indexComponentRows = @(Convert-ToList (Get-Value $indexComponentsResponse @("rows"))).Count
+$indexComponentsDiagnostics = Get-Value $indexComponentsResponse @("diagnostics")
+$indexProviderIdentifier = Get-Value $indexComponentsDiagnostics @("provider_index_identifier")
+$indexIdentifierSource = Get-Value $indexComponentsDiagnostics @("index_identifier_source")
+$indexComponentsReason = Get-Value $indexComponentsResponse @("reason")
+if (-not (Has-Value $indexComponentsReason)) {
+  $indexComponentsReason = Get-Value $indexComponentsDiagnostics @("index_components_reason")
+}
 $indexStatus = if ((Get-Status $indexListResponse) -eq "ok" -and $indexListRows -gt 0 -and (Get-Status $indexComponentsResponse) -eq "ok" -and $indexComponentRows -gt 0) { "reliable" } elseif ((Get-Status $indexListResponse) -eq "ok" -and $indexListRows -gt 0) { "partial" } elseif ((Get-Status $indexListResponse) -eq "disabled" -or (Get-Status $indexComponentsResponse) -eq "disabled") { "disabled" } elseif ((Get-Status $indexListResponse) -eq "unavailable" -or (Get-Status $indexComponentsResponse) -eq "unavailable") { "unavailable" } else { "unknown-needs-verification" }
-$capabilities += New-CapabilityRow "Index data / index components" $indexStatus "SSI IndexList / SSI IndexComponents" ("index-list status={0}, rows={1}; VN30 components status={2}, rows={3}" -f (Get-Status $indexListResponse), $indexListRows, (Get-Status $indexComponentsResponse), $indexComponentRows) "index identifiers and component rows when returned" "Use SSI-returned identifiers; do not hardcode components."
+$capabilities += New-CapabilityRow "Index data / index components" $indexStatus "SSI IndexList / SSI IndexComponents" ("index-list status={0}, rows={1}; VN30 components status={2}, rows={3}; provider_identifier={4}; identifier_source={5}; reason={6}" -f (Get-Status $indexListResponse), $indexListRows, (Get-Status $indexComponentsResponse), $indexComponentRows, (Format-ScalarValue $indexProviderIdentifier), (Format-ScalarValue $indexIdentifierSource), (Format-ScalarValue $indexComponentsReason)) "index identifiers and component rows when returned" "Use SSI-returned identifiers; do not hardcode components."
 
 $profile = Get-Value $companyResponse @("profile")
 $profileStatusRaw = Get-Status $profile
 $profileFields = 0
+$profilePresentFields = @()
+$profileMissingFields = @()
 foreach ($field in @("name", "exchange", "industry")) {
   if (Has-Value (Get-Value $profile @($field))) {
     $profileFields += 1
+    $profilePresentFields += $field
+  } else {
+    $profileMissingFields += $field
   }
 }
 $profileStatus = if ($profileStatusRaw -eq "ok" -and $profileFields -ge 3) { "reliable" } elseif ($profileStatusRaw -eq "ok" -or $profileFields -gt 0) { "partial" } elseif ($profileStatusRaw -eq "missing") { "partial" } elseif ($profileStatusRaw -eq "unavailable") { "unavailable" } else { "unknown-needs-verification" }
-$capabilities += New-CapabilityRow "Profile / securities metadata" $profileStatus "SSI Securities / SSI SecuritiesDetails" ("company profile status={0}; name/exchange/industry fields present={1}/3" -f $profileStatusRaw, $profileFields) "ticker, name, exchange, industry only when present" "Profile can be partial even when SSI metadata status is ok."
+$capabilities += New-CapabilityRow "Profile / securities metadata" $profileStatus "SSI Securities / SSI SecuritiesDetails" ("company profile status={0}; fields present={1}/3; present={2}; missing={3}" -f $profileStatusRaw, $profileFields, (Format-UniqueValues $profilePresentFields), (Format-UniqueValues $profileMissingFields)) "ticker, name, exchange, industry only when present" "Profile can be partial even when SSI metadata status is ok."
 
 $newsStatus = if ($newsStatuses -contains "ok") { "partial" } elseif ($newsStatuses -contains "disabled") { "disabled" } else { "future-provider" }
 $capabilities += New-CapabilityRow "News" $newsStatus "NewsProvider future" ("watchlist news statuses: {0}; company news status={1}" -f (($newsStatuses | Select-Object -Unique) -join ","), (Get-Status (Get-Value $companyResponse @("news")))) "news rows only after separate provider exists" "Current VN runtime must not use Mozyfin news fallback."
@@ -631,13 +643,18 @@ Write-Host "- Evidence source: current app API response fields; SSI is not calle
 
 Write-Host ""
 Write-Host "Observed reliable domains for this audit run:"
-@($capabilities | Where-Object { $_.Status -eq "reliable" } | ForEach-Object {
+$reliableDomainLines = @($capabilities | Where-Object { $_.Status -eq "reliable" } | ForEach-Object {
   if ($_.Domain -eq "Intraday OHLCV / intraday pulse") {
     "- {0}: {1} usable current pulse rows" -f $_.Domain, $intradayUsableRatio
   } else {
     "- {0}" -f $_.Domain
   }
-}) | ForEach-Object { Write-Host $_ }
+})
+if ($reliableDomainLines.Count -eq 0) {
+  Write-Host "- none"
+} else {
+  $reliableDomainLines | ForEach-Object { Write-Host $_ }
+}
 
 Write-Host ""
 Write-Host "Partial/unavailable/disabled domains:"

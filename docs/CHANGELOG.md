@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [fix] Carry SSI Securities/SecuritiesDetails industry metadata into Vietnam watchlist and company profile responses when provider fields exist.
+- [fix] Resolve SSI IndexComponents requests through IndexList identifiers and expose sanitized index/profile audit diagnostics.
 - [fix] Add SSI IntradayOhlc rate-limit cooldown guardrails with sanitized diagnostics and no daily-price ownership changes.
 - [fix] Classify SSI IntradayOhlc live request failures with sanitized diagnostics while preserving daily price ownership.
 - [new feature] Add a config-disabled SSI streaming realtime manager and cache skeleton with deterministic tests.

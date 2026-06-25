@@ -151,7 +151,7 @@ Source ownership:
 - Company `price.source` and `price.canonical_source` identify `SSI DailyOhlc`; `price.reference_source` identifies `SSI DailyStockPrice` for reference, ceiling, and floor fields.
 - Company `trading_stats` uses SSI DailyOhlc daily open/high/low/close/volume/value.
 - Reference/limits, foreign flow, matched/put-through, and adjusted-close values use SSI DailyStockPrice when exposed.
-- Profile metadata uses SSI Securities/SecuritiesDetails when available.
+- Profile metadata uses SSI Securities/SecuritiesDetails when available, including industry/sector only when SSI returns a mapped metadata field.
 
 Null/empty rules:
 
@@ -250,11 +250,13 @@ Response sections:
 
 - Index code/status/source.
 - Component rows when SSI returns usable data.
-- Unavailable status and diagnostics when SSI does not return rows.
+- Unavailable status and sanitized diagnostics when SSI does not return rows.
+- `index_code=...` is the documented query parameter; `index=...` remains accepted as a backward-compatible alias.
 
 Source ownership:
 
 - SSI IndexComponents owns component rows when available.
+- The service resolves provider-owned index identifiers from SSI IndexList before requesting IndexComponents.
 - No Mozyfin/KBS fallback.
 
 Null/empty rules:

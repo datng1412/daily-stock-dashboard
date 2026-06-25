@@ -386,11 +386,11 @@ Company research current behavior:
 
 `IndexList` rows normalize `index_id`, `index_code`, `index_name`, `exchange`, `market`, and `source`.
 
-`IndexComponents` rows normalize `index_code`, `symbol`, `exchange`, `market`, `weight`, `name`, and `source` when SSI returns component rows. Missing optional component fields remain null.
+`IndexComponents` rows normalize `index_code`, `symbol`, `exchange`, `market`, `weight`, `name`, and `source` when SSI returns component rows. The service first checks `IndexList` for a provider-owned identifier matching the requested code, then calls `IndexComponents` with that identifier. Responses include sanitized diagnostics for the requested index, provider identifier, identifier source, provider status, and reason. Missing optional component fields remain null.
 
-`Securities` and `SecuritiesDetails` rows normalize symbol metadata such as symbol, exchange, market, security type, names, issuer, lot size, listed shares, and listed date when present.
+`Securities` and `SecuritiesDetails` rows normalize symbol metadata such as symbol, exchange, market, security type, names, industry/sector, issuer, lot size, listed shares, and listed date when present.
 
-VN watchlist/detail responses now expose SSI metadata through `symbol_metadata` plus compatibility fields such as `company_name`, `security_type`, `metadata_source`, `issuer`, `lot_size`, `listed_shares`, and `listed_date`. The service queries `SecuritiesDetails` first and may use `Securities` only as an SSI same-provider metadata fallback. Mozyfin is not used for SSI-owned symbol metadata.
+VN watchlist/detail responses now expose SSI metadata through `symbol_metadata` plus compatibility fields such as `company_name`, `industry`, `security_type`, `metadata_source`, `issuer`, `lot_size`, `listed_shares`, and `listed_date`. The service queries `SecuritiesDetails` first and may use `Securities` only as an SSI same-provider metadata fallback. Mozyfin is not used for SSI-owned symbol metadata.
 
 ## Unavailable behavior
 

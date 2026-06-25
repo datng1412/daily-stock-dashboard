@@ -188,6 +188,15 @@ class _StubSsiFetcher:
         self.securities_details_args.append({"symbol": symbol, "market": market})
         return self.securities_details
 
+    def get_intraday_ohlcv(self, symbol, timeframe="1h", limit=8):
+        return {"status": "unavailable", "source": "SSI", "reason": "SSI IntradayOhlc disabled in test stub", "rows": []}
+
+    def get_realtime_snapshot(self, symbols):
+        return {"status": "unavailable", "source": "SSI", "reason": "SSI realtime disabled in test stub", "quotes": []}
+
+    def get_trade_tape(self, symbol, limit=100):
+        return {"status": "unavailable", "source": "SSI", "reason": "SSI trade tape disabled in test stub", "trades": []}
+
 
 def _sample_vn_rows():
     return pd.DataFrame(
@@ -618,6 +627,7 @@ def test_ssi_symbol_metadata_enrichment_uses_securities_details(monkeypatch):
                     "security_type": "stock",
                     "name": "Cong ty Co phan FPT",
                     "name_en": "FPT Corporation",
+                    "industry": "Information Technology",
                     "issuer": "FPT",
                     "lot_size": 100,
                     "listed_shares": 1_471_069_982,
@@ -640,14 +650,16 @@ def test_ssi_symbol_metadata_enrichment_uses_securities_details(monkeypatch):
     assert ssi.securities_calls == 0
     assert ssi.securities_details_args == [{"symbol": "FPT", "market": "HOSE"}]
     assert item["symbol_metadata"]["status"] == "ok"
-    assert item["symbol_metadata"]["source"] == "SSI"
+    assert item["symbol_metadata"]["source"] == "SSI SecuritiesDetails"
     assert item["symbol_metadata"]["symbol"] == "FPT"
     assert item["company_name"] == "Cong ty Co phan FPT"
     assert item["name"] == "Cong ty Co phan FPT"
     assert item["exchange"] == "HOSE"
     assert item["market"] == "HOSE"
     assert item["security_type"] == "stock"
-    assert item["metadata_source"] == "SSI"
+    assert item["industry"] == "Information Technology"
+    assert item["symbol_metadata"]["industry"] == "Information Technology"
+    assert item["metadata_source"] == "SSI SecuritiesDetails"
     assert item["issuer"] == "FPT"
     assert item["lot_size"] == 100
     assert item["listed_shares"] == 1_471_069_982
@@ -1005,7 +1017,7 @@ def test_index_list_service_uses_strict_ssi_without_mozyfin_fallback(monkeypatch
     payload = service.build_index_list("hose")
 
     assert payload["status"] == "ok"
-    assert payload["source"] == "SSI"
+    assert payload["source"] == "SSI IndexList"
     assert payload["fallback_used"] is False
     assert payload["rows"][0]["index_code"] == "VN30"
     assert payload["rows"][0]["index_name"] == "VN30 Index"
@@ -1045,7 +1057,7 @@ def test_index_components_service_uses_strict_ssi_without_mozyfin_fallback(monke
     payload = service.build_index_components("vn30", market="hose")
 
     assert payload["status"] == "ok"
-    assert payload["source"] == "SSI"
+    assert payload["source"] == "SSI IndexComponents"
     assert payload["fallback_used"] is False
     assert payload["index_code"] == "VN30"
     assert payload["rows"][0]["symbol"] == "FPT"
@@ -1053,6 +1065,57 @@ def test_index_components_service_uses_strict_ssi_without_mozyfin_fallback(monke
     assert ssi.index_components_args == [{"index_code": "VN30", "market": "HOSE"}]
     assert manager.daily_calls == 0
     assert manager.fetcher.quote_calls == 0
+
+
+def test_index_components_resolves_provider_identifier_from_index_list(monkeypatch):
+    monkeypatch.delenv("MOZYFIN_FIXTURE_DIR", raising=False)
+    manager = _StubManager(_sample_vn_rows_count(60))
+    ssi = _StubSsiFetcher(
+        index_list={
+            "status": "ok",
+            "source": "SSI",
+            "rows": [
+                {
+                    "index_id": "VN30-SSI-ID",
+                    "index_code": "VN30",
+                    "index_name": "VN30 Index",
+                    "market": "HOSE",
+                    "source": "SSI",
+                }
+            ],
+        },
+        index_components={
+            "status": "ok",
+            "source": "SSI",
+            "index_code": "VN30-SSI-ID",
+            "rows": [
+                {
+                    "index_code": "VN30-SSI-ID",
+                    "symbol": "FPT",
+                    "exchange": "HOSE",
+                    "market": "HOSE",
+                    "weight": 7.25,
+                    "name": "FPT Corp",
+                    "source": "SSI",
+                }
+            ],
+        },
+    )
+    service = VietnamMarketService(
+        manager=manager,
+        config=VietnamDashboardConfig(history_days=30, news_limit=0),
+        ssi_fetcher=ssi,
+    )
+
+    payload = service.build_index_components("VN30", market="HOSE")
+
+    assert payload["status"] == "ok"
+    assert payload["index_code"] == "VN30"
+    assert payload["rows"][0]["index_code"] == "VN30"
+    assert ssi.index_list_args == [{"market": "HOSE"}]
+    assert ssi.index_components_args == [{"index_code": "VN30-SSI-ID", "market": "HOSE"}]
+    assert payload["diagnostics"]["provider_index_identifier"] == "VN30-SSI-ID"
+    assert payload["diagnostics"]["index_identifier_source"] == "IndexList"
 
 
 def test_index_components_unavailable_state_remains_clean(monkeypatch):
@@ -1069,16 +1132,15 @@ def test_index_components_unavailable_state_remains_clean(monkeypatch):
 
     payload = service.build_index_components("VN30")
 
-    assert payload == {
-        "status": "unavailable",
-        "source": "SSI",
-        "reason": "SSI FastConnect request failed",
-        "index_code": "VN30",
-        "market": None,
-        "rows": [],
-        "count": 0,
-        "fallback_used": False,
-    }
+    assert payload["status"] == "unavailable"
+    assert payload["source"] == "SSI IndexComponents"
+    assert payload["reason"] == "SSI FastConnect request failed"
+    assert payload["index_code"] == "VN30"
+    assert payload["market"] is None
+    assert payload["rows"] == []
+    assert payload["count"] == 0
+    assert payload["fallback_used"] is False
+    assert payload["diagnostics"]["index_identifier_source"] == "request"
     assert manager.daily_calls == 0
 
 
@@ -1132,6 +1194,7 @@ def test_vietnam_index_endpoints_preserve_ssi_fields(monkeypatch, tmp_path):
 
     index_list = client.get("/api/v1/stocks/vn/index-list?market=HOSE").json()
     components = client.get("/api/v1/stocks/vn/index-components?index_code=VN30&market=HOSE").json()
+    components_alias = client.get("/api/v1/stocks/vn/index-components?index=VN30&market=HOSE").json()
 
     assert index_list["source"] == "SSI"
     assert index_list["fallback_used"] is False
@@ -1140,6 +1203,8 @@ def test_vietnam_index_endpoints_preserve_ssi_fields(monkeypatch, tmp_path):
     assert components["fallback_used"] is False
     assert components["rows"][0]["symbol"] == "FPT"
     assert components["rows"][0]["weight"] == 7.25
+    assert components_alias["source"] == "SSI"
+    assert components_alias["rows"][0]["symbol"] == "FPT"
 
 
 def test_ssi_daily_stock_price_unavailable_does_not_use_mozyfin_quote(monkeypatch):

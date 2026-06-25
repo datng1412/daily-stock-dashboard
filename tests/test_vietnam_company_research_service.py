@@ -25,6 +25,7 @@ def test_vietnam_company_research_endpoint_returns_phase_one_contract(monkeypatc
                             "symbol": "FPT",
                             "exchange": "HOSE",
                             "market": "HOSE",
+                            "industry": "Information Technology",
                             "source": "SSI",
                         },
                         "latest_price": 124.6,
@@ -132,6 +133,7 @@ def test_vietnam_company_research_endpoint_returns_phase_one_contract(monkeypatc
     assert payload["ticker"] == "FPT"
     assert payload["status"] == "ok"
     assert payload["profile"]["source"] == "SSI SecuritiesDetails"
+    assert payload["profile"]["industry"] == "Information Technology"
     assert payload["price"]["source"] == "SSI DailyOhlc"
     assert payload["price"]["canonical_source"] == "SSI DailyOhlc"
     assert payload["price"]["reference_source"] == "SSI DailyStockPrice"
@@ -191,6 +193,7 @@ def test_vietnam_company_research_keeps_unavailable_live_sections_visible(monkey
                             "symbol": "FPT",
                             "exchange": "HOSE",
                             "market": "HOSE",
+                            "industry": "Information Technology",
                             "source": "SSI",
                         },
                         "latest_price": 124.6,

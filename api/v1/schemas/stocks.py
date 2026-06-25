@@ -168,6 +168,7 @@ class VietnamSymbolMetadata(BaseModel):
     security_type: Optional[str] = None
     name: Optional[str] = None
     name_en: Optional[str] = None
+    industry: Optional[str] = None
     issuer: Optional[str] = None
     lot_size: Optional[int] = None
     listed_shares: Optional[int] = None
@@ -187,6 +188,7 @@ class VietnamWatchItem(BaseModel):
     exchange: Optional[str] = None
     market: Optional[str] = None
     security_type: Optional[str] = None
+    industry: Optional[str] = None
     metadata_source: Optional[str] = None
     symbol_metadata: VietnamSymbolMetadata = Field(default_factory=VietnamSymbolMetadata)
     issuer: Optional[str] = None
@@ -366,6 +368,7 @@ class VietnamIndexComponentsResponse(BaseModel):
     rows: List[VietnamIndexComponent] = Field(default_factory=list)
     count: int = 0
     fallback_used: bool = False
+    diagnostics: Dict[str, Any] = Field(default_factory=dict)
 
 
 class VietnamCompanyProfile(BaseModel):

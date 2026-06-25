@@ -536,12 +536,21 @@ def get_vietnam_index_list(
     description="Return SSI FastConnect component rows for one Vietnam index code.",
 )
 def get_vietnam_index_components(
-    index_code: str = Query(..., description="SSI index code returned by /vn/index-list, for example VN30"),
+    index_code: Optional[str] = Query(None, description="SSI index code returned by /vn/index-list, for example VN30"),
+    index_alias: Optional[str] = Query(None, alias="index", include_in_schema=False),
     market: Optional[str] = Query(None, description="Optional market/exchange filter such as HOSE, HNX, or UPCOM"),
 ) -> VietnamIndexComponentsResponse:
     try:
-        payload = VietnamMarketService().build_index_components(index_code=index_code, market=market)
+        requested_index = index_code or index_alias
+        if not requested_index:
+            raise HTTPException(
+                status_code=422,
+                detail={"error": "missing_index_code", "message": "index_code is required."},
+            )
+        payload = VietnamMarketService().build_index_components(index_code=requested_index, market=market)
         return VietnamIndexComponentsResponse(**payload)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Vietnam index components failed: %s", e, exc_info=True)
         raise HTTPException(

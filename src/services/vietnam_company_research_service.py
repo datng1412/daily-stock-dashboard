@@ -84,7 +84,7 @@ class VietnamCompanyResearchService:
             "ticker": symbol,
             "name": profile_name,
             "exchange": _first_present(row.get("exchange"), metadata.get("exchange"), row.get("market")),
-            "industry": None,
+            "industry": _first_present(row.get("industry"), metadata.get("industry")),
             "source": _first_present(metadata.get("source_label"), metadata.get("source")) or SSI_SECURITIES_DETAILS_SOURCE,
             "status": "ok" if metadata.get("status") == "ok" or _has_value(profile_name, row.get("exchange"), metadata.get("exchange")) else "missing",
         }
