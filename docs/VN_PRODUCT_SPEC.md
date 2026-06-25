@@ -109,7 +109,7 @@ Every block should make source ownership clear:
 * Daily close and chart: SSI DailyOhlc.
 * Reference, limits, matched, put-through, and latest foreign flow: SSI DailyStockPrice.
 * Intraday candles: SSI IntradayOhlc.
-* Realtime snapshot: SSI realtime contract.
+* Realtime snapshot: SSI FastConnect streaming realtime contract.
 * Trade tape: SSI trade-tape contract.
 * News: disabled until a separate provider exists.
 * Financials and corporate actions: future external providers.
@@ -291,7 +291,7 @@ The current MVP is:
 * SSI symbol metadata when available.
 * SSI IndexList and IndexComponents diagnostics when available.
 * SSI IntradayOhlc contract with freshness validation.
-* SSI realtime and trade-tape contracts with explicit unavailable states when live rows are not confirmed.
+* SSI realtime streaming parser coverage for buffered `X`, `X-QUOTE`, and `X-TRADE` messages, with explicit unavailable states until a live streaming adapter is implemented.
 * Company research page shell using the same source-aware market-data contract.
 * Frontend-only watchlist preset groups for VN30, Banks, Securities, Real estate, Consumer, Logistics, Tech, Oil & gas, and Electricity.
 * Local-only custom watchlist input using browser localStorage; no server sync.
@@ -305,7 +305,7 @@ Current known limitations are part of the product surface and should be visible 
 * SSI DailyOhlc and DailyStockPrice can disagree on the same ticker/date; `latest_price` currently remains SSI DailyOhlc close until canonical source and final/provisional semantics are resolved.
 * `final_close_status` can be `unknown` because SSI finality metadata and VN session/calendar rules are not fully wired.
 * SSI IntradayOhlc can be stale or mismatched against the daily trading date, so `intraday_pulse` should be `null` and `intraday_candles` should be `[]` when no usable current intraday data exists.
-* SSI realtime snapshot and trade tape are not confirmed live in the latest smoke; endpoint candidates can return unavailable or 404.
+* SSI realtime snapshot and trade tape are not confirmed live in the latest smoke. Realtime is streaming-based, and the current backend does not run a live SSI streaming adapter from request handlers.
 * Trade tape may still need contract cleanup from a placeholder wrapper object to `trade_tape = []` when unavailable.
 * Symbol metadata can be partial; optional company name, issuer, lot size, listed shares, listed date, and security type may remain null.
 * Foreign-flow rolling windows can be unavailable when SSI DailyStockPrice history is insufficient.

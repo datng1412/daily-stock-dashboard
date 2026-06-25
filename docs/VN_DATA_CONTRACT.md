@@ -145,6 +145,7 @@ Diagnostics may include:
 * Stale-date details.
 * Row counts.
 * Normalized keys.
+* Realtime failure mode such as `rest_unsupported`, `streaming_adapter_not_implemented`, `streaming_no_message`, or `streaming_parsed_rows`.
 * Sanitized provider error summaries.
 
 Watchlist live-section status objects may include a nested `diagnostics` object for sanitized provider details that were previously embedded in public messages. The public `message` field must remain short and user-safe.
@@ -203,8 +204,8 @@ Rules:
 | Index components | SSI IndexComponents | Use only when SSI returns rows |
 | Symbol metadata | SSI Securities/SecuritiesDetails | Optional fields may remain null |
 | Intraday candles | SSI IntradayOhlc | Strict source; no fallback |
-| Realtime snapshot | SSI realtime contract | Contract exists; live endpoint not confirmed |
-| Trade tape | SSI trade-tape contract | Contract exists; live endpoint not confirmed |
+| Realtime snapshot | SSI FastConnect streaming realtime contract | Parser covered for buffered `X`, `X-QUOTE`, and `X-TRADE`; live streaming adapter not implemented |
+| Trade tape | SSI trade-tape contract | Contract exists; live list/history semantics not confirmed |
 | News | Future NewsProvider | Disabled now |
 | Financials | Future external provider | Not implemented |
 | Corporate actions | Future external provider | Not implemented; no inference |

@@ -307,7 +307,8 @@ Response rules:
 
 - Realtime output is optional and not a substitute for SSI DailyOhlc.
 - Missing quote lists return `[]`; embedded unavailable snapshot objects should be `null`.
-- SSI realtime is not confirmed live in the handoff context; endpoint/http details belong in diagnostics.
+- SSI realtime is a FastConnect streaming contract. The backend currently has parser coverage for buffered `X`, `X-QUOTE`, and `X-TRADE` messages, but no live streaming adapter is implemented.
+- Until a bounded streaming adapter safely populates current rows, this endpoint should return unavailable with `realtime_snapshot=null`; stream/REST failure details belong in diagnostics.
 - Legacy KBS may exist behind explicit development flags, but it is not a normal VN runtime fallback.
 - Primary UI should label this section as SSI realtime or realtime snapshot, not KBS.
 
