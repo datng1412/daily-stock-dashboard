@@ -206,6 +206,7 @@ def _service() -> VietnamMarketService:
             realtime_data_provider="ssi",
             trade_tape_provider="ssi",
             ssi_realtime_enabled=True,
+            ssi_streaming_realtime_enabled=True,
             ssi_trade_tape_enabled=True,
             kbs_enabled=False,
             allow_legacy_kbs_provider=False,

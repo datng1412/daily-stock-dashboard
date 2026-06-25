@@ -18,6 +18,7 @@ import pandas as pd
 
 from data_provider.base import DataFetcherManager
 from data_provider.ssi_fastconnect_fetcher import SsiFastConnectFetcher
+from data_provider.ssi_streaming_realtime import SSI_STREAMING_REALTIME_DISABLED_REASON
 from src.config import get_config
 from src.services.vietnam_observability import (
     monotonic_ms,
@@ -350,6 +351,7 @@ class VietnamDashboardConfig:
     realtime_data_provider: str = VN_PROVIDER_SSI
     trade_tape_provider: str = VN_PROVIDER_SSI
     ssi_realtime_enabled: bool = True
+    ssi_streaming_realtime_enabled: bool = False
     ssi_trade_tape_enabled: bool = True
     kbs_enabled: bool = False
     allow_legacy_kbs_provider: bool = False
@@ -368,6 +370,7 @@ def _default_dashboard_config() -> VietnamDashboardConfig:
         realtime_data_provider=getattr(app_config, "vn_realtime_data_provider", VN_PROVIDER_SSI),
         trade_tape_provider=getattr(app_config, "vn_trade_tape_provider", VN_PROVIDER_SSI),
         ssi_realtime_enabled=getattr(app_config, "ssi_fastconnect_realtime_enabled", True),
+        ssi_streaming_realtime_enabled=getattr(app_config, "ssi_streaming_realtime_enabled", False),
         ssi_trade_tape_enabled=getattr(app_config, "ssi_fastconnect_trade_tape_enabled", True),
         kbs_enabled=getattr(app_config, "kbs_enabled", False),
         allow_legacy_kbs_provider=getattr(app_config, "vn_allow_legacy_kbs_provider", False),
@@ -2018,6 +2021,7 @@ class VietnamMarketService:
         *,
         status: str = "unavailable",
         reason: Optional[str] = None,
+        diagnostics: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         reason_text = reason or VN_REALTIME_UNAVAILABLE_REASON
         public_status = _public_live_status(status)
@@ -2027,9 +2031,11 @@ class VietnamMarketService:
             "message": VN_REALTIME_UNAVAILABLE_REASON,
             "ticker": symbol,
         }
-        diagnostics = _status_diagnostics(reason_text if reason_text != VN_REALTIME_UNAVAILABLE_REASON else None)
+        safe_diagnostics = _status_diagnostics(reason_text if reason_text != VN_REALTIME_UNAVAILABLE_REASON else None)
         if diagnostics:
-            status_payload["diagnostics"] = diagnostics
+            safe_diagnostics.update(diagnostics)
+        if safe_diagnostics:
+            status_payload["diagnostics"] = safe_diagnostics
         return {
             "realtime_source": SSI_REALTIME_SOURCE,
             "realtime_snapshot": None,
@@ -2128,6 +2134,17 @@ class VietnamMarketService:
     def _load_ssi_realtime_payload(self, symbol: str) -> Dict[str, Any]:
         if self.config.realtime_data_provider != VN_PROVIDER_SSI or not self.config.ssi_realtime_enabled:
             return self._disabled_realtime_payload(symbol)
+        if not self.config.ssi_streaming_realtime_enabled:
+            return self._ssi_realtime_unavailable_payload(
+                symbol,
+                reason=SSI_STREAMING_REALTIME_DISABLED_REASON,
+                diagnostics={
+                    "streaming_status": "disabled",
+                    "manager_state": "disabled",
+                    "cache_status": "disabled",
+                    "live_adapter_status": "not_enabled",
+                },
+            )
 
         payload = self._get_ssi_fetcher().get_realtime_snapshot([symbol])
         status = str(payload.get("status") or "").lower() if isinstance(payload, dict) else ""
@@ -2144,6 +2161,7 @@ class VietnamMarketService:
                         "source": SSI_REALTIME_SOURCE,
                         "message": None,
                         "ticker": symbol,
+                        "diagnostics": payload.get("diagnostics") or {},
                     },
                 }
             return self._ssi_realtime_unavailable_payload(symbol, reason="SSI realtime returned no quote row.")
@@ -2153,6 +2171,9 @@ class VietnamMarketService:
             symbol,
             status=status or "unavailable",
             reason=(payload.get("reason") or payload.get("message")) if isinstance(payload, dict) else None,
+            diagnostics=(payload.get("diagnostics") if isinstance(payload.get("diagnostics"), dict) else None)
+            if isinstance(payload, dict)
+            else None,
         )
 
     def _load_ssi_trade_tape_payload(self, symbol: str, limit: int = 100) -> Dict[str, Any]:
@@ -2769,12 +2790,34 @@ class VietnamMarketService:
                 "quotes": [],
                 "cache": {"cache_status": "disabled"},
             }
+        if not self.config.ssi_streaming_realtime_enabled:
+            diagnostics = {
+                "streaming_status": "disabled",
+                "manager_state": "disabled",
+                "cache_status": "disabled",
+                "live_adapter_status": "not_enabled",
+            }
+            return {
+                "market": "VN",
+                "source": SSI_REALTIME_SOURCE,
+                "status": "unavailable",
+                "error": SSI_STREAMING_REALTIME_DISABLED_REASON,
+                "error_detail": SSI_STREAMING_REALTIME_DISABLED_REASON,
+                "requested_tickers": tickers,
+                "quotes": [],
+                "cache": {"cache_status": "disabled"},
+                "streaming_status": "disabled",
+                "manager_state": "disabled",
+                "cache_status": "disabled",
+                "diagnostics": diagnostics,
+            }
 
         cache_key = _cache_key(
             "realtime_snapshot",
             ",".join(tickers),
             provider=self.config.realtime_data_provider,
             enabled=self.config.ssi_realtime_enabled,
+            streaming_enabled=self.config.ssi_streaming_realtime_enabled,
         )
         result = _read_cache(
             cache_key,
@@ -2804,6 +2847,12 @@ class VietnamMarketService:
                 "ttl_seconds": VN_CACHE_TTL_SECONDS["realtime_snapshot"],
             },
         }
+        diagnostics = payload.get("diagnostics") if isinstance(payload.get("diagnostics"), dict) else {}
+        if diagnostics:
+            response["diagnostics"] = diagnostics
+        for key in ("streaming_status", "manager_state", "cache_status", "parsed_streaming_rows"):
+            if key in payload:
+                response[key] = payload.get(key)
         if status == "ok" and not quotes:
             response["status"] = "unavailable"
             response["error"] = VN_REALTIME_UNAVAILABLE_REASON
@@ -3152,6 +3201,7 @@ class VietnamMarketService:
             symbol,
             provider=self.config.realtime_data_provider,
             enabled=self.config.ssi_realtime_enabled,
+            streaming_enabled=self.config.ssi_streaming_realtime_enabled,
         )
         realtime_result = _read_cache(
             realtime_key,

@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [new feature] Add a config-disabled SSI streaming realtime manager and cache skeleton with deterministic tests.
 - [documentation] Document official SSI Python FC Data streaming client semantics and keep live realtime deferred behind a safe adapter.
 - [fix] Add SSI streaming realtime parser coverage while keeping live realtime unavailable until a bounded streaming adapter exists.
 - [fix] Stop probing unverified SSI realtime candidate endpoints and report unsupported realtime discovery explicitly.

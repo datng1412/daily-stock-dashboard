@@ -115,6 +115,8 @@ realtime_snapshot = null
 
 The primary UI should not render snapshot price, snapshot time, change, or session-volume metric rows when `realtime_snapshot` is `null`.
 
+SSI realtime is streaming-backed. The service may read from a background manager/cache only when `SSI_STREAMING_REALTIME_ENABLED=true`, the manager is running, and the cache row is fresh. Request handlers must not open streams. When streaming runtime is disabled, not started, empty, stale, or errored, the public object remains `null` and diagnostics carry the safe reason.
+
 ### Trade Tape
 
 When SSI trade tape has usable rows:
@@ -145,7 +147,8 @@ Diagnostics may include:
 * Stale-date details.
 * Row counts.
 * Normalized keys.
-* Realtime failure mode such as `rest_unsupported`, `streaming_adapter_not_implemented`, `streaming_no_message`, or `streaming_parsed_rows`.
+* Realtime failure mode such as `rest_unsupported`, `streaming_disabled`, `streaming_manager_not_started`, `streaming_cache_empty`, `streaming_cache_stale`, `streaming_manager_error`, `live_adapter_not_enabled`, or `streaming_parsed_rows`.
+* Realtime manager/cache fields such as `streaming_status`, `manager_state`, `cache_status`, `parsed_streaming_rows`, and cache age or stale reason.
 * Sanitized provider error summaries.
 
 Watchlist live-section status objects may include a nested `diagnostics` object for sanitized provider details that were previously embedded in public messages. The public `message` field must remain short and user-safe.
@@ -204,7 +207,7 @@ Rules:
 | Index components | SSI IndexComponents | Use only when SSI returns rows |
 | Symbol metadata | SSI Securities/SecuritiesDetails | Optional fields may remain null |
 | Intraday candles | SSI IntradayOhlc | Strict source; no fallback |
-| Realtime snapshot | SSI FastConnect streaming realtime contract | Parser covered for buffered `X`, `X-QUOTE`, and `X-TRADE`; live streaming adapter not implemented |
+| Realtime snapshot | SSI FastConnect streaming realtime contract | Parser and disabled background manager/cache skeleton covered for buffered `X`, `X-QUOTE`, and `X-TRADE`; live official-client adapter not enabled |
 | Trade tape | SSI trade-tape contract | Contract exists; live list/history semantics not confirmed |
 | News | Future NewsProvider | Disabled now |
 | Financials | Future external provider | Not implemented |

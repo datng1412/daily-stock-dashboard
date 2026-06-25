@@ -143,6 +143,7 @@ def _service(fetcher: FakeSsiFetcher, *, realtime_enabled: bool = True, trade_ta
             realtime_data_provider="ssi",
             trade_tape_provider="ssi",
             ssi_realtime_enabled=realtime_enabled,
+            ssi_streaming_realtime_enabled=realtime_enabled,
             ssi_trade_tape_enabled=trade_tape_enabled,
             kbs_enabled=False,
             allow_legacy_kbs_provider=False,

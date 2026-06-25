@@ -133,6 +133,15 @@ function Format-UniqueValues {
   return ($normalized -join ",")
 }
 
+function Format-ScalarValue {
+  param([object]$Value)
+
+  if (Has-Value $Value) {
+    return [string]$Value
+  }
+  return "none"
+}
+
 function Get-Status {
   param([object]$Object)
 
@@ -464,10 +473,43 @@ $realtimeEndpointDetail = Get-Value $realtimeResponse @("error_detail", "error")
 if (-not (Has-Value $realtimeEndpointDetail)) {
   $realtimeEndpointDetail = "none"
 }
+$realtimeEndpointDiagnostics = Get-Value $realtimeResponse @("diagnostics")
+$realtimeStreamingStatus = Get-Value $realtimeResponse @("streaming_status")
+if (-not (Has-Value $realtimeStreamingStatus)) {
+  $realtimeStreamingStatus = Get-Value $realtimeEndpointDiagnostics @("streaming_status")
+}
+$realtimeManagerState = Get-Value $realtimeResponse @("manager_state")
+if (-not (Has-Value $realtimeManagerState)) {
+  $realtimeManagerState = Get-Value $realtimeEndpointDiagnostics @("manager_state")
+}
+$realtimeCacheStatus = Get-Value $realtimeResponse @("cache_status")
+if (-not (Has-Value $realtimeCacheStatus)) {
+  $realtimeCacheStatus = Get-Value $realtimeEndpointDiagnostics @("cache_status")
+}
+$realtimeLiveAdapterStatus = Get-Value $realtimeEndpointDiagnostics @("live_adapter_status")
+$realtimeParsedStreamingRows = Get-Value $realtimeResponse @("parsed_streaming_rows")
+if (-not (Has-Value $realtimeParsedStreamingRows)) {
+  $realtimeParsedStreamingRows = Get-Value $realtimeEndpointDiagnostics @("parser_rows_observed")
+}
+if (-not (Has-Value $realtimeParsedStreamingRows)) {
+  $realtimeParsedStreamingRows = $realtimeQuoteCount
+}
 $realtimeClassificationDetail = "{0}; watchlist_messages={1}" -f $realtimeEndpointDetail, (Format-UniqueValues $realtimeMessages)
 $realtimeFailureMode = "unknown-needs-verification"
 if ($realtimeQuoteCount -gt 0 -or $realtimeOkRows -gt 0) {
-  $realtimeFailureMode = "streaming_parsed_rows"
+  $realtimeFailureMode = if ($realtimeStreamingStatus -eq "cache_hit") { "streaming_cache_hit" } else { "streaming_parsed_rows" }
+} elseif ($realtimeStreamingStatus -eq "disabled" -or $realtimeManagerState -eq "disabled" -or $realtimeClassificationDetail -match "streaming realtime manager disabled") {
+  $realtimeFailureMode = "streaming_disabled"
+} elseif ($realtimeStreamingStatus -eq "manager_not_started" -or $realtimeClassificationDetail -match "manager not started") {
+  $realtimeFailureMode = "streaming_manager_not_started"
+} elseif ($realtimeStreamingStatus -eq "cache_empty" -or $realtimeClassificationDetail -match "cache empty") {
+  $realtimeFailureMode = "streaming_cache_empty"
+} elseif ($realtimeStreamingStatus -eq "cache_stale" -or $realtimeClassificationDetail -match "cache stale") {
+  $realtimeFailureMode = "streaming_cache_stale"
+} elseif ($realtimeStreamingStatus -eq "manager_error" -or $realtimeManagerState -eq "errored") {
+  $realtimeFailureMode = "streaming_manager_error"
+} elseif ($realtimeLiveAdapterStatus -eq "not_enabled" -and $realtimeClassificationDetail -match "live adapter") {
+  $realtimeFailureMode = "live_adapter_not_enabled"
 } elseif ($realtimeClassificationDetail -match "streaming adapter|connection semantics not implemented") {
   $realtimeFailureMode = "streaming_adapter_not_implemented"
 } elseif ($realtimeClassificationDetail -match "no streaming message") {
@@ -479,7 +521,7 @@ if ($realtimeQuoteCount -gt 0 -or $realtimeOkRows -gt 0) {
 } elseif ($realtimeEndpointStatus -eq "unavailable") {
   $realtimeFailureMode = "unavailable"
 }
-$capabilities += New-CapabilityRow "Realtime snapshot" $realtimeStatus "SSI realtime contract" ("endpoint status={0}; endpoint quote rows={1}; watchlist usable snapshots={2}/{3}; failure_mode={4}" -f (Get-Status $realtimeResponse), $realtimeQuoteCount, $realtimeOkRows, $rowCount, $realtimeFailureMode) "realtime_snapshot fields only when status ok and snapshot is non-null" "Do not use realtime snapshot as official daily close."
+$capabilities += New-CapabilityRow "Realtime snapshot" $realtimeStatus "SSI realtime contract" ("endpoint status={0}; endpoint quote rows={1}; watchlist usable snapshots={2}/{3}; failure_mode={4}; streaming_status={5}; manager_state={6}; cache_status={7}; parsed_streaming_rows={8}; live_adapter={9}" -f (Get-Status $realtimeResponse), $realtimeQuoteCount, $realtimeOkRows, $rowCount, $realtimeFailureMode, (Format-ScalarValue $realtimeStreamingStatus), (Format-ScalarValue $realtimeManagerState), (Format-ScalarValue $realtimeCacheStatus), $realtimeParsedStreamingRows, (Format-ScalarValue $realtimeLiveAdapterStatus)) "realtime_snapshot fields only when status ok and snapshot is non-null" "Do not use realtime snapshot as official daily close."
 
 $tradeEndpointStatus = Get-OptionalStatusFromEndpoint $tradesResponse "trades"
 $tradeStatus = if ($tradeEndpointStatus -eq "reliable" -and $tradeTapeOkRows -gt 0) { "reliable" } elseif ($tradeEndpointStatus -eq "disabled") { "disabled" } elseif ($tradeTapeOkRows -gt 0) { "partial" } elseif ($tradeEndpointStatus -eq "unavailable") { "unavailable" } else { "unknown-needs-verification" }
@@ -540,9 +582,13 @@ Write-Host ""
 Write-Host "Realtime evidence:"
 Write-Host ("- Realtime endpoint status: {0}" -f (Get-Status $realtimeResponse))
 Write-Host ("- Endpoint quote row count: {0}" -f $realtimeQuoteCount)
-Write-Host ("- Parsed streaming row count: {0}" -f $realtimeQuoteCount)
+Write-Host ("- Parsed streaming row count: {0}" -f $realtimeParsedStreamingRows)
 Write-Host ("- Watchlist usable snapshot ratio: {0}/{1}" -f $realtimeOkRows, $rowCount)
 Write-Host ("- Failure mode: {0}" -f $realtimeFailureMode)
+Write-Host ("- Streaming status: {0}" -f (Format-ScalarValue $realtimeStreamingStatus))
+Write-Host ("- Manager state: {0}" -f (Format-ScalarValue $realtimeManagerState))
+Write-Host ("- Cache status: {0}" -f (Format-ScalarValue $realtimeCacheStatus))
+Write-Host ("- Live adapter: {0}" -f (Format-ScalarValue $realtimeLiveAdapterStatus))
 Write-Host ("- Endpoint detail: {0}" -f $realtimeEndpointDetail)
 Write-Host ("- Watchlist detail: {0}" -f (Format-UniqueValues $realtimeMessages))
 Write-Host "- Evidence source: current app API response fields; SSI is not called directly by this script."

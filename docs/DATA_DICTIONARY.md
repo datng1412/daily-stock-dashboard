@@ -67,7 +67,7 @@ Conventions:
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `intraday_candles` | Usable intraday candles | SSI IntradayOhlc | list of OHLCV candles | no, empty list if unavailable | no | Live availability/chart adjunct | `[]` when unavailable/stale/no usable rows. |
 | `intraday_pulse` | Compact intraday summary object | Derived from usable SSI IntradayOhlc | object | yes | no | Live availability/Data Quality Summary | Phase 2.1 normalizes unavailable watchlist/company intraday pulse to `null`. |
-| `realtime_snapshot` | Realtime snapshot object | SSI FastConnect streaming realtime contract | object | yes | no | Live availability | `null` until SSI streaming messages are connected, parsed, and status is `ok`; parser coverage alone is not live support. |
+| `realtime_snapshot` | Realtime snapshot object | SSI FastConnect streaming realtime contract | object | yes | no | Live availability | `null` until SSI streaming messages are connected through a running background manager, parsed, cached fresh, and status is `ok`; parser/cache skeleton alone is not live support. |
 | `trade_tape` | Watchlist trade tape row list | SSI trade-tape contract | list | no, empty list if unavailable | no | Live availability | Phase 2.1 normalizes watchlist public data to a list: `[]` when unavailable/no rows, trade rows when usable. |
 | `trade_tape.trades` | Company detail trade tape rows | SSI trade-tape contract | list | no, empty list if unavailable | no | Company live availability | Company detail keeps rows under the nested block while preserving the same empty-list rule. |
 | `trade_tape_status` | Public status/source/message for trade tape | Service status wrapper | object | yes | no | Live availability status | Message should be short; sanitized endpoint/provider details belong in status diagnostics or other diagnostics-only structures. |
@@ -76,7 +76,7 @@ Conventions:
 
 | Field | Meaning | Source | Unit | Nullable | Canonical | UI placement | Known caveat |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `diagnostics.realtime` / `realtime_status.diagnostics` | Technical details for realtime snapshot attempts | Provider/service diagnostics | object | yes | no | Collapsible diagnostics only | May include REST unsupported state, streaming adapter state, parsed row counts, endpoint labels, HTTP status, retryable flag, and sanitized error summary. |
+| `diagnostics.realtime` / `realtime_status.diagnostics` | Technical details for realtime snapshot attempts | Provider/service diagnostics | object | yes | no | Collapsible diagnostics only | May include REST unsupported state, streaming disabled/not-started/cache-empty/cache-stale/cache-hit/manager-error state, parsed row counts, manager/cache labels, and sanitized error summary. |
 | `diagnostics.trade_tape` / `trade_tape_status.diagnostics` | Technical details for trade tape attempts | Provider/service diagnostics | object | yes | no | Collapsible diagnostics only | Must not leak tokens, auth headers, account IDs, or raw auth responses. |
 
 ## Profile Fields
@@ -91,7 +91,7 @@ Conventions:
 
 - Company shared daily fields: company `latest_price`, `daily_close`, daily OHLCV open/high/low/close/volume, and daily value align with the watchlist SSI DailyOhlc fields. Company reference, limits, foreign flow, matched/put-through, and adjusted-close values remain SSI DailyStockPrice-specific.
 - Dashboard top summary `Foreign net volume` sums `ssi_foreign_net_volume` from the latest successful complete watchlist response in shares. Do not mix this with `ssi_foreign_net_value`, which is VND and should be shown as a separate value-based metric if added.
-- Active dashboard labels use `Realtime snapshot`, `SSI realtime`, and `Trade tape` for live sections. KBS/Mozyfin names are reserved for legacy diagnostics or historical notes, not normal runtime UI.
+- Active dashboard labels use `Realtime snapshot`, `SSI realtime`, and `Trade tape` for live sections. Realtime status may be unavailable because the streaming manager is disabled, not started, empty, stale, or errored. KBS/Mozyfin names are reserved for legacy diagnostics or historical notes, not normal runtime UI.
 - Future module statuses: live-provider statuses remain `ok`, `unavailable`, `disabled`; future modules may use `not_implemented` until Phase 2 chooses a normalized shape.
 
 ## Standard Source Labels
@@ -101,7 +101,7 @@ Conventions:
 - `derived from SSI DailyOhlc`: technical indicators computed from canonical daily OHLCV.
 - `SSI Securities` / `SSI SecuritiesDetails`: security metadata and profile fields when available.
 - `SSI IntradayOhlc`: intraday candles and derived intraday pulse.
-- `SSI realtime contract`: optional FastConnect streaming realtime snapshot contract; live support is not confirmed by this label.
+- `SSI realtime contract`: optional FastConnect streaming realtime snapshot contract; live support is not confirmed by this label or by parser/cache skeleton presence.
 - `SSI trade-tape contract`: optional trade-tape contract; live support is not confirmed by this label.
 - `SSI IndexList` / `SSI IndexComponents`: index metadata and component rows.
 - `disabled`: intentionally disabled public sections, including current VN news status.

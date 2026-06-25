@@ -13,6 +13,7 @@ python -m pytest tests/test_vietnam_observability.py -q
 python -m pytest tests/test_vietnam_market_service_no_mozyfin.py -q
 python -m pytest tests/test_vietnam_market_service_realtime.py -q
 python -m pytest tests/test_vietnam_market_service_intraday.py -q
+python -m pytest tests/test_ssi_streaming_realtime.py -q
 ```
 
 Expected protection:
@@ -21,6 +22,7 @@ Expected protection:
 - KBS remains legacy optional only and disabled by default.
 - News is disabled until a separate provider exists.
 - SSI realtime unavailable returns `realtime_snapshot = null`.
+- SSI streaming realtime stays disabled by default, does not instantiate the official client when disabled, never starts on import, and reads only from a running manager plus fresh cache.
 - SSI intraday stale/unavailable returns `intraday_pulse = null` and `intraday_candles = []`.
 - SSI trade tape unavailable returns public `trade_tape = []`.
 - Observability separates disabled provider, provider unavailable, and cache state.

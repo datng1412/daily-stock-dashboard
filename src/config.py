@@ -660,6 +660,9 @@ class Config:
     ssi_fastconnect_intraday_enabled: bool = True
     ssi_fastconnect_realtime_enabled: bool = True
     ssi_fastconnect_trade_tape_enabled: bool = True
+    ssi_streaming_realtime_enabled: bool = False
+    ssi_streaming_realtime_cache_ttl_seconds: int = 15
+    ssi_streaming_realtime_channel_template: str = "X: {symbol}"
     vn_daily_data_provider: str = "ssi"
     vn_chart_data_provider: str = "ssi"
     vn_daily_stock_price_provider: str = "ssi"
@@ -1886,6 +1889,20 @@ class Config:
                 os.getenv('SSI_FASTCONNECT_TRADE_TAPE_ENABLED'),
                 default=True,
             ),
+            ssi_streaming_realtime_enabled=parse_env_bool(
+                os.getenv('SSI_STREAMING_REALTIME_ENABLED'),
+                default=False,
+            ),
+            ssi_streaming_realtime_cache_ttl_seconds=parse_env_int(
+                os.getenv('SSI_STREAMING_REALTIME_CACHE_TTL_SECONDS'),
+                15,
+                field_name='SSI_STREAMING_REALTIME_CACHE_TTL_SECONDS',
+                minimum=1,
+            ),
+            ssi_streaming_realtime_channel_template=(
+                os.getenv('SSI_STREAMING_REALTIME_CHANNEL_TEMPLATE')
+                or 'X: {symbol}'
+            ).strip() or 'X: {symbol}',
             vn_daily_data_provider=parse_env_choice(
                 os.getenv('VN_DAILY_DATA_PROVIDER'),
                 {'ssi'},

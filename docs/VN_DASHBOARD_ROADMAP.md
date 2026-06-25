@@ -52,7 +52,7 @@ This roadmap is the source of truth for Vietnam dashboard provider ownership. SS
 | IntradayOhlc | SSI FastConnect Data REST | Implemented and wired for watchlist/company intraday pulse | Use for compact intraday candles; keep separate from daily close and SSI realtime |
 | DailyStockPrice | SSI FastConnect Data REST | Implemented and wired for selected-ticker enrichment | Use for reference, ceiling/floor, adjusted close if provided, matched volume/value, put-through volume/value, and foreign buy/sell/net volume/value |
 | DailyIndex | SSI FastConnect Data REST | Implemented provider method with chunking; dashboard consumption is next | Use for daily index value, change, breadth, and liquidity |
-| Realtime snapshot | SSI FastConnect Data streaming | Provider, service, API, and UI contract added; buffered `X`, `X-QUOTE`, and `X-TRADE` parser covered; live streaming adapter not implemented | Keep unavailable and separate from daily close, intraday, and official daily OHLCV until a bounded SSI streaming adapter safely populates current rows |
+| Realtime snapshot | SSI FastConnect Data streaming | Provider, service, API, and UI contract added; buffered `X`, `X-QUOTE`, and `X-TRADE` parser covered; config-disabled background manager/cache skeleton added; live official-client adapter not enabled | Keep unavailable and separate from daily close, intraday, and official daily OHLCV until a bounded SSI streaming adapter safely populates current rows |
 | Trade tape | SSI FastConnect Data streaming or future verified trade contract | Provider, service, API, and UI contract added; live list/history semantics need confirmation | Keep separate from latest-trade stream messages and official daily OHLCV |
 | Legacy realtime snapshot/trade tape | KBS | Disabled by default; only available behind explicit legacy flags | Do not silently fallback from SSI to KBS |
 | News | Future NewsProvider | Disabled/not implemented | Do not call Mozyfin; return explicit disabled/not_implemented state |
@@ -92,7 +92,8 @@ If SSI-owned data is unavailable, show unavailable. Do not silently fallback.
 * Mozyfin fallback for SSI-owned fields is not allowed.
 * SSI realtime snapshot and trade tape are exposed through the existing realtime endpoints and dashboard/company UI blocks.
 * Phase 4.0C-2 searched the repository for a supported SSI FastConnect realtime REST endpoint, SDK method, enum, docs reference, or hidden contract and did not find one.
-* Phase 4.0C-3 confirmed SSI realtime is streaming-based and added deterministic parser coverage for buffered `X`, `X-QUOTE`, and `X-TRADE` messages. `get_realtime_snapshot()` remains unavailable with a clear streaming-adapter-not-implemented reason and still does not probe speculative REST candidate names.
+* Phase 4.0C-3 confirmed SSI realtime is streaming-based and added deterministic parser coverage for buffered `X`, `X-QUOTE`, and `X-TRADE` messages.
+* Phase 4.0C-5 added a config-disabled background streaming manager/cache skeleton. `get_realtime_snapshot()` can read only from a running manager and fresh cache when `SSI_STREAMING_REALTIME_ENABLED=true`; default runtime returns `SSI streaming realtime manager disabled.` and still does not probe speculative REST candidate names.
 * SSI realtime/trade-tape live endpoint names and entitlements may return unavailable. Unavailable states should include sanitized diagnostics without tokens, credentials, auth headers, or raw provider bodies.
 * Dashboard provider-status UI must keep core daily SSI availability separate from optional SSI realtime, SSI trade tape, SSI index components, and disabled news states. A `Partial` dashboard status can mean optional sections are unavailable; it must not imply daily SSI data failed when daily rows are OK.
 * KBS legacy realtime/trade-tape paths are disabled by default and require explicit legacy flags.
@@ -703,7 +704,7 @@ Phase 4.0C-3 SSI streaming realtime result:
 * `X-QUOTE` is quote context only and must not create a last-trade price.
 * `X` and `X-TRADE` can populate latest-trade snapshot fields only when `LastPrice` is present.
 * A single `X-TRADE` stream message is not full trade-tape history.
-* `get_realtime_snapshot()` remains `unavailable` with `SSI realtime requires FastConnect streaming adapter; connection semantics not implemented.` because no bounded streaming client, subscription lifecycle, or request-safe cache handoff exists yet.
+* Phase 4.0C-5 supersedes the parser-only runtime state with a config-disabled background manager/cache skeleton. The default response remains unavailable with `SSI streaming realtime manager disabled.`
 * Future streaming work must avoid `X: ALL` in runtime and must not run long-lived stream connections inside request handlers.
 
 Phase 4.0C-4 official Python FC Data client inspection result:
@@ -716,7 +717,7 @@ Phase 4.0C-4 official Python FC Data client inspection result:
 * SignalR constants: `v2.0/signalr`, hub `FcMarketDataV2Hub`, message method `Broadcast`, error method `Error`.
 * Subscription format is a caller-provided channel string, so symbol-scoped channels such as `X-TRADE: FPT`, `X-QUOTE: FPT`, or `X: FPT` are the safe runtime direction. Do not use `X: ALL`.
 * Runtime adapter remains deferred: the official client starts a daemon websocket thread, exposes no documented bounded receive/wait API, has a negotiation `print(self.headers)` path that can leak authorization headers, and its public `Connection.close()` path calls a non-existent transport `close()` method instead of the available `stop()` method.
-* Minimal future design: a background adapter that wraps or patches the official client to prevent header printing, subscribes only to symbol-scoped channels, writes latest parsed messages into a thread-safe cache, uses the Phase 4.0C-3 parser, and exposes a bounded cache read to `get_realtime_snapshot()`.
+* Minimal future live design: a background adapter that wraps or patches the official client to prevent header printing, subscribes only to symbol-scoped channels, writes latest parsed messages into the existing thread-safe cache, uses the Phase 4.0C-3 parser, and leaves request handlers as bounded cache readers.
 
 ### Phase 4.1A - Intraday Cadence and Freshness Correctness
 
@@ -1575,6 +1576,8 @@ Status: provider, service, API, and UI contract added in the current working tre
 * Live SSI realtime/trade-tape endpoint names, permissions, and row shapes still require validation in an environment with the relevant SSI data entitlements.
 
 ### Priority 4 - SSI streaming/protocol hardening
+
+Status: Phase 4.0C-5 added the disabled background manager/cache skeleton and mocked lifecycle/cache/parser tests. Live official-client streaming remains deferred.
 
 * Build a standalone streaming client.
 * Support safe subscriptions for market data, foreign room, index data, and realtime bars.

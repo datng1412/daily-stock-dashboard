@@ -621,6 +621,11 @@ class VietnamRealtimeResponse(BaseModel):
     requested_tickers: List[str] = Field(default_factory=list)
     quotes: List[VietnamRealtimeQuote] = Field(default_factory=list)
     cache: Dict[str, Any] = Field(default_factory=dict)
+    diagnostics: Dict[str, Any] = Field(default_factory=dict)
+    streaming_status: Optional[str] = None
+    manager_state: Optional[str] = None
+    cache_status: Optional[str] = None
+    parsed_streaming_rows: Optional[int] = None
 
 
 class VietnamRealtimeTrade(BaseModel):

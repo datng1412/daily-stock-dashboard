@@ -34,7 +34,7 @@ Last local audit baseline: 2026-06-24, using `FPT,VPB,ACB,SSI,GMD,GAS,POW,VNM` a
 | Foreign buy/sell/net value | SSI DailyStockPrice | `daily_stock_price`, `foreign`, `ssi_foreign_net_value` | `reliable` | `foreign_buy_value`, `foreign_sell_value`, `foreign_net_value` | Value fields can be absent while volume fields exist | Latest DailyStockPrice row; date alignment matters | Future value-based foreign-flow display | Baseline observed buy/sell/net value on 8/8 rows; do not mix with share-volume summaries. |
 | Technical indicators | Derived from SSI DailyOhlc | `indicators`, `calculate_vietnam_indicators` | `reliable` | `rsi14_wilder`/`rsi14`, `ma20`, `ma50`, Bollinger fields when present, volume ratio | Missing history yields unavailable indicator fields | Derived from daily history window | Scan table, selected ticker technical context | Baseline observed RSI14 and MA20/MA50 on 8/8 rows; RSI14 remains Wilder/RMA. |
 | Intraday OHLCV / intraday pulse | SSI IntradayOhlc | `intraday_status`, `intraday_candles`, `intraday_pulse`, company `intraday` | `partial` | `intraday_candles`, `intraday_pulse`, granularity fields only when status is `ok` and dates match | Stale, disabled, mismatched, empty, malformed, or request-failed rows remain unavailable/disabled | Provider-returned cadence; freshness must match daily trading date | Optional live layer only | Phase 4.0B root cause was a fetcher page-size/order bug: the dashboard requested `pageSize=8` with `ascending=true` over a 7-day window, so SSI returned only the oldest first-page rows. The fetcher now paginates internally with `pageSize=1000`, sorts rows, and returns the latest public limit. Isolated patched-backend audit observed partial live support: 1/8 usable current pulse rows, FPT `intraday_latest_date=2026-06-24`, `date_match=matched`, public candle count 8, requested `1h`, observed `1m`/61s; other tickers can still be unavailable/request-failed. |
-| Realtime snapshot | SSI FastConnect streaming realtime contract | `GET /api/v1/stocks/vn/realtime`, `realtime_status`, `realtime_snapshot` | `unknown-needs-verification` | Deterministic parser coverage for buffered `X`, `X-QUOTE`, and `X-TRADE` envelopes; snapshot fields only with `status=ok` and non-null snapshot | Runtime request path remains unavailable because a bounded SSI streaming adapter is not implemented | Realtime cadence not proven until current stream messages are connected, parsed, and surfaced safely | Optional live layer only | Phase 4.0C-3 confirmed realtime is an SSI streaming contract, not a REST candidate endpoint. The fetcher keeps `get_realtime_snapshot()` unavailable with reason `SSI realtime requires FastConnect streaming adapter; connection semantics not implemented.` Keep `realtime_snapshot=null`; do not infer from daily OHLCV or intraday. |
+| Realtime snapshot | SSI FastConnect streaming realtime contract | `GET /api/v1/stocks/vn/realtime`, `realtime_status`, `realtime_snapshot` | `unknown-needs-verification` | Deterministic parser coverage for buffered `X`, `X-QUOTE`, and `X-TRADE` envelopes; config-disabled manager/cache skeleton; snapshot fields only with `status=ok` and non-null snapshot | Default runtime remains unavailable because SSI streaming realtime is disabled and the live official-client adapter is not enabled | Realtime cadence not proven until current stream messages are connected, parsed, cached, and surfaced safely | Optional live layer only | Phase 4.0C-5 added a request-safe background manager/cache architecture, but parser/cache skeleton alone is not reliable realtime. The default fetcher keeps `get_realtime_snapshot()` unavailable with reason `SSI streaming realtime manager disabled.` Keep `realtime_snapshot=null`; do not infer from daily OHLCV or intraday. |
 | Trade tape | SSI trade-tape contract | `GET /api/v1/stocks/vn/realtime/trades`, `trade_tape_status`, `trade_tape` | `unavailable` | Trade rows only with `status=ok` and non-empty rows | Endpoint permissions, row shape, and live availability can be unavailable | Trade-list cadence not proven until current `ok` response exists | Optional live layer only | Baseline observed endpoint `unavailable`, 0 trade rows, and 0/8 usable watchlist trade rows. |
 | Index data / index components | SSI IndexList / SSI IndexComponents | `GET /api/v1/stocks/vn/index-list`, `GET /api/v1/stocks/vn/index-components`, `build_index_list`, `build_index_components` | `partial` | SSI-returned index identifiers and component rows | VN30 components can be unavailable depending on endpoint/permission | SSI endpoint response cadence; not tied to watchlist daily validity | Diagnostics and future index context | Baseline observed IndexList `ok` with 10 rows and VN30 components `unavailable` with 0 rows. |
 | Profile / securities metadata | SSI Securities / SSI SecuritiesDetails | `symbol_metadata`, company `profile`, `source_coverage` | `partial` | Ticker, exchange, market, name, issuer, security type, lot size, listed shares/date when present | Optional fields can remain null while provider status is `ok` | Metadata cadence is provider-specific and not daily price cadence | Header/profile/source coverage | Baseline company profile status was `ok`, but only 1 of name/exchange/industry was present. |
@@ -140,7 +140,7 @@ Parser rules:
 - Treat `X` and `X-TRADE` as latest-trade snapshot candidates only when `LastPrice` is present.
 - Do not turn a single `X-TRADE` message into full trade-tape history.
 
-Runtime state remains unavailable because the repository still does not implement a bounded SSI streaming client, subscription lifecycle, reconnection/backoff policy, or request-safe cache handoff. `SsiFastConnectFetcher.get_realtime_snapshot()` does not open a streaming connection and does not probe REST realtime candidates. It returns:
+Runtime state remained unavailable at the end of Phase 4.0C-3 because the repository did not implement a bounded SSI streaming client, subscription lifecycle, reconnection/backoff policy, or request-safe cache handoff. `SsiFastConnectFetcher.get_realtime_snapshot()` did not open a streaming connection and did not probe REST realtime candidates. It returned:
 
 ```text
 status = unavailable
@@ -149,7 +149,7 @@ rest_status = unsupported
 streaming_status = not_implemented
 ```
 
-Future implementation should run streaming outside request handlers, subscribe only to requested symbol scopes, avoid `X: ALL` in runtime, and surface rows only after current stream messages are parsed into the existing public realtime response shape.
+Phase 4.0C-5 adds the first request-safe cache handoff skeleton. Future live implementation should still run streaming outside request handlers, subscribe only to requested symbol scopes, avoid `X: ALL` in runtime, and surface rows only after current stream messages are parsed and cached fresh in the existing public realtime response shape.
 
 ## Phase 4.0C-4 Official Python Client Inspection
 
@@ -197,6 +197,33 @@ Safe bounded one-shot adapter feasibility:
 - `Connection.close()` calls `self.__transport.close()`, while the bundled transport exposes `stop()`; this needs wrapper-level close handling before runtime use.
 
 Conclusion: a minimal future adapter is feasible only as a background service, not inside request handlers. It should wrap the official client, subscribe to symbol-scoped channels only, collect messages into a thread-safe cache, call the parser added in Phase 4.0C-3, suppress or patch header printing, and provide an explicit stop path that uses the transport `stop()` method if the official `close()` path is not functional. `get_realtime_snapshot()` remains unavailable until that adapter is implemented and validated.
+
+## Phase 4.0C-5 Safe Streaming Manager Skeleton
+
+Phase 4.0C-5 added the internal architecture for future SSI streaming realtime without enabling live streaming:
+
+- `SSI_STREAMING_REALTIME_ENABLED=false` by default.
+- `SSI_STREAMING_REALTIME_CACHE_TTL_SECONDS=15` by default.
+- `SSI_STREAMING_REALTIME_CHANNEL_TEMPLATE=X: {symbol}` by default.
+- `SsiStreamingRealtimeManager` owns explicit lifecycle states: `disabled`, `stopped`, `starting`, `running`, and `errored`.
+- `RealtimeSnapshotCache` stores latest normalized snapshot candidates per symbol and marks empty or stale cache reads unavailable.
+- `SsiFastConnectFetcher.get_realtime_snapshot()` reads only the manager/cache path when streaming runtime is enabled; it does not open a websocket and does not probe REST realtime candidates.
+- Request handlers do not start streams. Module imports do not start streams.
+- Runtime channel construction rejects `ALL` subscriptions.
+- A single `X-TRADE` message may update the realtime snapshot candidate, but it must not create trade-tape history or mark trade tape reliable.
+
+Default runtime response remains unavailable:
+
+```text
+status = unavailable
+reason = SSI streaming realtime manager disabled.
+rest_status = unsupported
+streaming_status = disabled
+manager_state = disabled
+cache_status = disabled
+```
+
+When streaming runtime is explicitly enabled but the background manager is not running, has an empty cache, has stale cache rows, or has errored, realtime remains unavailable with sanitized diagnostics for `streaming_manager_not_started`, `streaming_cache_empty`, `streaming_cache_stale`, or `streaming_manager_error`. A cache hit is only a realtime snapshot candidate; live reliability still requires current stream evidence.
 
 ## Required Guardrails
 

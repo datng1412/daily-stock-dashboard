@@ -11,7 +11,6 @@ from data_provider.ssi_fastconnect_fetcher import (
     DISABLED_REASON,
     MISSING_CREDENTIALS_REASON,
     REQUEST_FAILED_REASON,
-    REALTIME_STREAMING_NOT_IMPLEMENTED_REASON,
     SSI_REALTIME_ENDPOINT_CANDIDATES,
     SSI_REALTIME_STREAMING_DATA_TYPES,
     SSI_CHUNK_MAX_DAYS,
@@ -19,6 +18,7 @@ from data_provider.ssi_fastconnect_fetcher import (
     build_ssi_date_windows,
     format_ssi_date,
 )
+from data_provider.ssi_streaming_realtime import SSI_STREAMING_REALTIME_DISABLED_REASON
 from src.config import Config
 
 
@@ -131,6 +131,9 @@ def test_config_defaults_keep_ssi_disabled(monkeypatch):
     assert config.ssi_fastconnect_intraday_enabled is True
     assert config.ssi_fastconnect_realtime_enabled is True
     assert config.ssi_fastconnect_trade_tape_enabled is True
+    assert config.ssi_streaming_realtime_enabled is False
+    assert config.ssi_streaming_realtime_cache_ttl_seconds == 15
+    assert config.ssi_streaming_realtime_channel_template == "X: {symbol}"
     assert config.vn_intraday_data_provider == "ssi"
     assert config.vn_realtime_data_provider == "ssi"
     assert config.vn_trade_tape_provider == "ssi"
@@ -593,7 +596,7 @@ def test_streaming_quote_after_trade_does_not_clear_last_trade_price():
     assert rows[0]["bid_levels"][0]["price"] == 22.4
 
 
-def test_realtime_snapshot_returns_streaming_not_implemented_state_without_http_calls():
+def test_realtime_snapshot_returns_streaming_disabled_state_without_http_calls():
     session = _FakeSession(post_items=[_token_response()])
     fetcher = _fetcher(session=session)
 
@@ -601,7 +604,7 @@ def test_realtime_snapshot_returns_streaming_not_implemented_state_without_http_
 
     assert payload["status"] == "unavailable"
     assert payload["source"] == "SSI"
-    assert payload["reason"] == REALTIME_STREAMING_NOT_IMPLEMENTED_REASON
+    assert payload["reason"] == SSI_STREAMING_REALTIME_DISABLED_REASON
     assert payload["requested_tickers"] == ["FPT", "VPB"]
     assert payload["quotes"] == []
     assert payload["count"] == 0
@@ -609,11 +612,13 @@ def test_realtime_snapshot_returns_streaming_not_implemented_state_without_http_
     assert payload["candidate_endpoints"] == []
     assert payload["rest_candidate_endpoints"] == list(SSI_REALTIME_ENDPOINT_CANDIDATES)
     assert payload["endpoint_attempts"] == []
-    assert payload["discovery_status"] == "streaming_adapter_not_implemented"
+    assert payload["discovery_status"] == "streaming_manager_disabled"
     assert payload["rest_status"] == "unsupported"
-    assert payload["streaming_status"] == "not_implemented"
+    assert payload["streaming_status"] == "disabled"
     assert payload["streaming_data_types"] == list(SSI_REALTIME_STREAMING_DATA_TYPES)
     assert payload["parsed_streaming_rows"] == 0
+    assert payload["cache_status"] == "disabled"
+    assert payload["manager_state"] == "disabled"
     assert session.calls == []
     assert SECRET_TOKEN not in str(payload)
 

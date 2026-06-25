@@ -13,11 +13,19 @@ import os
 import time
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import requests
 
 from src.config import get_config, parse_env_bool, parse_env_int
+from data_provider.ssi_streaming_realtime import (
+    DEFAULT_STREAMING_REALTIME_CACHE_TTL_SECONDS,
+    DEFAULT_STREAMING_REALTIME_CHANNEL_TEMPLATE,
+    RealtimeSnapshotCache,
+    SsiRealtimeStreamClient,
+    SsiStreamingRealtimeManager,
+    SSI_STREAMING_REALTIME_DISABLED_REASON,
+)
 
 
 SSI_SOURCE = "SSI"
@@ -444,6 +452,11 @@ class SsiFastConnectFetcher:
         intraday_enabled: Optional[bool] = None,
         realtime_enabled: Optional[bool] = None,
         trade_tape_enabled: Optional[bool] = None,
+        streaming_realtime_enabled: Optional[bool] = None,
+        streaming_realtime_cache_ttl_seconds: Optional[int] = None,
+        streaming_realtime_channel_template: Optional[str] = None,
+        streaming_realtime_client_factory: Optional[Callable[[], SsiRealtimeStreamClient]] = None,
+        streaming_realtime_manager: Optional[SsiStreamingRealtimeManager] = None,
         request_delay_seconds: float = 0,
         session: Optional[requests.Session] = None,
         config: Any = None,
@@ -511,6 +524,42 @@ class SsiFastConnectFetcher:
             bool(trade_tape_enabled)
             if trade_tape_enabled is not None
             else bool(getattr(config, "ssi_fastconnect_trade_tape_enabled", parse_env_bool(os.getenv("SSI_FASTCONNECT_TRADE_TAPE_ENABLED"), default=True)))
+        )
+        self.streaming_realtime_enabled = (
+            bool(streaming_realtime_enabled)
+            if streaming_realtime_enabled is not None
+            else bool(
+                getattr(
+                    config,
+                    "ssi_streaming_realtime_enabled",
+                    parse_env_bool(os.getenv("SSI_STREAMING_REALTIME_ENABLED"), default=False),
+                )
+            )
+        )
+        self.streaming_realtime_cache_ttl_seconds = int(
+            streaming_realtime_cache_ttl_seconds
+            if streaming_realtime_cache_ttl_seconds is not None
+            else getattr(config, "ssi_streaming_realtime_cache_ttl_seconds", None)
+            or parse_env_int(
+                os.getenv("SSI_STREAMING_REALTIME_CACHE_TTL_SECONDS"),
+                DEFAULT_STREAMING_REALTIME_CACHE_TTL_SECONDS,
+                field_name="SSI_STREAMING_REALTIME_CACHE_TTL_SECONDS",
+                minimum=1,
+            )
+        )
+        self.streaming_realtime_channel_template = (
+            streaming_realtime_channel_template
+            if streaming_realtime_channel_template is not None
+            else getattr(config, "ssi_streaming_realtime_channel_template", None)
+            or os.getenv("SSI_STREAMING_REALTIME_CHANNEL_TEMPLATE")
+            or DEFAULT_STREAMING_REALTIME_CHANNEL_TEMPLATE
+        ).strip() or DEFAULT_STREAMING_REALTIME_CHANNEL_TEMPLATE
+        self.streaming_realtime_manager = streaming_realtime_manager or SsiStreamingRealtimeManager(
+            enabled=self.streaming_realtime_enabled,
+            cache=RealtimeSnapshotCache(self.streaming_realtime_cache_ttl_seconds),
+            parser=self.normalize_streaming_realtime_messages,
+            client_factory=streaming_realtime_client_factory,
+            channel_template=self.streaming_realtime_channel_template,
         )
         self.session = session or requests.Session()
         self.request_delay_seconds = max(0.0, float(request_delay_seconds or 0))
@@ -700,9 +749,9 @@ class SsiFastConnectFetcher:
     def get_realtime_snapshot(self, symbols: List[str]) -> Dict[str, Any]:
         """Return the current SSI realtime contract state.
 
-        Phase 4.0C-3 found SSI realtime is a streaming contract. Keep parser
-        helpers for future verified stream messages, but do not open a
-        long-running stream or probe speculative REST names at request time.
+        SSI realtime is a streaming contract. This request-time method only
+        reads the disabled-by-default streaming manager/cache state; it never
+        opens a long-running stream or probes speculative REST names.
         """
         normalized_symbols = [str(symbol or "").strip().upper() for symbol in symbols or [] if str(symbol or "").strip()]
         if not self.realtime_enabled:
@@ -724,31 +773,43 @@ class SsiFastConnectFetcher:
                 "count": 0,
             }
 
-        cache_key = ("RealtimeSnapshot", (("symbols", ",".join(normalized_symbols)),))
-        if self.cache_ttl_seconds > 0:
-            entry = self._cache.get(cache_key)
-            if entry and entry.expires_at > time.time():
-                return dict(entry.value)
+        if not self.streaming_realtime_enabled:
+            return {
+                "status": "unavailable",
+                "source": SSI_SOURCE,
+                "reason": SSI_STREAMING_REALTIME_DISABLED_REASON,
+                "requested_tickers": normalized_symbols,
+                "quotes": [],
+                "count": 0,
+                "attempted_endpoints": [],
+                "candidate_endpoints": [],
+                "rest_candidate_endpoints": list(SSI_REALTIME_ENDPOINT_CANDIDATES),
+                "endpoint_attempts": [],
+                "discovery_status": "streaming_manager_disabled",
+                "rest_status": "unsupported",
+                "streaming_status": "disabled",
+                "streaming_data_types": list(SSI_REALTIME_STREAMING_DATA_TYPES),
+                "parsed_streaming_rows": 0,
+                "cache_status": "disabled",
+                "manager_state": "disabled",
+                "diagnostics": {
+                    "manager_state": "disabled",
+                    "streaming_status": "disabled",
+                    "cache_status": "disabled",
+                    "live_adapter_status": "not_enabled",
+                    "parser_rows_observed": 0,
+                },
+            }
 
-        result = {
-            "status": "unavailable",
-            "source": SSI_SOURCE,
-            "reason": REALTIME_STREAMING_NOT_IMPLEMENTED_REASON,
-            "requested_tickers": normalized_symbols,
-            "quotes": [],
-            "count": 0,
-            "attempted_endpoints": [],
-            "candidate_endpoints": [],
-            "rest_candidate_endpoints": list(SSI_REALTIME_ENDPOINT_CANDIDATES),
-            "endpoint_attempts": [],
-            "discovery_status": "streaming_adapter_not_implemented",
-            "rest_status": "unsupported",
-            "streaming_status": "not_implemented",
-            "streaming_data_types": list(SSI_REALTIME_STREAMING_DATA_TYPES),
-            "parsed_streaming_rows": 0,
-        }
-        if self.cache_ttl_seconds > 0:
-            self._cache[cache_key] = _CacheEntry(value=dict(result), expires_at=time.time() + self.cache_ttl_seconds)
+        result = dict(self.streaming_realtime_manager.snapshot(normalized_symbols))
+        result.setdefault("source", SSI_SOURCE)
+        result.setdefault("requested_tickers", normalized_symbols)
+        result.setdefault("quotes", [])
+        result.setdefault("count", len(result.get("quotes") or []))
+        result.setdefault("rest_candidate_endpoints", list(SSI_REALTIME_ENDPOINT_CANDIDATES))
+        result.setdefault("endpoint_attempts", [])
+        result.setdefault("discovery_status", result.get("streaming_status") or "streaming_manager")
+        result.setdefault("streaming_data_types", list(SSI_REALTIME_STREAMING_DATA_TYPES))
         return result
 
     def normalize_streaming_realtime_messages(
