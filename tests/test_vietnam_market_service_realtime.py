@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
+from data_provider.ssi_fastconnect_fetcher import REALTIME_ENDPOINT_NOT_IDENTIFIED_REASON
 from src.services.vietnam_market_service import (
     VietnamDashboardConfig,
     VietnamMarketService,
@@ -178,7 +179,9 @@ def test_ssi_realtime_failure_is_separate_from_daily_row():
         realtime_payload={
             "status": "unavailable",
             "source": "SSI",
-            "reason": "SSI FastConnect realtime snapshot unavailable (attempted endpoints: RealtimeQuote, RealtimePrice). Last error: SSI FastConnect request failed",
+            "reason": REALTIME_ENDPOINT_NOT_IDENTIFIED_REASON,
+            "candidate_endpoints": ["RealtimeQuote", "RealtimePrice", "RealtimeSnapshot", "SecuritiesRealtime"],
+            "discovery_status": "unsupported_endpoint_not_identified",
             "requested_tickers": ["FPT"],
             "quotes": [],
         }
@@ -193,7 +196,47 @@ def test_ssi_realtime_failure_is_separate_from_daily_row():
     assert item["realtime_snapshot"] is None
     assert item["realtime_status"]["message"] == "SSI realtime unavailable."
     assert "RealtimeQuote" not in item["realtime_status"]["message"]
-    assert "RealtimeQuote" in item["realtime_status"]["diagnostics"]["provider_message"]
+    assert item["realtime_status"]["diagnostics"]["provider_message"] == REALTIME_ENDPOINT_NOT_IDENTIFIED_REASON
+
+
+class IntradayAvailableRealtimeUnavailableFetcher(FakeSsiFetcher):
+    def get_intraday_ohlcv(self, symbol: str, **kwargs):
+        return {
+            "status": "ok",
+            "source": "SSI",
+            "rows": [
+                {
+                    "date_time": "2026-06-30T10:00:00+07:00",
+                    "open": 129.0,
+                    "high": 131.0,
+                    "low": 128.0,
+                    "close": 130.0,
+                    "volume": 12_000,
+                    "source": "SSI",
+                }
+            ],
+        }
+
+
+def test_realtime_unavailable_is_not_inferred_from_intraday_or_daily_ohlcv():
+    fetcher = IntradayAvailableRealtimeUnavailableFetcher(
+        realtime_payload={
+            "status": "unavailable",
+            "source": "SSI",
+            "reason": "SSI realtime endpoint returned no quote rows.",
+            "quotes": [],
+        }
+    )
+
+    item = _service(fetcher).build_watchlist(["FPT"], force_refresh=True)["watchlist"][0]
+
+    assert item["status"] == "ok"
+    assert item["latest_price"] == 130.0
+    assert item["latest_price_source"] == "SSI DailyOhlc"
+    assert item["intraday_status"]["status"] == "ok"
+    assert item["intraday_pulse"] is not None
+    assert item["realtime_status"]["status"] == "unavailable"
+    assert item["realtime_snapshot"] is None
 
 
 def test_ssi_trade_tape_success_returns_normalized_trades():

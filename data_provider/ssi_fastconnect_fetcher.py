@@ -26,7 +26,9 @@ MISSING_CREDENTIALS_REASON = "SSI FastConnect credentials missing"
 REQUEST_FAILED_REASON = "SSI FastConnect request failed"
 INTRADAY_DISABLED_REASON = "SSI FastConnect IntradayOhlc disabled"
 REALTIME_DISABLED_REASON = "SSI FastConnect realtime disabled"
+REALTIME_ENDPOINT_NOT_IDENTIFIED_REASON = "Supported SSI realtime endpoint not identified in repository."
 TRADE_TAPE_DISABLED_REASON = "SSI FastConnect trade tape disabled"
+SSI_REALTIME_ENDPOINT_CANDIDATES = ("RealtimeQuote", "RealtimePrice", "RealtimeSnapshot", "SecuritiesRealtime")
 SSI_CHUNK_MAX_DAYS = 29
 SSI_PAGE_SIZE = 1000
 SSI_MAX_PAGES = 20
@@ -37,6 +39,7 @@ def _endpoint_attempt_reason(
     kind: str,
     endpoints: Tuple[str, ...],
     first_unavailable: Optional[Dict[str, Any]] = None,
+    attempts: Optional[List[Dict[str, Any]]] = None,
 ) -> str:
     """Build a secret-free diagnostic for realtime/trade-tape probe failures."""
     reason = str((first_unavailable or {}).get("reason") or REQUEST_FAILED_REASON)
@@ -44,13 +47,43 @@ def _endpoint_attempt_reason(
     http_status = (first_unavailable or {}).get("http_status")
     code = (first_unavailable or {}).get("code")
     details = [f"attempted endpoints: {', '.join(endpoints)}"]
-    if endpoint:
-        details.append(f"last endpoint: {endpoint}")
-    if http_status is not None:
-        details.append(f"http status: {http_status}")
-    if code is not None:
-        details.append(f"provider code: {code}")
+    endpoint_statuses = _endpoint_status_summary(attempts or [])
+    if endpoint_statuses:
+        details.append(f"endpoint statuses: {endpoint_statuses}")
+    else:
+        if endpoint:
+            details.append(f"sample endpoint: {endpoint}")
+        if http_status is not None:
+            details.append(f"http status: {http_status}")
+        if code is not None:
+            details.append(f"provider code: {code}")
     return f"SSI FastConnect {kind} unavailable ({'; '.join(details)}). Last error: {reason}"
+
+
+def _endpoint_status_summary(attempts: List[Dict[str, Any]]) -> str:
+    grouped: Dict[str, List[str]] = {}
+    for attempt in attempts:
+        endpoint = str(attempt.get("endpoint") or "").strip()
+        if not endpoint:
+            continue
+        label = None
+        http_status = attempt.get("http_status")
+        if http_status is not None:
+            label = f"http {http_status}"
+        else:
+            error_type = attempt.get("error_type")
+            if error_type:
+                label = str(error_type)
+            else:
+                status = attempt.get("status")
+                if status:
+                    label = str(status)
+        if not label:
+            continue
+        labels = grouped.setdefault(endpoint, [])
+        if label not in labels:
+            labels.append(label)
+    return ", ".join(f"{endpoint}={'+'.join(labels)}" for endpoint, labels in grouped.items())
 
 
 def format_ssi_date(value: Any) -> Optional[str]:
@@ -662,12 +695,11 @@ class SsiFastConnectFetcher:
         return self._empty_as_unavailable(payload)
 
     def get_realtime_snapshot(self, symbols: List[str]) -> Dict[str, Any]:
-        """Return SSI realtime snapshot rows when an account exposes them.
+        """Return the current SSI realtime contract state.
 
-        SSI realtime/streaming endpoint names vary by entitlement and
-        documentation set. This method tries a small set of FC Data-style
-        endpoint names and normalizes only meaningful quote rows. Unknown,
-        unentitled, or empty responses return clean unavailable payloads.
+        Phase 4.0C-2 repository discovery found no supported FastConnect
+        realtime endpoint, SDK method, or enum. Keep mapper helpers for future
+        verified rows, but do not probe speculative REST names at runtime.
         """
         normalized_symbols = [str(symbol or "").strip().upper() for symbol in symbols or [] if str(symbol or "").strip()]
         if not self.realtime_enabled:
@@ -695,57 +727,17 @@ class SsiFastConnectFetcher:
             if entry and entry.expires_at > time.time():
                 return dict(entry.value)
 
-        endpoint_candidates = ("RealtimeQuote", "RealtimePrice", "RealtimeSnapshot", "SecuritiesRealtime")
-        rows: List[Dict[str, Any]] = []
-        first_unavailable: Optional[Dict[str, Any]] = None
-        for endpoint in endpoint_candidates:
-            for symbol in normalized_symbols:
-                params = {"symbol": symbol}
-                payload = self._request(endpoint, params=params)
-                if isinstance(payload, dict) and payload.get("status") == "unavailable":
-                    if first_unavailable is None:
-                        first_unavailable = payload
-                    continue
-                mapped = [self._map_realtime_snapshot(row, fallback_symbol=symbol) for row in _extract_rows(payload)]
-                mapped = [
-                    row
-                    for row in mapped
-                    if row and _has_required_field(row, ("price", "reference_price", "volume", "value", "bid_levels", "ask_levels"))
-                ]
-                rows.extend(mapped)
-            if rows:
-                break
-
-        deduped: Dict[str, Dict[str, Any]] = {}
-        for row in rows:
-            ticker = str(row.get("ticker") or row.get("symbol") or "").upper()
-            if ticker:
-                deduped[ticker] = row
-        quotes = [deduped[symbol] for symbol in normalized_symbols if symbol in deduped]
-        if not quotes:
-            payload = {
-                "status": "unavailable",
-                "source": SSI_SOURCE,
-                "reason": _endpoint_attempt_reason(
-                    kind="realtime snapshot",
-                    endpoints=endpoint_candidates,
-                    first_unavailable=first_unavailable,
-                ),
-                "requested_tickers": normalized_symbols,
-                "quotes": [],
-                "count": 0,
-                "attempted_endpoints": list(endpoint_candidates),
-            }
-            if self.cache_ttl_seconds > 0:
-                self._cache[cache_key] = _CacheEntry(value=dict(payload), expires_at=time.time() + self.cache_ttl_seconds)
-            return payload
-
         result = {
-            "status": "ok",
+            "status": "unavailable",
             "source": SSI_SOURCE,
+            "reason": REALTIME_ENDPOINT_NOT_IDENTIFIED_REASON,
             "requested_tickers": normalized_symbols,
-            "quotes": quotes,
-            "count": len(quotes),
+            "quotes": [],
+            "count": 0,
+            "attempted_endpoints": [],
+            "candidate_endpoints": list(SSI_REALTIME_ENDPOINT_CANDIDATES),
+            "endpoint_attempts": [],
+            "discovery_status": "unsupported_endpoint_not_identified",
         }
         if self.cache_ttl_seconds > 0:
             self._cache[cache_key] = _CacheEntry(value=dict(result), expires_at=time.time() + self.cache_ttl_seconds)

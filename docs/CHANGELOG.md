@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [fix] Stop probing unverified SSI realtime candidate endpoints and report unsupported realtime discovery explicitly.
+- [fix] Improve VN SSI realtime snapshot audit diagnostics and keep unavailable realtime separate from daily and intraday data.
 - [fix] Show exact VN audit intraday usable-row ratios and mark all-ok intraday audits reliable.
 - [fix] Page SSI IntradayOhlc internally before applying the public candle limit and keep malformed intraday rows unavailable.
 - [documentation] Add a local VN data capability audit script and SSI capability matrix for conservative data-domain planning.

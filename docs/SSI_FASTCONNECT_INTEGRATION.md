@@ -16,6 +16,7 @@ Current phase:
 * Dashboard detail rendering for SSI DailyStockPrice fields when SSI provides them.
 * SSI IntradayOhlc candles for compact watchlist/company intraday pulse.
 * SSI realtime snapshot and trade-tape contracts for dashboard/company realtime blocks.
+* SSI realtime endpoint discovery concluded that no supported FastConnect realtime snapshot endpoint is identified in this repository.
 * SSI live API plus backend cache/TTL; local DB market-data storage is deferred.
 
 Out of scope:
@@ -70,7 +71,7 @@ External providers are still required for BCTC/KQKD, financial statements, finan
 | IntradayOhlc | SSI FastConnect Data REST | Implemented and wired for compact intraday pulse | Use as strict VN intraday candle source; do not treat as realtime matched quote |
 | DailyIndex | SSI FastConnect Data REST | Implemented with 29-day chunking | Use for daily index value/change/breadth/liquidity when wired |
 | DailyStockPrice | SSI FastConnect Data REST | Implemented and wired | Use for reference, ceiling/floor, adjusted close, matched, put-through, and foreign flow |
-| Realtime snapshot and trade tape | SSI FastConnect Data/streaming | Provider/service/API/UI contract added; live endpoint names and permissions need confirmation | Show SSI unavailable when no usable rows return; no KBS fallback |
+| Realtime snapshot and trade tape | SSI FastConnect Data/streaming | Provider/service/API/UI contract added; supported realtime snapshot endpoint not identified in repo discovery; trade-tape live endpoint names and permissions need confirmation | Show SSI unavailable when no usable rows return; no KBS fallback |
 | Realtime best bid/ask, matched data, foreign room, index stream, realtime bars/OHLC | SSI streaming/protocol hardening later | Partially covered by realtime contract; streaming not fully validated | Keep semantics explicit and unavailable until SSI behavior is proven stable |
 | News | Future NewsProvider | Disabled/not implemented | Do not call Mozyfin; keep separate from SSI-owned market data |
 | BCTC/KQKD, financial statements, ratios | External provider | Unsupported/future provider | Do not infer fundamentals from price fields |
@@ -86,7 +87,7 @@ External providers are still required for BCTC/KQKD, financial statements, finan
 | IndexList | `GET /Market/IndexList` | OK | Use SSI-returned index codes instead of hardcoded assumptions. |
 | IndexComponents | `GET /Market/IndexComponents` | Clean unavailable when provider request fails | Provider/service/API coverage exists, but live component rows remain unconfirmed in the current SSI environment. |
 | IntradayOhlc | `GET /Market/IntradayOhlc` | Contract exists; returned rows may be stale/mismatched | Freshness must be validated against SSI DailyOhlc date before rendering intraday metrics. |
-| Realtime snapshot | SSI realtime/data endpoint candidates | Contract exists; currently unavailable/404 in latest smoke | Not confirmed live. The dashboard must not claim realtime is live unless `realtime_snapshot` is non-null and `realtime_status.status = ok`. |
+| Realtime snapshot | Supported SSI realtime endpoint not identified | Contract exists; currently unavailable by discovery | Phase 4.0C verified the route/service/fetcher wiring and config gate. Phase 4.0C-2 found no supported SSI FastConnect realtime endpoint, SDK method, enum, or hidden repo contract. Previous candidate names `RealtimeQuote`, `RealtimePrice`, `RealtimeSnapshot`, and `SecuritiesRealtime` are discovery evidence only and are no longer probed at runtime. The dashboard must not claim realtime is live unless `realtime_snapshot` is non-null and `realtime_status.status = ok`. |
 | Trade tape | SSI trade-tape endpoint candidates | Contract exists; currently unavailable/404 in latest smoke | Not confirmed live. Desired unavailable contract is `trade_tape=[]` plus `trade_tape_status`, with endpoint/http details in diagnostics. |
 | Securities/SecuritiesDetails | `GET /Market/Securities`, `GET /Market/SecuritiesDetails` | Partial metadata | Optional company name, issuer, security type, lot size, listed shares, and listed date may remain null. |
 | News | Not SSI | Disabled until separate provider exists | Mozyfin is not used for VN runtime news. |
@@ -102,7 +103,7 @@ If data is news/fundamentals/corporate actions/macro: use external provider.
 If SSI-owned data is unavailable: show unavailable, do not silently fallback.
 ```
 
-SSI realtime and trade tape are not confirmed live in the latest smoke context. The dashboard must not use daily close as a realtime substitute, and it must not claim realtime is live unless the realtime snapshot object exists and its public status is `ok`.
+SSI realtime and trade tape are not confirmed live in the latest smoke context. Phase 4.0C found the realtime snapshot route and service wiring correct, with the live backend returning unavailable, 0 quote rows, and a 404 from an SSI realtime REST candidate path for FPT. Phase 4.0C-2 searched the repository for FastConnect realtime endpoint contracts, SDK methods, enums, docs references, and configuration but did not identify a supported SSI realtime snapshot endpoint. The dashboard must not use daily close or intraday candles as a realtime substitute, and it must not claim realtime is live unless the realtime snapshot object exists and its public status is `ok`.
 
 ## Configuration
 

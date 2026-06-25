@@ -52,7 +52,7 @@ This roadmap is the source of truth for Vietnam dashboard provider ownership. SS
 | IntradayOhlc | SSI FastConnect Data REST | Implemented and wired for watchlist/company intraday pulse | Use for compact intraday candles; keep separate from daily close and SSI realtime |
 | DailyStockPrice | SSI FastConnect Data REST | Implemented and wired for selected-ticker enrichment | Use for reference, ceiling/floor, adjusted close if provided, matched volume/value, put-through volume/value, and foreign buy/sell/net volume/value |
 | DailyIndex | SSI FastConnect Data REST | Implemented provider method with chunking; dashboard consumption is next | Use for daily index value, change, breadth, and liquidity |
-| Realtime snapshot | SSI FastConnect Data/streaming | Provider, service, API, and UI contract added; live endpoint names/permissions need confirmation | Keep separate from daily close and official daily OHLCV |
+| Realtime snapshot | SSI FastConnect Data/streaming | Provider, service, API, and UI contract added; supported endpoint not identified in repo discovery | Keep unavailable and separate from daily close, intraday, and official daily OHLCV until SSI provides a verified endpoint contract |
 | Trade tape | SSI FastConnect Data/streaming | Provider, service, API, and UI contract added; live endpoint names/permissions need confirmation | Keep separate from official daily OHLCV |
 | Legacy realtime snapshot/trade tape | KBS | Disabled by default; only available behind explicit legacy flags | Do not silently fallback from SSI to KBS |
 | News | Future NewsProvider | Disabled/not implemented | Do not call Mozyfin; return explicit disabled/not_implemented state |
@@ -91,7 +91,8 @@ If SSI-owned data is unavailable, show unavailable. Do not silently fallback.
 * `/api/v1/stocks/vn/company/{ticker}` is the current company research contract/page shell that reuses the SSI-backed watchlist row for market-data blocks.
 * Mozyfin fallback for SSI-owned fields is not allowed.
 * SSI realtime snapshot and trade tape are exposed through the existing realtime endpoints and dashboard/company UI blocks.
-* SSI realtime/trade-tape live endpoint names and entitlements may return unavailable. Unavailable states should include sanitized attempted-endpoint diagnostics without tokens, credentials, auth headers, or raw provider bodies.
+* Phase 4.0C-2 searched the repository for a supported SSI FastConnect realtime endpoint, SDK method, enum, docs reference, or hidden contract and did not find one. The realtime fetcher returns an explicit unavailable discovery state instead of probing speculative REST candidate names.
+* SSI realtime/trade-tape live endpoint names and entitlements may return unavailable. Unavailable states should include sanitized diagnostics without tokens, credentials, auth headers, or raw provider bodies.
 * Dashboard provider-status UI must keep core daily SSI availability separate from optional SSI realtime, SSI trade tape, SSI index components, and disabled news states. A `Partial` dashboard status can mean optional sections are unavailable; it must not imply daily SSI data failed when daily rows are OK.
 * KBS legacy realtime/trade-tape paths are disabled by default and require explicit legacy flags.
 * News/social are disabled/not implemented until a separate NewsProvider is added.
@@ -645,7 +646,7 @@ Acceptance criteria:
 
 ### Phase 4.0C - SSI Realtime and Trade-Tape Verification
 
-Status: deferred.
+Status: realtime snapshot root cause verified; trade tape remains unavailable pending separate endpoint verification.
 
 Goal:
 
@@ -676,6 +677,23 @@ Acceptance criteria:
 * Either SSI realtime/trade tape works with clear `ok` status and data rows, or it remains clearly unavailable with diagnostics.
 * Non-retryable failures use longer TTL/backoff only if implementation evidence justifies it.
 * UI states stay concise and daily scan data remains visible.
+
+Phase 4.0C realtime snapshot result on 2026-06-24:
+
+* `GET /api/v1/stocks/vn/realtime?tickers=FPT` is correctly wired through `VietnamMarketService.build_realtime_snapshot` to `SsiFastConnectFetcher.get_realtime_snapshot`.
+* The live backend config was not disabled: the endpoint returned `unavailable`, not `disabled`.
+* The observed live endpoint response returned `0` quote rows and reported a 404 from the SSI realtime REST candidate path.
+* The force-refresh FPT audit reported `watchlist usable snapshots=0/1` while daily OHLCV, DailyStockPrice, foreign flow, indicators, and FPT intraday pulse stayed reliable.
+* No realtime snapshot is inferred from daily OHLCV, intraday candles, or trade tape. Keep `realtime_snapshot=null` until SSI returns current usable realtime quote rows with `status=ok`.
+
+Phase 4.0C-2 realtime endpoint discovery result:
+
+* Repository discovery generated `ssi_realtime_endpoint_discovery.txt` and inspected existing SSI provider code, service code, config/env names, smoke scripts, integration docs, roadmap/runbook docs, and `docs/resources/realtime-data/ssi-iboard.md`.
+* Found candidate names `RealtimeQuote`, `RealtimePrice`, `RealtimeSnapshot`, and `SecuritiesRealtime` only as existing speculative REST candidates, plus the internal `SsiFastConnectFetcher.get_realtime_snapshot` method and public `GET /api/v1/stocks/vn/realtime` route.
+* Found no verified SSI FastConnect SDK package, endpoint path, SDK method, enum, or hidden repo contract for realtime quotes.
+* `docs/resources/realtime-data/ssi-iboard.md` remains reference-only because authentication, rate limits, timestamp semantics, and price semantics are unknown.
+* The fetcher now returns `unavailable` with `Supported SSI realtime endpoint not identified in repository.` and does not call token or HTTP request paths for speculative realtime candidates.
+* Deterministic tests keep realtime row mapping as a private parser regression, cover the explicit unsupported discovery state, and keep realtime unavailable separate from daily and intraday behavior.
 
 ### Phase 4.1A - Intraday Cadence and Freshness Correctness
 

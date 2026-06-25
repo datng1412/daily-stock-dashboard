@@ -11,6 +11,8 @@ from data_provider.ssi_fastconnect_fetcher import (
     DISABLED_REASON,
     MISSING_CREDENTIALS_REASON,
     REQUEST_FAILED_REASON,
+    REALTIME_ENDPOINT_NOT_IDENTIFIED_REASON,
+    SSI_REALTIME_ENDPOINT_CANDIDATES,
     SSI_CHUNK_MAX_DAYS,
     SsiFastConnectFetcher,
     build_ssi_date_windows,
@@ -403,63 +405,81 @@ def test_intraday_ohlcv_disabled_does_not_request_token():
 
 
 def test_realtime_snapshot_maps_ssi_like_quote_row():
-    session = _FakeSession(
-        post_items=[_token_response()],
-        get_items=[
-            _FakeResponse(
-                payload={
-                    "data": [
-                        {
-                            "Symbol": "FPT",
-                            "LastPrice": "130.5",
-                            "Change": "1.5",
-                            "ChangePercent": "1.16",
-                            "RefPrice": "129",
-                            "CeilingPrice": "138",
-                            "FloorPrice": "120",
-                            "OpenPrice": "129.5",
-                            "HighPrice": "132",
-                            "LowPrice": "128",
-                            "TotalVolume": "1234567",
-                            "TotalValue": "123456789000",
-                            "BidPrice1": "130.4",
-                            "BidVol1": "1000",
-                            "AskPrice1": "130.6",
-                            "AskVol1": "2000",
-                        }
-                    ]
-                }
-            )
-        ],
+    fetcher = _fetcher()
+
+    row = fetcher._map_realtime_snapshot(
+        {
+            "Symbol": "FPT",
+            "LastPrice": "130.5",
+            "Change": "1.5",
+            "ChangePercent": "1.16",
+            "RefPrice": "129",
+            "CeilingPrice": "138",
+            "FloorPrice": "120",
+            "OpenPrice": "129.5",
+            "HighPrice": "132",
+            "LowPrice": "128",
+            "TotalVolume": "1234567",
+            "TotalValue": "123456789000",
+            "BidPrice1": "130.4",
+            "BidVol1": "1000",
+            "AskPrice1": "130.6",
+            "AskVol1": "2000",
+        },
+        fallback_symbol="FPT",
     )
+
+    assert row["source"] == "SSI"
+    assert row["ticker"] == "FPT"
+    assert row["price"] == 130.5
+    assert row["reference_price"] == 129.0
+    assert row["bid_levels"][0] == {"price": 130.4, "volume": 1000.0}
+    assert SECRET_TOKEN not in str(row)
+
+
+def test_realtime_snapshot_accepts_safe_field_aliases():
+    fetcher = _fetcher()
+
+    row = fetcher._map_realtime_snapshot(
+        {
+            "StockCode": "FPT",
+            "MatchPrice": "130.5",
+            "ChangeValue": "1.5",
+            "RatioChange": "1.16",
+            "BasicPrice": "129",
+            "TotalVol": "1234567",
+            "TotalVal": "123456789000",
+            "bidLevels": [{"price": "130.4", "volume": "1000"}],
+            "askLevels": [{"price": "130.6", "volume": "2000"}],
+        },
+        fallback_symbol="FPT",
+    )
+
+    assert row["ticker"] == "FPT"
+    assert row["price"] == 130.5
+    assert row["reference_price"] == 129.0
+    assert row["volume"] == 1_234_567
+    assert row["value"] == 123_456_789_000.0
+    assert row["bid_levels"][0] == {"price": 130.4, "volume": 1000.0}
+
+
+def test_realtime_snapshot_returns_unsupported_discovery_state_without_http_calls():
+    session = _FakeSession(post_items=[_token_response()])
     fetcher = _fetcher(session=session)
 
-    payload = fetcher.get_realtime_snapshot(["fpt"])
-
-    assert payload["status"] == "ok"
-    assert payload["source"] == "SSI"
-    assert payload["quotes"][0]["ticker"] == "FPT"
-    assert payload["quotes"][0]["price"] == 130.5
-    assert payload["quotes"][0]["reference_price"] == 129.0
-    assert payload["quotes"][0]["bid_levels"][0] == {"price": 130.4, "volume": 1000.0}
-    assert SECRET_TOKEN not in str(payload)
-
-
-def test_realtime_snapshot_failure_returns_clean_unavailable_without_secrets():
-    session = _FakeSession(
-        post_items=[_token_response()],
-        get_items=[requests.exceptions.Timeout(f"timeout {SECRET_TOKEN}") for _ in range(4)],
-    )
-    fetcher = _fetcher(session=session)
-
-    payload = fetcher.get_realtime_snapshot(["FPT"])
+    payload = fetcher.get_realtime_snapshot(["FPT", "VPB"])
 
     assert payload["status"] == "unavailable"
     assert payload["source"] == "SSI"
-    assert payload["requested_tickers"] == ["FPT"]
-    assert "realtime snapshot unavailable" in payload["reason"]
-    assert "RealtimeQuote" in payload["reason"]
-    assert payload["attempted_endpoints"] == ["RealtimeQuote", "RealtimePrice", "RealtimeSnapshot", "SecuritiesRealtime"]
+    assert payload["reason"] == REALTIME_ENDPOINT_NOT_IDENTIFIED_REASON
+    assert payload["requested_tickers"] == ["FPT", "VPB"]
+    assert payload["quotes"] == []
+    assert payload["count"] == 0
+    assert payload["attempted_endpoints"] == []
+    assert payload["candidate_endpoints"] == list(SSI_REALTIME_ENDPOINT_CANDIDATES)
+    assert payload["endpoint_attempts"] == []
+    assert payload["discovery_status"] == "unsupported_endpoint_not_identified"
+    assert session.calls == []
     assert SECRET_TOKEN not in str(payload)
 
 
