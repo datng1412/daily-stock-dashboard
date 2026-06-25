@@ -664,6 +664,7 @@ class Config:
     ssi_streaming_realtime_enabled: bool = False
     ssi_streaming_realtime_cache_ttl_seconds: int = 15
     ssi_streaming_realtime_channel_template: str = "X: {symbol}"
+    ssi_streaming_realtime_stream_url: str = "https://fc-datahub.ssi.com.vn/"
     vn_daily_data_provider: str = "ssi"
     vn_chart_data_provider: str = "ssi"
     vn_daily_stock_price_provider: str = "ssi"
@@ -1910,6 +1911,14 @@ class Config:
                 os.getenv('SSI_STREAMING_REALTIME_CHANNEL_TEMPLATE')
                 or 'X: {symbol}'
             ).strip() or 'X: {symbol}',
+            ssi_streaming_realtime_stream_url=(
+                (
+                    (os.getenv('SSI_STREAMING_REALTIME_STREAM_URL') or 'https://fc-datahub.ssi.com.vn/')
+                    .strip()
+                    .rstrip('/')
+                )
+                or 'https://fc-datahub.ssi.com.vn'
+            ) + '/',
             vn_daily_data_provider=parse_env_choice(
                 os.getenv('VN_DAILY_DATA_PROVIDER'),
                 {'ssi'},

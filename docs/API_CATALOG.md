@@ -311,9 +311,9 @@ Response rules:
 
 - Realtime output is optional and not a substitute for SSI DailyOhlc.
 - Missing quote lists return `[]`; embedded unavailable snapshot objects should be `null`.
-- SSI realtime is a FastConnect streaming contract. The backend has parser coverage for buffered `X`, `X-QUOTE`, and `X-TRADE` messages plus a config-disabled background manager/cache skeleton.
+- SSI realtime is a FastConnect streaming contract. The backend has parser coverage for buffered `X`, `X-QUOTE`, and `X-TRADE` messages, a config-disabled background manager/cache skeleton, and an official-client adapter behind the disabled streaming runtime flag.
 - Request handlers do not open streams. When `SSI_STREAMING_REALTIME_ENABLED=false`, the endpoint returns unavailable with reason `SSI streaming realtime manager disabled.` even if old cache data exists.
-- When streaming is enabled, this endpoint may read only from a running manager and fresh cache rows. Disabled, not-started, empty-cache, stale-cache, and manager-error states remain unavailable with `realtime_snapshot=null`; safe manager/cache details belong in diagnostics.
+- When streaming is enabled, this endpoint may read only from a running manager and fresh cache rows. Disabled, incomplete-config, package-unavailable, not-started, empty-cache, stale-cache, and manager-error states remain unavailable with `realtime_snapshot=null`; safe manager/cache details belong in diagnostics.
 - Legacy KBS may exist behind explicit development flags, but it is not a normal VN runtime fallback.
 - Primary UI should label this section as SSI realtime or realtime snapshot, not KBS.
 

@@ -6,17 +6,22 @@ import importlib
 import sys
 from types import SimpleNamespace
 
+import pytest
+
 from data_provider.ssi_fastconnect_fetcher import SsiFastConnectFetcher
 from data_provider.ssi_streaming_realtime import (
     MANAGER_ERRORED,
     MANAGER_RUNNING,
+    OfficialSsiRealtimeStreamClient,
     RealtimeSnapshotCache,
     SsiStreamingRealtimeManager,
     SSI_STREAMING_REALTIME_CACHE_EMPTY_REASON,
     SSI_STREAMING_REALTIME_CACHE_STALE_REASON,
+    SSI_STREAMING_REALTIME_CONFIG_INCOMPLETE_REASON,
     SSI_STREAMING_REALTIME_DISABLED_REASON,
     SSI_STREAMING_REALTIME_MANAGER_ERROR_REASON,
     SSI_STREAMING_REALTIME_NOT_STARTED_REASON,
+    SSI_STREAMING_REALTIME_PACKAGE_UNAVAILABLE_REASON,
 )
 from src.services.vietnam_market_service import VietnamDashboardConfig, VietnamMarketService, clear_vietnam_cache
 
@@ -56,6 +61,49 @@ class FakeStreamClient:
 
     def stop(self):
         self.stop_calls += 1
+
+
+class FakeOfficialClient:
+    instances = []
+
+    def __init__(self, config):
+        self.config = config
+        FakeOfficialClient.instances.append(self)
+
+
+class FakeOfficialTransport:
+    def __init__(self):
+        self.stop_calls = 0
+
+    def stop(self):
+        self.stop_calls += 1
+
+
+class FakeOfficialStream:
+    instances = []
+
+    def __init__(self, config, client):
+        self.config = config
+        self.client = client
+        self.transport = FakeOfficialTransport()
+        self.connection = SimpleNamespace()
+        setattr(self.connection, "_Connection__transport", self.transport)
+        self.started_channels = []
+        FakeOfficialStream.instances.append(self)
+
+    def start(self, on_message, on_error, channel):
+        print(f"Authorization: Bearer {SECRET_TOKEN}")
+        self.on_message = on_message
+        self.on_error = on_error
+        self.started_channels.append(channel)
+
+
+def _fake_official_import(name):
+    if name == "ssi_fc_data.fc_md_client":
+        return SimpleNamespace(MarketDataClient=FakeOfficialClient)
+    if name == "ssi_fc_data.fc_md_stream":
+        return SimpleNamespace(MarketDataStream=FakeOfficialStream)
+    raise ImportError(name)
 
 
 class FakeMarketFetcher:
@@ -439,6 +487,94 @@ def test_official_client_factory_is_not_called_when_streaming_config_is_off():
 
     assert payload["reason"] == SSI_STREAMING_REALTIME_DISABLED_REASON
     assert calls["factory"] == 0
+
+
+def test_fetcher_config_off_does_not_check_or_import_official_package(monkeypatch):
+    def fail_find_spec(name):  # pragma: no cover - should not be called
+        raise AssertionError("official package lookup must not run when streaming is disabled")
+
+    monkeypatch.setattr("data_provider.ssi_fastconnect_fetcher.importlib.util.find_spec", fail_find_spec)
+    fetcher = _fetcher(streaming_realtime_enabled=False)
+
+    payload = fetcher.get_realtime_snapshot(["FPT"])
+
+    assert payload["reason"] == SSI_STREAMING_REALTIME_DISABLED_REASON
+
+
+def test_fetcher_config_on_missing_streaming_config_fails_closed():
+    fetcher = _fetcher(
+        streaming_realtime_enabled=True,
+        consumer_id="",
+        consumer_secret="",
+    )
+
+    payload = fetcher.get_realtime_snapshot(["FPT"])
+
+    assert payload["status"] == "unavailable"
+    assert payload["reason"] == SSI_STREAMING_REALTIME_CONFIG_INCOMPLETE_REASON
+    assert payload["diagnostics"]["live_adapter_status"] == "configuration_incomplete"
+
+
+def test_fetcher_config_on_missing_official_package_fails_closed(monkeypatch):
+    monkeypatch.setattr("data_provider.ssi_fastconnect_fetcher.importlib.util.find_spec", lambda name: None)
+    fetcher = _fetcher(streaming_realtime_enabled=True)
+
+    payload = fetcher.get_realtime_snapshot(["FPT"])
+
+    assert payload["status"] == "unavailable"
+    assert payload["reason"] == SSI_STREAMING_REALTIME_PACKAGE_UNAVAILABLE_REASON
+    assert payload["diagnostics"]["live_adapter_status"] == "package_unavailable"
+
+
+def test_official_adapter_starts_symbol_channel_without_leaking_headers(capsys):
+    FakeOfficialClient.instances.clear()
+    FakeOfficialStream.instances.clear()
+    adapter = OfficialSsiRealtimeStreamClient(
+        consumer_id="test-consumer",
+        consumer_secret="test-secret",
+        base_url="https://fc-data.ssi.com.vn/api/v2/Market",
+        stream_url="https://fc-datahub.ssi.com.vn/",
+        import_module=_fake_official_import,
+    )
+
+    adapter.start(lambda message: None, lambda error: None, ["X: FPT"])
+    captured = capsys.readouterr()
+
+    assert SECRET_TOKEN not in captured.out
+    assert SECRET_TOKEN not in captured.err
+    assert FakeOfficialClient.instances[0].config.url == "https://fc-data.ssi.com.vn/"
+    assert FakeOfficialClient.instances[0].config.stream_url == "https://fc-datahub.ssi.com.vn/"
+    assert FakeOfficialStream.instances[0].started_channels == ["X: FPT"]
+    adapter.stop()
+    assert FakeOfficialStream.instances[0].transport.stop_calls == 1
+
+
+def test_official_adapter_missing_package_fails_closed():
+    adapter = OfficialSsiRealtimeStreamClient(
+        consumer_id="test-consumer",
+        consumer_secret="test-secret",
+        base_url="https://fc-data.ssi.com.vn/api/v2/Market",
+        import_module=lambda name: (_ for _ in ()).throw(ImportError(name)),
+    )
+
+    with pytest.raises(RuntimeError, match=SSI_STREAMING_REALTIME_PACKAGE_UNAVAILABLE_REASON):
+        adapter.start(lambda message: None, lambda error: None, ["X: FPT"])
+
+
+def test_manager_start_instantiates_official_wrapper_only_when_enabled():
+    calls = {"factory": 0}
+
+    def factory():
+        calls["factory"] += 1
+        return FakeStreamClient()
+
+    disabled = SsiStreamingRealtimeManager(enabled=False, client_factory=factory)
+    enabled = SsiStreamingRealtimeManager(enabled=True, client_factory=factory)
+
+    disabled.start(["FPT"])
+    assert calls["factory"] == 0
+    enabled.start(["FPT"])
+    assert calls["factory"] == 1
 
 
 def test_realtime_service_reads_cache_hit_without_overwriting_daily_latest_price():

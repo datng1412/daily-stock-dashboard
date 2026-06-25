@@ -23,7 +23,8 @@ Expected protection:
 - KBS remains legacy optional only and disabled by default.
 - News is disabled until a separate provider exists.
 - SSI realtime unavailable returns `realtime_snapshot = null`.
-- SSI streaming realtime stays disabled by default, does not instantiate the official client when disabled, never starts on import, and reads only from a running manager plus fresh cache.
+- SSI streaming realtime stays disabled by default, does not instantiate or import the official client when disabled, never starts on import, and reads only from a running manager plus fresh cache.
+- SSI official streaming adapter tests use mocked official modules, suppress header-like output, reject `X: ALL`, and fail closed when streaming config or `ssi_fc_data` is unavailable.
 - SSI intraday stale/unavailable returns `intraday_pulse = null` and `intraday_candles = []`.
 - SSI intraday provider failures are classified into sanitized diagnostics such as `rate_limited`, without raw payloads or credentials, and without changing DailyOhlc `latest_price` ownership.
 - SSI intraday provider-code/HTTP `429` starts a deterministic symbol/timeframe cooldown; active cooldown skips IntradayOhlc provider requests and remains unavailable without blocking DailyOhlc or DailyStockPrice.

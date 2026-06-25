@@ -511,6 +511,8 @@ if (-not (Has-Value $realtimeCacheStatus)) {
   $realtimeCacheStatus = Get-Value $realtimeEndpointDiagnostics @("cache_status")
 }
 $realtimeLiveAdapterStatus = Get-Value $realtimeEndpointDiagnostics @("live_adapter_status")
+$realtimeSubscribedChannels = Get-Value $realtimeEndpointDiagnostics @("channels")
+$realtimeLatestError = Get-Value $realtimeEndpointDiagnostics @("latest_error")
 $realtimeParsedStreamingRows = Get-Value $realtimeResponse @("parsed_streaming_rows")
 if (-not (Has-Value $realtimeParsedStreamingRows)) {
   $realtimeParsedStreamingRows = Get-Value $realtimeEndpointDiagnostics @("parser_rows_observed")
@@ -532,6 +534,10 @@ if ($realtimeQuoteCount -gt 0 -or $realtimeOkRows -gt 0) {
   $realtimeFailureMode = "streaming_cache_stale"
 } elseif ($realtimeStreamingStatus -eq "manager_error" -or $realtimeManagerState -eq "errored") {
   $realtimeFailureMode = "streaming_manager_error"
+} elseif ($realtimeStreamingStatus -eq "configuration_incomplete" -or $realtimeLiveAdapterStatus -eq "configuration_incomplete") {
+  $realtimeFailureMode = "streaming_configuration_incomplete"
+} elseif ($realtimeStreamingStatus -eq "package_unavailable" -or $realtimeLiveAdapterStatus -eq "package_unavailable") {
+  $realtimeFailureMode = "streaming_package_unavailable"
 } elseif ($realtimeLiveAdapterStatus -eq "not_enabled" -and $realtimeClassificationDetail -match "live adapter") {
   $realtimeFailureMode = "live_adapter_not_enabled"
 } elseif ($realtimeClassificationDetail -match "streaming adapter|connection semantics not implemented") {
@@ -545,7 +551,7 @@ if ($realtimeQuoteCount -gt 0 -or $realtimeOkRows -gt 0) {
 } elseif ($realtimeEndpointStatus -eq "unavailable") {
   $realtimeFailureMode = "unavailable"
 }
-$capabilities += New-CapabilityRow "Realtime snapshot" $realtimeStatus "SSI realtime contract" ("endpoint status={0}; endpoint quote rows={1}; watchlist usable snapshots={2}/{3}; failure_mode={4}; streaming_status={5}; manager_state={6}; cache_status={7}; parsed_streaming_rows={8}; live_adapter={9}" -f (Get-Status $realtimeResponse), $realtimeQuoteCount, $realtimeOkRows, $rowCount, $realtimeFailureMode, (Format-ScalarValue $realtimeStreamingStatus), (Format-ScalarValue $realtimeManagerState), (Format-ScalarValue $realtimeCacheStatus), $realtimeParsedStreamingRows, (Format-ScalarValue $realtimeLiveAdapterStatus)) "realtime_snapshot fields only when status ok and snapshot is non-null" "Do not use realtime snapshot as official daily close."
+$capabilities += New-CapabilityRow "Realtime snapshot" $realtimeStatus "SSI realtime contract" ("endpoint status={0}; endpoint quote rows={1}; watchlist usable snapshots={2}/{3}; failure_mode={4}; streaming_status={5}; manager_state={6}; cache_status={7}; parsed_streaming_rows={8}; live_adapter={9}; subscribed_channels={10}; latest_error={11}" -f (Get-Status $realtimeResponse), $realtimeQuoteCount, $realtimeOkRows, $rowCount, $realtimeFailureMode, (Format-ScalarValue $realtimeStreamingStatus), (Format-ScalarValue $realtimeManagerState), (Format-ScalarValue $realtimeCacheStatus), $realtimeParsedStreamingRows, (Format-ScalarValue $realtimeLiveAdapterStatus), (Format-UniqueValues (Convert-ToList $realtimeSubscribedChannels)), (Format-ScalarValue $realtimeLatestError)) "realtime_snapshot fields only when status ok and snapshot is non-null" "Do not use realtime snapshot as official daily close."
 
 $tradeEndpointStatus = Get-OptionalStatusFromEndpoint $tradesResponse "trades"
 $tradeStatus = if ($tradeEndpointStatus -eq "reliable" -and $tradeTapeOkRows -gt 0) { "reliable" } elseif ($tradeEndpointStatus -eq "disabled") { "disabled" } elseif ($tradeTapeOkRows -gt 0) { "partial" } elseif ($tradeEndpointStatus -eq "unavailable") { "unavailable" } else { "unknown-needs-verification" }
@@ -637,6 +643,8 @@ Write-Host ("- Streaming status: {0}" -f (Format-ScalarValue $realtimeStreamingS
 Write-Host ("- Manager state: {0}" -f (Format-ScalarValue $realtimeManagerState))
 Write-Host ("- Cache status: {0}" -f (Format-ScalarValue $realtimeCacheStatus))
 Write-Host ("- Live adapter: {0}" -f (Format-ScalarValue $realtimeLiveAdapterStatus))
+Write-Host ("- Subscribed channels: {0}" -f (Format-UniqueValues (Convert-ToList $realtimeSubscribedChannels)))
+Write-Host ("- Latest sanitized error: {0}" -f (Format-ScalarValue $realtimeLatestError))
 Write-Host ("- Endpoint detail: {0}" -f $realtimeEndpointDetail)
 Write-Host ("- Watchlist detail: {0}" -f (Format-UniqueValues $realtimeMessages))
 Write-Host "- Evidence source: current app API response fields; SSI is not called directly by this script."

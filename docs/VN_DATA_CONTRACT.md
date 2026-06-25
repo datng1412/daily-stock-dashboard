@@ -209,7 +209,7 @@ Rules:
 | Index components | SSI IndexComponents | Resolve through SSI IndexList identifiers; use only when SSI returns rows |
 | Symbol metadata | SSI Securities/SecuritiesDetails | Optional fields, including industry, may remain null |
 | Intraday candles | SSI IntradayOhlc | Strict source; no fallback |
-| Realtime snapshot | SSI FastConnect streaming realtime contract | Parser and disabled background manager/cache skeleton covered for buffered `X`, `X-QUOTE`, and `X-TRADE`; live official-client adapter not enabled |
+| Realtime snapshot | SSI FastConnect streaming realtime contract | Parser and disabled background manager/cache skeleton covered for buffered `X`, `X-QUOTE`, and `X-TRADE`; official-client adapter exists behind disabled streaming runtime flag |
 | Trade tape | SSI trade-tape contract | Contract exists; live list/history semantics not confirmed |
 | News | Future NewsProvider | Disabled now |
 | Financials | Future external provider | Not implemented |

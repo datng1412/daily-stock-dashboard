@@ -8,6 +8,7 @@ headers in returned payloads.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import time
@@ -22,10 +23,14 @@ from src.config import get_config, parse_env_bool, parse_env_int
 from data_provider.ssi_streaming_realtime import (
     DEFAULT_STREAMING_REALTIME_CACHE_TTL_SECONDS,
     DEFAULT_STREAMING_REALTIME_CHANNEL_TEMPLATE,
+    DEFAULT_STREAMING_REALTIME_STREAM_URL,
+    OfficialSsiRealtimeStreamClient,
     RealtimeSnapshotCache,
     SsiRealtimeStreamClient,
     SsiStreamingRealtimeManager,
+    SSI_STREAMING_REALTIME_CONFIG_INCOMPLETE_REASON,
     SSI_STREAMING_REALTIME_DISABLED_REASON,
+    SSI_STREAMING_REALTIME_PACKAGE_UNAVAILABLE_REASON,
 )
 
 
@@ -527,6 +532,7 @@ class SsiFastConnectFetcher:
         streaming_realtime_enabled: Optional[bool] = None,
         streaming_realtime_cache_ttl_seconds: Optional[int] = None,
         streaming_realtime_channel_template: Optional[str] = None,
+        streaming_realtime_stream_url: Optional[str] = None,
         streaming_realtime_client_factory: Optional[Callable[[], SsiRealtimeStreamClient]] = None,
         streaming_realtime_manager: Optional[SsiStreamingRealtimeManager] = None,
         intraday_rate_limit_cooldown_seconds: Optional[int] = None,
@@ -642,6 +648,17 @@ class SsiFastConnectFetcher:
             or os.getenv("SSI_STREAMING_REALTIME_CHANNEL_TEMPLATE")
             or DEFAULT_STREAMING_REALTIME_CHANNEL_TEMPLATE
         ).strip() or DEFAULT_STREAMING_REALTIME_CHANNEL_TEMPLATE
+        self.streaming_realtime_stream_url = (
+            streaming_realtime_stream_url
+            if streaming_realtime_stream_url is not None
+            else getattr(config, "ssi_streaming_realtime_stream_url", None)
+            or os.getenv("SSI_STREAMING_REALTIME_STREAM_URL")
+            or DEFAULT_STREAMING_REALTIME_STREAM_URL
+        ).strip() or DEFAULT_STREAMING_REALTIME_STREAM_URL
+        self._streaming_realtime_client_factory_supplied = streaming_realtime_client_factory is not None
+        self._streaming_realtime_manager_supplied = streaming_realtime_manager is not None
+        if streaming_realtime_client_factory is None and self.streaming_realtime_enabled:
+            streaming_realtime_client_factory = self._build_official_streaming_realtime_client
         self.streaming_realtime_manager = streaming_realtime_manager or SsiStreamingRealtimeManager(
             enabled=self.streaming_realtime_enabled,
             cache=RealtimeSnapshotCache(self.streaming_realtime_cache_ttl_seconds),
@@ -656,6 +673,14 @@ class SsiFastConnectFetcher:
         self._access_token: Optional[str] = None
         self._token_expires_at: float = 0
         self._cache: Dict[Tuple[str, Tuple[Tuple[str, Any], ...]], _CacheEntry] = {}
+
+    def _build_official_streaming_realtime_client(self) -> SsiRealtimeStreamClient:
+        return OfficialSsiRealtimeStreamClient(
+            consumer_id=self.consumer_id,
+            consumer_secret=self.consumer_secret,
+            base_url=self.base_url,
+            stream_url=self.streaming_realtime_stream_url,
+        )
 
     @classmethod
     def clear_intraday_rate_limit_cooldowns(cls) -> None:
@@ -1073,6 +1098,66 @@ class SsiFastConnectFetcher:
                     "streaming_status": "disabled",
                     "cache_status": "disabled",
                     "live_adapter_status": "not_enabled",
+                    "parser_rows_observed": 0,
+                },
+            }
+
+        if not self.consumer_id or not self.consumer_secret or not self.streaming_realtime_stream_url:
+            return {
+                "status": "unavailable",
+                "source": SSI_SOURCE,
+                "reason": SSI_STREAMING_REALTIME_CONFIG_INCOMPLETE_REASON,
+                "requested_tickers": normalized_symbols,
+                "quotes": [],
+                "count": 0,
+                "attempted_endpoints": [],
+                "candidate_endpoints": [],
+                "rest_candidate_endpoints": list(SSI_REALTIME_ENDPOINT_CANDIDATES),
+                "endpoint_attempts": [],
+                "discovery_status": "streaming_configuration_incomplete",
+                "rest_status": "unsupported",
+                "streaming_status": "configuration_incomplete",
+                "streaming_data_types": list(SSI_REALTIME_STREAMING_DATA_TYPES),
+                "parsed_streaming_rows": 0,
+                "cache_status": "unavailable",
+                "manager_state": self.streaming_realtime_manager.state,
+                "diagnostics": {
+                    "manager_state": self.streaming_realtime_manager.state,
+                    "streaming_status": "configuration_incomplete",
+                    "cache_status": "unavailable",
+                    "live_adapter_status": "configuration_incomplete",
+                    "parser_rows_observed": 0,
+                },
+            }
+
+        if (
+            not self._streaming_realtime_client_factory_supplied
+            and not self._streaming_realtime_manager_supplied
+            and importlib.util.find_spec("ssi_fc_data") is None
+        ):
+            return {
+                "status": "unavailable",
+                "source": SSI_SOURCE,
+                "reason": SSI_STREAMING_REALTIME_PACKAGE_UNAVAILABLE_REASON,
+                "requested_tickers": normalized_symbols,
+                "quotes": [],
+                "count": 0,
+                "attempted_endpoints": [],
+                "candidate_endpoints": [],
+                "rest_candidate_endpoints": list(SSI_REALTIME_ENDPOINT_CANDIDATES),
+                "endpoint_attempts": [],
+                "discovery_status": "streaming_package_unavailable",
+                "rest_status": "unsupported",
+                "streaming_status": "package_unavailable",
+                "streaming_data_types": list(SSI_REALTIME_STREAMING_DATA_TYPES),
+                "parsed_streaming_rows": 0,
+                "cache_status": "unavailable",
+                "manager_state": self.streaming_realtime_manager.state,
+                "diagnostics": {
+                    "manager_state": self.streaming_realtime_manager.state,
+                    "streaming_status": "package_unavailable",
+                    "cache_status": "unavailable",
+                    "live_adapter_status": "package_unavailable",
                     "parser_rows_observed": 0,
                 },
             }
