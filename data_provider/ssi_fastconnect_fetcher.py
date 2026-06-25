@@ -175,6 +175,66 @@ def _unavailable(reason: str) -> Dict[str, str]:
     }
 
 
+def _safe_int(value: Any) -> Optional[int]:
+    if value in (None, ""):
+        return None
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _classify_provider_failure(
+    *,
+    error_type: Optional[str] = None,
+    http_status: Optional[Any] = None,
+    code: Optional[Any] = None,
+    reason: Optional[str] = None,
+) -> str:
+    """Map provider/request failure metadata into a safe diagnostic class."""
+    error = str(error_type or "").strip().lower()
+    status_code = _safe_int(http_status)
+    provider_code = _safe_int(code)
+    reason_text = str(reason or "").strip().lower()
+
+    if reason_text == MISSING_CREDENTIALS_REASON.lower():
+        return "auth_failed"
+    if error == "timeout":
+        return "timeout"
+    if error in {"connection_error", "network_error", "request_error"}:
+        return "network_error"
+    if error == "invalid_json":
+        return "parse_failed"
+
+    effective_code = provider_code if provider_code is not None else status_code
+    if effective_code == 429:
+        return "rate_limited"
+    if effective_code == 401:
+        return "auth_failed"
+    if effective_code == 403:
+        return "permission_denied"
+    if effective_code == 400:
+        return "bad_request_params"
+    if effective_code in {408, 504}:
+        return "timeout"
+    if effective_code is not None and effective_code >= 500:
+        return "provider_unavailable"
+    if error == "ssi_error":
+        return "provider_unavailable"
+    if error == "http_error":
+        return "provider_unavailable"
+    return "unknown"
+
+
+def _safe_diagnostic_text(value: Any, *, max_length: int = 120) -> Optional[str]:
+    if value in (None, ""):
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    return text[:max_length]
+
+
 def _clean_key(key: Any) -> str:
     return "".join(ch for ch in str(key or "").strip().lower() if ch.isalnum())
 
@@ -606,8 +666,24 @@ class SsiFastConnectFetcher:
                 },
                 timeout=self.timeout_seconds,
             )
-        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.exceptions.RequestException):
-            return _unavailable(REQUEST_FAILED_REASON)
+        except requests.exceptions.Timeout:
+            return {
+                **_unavailable(REQUEST_FAILED_REASON),
+                "error_type": "timeout",
+                "failure_class": "timeout",
+            }
+        except requests.exceptions.ConnectionError:
+            return {
+                **_unavailable(REQUEST_FAILED_REASON),
+                "error_type": "connection_error",
+                "failure_class": "network_error",
+            }
+        except requests.exceptions.RequestException:
+            return {
+                **_unavailable(REQUEST_FAILED_REASON),
+                "error_type": "request_error",
+                "failure_class": "network_error",
+            }
 
         payload = self._parse_response(response)
         if isinstance(payload, dict) and payload.get("status") == "unavailable":
@@ -615,7 +691,11 @@ class SsiFastConnectFetcher:
 
         token = _token_from_payload(payload)
         if not token:
-            return _unavailable(REQUEST_FAILED_REASON)
+            return {
+                **_unavailable(REQUEST_FAILED_REASON),
+                "error_type": "auth_response_missing_token",
+                "failure_class": "auth_failed",
+            }
 
         self._access_token = token
         self._token_expires_at = _expiry_from_payload(payload, self.token_ttl_seconds)
@@ -744,7 +824,17 @@ class SsiFastConnectFetcher:
             param_variants=variants,
             required_any=("date_time", "timestamp", "open", "high", "low", "close", "volume"),
         )
-        return self._empty_as_unavailable(payload)
+        payload = self._empty_as_unavailable(
+            payload,
+            reason="SSI IntradayOhlc returned no candles.",
+            failure_class="empty_response",
+        )
+        return self._with_intraday_failure_diagnostics(
+            payload,
+            params=params,
+            public_limit=public_limit,
+            interval=interval,
+        )
 
     def get_realtime_snapshot(self, symbols: List[str]) -> Dict[str, Any]:
         """Return the current SSI realtime contract state.
@@ -1188,11 +1278,26 @@ class SsiFastConnectFetcher:
                 timeout=self.timeout_seconds,
             )
         except requests.exceptions.Timeout:
-            return {**_unavailable(REQUEST_FAILED_REASON), "endpoint": endpoint, "error_type": "timeout"}
+            return {
+                **_unavailable(REQUEST_FAILED_REASON),
+                "endpoint": endpoint,
+                "error_type": "timeout",
+                "failure_class": "timeout",
+            }
         except requests.exceptions.ConnectionError:
-            return {**_unavailable(REQUEST_FAILED_REASON), "endpoint": endpoint, "error_type": "connection_error"}
+            return {
+                **_unavailable(REQUEST_FAILED_REASON),
+                "endpoint": endpoint,
+                "error_type": "connection_error",
+                "failure_class": "network_error",
+            }
         except requests.exceptions.RequestException:
-            return {**_unavailable(REQUEST_FAILED_REASON), "endpoint": endpoint, "error_type": "request_error"}
+            return {
+                **_unavailable(REQUEST_FAILED_REASON),
+                "endpoint": endpoint,
+                "error_type": "request_error",
+                "failure_class": "network_error",
+            }
 
         return self._parse_response(response, endpoint=endpoint)
 
@@ -1204,17 +1309,34 @@ class SsiFastConnectFetcher:
                 "endpoint": endpoint,
                 "http_status": http_status,
                 "error_type": "http_error",
+                "failure_class": _classify_provider_failure(error_type="http_error", http_status=http_status),
             }
         try:
             payload = response.json()
         except (TypeError, ValueError):
-            return {**_unavailable(REQUEST_FAILED_REASON), "endpoint": endpoint, "http_status": http_status, "error_type": "invalid_json"}
+            return {
+                **_unavailable(REQUEST_FAILED_REASON),
+                "endpoint": endpoint,
+                "http_status": http_status,
+                "error_type": "invalid_json",
+                "failure_class": "parse_failed",
+            }
         if _has_ssi_error(payload):
-            result = {**_unavailable(REQUEST_FAILED_REASON), "endpoint": endpoint, "http_status": http_status, "error_type": "ssi_error"}
+            result = {
+                **_unavailable(REQUEST_FAILED_REASON),
+                "endpoint": endpoint,
+                "http_status": http_status,
+                "error_type": "ssi_error",
+            }
             if isinstance(payload, dict):
                 code = _pick_ci(payload, "code", "errorCode", "status", "Status")
                 if code is not None:
                     result["code"] = str(code)[:80]
+            result["failure_class"] = _classify_provider_failure(
+                error_type="ssi_error",
+                http_status=http_status,
+                code=result.get("code"),
+            )
             return result
         return payload
 
@@ -1278,18 +1400,80 @@ class SsiFastConnectFetcher:
         return result
 
     @staticmethod
-    def _empty_as_unavailable(payload: Dict[str, Any]) -> Dict[str, Any]:
+    def _empty_as_unavailable(
+        payload: Dict[str, Any],
+        *,
+        reason: str = REQUEST_FAILED_REASON,
+        failure_class: Optional[str] = None,
+        diagnostics: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         if payload.get("status") != "ok":
             return payload
         if payload.get("count", 0) == 0:
-            return {
+            result = {
                 **payload,
                 "status": "unavailable",
-                "reason": REQUEST_FAILED_REASON,
+                "reason": reason,
                 "rows": [],
                 "count": 0,
             }
+            if failure_class:
+                result["failure_class"] = failure_class
+            if diagnostics:
+                result["diagnostics"] = dict(diagnostics)
+            return result
         return payload
+
+    @staticmethod
+    def _with_intraday_failure_diagnostics(
+        payload: Dict[str, Any],
+        *,
+        params: Dict[str, Any],
+        public_limit: int,
+        interval: Optional[str],
+    ) -> Dict[str, Any]:
+        if not isinstance(payload, dict) or str(payload.get("status") or "").lower() not in {"unavailable", "disabled"}:
+            return payload
+
+        existing = payload.get("diagnostics") if isinstance(payload.get("diagnostics"), dict) else {}
+        diagnostics: Dict[str, Any] = {
+            key: value
+            for key, value in existing.items()
+            if isinstance(value, (str, int, float, bool)) or value is None
+        }
+        failure_class = payload.get("failure_class") or diagnostics.get("failure_class")
+        if not failure_class:
+            failure_class = _classify_provider_failure(
+                error_type=payload.get("error_type"),
+                http_status=payload.get("http_status"),
+                code=payload.get("code") or diagnostics.get("provider_code"),
+                reason=payload.get("reason"),
+            )
+
+        def set_diag(key: str, value: Any) -> None:
+            text = _safe_diagnostic_text(value)
+            if text is not None:
+                diagnostics[key] = text
+
+        diagnostics["failure_class"] = str(failure_class)
+        diagnostics["endpoint"] = "IntradayOhlc"
+        set_diag("http_status", payload.get("http_status"))
+        set_diag("provider_code", payload.get("code") or diagnostics.get("provider_code"))
+        set_diag("error_type", payload.get("error_type"))
+        set_diag("symbol", params.get("symbol"))
+        set_diag("from_date", params.get("fromDate") or params.get("Fromdate"))
+        set_diag("to_date", params.get("toDate") or params.get("Todate"))
+        set_diag("requested_timeframe", interval or params.get("timeFrame") or params.get("TimeFrame"))
+        set_diag("pageIndex", params.get("pageIndex") or 1)
+        set_diag("pageSize", params.get("pageSize") or SSI_PAGE_SIZE)
+        set_diag("ascending", params.get("ascending"))
+        set_diag("public_limit", public_limit)
+        set_diag("request_page_size", payload.get("request_page_size") or SSI_PAGE_SIZE)
+
+        result = dict(payload)
+        result["failure_class"] = str(failure_class)
+        result["diagnostics"] = diagnostics
+        return result
 
     def _cached_paged_normalized(
         self,

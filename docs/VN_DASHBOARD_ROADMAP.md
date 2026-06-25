@@ -85,7 +85,8 @@ If SSI-owned data is unavailable, show unavailable. Do not silently fallback.
 * DailyIndex works but requires 29-day provider-level chunking because SSI rejects broad ranges.
 * IndexList is exposed through `/api/v1/stocks/vn/index-list` and should be used to discover SSI-returned index codes.
 * IndexComponents is exposed through `/api/v1/stocks/vn/index-components?index_code=...`, but the current local SSI environment returned a clean unavailable state for `VN30`; do not hardcode components or fallback to another provider.
-* SSI IntradayOhlc is implemented for the watchlist/company intraday pulse through the same SSI auth/cache path. If SSI returns no candles or the endpoint is disabled, expose a clean SSI `disabled`/`unavailable` intraday status and keep daily rows OK.
+* SSI IntradayOhlc is implemented for the watchlist/company intraday pulse through the same SSI auth/cache path. If SSI returns no candles, stale rows, malformed rows, provider code `429`, or the endpoint is disabled, expose a clean SSI `disabled`/`unavailable` intraday status and keep daily rows OK.
+* Phase 4.0B fixed the IntradayOhlc paging bug by using internal `pageSize=1000`, sorting provider rows, and applying the public candle limit afterward. Phase 4.0B-2 added sanitized failure classification for current live failures; the observed FPT failure was SSI provider code `429` with HTTP 200, classified as `rate_limited`.
 * `/api/v1/stocks/vn/chart` should be SSI-backed and should return SSI source metadata.
 * `/api/v1/stocks/vn/watchlist` must remain SSI-backed for SSI-owned fields, including daily close, reference, ceiling/floor, matched value, put-through value, foreign flow, and source metadata.
 * `/api/v1/stocks/vn/company/{ticker}` is the current company research contract/page shell that reuses the SSI-backed watchlist row for market-data blocks.

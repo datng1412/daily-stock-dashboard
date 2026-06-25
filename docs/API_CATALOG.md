@@ -83,6 +83,7 @@ Implemented contract notes:
 
 - Watchlist `trade_tape` is public list data. It returns `[]` when unavailable/no rows and trade rows when usable.
 - Realtime/trade-tape status messages are short and user-safe. Sanitized provider details may appear under status diagnostics or other diagnostics-only structures.
+- Intraday unavailable status may include sanitized diagnostics such as `failure_class`, `endpoint=IntradayOhlc`, HTTP status, provider code, requested timeframe, internal page size, and public limit.
 - DailyOhlc and DailyStockPrice can disagree on same ticker/date.
 
 Future changes:
@@ -162,6 +163,7 @@ Null/empty rules:
 Implemented contract notes:
 
 - Company intraday unavailable shape is `status = unavailable`, `candles = []`, and `pulse = null`.
+- Company `intraday.diagnostics` is optional and diagnostic-only; it may include sanitized SSI IntradayOhlc failure classification such as `rate_limited` without raw provider payloads or secrets.
 - Profile can have `name = null` and `industry = null` while provider status is `ok`; docs define this as provider OK plus profile completeness `partial`.
 - Company price and trading stats now align shared daily values with SSI DailyOhlc; remaining numeric differences versus DailyStockPrice are intentional when fields are explicitly labeled as reference, matched, put-through, adjusted, or foreign-flow values.
 - News placeholders use `NewsProvider future`; financials/events/corporate-action placeholders use `external provider future`. `not_implemented` is allowed for future modules, not live-provider statuses.

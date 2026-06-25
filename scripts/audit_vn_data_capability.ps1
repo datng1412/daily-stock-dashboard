@@ -389,6 +389,18 @@ $intradayMessages = @($rows | ForEach-Object {
   $status = Get-Value $_ @("intraday_status")
   Get-Value $status @("message", "reason")
 })
+$intradayDiagnostics = @($rows | ForEach-Object {
+  $status = Get-Value $_ @("intraday_status")
+  $diagnostics = Get-Value $status @("diagnostics")
+  if ($null -ne $diagnostics) { $diagnostics } else { $status }
+})
+$intradayFailureModes = @($intradayDiagnostics | ForEach-Object { Get-Value $_ @("failure_class", "failure_mode") })
+$intradayHttpStatuses = @($intradayDiagnostics | ForEach-Object { Get-Value $_ @("http_status") })
+$intradayProviderCodes = @($intradayDiagnostics | ForEach-Object { Get-Value $_ @("provider_code", "code") })
+$intradayErrorTypes = @($intradayDiagnostics | ForEach-Object { Get-Value $_ @("error_type") })
+$intradayEndpoints = @($intradayDiagnostics | ForEach-Object { Get-Value $_ @("endpoint") })
+$intradayPageSizes = @($intradayDiagnostics | ForEach-Object { Get-Value $_ @("pageSize", "request_page_size") })
+$intradayPublicLimits = @($intradayDiagnostics | ForEach-Object { Get-Value $_ @("public_limit") })
 $intradayTimestamps = @()
 foreach ($row in $rows) {
   foreach ($candle in @(Convert-ToList (Get-Value $row @("intraday_candles")))) {
@@ -450,7 +462,7 @@ $capabilities += New-CapabilityRow "Technical indicators derived from daily OHLC
 
 $intradayUsableRatio = "{0}/{1}" -f $intradayOkRows, $rowCount
 $intradayStatus = if ($intradayOkRows -eq $rowCount) { "reliable" } elseif ($intradayOkRows -gt 0) { "partial" } elseif ($intradayStatusValues -contains "disabled") { "disabled" } elseif ($intradayStatusValues -contains "unavailable") { "unavailable" } else { "unknown-needs-verification" }
-$intradayEvidence = "usable current pulse rows {0}/{1}; pulse rows {2}/{1}; public candle counts {3}; statuses {4}; date_match {5}; intraday_latest_date {6}; daily_price_date {7}; requested_timeframe {8}; observed_granularity {9}; observed_granularity_seconds {10}; timestamp_range {11}; messages {12}" -f `
+$intradayEvidence = "usable current pulse rows {0}/{1}; pulse rows {2}/{1}; public candle counts {3}; statuses {4}; date_match {5}; intraday_latest_date {6}; daily_price_date {7}; requested_timeframe {8}; observed_granularity {9}; observed_granularity_seconds {10}; timestamp_range {11}; failure_mode {12}; http_status {13}; provider_code {14}; error_type {15}; endpoint {16}; messages {17}" -f `
   $intradayOkRows,
   $rowCount,
   $intradayPulseRows,
@@ -463,6 +475,11 @@ $intradayEvidence = "usable current pulse rows {0}/{1}; pulse rows {2}/{1}; publ
   (Format-UniqueValues $intradayGranularities),
   (Format-UniqueValues $intradayGranularitySeconds),
   $intradayTimestampRange,
+  (Format-UniqueValues $intradayFailureModes),
+  (Format-UniqueValues $intradayHttpStatuses),
+  (Format-UniqueValues $intradayProviderCodes),
+  (Format-UniqueValues $intradayErrorTypes),
+  (Format-UniqueValues $intradayEndpoints),
   (Format-UniqueValues $intradayMessages)
 $capabilities += New-CapabilityRow "Intraday OHLCV / intraday pulse" $intradayStatus "SSI IntradayOhlc" $intradayEvidence "intraday_candles, intraday_pulse only when status ok and date matched" "Evidence is from current API response fields; public candles stay empty when stale or mismatched."
 
@@ -575,6 +592,13 @@ Write-Host ("- Intraday latest date: {0}" -f (Format-UniqueValues $intradayLates
 Write-Host ("- Daily price date: {0}" -f (Format-UniqueValues $intradayDailyDates))
 Write-Host ("- Requested timeframe: {0}" -f (Format-UniqueValues $intradayRequestedTimeframes))
 Write-Host ("- Observed granularity: {0} ({1} seconds)" -f (Format-UniqueValues $intradayGranularities), (Format-UniqueValues $intradayGranularitySeconds))
+Write-Host ("- Failure mode: {0}" -f (Format-UniqueValues $intradayFailureModes))
+Write-Host ("- HTTP status: {0}" -f (Format-UniqueValues $intradayHttpStatuses))
+Write-Host ("- Provider code: {0}" -f (Format-UniqueValues $intradayProviderCodes))
+Write-Host ("- Error type: {0}" -f (Format-UniqueValues $intradayErrorTypes))
+Write-Host ("- Endpoint: {0}" -f (Format-UniqueValues $intradayEndpoints))
+Write-Host ("- Request page size: {0}" -f (Format-UniqueValues $intradayPageSizes))
+Write-Host ("- Public limit: {0}" -f (Format-UniqueValues $intradayPublicLimits))
 Write-Host ("- Reason: {0}" -f (Format-UniqueValues $intradayMessages))
 Write-Host "- Evidence source: current app API response fields; SSI is not called directly by this script."
 

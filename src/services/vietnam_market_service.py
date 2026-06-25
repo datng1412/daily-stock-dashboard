@@ -440,6 +440,64 @@ def _status_diagnostics(reason: Optional[str]) -> Dict[str, Any]:
     return {"provider_message": str(reason)}
 
 
+INTRADAY_DIAGNOSTIC_KEYS = {
+    "failure_class",
+    "endpoint",
+    "http_status",
+    "provider_code",
+    "code",
+    "error_type",
+    "symbol",
+    "from_date",
+    "to_date",
+    "requested_timeframe",
+    "pageIndex",
+    "pageSize",
+    "ascending",
+    "public_limit",
+    "request_page_size",
+    "pages_used",
+    "intraday_latest_date",
+    "daily_price_date",
+    "date_match",
+    "intraday_granularity",
+    "intraday_granularity_seconds",
+    "intraday_granularity_label",
+}
+
+
+def _safe_intraday_diagnostic_value(value: Any) -> Any:
+    if value in (None, ""):
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        if isinstance(value, float) and math.isnan(value):
+            return None
+        return value
+    text = str(value).strip()
+    return text[:120] if text else None
+
+
+def _intraday_failure_diagnostics(payload: Any) -> Dict[str, Any]:
+    if not isinstance(payload, dict):
+        return {}
+
+    diagnostics: Dict[str, Any] = {}
+    nested = payload.get("diagnostics")
+    sources = [nested] if isinstance(nested, dict) else []
+    sources.append(payload)
+    for source in sources:
+        for key, value in source.items():
+            if key not in INTRADAY_DIAGNOSTIC_KEYS:
+                continue
+            output_key = "provider_code" if key == "code" else key
+            safe_value = _safe_intraday_diagnostic_value(value)
+            if safe_value is not None:
+                diagnostics[output_key] = safe_value
+    return diagnostics
+
+
 def _public_live_status(status: Optional[str]) -> str:
     normalized = str(status or "").lower()
     if normalized in {"ok", "unavailable", "disabled"}:
@@ -1782,6 +1840,17 @@ class VietnamMarketService:
         intraday_granularity = diagnostics.get("intraday_granularity") or "unknown"
         intraday_granularity_seconds = diagnostics.get("intraday_granularity_seconds")
         intraday_granularity_label = diagnostics.get("intraday_granularity_label") or "provider-returned"
+        status_payload = {
+            "status": status,
+            "source": SSI_INTRADAY_SOURCE,
+            "message": reason_text,
+            "intraday_requested_timeframe": intraday_timeframe,
+            "intraday_actual_granularity": intraday_granularity,
+            "intraday_actual_granularity_seconds": intraday_granularity_seconds,
+        }
+        status_payload.update(diagnostics)
+        if diagnostics:
+            status_payload["diagnostics"] = dict(diagnostics)
         return {
             "intraday_timeframe": intraday_timeframe,
             "intraday_requested_timeframe": intraday_timeframe,
@@ -1800,15 +1869,7 @@ class VietnamMarketService:
             "intraday_pulse": None,
             "intraday_labels": [],
             "intraday_details": [],
-            "intraday_status": {
-                "status": status,
-                "source": SSI_INTRADAY_SOURCE,
-                "message": reason_text,
-                "intraday_requested_timeframe": intraday_timeframe,
-                "intraday_actual_granularity": intraday_granularity,
-                "intraday_actual_granularity_seconds": intraday_granularity_seconds,
-                **diagnostics,
-            },
+            "intraday_status": status_payload,
         }
 
     def _load_ssi_intraday_payload(self, symbol: str, intraday_timeframe: str, intraday_limit: int) -> Dict[str, Any]:
@@ -1851,14 +1912,18 @@ class VietnamMarketService:
                 intraday_timeframe,
                 status="disabled",
                 reason=disabled_reason or VN_INTRADAY_DISABLED_REASON,
+                diagnostics=_intraday_failure_diagnostics(payload),
             )
         unavailable_reason = None
+        diagnostics: Dict[str, Any] = {}
         if isinstance(payload, dict):
             unavailable_reason = payload.get("reason") or payload.get("message")
+            diagnostics = _intraday_failure_diagnostics(payload)
         return self._ssi_intraday_unavailable_payload(
             intraday_timeframe,
             status=status or "unavailable",
             reason=unavailable_reason or VN_INTRADAY_UNAVAILABLE_REASON,
+            diagnostics=diagnostics,
         )
 
     def _validate_intraday_freshness(

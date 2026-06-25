@@ -296,6 +296,115 @@ def test_intraday_ohlcv_sends_ssi_params_and_maps_sorted_candles():
     assert payload["request_page_size"] == 1000
 
 
+def test_intraday_ohlcv_maps_trading_date_and_time_shape():
+    session = _FakeSession(
+        post_items=[_token_response()],
+        get_items=[
+            _FakeResponse(
+                payload={
+                    "data": [
+                        {
+                            "TradingDate": "2026-06-17",
+                            "Time": "10:00:00",
+                            "Open": "101",
+                            "High": "103",
+                            "Low": "100",
+                            "Close": "102",
+                            "Volume": "2000",
+                        }
+                    ]
+                }
+            )
+        ],
+    )
+    fetcher = _fetcher(session=session)
+
+    payload = fetcher.get_intraday_ohlcv("FPT", from_date="2026-06-17", to_date="2026-06-17", limit=8, interval="1h")
+
+    assert payload["status"] == "ok"
+    assert payload["rows"][0]["date_time"] == "2026-06-17T10:00:00"
+    assert payload["rows"][0]["close"] == 102.0
+    assert payload["rows"][0]["volume"] == 2000
+
+
+@pytest.mark.parametrize(
+    ("provider_code", "expected_failure_class"),
+    [
+        ("400", "bad_request_params"),
+        ("401", "auth_failed"),
+        ("403", "permission_denied"),
+        ("429", "rate_limited"),
+        ("500", "provider_unavailable"),
+    ],
+)
+def test_intraday_provider_error_codes_are_classified(provider_code, expected_failure_class):
+    session = _FakeSession(
+        post_items=[_token_response()],
+        get_items=[
+            _FakeResponse(
+                payload={
+                    "status": "error",
+                    "code": provider_code,
+                    "message": "provider rejected request",
+                }
+            )
+        ],
+    )
+    fetcher = _fetcher(session=session)
+
+    payload = fetcher.get_intraday_ohlcv("FPT", from_date="2026-06-17", to_date="2026-06-17", limit=8, interval="1h")
+
+    assert payload["status"] == "unavailable"
+    assert payload["reason"] == REQUEST_FAILED_REASON
+    assert payload["failure_class"] == expected_failure_class
+    assert payload["diagnostics"]["failure_class"] == expected_failure_class
+    assert payload["diagnostics"]["endpoint"] == "IntradayOhlc"
+    assert payload["diagnostics"]["provider_code"] == provider_code
+    assert payload["diagnostics"]["http_status"] == "200"
+    assert payload["diagnostics"]["pageSize"] == "1000"
+    assert payload["diagnostics"]["public_limit"] == "8"
+
+
+@pytest.mark.parametrize(
+    ("exception", "expected_error_type", "expected_failure_class"),
+    [
+        (requests.exceptions.Timeout("timed out"), "timeout", "timeout"),
+        (requests.exceptions.ConnectionError("connection failed"), "connection_error", "network_error"),
+    ],
+)
+def test_intraday_request_exceptions_are_classified_without_secrets(exception, expected_error_type, expected_failure_class):
+    session = _FakeSession(post_items=[_token_response()], get_items=[exception])
+    fetcher = _fetcher(session=session)
+
+    payload = fetcher.get_intraday_ohlcv("FPT", from_date="2026-06-17", to_date="2026-06-17", limit=8, interval="1h")
+
+    assert payload["status"] == "unavailable"
+    assert payload["failure_class"] == expected_failure_class
+    assert payload["diagnostics"]["failure_class"] == expected_failure_class
+    assert payload["diagnostics"]["error_type"] == expected_error_type
+    assert payload["diagnostics"]["endpoint"] == "IntradayOhlc"
+    assert SECRET_TOKEN not in str(payload)
+
+
+def test_intraday_empty_response_has_explicit_diagnostics_without_fallback():
+    session = _FakeSession(
+        post_items=[_token_response()],
+        get_items=[_FakeResponse(payload={"data": []}), _FakeResponse(payload={"data": []})],
+    )
+    fetcher = _fetcher(session=session)
+
+    payload = fetcher.get_intraday_ohlcv("FPT", from_date="2026-06-17", to_date="2026-06-17", limit=8)
+
+    assert payload["status"] == "unavailable"
+    assert payload["reason"] == "SSI IntradayOhlc returned no candles."
+    assert payload["rows"] == []
+    assert payload["count"] == 0
+    assert payload["failure_class"] == "empty_response"
+    assert payload["diagnostics"]["failure_class"] == "empty_response"
+    assert payload["diagnostics"]["endpoint"] == "IntradayOhlc"
+    assert payload["diagnostics"]["request_page_size"] == "1000"
+
+
 def test_intraday_ohlcv_keeps_latest_rows_after_sorting_oldest_first_response():
     session = _FakeSession(
         post_items=[_token_response()],

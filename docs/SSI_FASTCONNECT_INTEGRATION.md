@@ -90,7 +90,7 @@ External providers are still required for BCTC/KQKD, financial statements, finan
 | DailyStockPrice | `GET /Market/DailyStockPrice` | OK, investigation pending | Owns reference, ceiling/floor, matched/put-through, adjusted close if provided, and latest foreign-flow fields. Latest smoke found same-day DailyOhlc versus DailyStockPrice close/volume mismatch for FPT on `2026-06-22`. |
 | IndexList | `GET /Market/IndexList` | OK | Use SSI-returned index codes instead of hardcoded assumptions. |
 | IndexComponents | `GET /Market/IndexComponents` | Clean unavailable when provider request fails | Provider/service/API coverage exists, but live component rows remain unconfirmed in the current SSI environment. |
-| IntradayOhlc | `GET /Market/IntradayOhlc` | Contract exists; returned rows may be stale/mismatched | Freshness must be validated against SSI DailyOhlc date before rendering intraday metrics. |
+| IntradayOhlc | `GET /Market/IntradayOhlc` | Contract exists; returned rows may be stale/mismatched or provider-throttled | Freshness must be validated against SSI DailyOhlc date before rendering intraday metrics; failures expose only sanitized diagnostics. |
 | Realtime snapshot | SSI FastConnect streaming data types `X`, `X-QUOTE`, `X-TRADE` | Parser covered; config-disabled manager/cache skeleton exists; live official-client adapter is not enabled | Phase 4.0C verified the route/service/fetcher wiring and config gate. Phase 4.0C-2 found no supported SSI REST realtime endpoint, SDK method, enum, or hidden repo contract. Phase 4.0C-3 confirmed the realtime direction is streaming. Phase 4.0C-5 added a request-safe cache read path that stays disabled by default. Previous candidate names `RealtimeQuote`, `RealtimePrice`, `RealtimeSnapshot`, and `SecuritiesRealtime` are discovery evidence only and are no longer probed at runtime. The dashboard must not claim realtime is live unless `realtime_snapshot` is non-null and `realtime_status.status = ok`. |
 | Trade tape | SSI trade-tape endpoint candidates | Contract exists; currently unavailable/404 in latest smoke | Not confirmed live. Desired unavailable contract is `trade_tape=[]` plus `trade_tape_status`, with endpoint/http details in diagnostics. |
 | Securities/SecuritiesDetails | `GET /Market/Securities`, `GET /Market/SecuritiesDetails` | Partial metadata | Optional company name, issuer, security type, lot size, listed shares, and listed date may remain null. |
@@ -108,6 +108,38 @@ If SSI-owned data is unavailable: show unavailable, do not silently fallback.
 ```
 
 SSI realtime and trade tape are not confirmed live in the latest smoke context. Phase 4.0C found the realtime snapshot route and service wiring correct, with the live backend returning unavailable, 0 quote rows, and a 404 from an SSI realtime REST candidate path for FPT. Phase 4.0C-2 searched the repository for FastConnect realtime REST endpoint contracts, SDK methods, enums, docs references, and configuration but did not identify a supported SSI realtime snapshot endpoint. Phase 4.0C-3 confirmed the correct SSI direction is streaming and added parser coverage for buffered `X`, `X-QUOTE`, and `X-TRADE` envelopes. Phase 4.0C-5 added a config-disabled background manager/cache skeleton, but it does not connect the official SSI client and it does not start streams from request handlers. The dashboard must not use daily close or intraday candles as a realtime substitute, and it must not claim realtime is live unless the realtime snapshot object exists and its public status is `ok`.
+
+## Intraday Failure Diagnostics
+
+Phase 4.0B-2 inspected the live IntradayOhlc failure path after the paging fix was already in place. The company and watchlist paths still call:
+
+```text
+VietnamCompanyResearchService -> VietnamMarketService.build_watchlist(include_intraday=True) -> SsiFastConnectFetcher.get_intraday_ohlcv -> GET /Market/IntradayOhlc
+```
+
+The request shape remains symbol-scoped and paged internally:
+
+```text
+endpoint = IntradayOhlc
+symbol = FPT
+timeFrame = 1h
+pageIndex = 1
+pageSize = 1000
+ascending = true
+```
+
+Live evidence on 2026-06-25 showed SSI returning HTTP 200 with provider code `429` for IntradayOhlc, which is classified as `rate_limited`. This is a provider-side throttle/error response, not a route, parser, public limit, or stale-row filtering failure. Intraday therefore remains unavailable for that response, with `intraday_candles=[]` and `intraday_pulse=null`.
+
+Sanitized intraday diagnostics may include:
+
+* `failure_class`, such as `rate_limited`, `bad_request_params`, `auth_failed`, `permission_denied`, `timeout`, `network_error`, `parse_failed`, `provider_unavailable`, or `empty_response`.
+* `endpoint=IntradayOhlc`.
+* `http_status`.
+* `provider_code`.
+* `error_type`.
+* symbol, date range, requested timeframe, page size, public limit, and ascending flag.
+
+Diagnostics must not include raw response bodies, tokens, auth headers, account IDs, consumer IDs, consumer secrets, or raw auth responses.
 
 ## Official Python Streaming Client Inspection
 

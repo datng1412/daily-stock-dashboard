@@ -211,6 +211,11 @@ def test_vietnam_company_research_keeps_unavailable_live_sections_visible(monkey
                             "status": "unavailable",
                             "source": "SSI IntradayOhlc",
                             "message": "SSI IntradayOhlc latest candle date does not match latest daily trading date.",
+                            "diagnostics": {
+                                "failure_class": "rate_limited",
+                                "endpoint": "IntradayOhlc",
+                                "provider_code": "429",
+                            },
                         },
                         "intraday_candles": [],
                         "intraday_pulse": None,
@@ -267,6 +272,9 @@ def test_vietnam_company_research_keeps_unavailable_live_sections_visible(monkey
     assert payload["intraday"]["status"] == "unavailable"
     assert payload["intraday"]["candles"] == []
     assert payload["intraday"]["pulse"] is None
+    assert payload["intraday"]["diagnostics"]["failure_class"] == "rate_limited"
+    assert payload["intraday"]["diagnostics"]["endpoint"] == "IntradayOhlc"
+    assert payload["intraday"]["diagnostics"]["provider_code"] == "429"
     assert payload["realtime"]["status"] == "unavailable"
     assert payload["realtime"]["snapshot"] is None
     assert payload["realtime"]["message"] == "SSI realtime unavailable."

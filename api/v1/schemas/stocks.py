@@ -450,6 +450,7 @@ class VietnamCompanyIntraday(BaseModel):
     source: Optional[str] = None
     status: str = "unavailable"
     message: Optional[str] = None
+    diagnostics: Dict[str, Any] = Field(default_factory=dict)
 
 
 class VietnamCompanyRealtime(BaseModel):

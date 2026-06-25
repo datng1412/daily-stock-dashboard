@@ -156,6 +156,7 @@ class VietnamCompanyResearchService:
             technical["bollinger_lower"],
         )
         intraday_status = _dict(row.get("intraday_status"))
+        intraday_diagnostics = _dict(intraday_status.get("diagnostics"))
         intraday_pulse = row.get("intraday_pulse") if isinstance(row.get("intraday_pulse"), dict) else None
         intraday = {
             "candles": list(row.get("intraday_candles") or []),
@@ -172,6 +173,7 @@ class VietnamCompanyResearchService:
             "source": SSI_INTRADAY_SOURCE,
             "status": intraday_status.get("status") or "unavailable",
             "message": intraday_status.get("message") or row.get("intraday_warning"),
+            "diagnostics": intraday_diagnostics,
         }
         realtime_status = _dict(row.get("realtime_status"))
         realtime = {

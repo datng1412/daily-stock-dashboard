@@ -11,6 +11,7 @@ Run these before a Phase 0/1/2/3 runtime milestone commit:
 ```powershell
 python -m pytest tests/test_vietnam_observability.py -q
 python -m pytest tests/test_vietnam_market_service_no_mozyfin.py -q
+python -m pytest tests/test_ssi_fastconnect_fetcher.py -q
 python -m pytest tests/test_vietnam_market_service_realtime.py -q
 python -m pytest tests/test_vietnam_market_service_intraday.py -q
 python -m pytest tests/test_ssi_streaming_realtime.py -q
@@ -24,6 +25,7 @@ Expected protection:
 - SSI realtime unavailable returns `realtime_snapshot = null`.
 - SSI streaming realtime stays disabled by default, does not instantiate the official client when disabled, never starts on import, and reads only from a running manager plus fresh cache.
 - SSI intraday stale/unavailable returns `intraday_pulse = null` and `intraday_candles = []`.
+- SSI intraday provider failures are classified into sanitized diagnostics such as `rate_limited`, without raw payloads or credentials, and without changing DailyOhlc `latest_price` ownership.
 - SSI trade tape unavailable returns public `trade_tape = []`.
 - Observability separates disabled provider, provider unavailable, and cache state.
 

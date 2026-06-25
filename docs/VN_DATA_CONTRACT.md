@@ -95,7 +95,7 @@ intraday_pulse = null
 
 Stale latest-date metadata and date-match details should move to `intraday_status` or diagnostics when there is no usable intraday section.
 
-The company endpoint follows the same missing-object rule. When nested company `intraday.status = unavailable`, `intraday.candles = []` and `intraday.pulse = null`.
+The company endpoint follows the same missing-object rule. When nested company `intraday.status = unavailable`, `intraday.candles = []` and `intraday.pulse = null`. Company `intraday.diagnostics` may carry sanitized failure details such as `failure_class`, `endpoint`, `http_status`, and provider code.
 
 ### Realtime Snapshot
 
@@ -149,6 +149,8 @@ Diagnostics may include:
 * Normalized keys.
 * Realtime failure mode such as `rest_unsupported`, `streaming_disabled`, `streaming_manager_not_started`, `streaming_cache_empty`, `streaming_cache_stale`, `streaming_manager_error`, `live_adapter_not_enabled`, or `streaming_parsed_rows`.
 * Realtime manager/cache fields such as `streaming_status`, `manager_state`, `cache_status`, `parsed_streaming_rows`, and cache age or stale reason.
+* Intraday failure mode such as `rate_limited`, `bad_request_params`, `auth_failed`, `permission_denied`, `timeout`, `network_error`, `parse_failed`, `provider_unavailable`, or `empty_response`.
+* Intraday request diagnostics such as `endpoint=IntradayOhlc`, HTTP status, provider code, requested timeframe, internal request page size, and public candle limit.
 * Sanitized provider error summaries.
 
 Watchlist live-section status objects may include a nested `diagnostics` object for sanitized provider details that were previously embedded in public messages. The public `message` field must remain short and user-safe.

@@ -298,6 +298,16 @@ def test_ssi_intraday_failure_does_not_downgrade_daily_row():
             "status": "unavailable",
             "source": "SSI",
             "reason": "SSI FastConnect request failed",
+            "failure_class": "rate_limited",
+            "diagnostics": {
+                "failure_class": "rate_limited",
+                "endpoint": "IntradayOhlc",
+                "http_status": "200",
+                "provider_code": "429",
+                "error_type": "ssi_error",
+                "pageSize": "1000",
+                "public_limit": "8",
+            },
             "rows": [],
         }
     )
@@ -306,9 +316,15 @@ def test_ssi_intraday_failure_does_not_downgrade_daily_row():
 
     assert item["status"] == "ok"
     assert item["daily_stock_price"]["status"] == "ok"
+    assert item["latest_price_source"] == "SSI DailyOhlc"
     assert item["intraday_source"] == "SSI IntradayOhlc"
     assert item["intraday_status"]["status"] == "unavailable"
     assert item["intraday_status"]["message"] == "SSI FastConnect request failed"
+    assert item["intraday_status"]["failure_class"] == "rate_limited"
+    assert item["intraday_status"]["diagnostics"]["failure_class"] == "rate_limited"
+    assert item["intraday_status"]["diagnostics"]["endpoint"] == "IntradayOhlc"
+    assert item["intraday_status"]["diagnostics"]["provider_code"] == "429"
+    assert item["intraday_status"]["diagnostics"]["pageSize"] == "1000"
     assert item["intraday_candles"] == []
     assert item["intraday_pulse"] is None
 
