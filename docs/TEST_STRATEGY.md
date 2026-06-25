@@ -15,6 +15,7 @@ python -m pytest tests/test_ssi_fastconnect_fetcher.py -q
 python -m pytest tests/test_vietnam_market_service_realtime.py -q
 python -m pytest tests/test_vietnam_market_service_intraday.py -q
 python -m pytest tests/test_ssi_streaming_realtime.py -q
+python -m pytest tests/test_verify_ssi_streaming_realtime_script.py -q
 ```
 
 Expected protection:
@@ -25,6 +26,7 @@ Expected protection:
 - SSI realtime unavailable returns `realtime_snapshot = null`.
 - SSI streaming realtime stays disabled by default, does not instantiate or import the official client when disabled, never starts on import, and reads only from a running manager plus fresh cache.
 - SSI official streaming adapter tests use mocked official modules, suppress header-like output, reject `X: ALL`, and fail closed when streaming config or `ssi_fc_data` is unavailable.
+- SSI streaming verification script tests import the script without starting streams, validate config-only mode, reject unsafe symbols/channels, use mocked manager/client paths, stop in `finally`, and keep the script-local cache separate from the backend cache.
 - SSI intraday stale/unavailable returns `intraday_pulse = null` and `intraday_candles = []`.
 - SSI intraday provider failures are classified into sanitized diagnostics such as `rate_limited`, without raw payloads or credentials, and without changing DailyOhlc `latest_price` ownership.
 - SSI intraday provider-code/HTTP `429` starts a deterministic symbol/timeframe cooldown; active cooldown skips IntradayOhlc provider requests and remains unavailable without blocking DailyOhlc or DailyStockPrice.

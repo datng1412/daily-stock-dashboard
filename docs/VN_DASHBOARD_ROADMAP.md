@@ -725,6 +725,7 @@ Phase 4.0C-3 SSI streaming realtime result:
 * A single `X-TRADE` stream message is not full trade-tape history.
 * Phase 4.0C-5 supersedes the parser-only runtime state with a config-disabled background manager/cache skeleton. The default response remains unavailable with `SSI streaming realtime manager disabled.`
 * Phase 4.0C-6 adds the official-client adapter behind `SSI_STREAMING_REALTIME_ENABLED=false` by default. The adapter suppresses the official header-printing path during stream start, uses symbol-scoped channels only, and remains a background-manager path rather than a request-handler path.
+* Phase 4.0C-7B adds `scripts/verify_ssi_streaming_realtime.py` as a dev-only local verification path. It validates config/channel safety, starts the manager explicitly in a standalone process, uses the real parser, polls only the script-local cache, and stops the manager in `finally`. It does not populate the FastAPI backend cache.
 * Future streaming work must avoid `X: ALL` in runtime and must not run long-lived stream connections inside request handlers.
 
 Phase 4.0C-4 official Python FC Data client inspection result:
@@ -1597,9 +1598,10 @@ Status: provider, service, API, and UI contract added in the current working tre
 
 ### Priority 4 - SSI streaming/protocol hardening
 
-Status: Phase 4.0C-6 added the official SSI streaming adapter behind the disabled runtime flag, with mocked adapter tests and no automatic production startup.
+Status: Phase 4.0C-7B added the dev-only local streaming verification script and deterministic tests. Backend bootstrap/production lifecycle startup remains next.
 
 * Add controlled application lifecycle startup only after live environment validation confirms credentials, permissions, stop behavior, retry/backoff, and stream freshness.
+* Keep the verification-script cache separate from the backend cache until Phase 4.0C-8 defines startup/bootstrap ownership.
 * Support safe subscriptions for market data, foreign room, index data, and realtime bars.
 * Add heartbeat, reconnect, and cache behavior.
 * Compare live SSI stream/probe behavior against dashboard REST expectations.

@@ -203,6 +203,34 @@ Phase 4.0C-6 adds `OfficialSsiRealtimeStreamClient`, a small wrapper around `Mar
 
 This is a background-service adapter, not a one-shot request path. The current application does not auto-start a production stream lifecycle in this phase. If `SSI_STREAMING_REALTIME_ENABLED=true` but credentials are incomplete, the package is unavailable, the manager is not running, the cache is empty, or the cache is stale, realtime remains unavailable with sanitized diagnostics.
 
+## Local Streaming Verification
+
+Phase 4.0C-7B adds a dev-only verifier:
+
+```powershell
+python .\scripts\verify_ssi_streaming_realtime.py --symbols FPT,HPG,SSI,VPB --wait-seconds 60
+```
+
+The script runs in its own Python process. It manually creates a `SsiStreamingRealtimeManager`, passes `SsiFastConnectFetcher.normalize_streaming_realtime_messages` as the parser, starts the official streaming adapter only through the manager client factory, polls the script-local cache for a bounded wait, and stops the manager in `finally`.
+
+Important boundaries:
+
+* The script cache is not the FastAPI backend cache.
+* The script does not start the backend.
+* The script does not call `/api/v1/stocks/vn/realtime`.
+* The script does not add a public start/stop API.
+* The script does not add production auto-start.
+* The script prints only sanitized summary fields, not raw callbacks, auth responses, headers, tokens, consumer IDs, or consumer secrets.
+* The script refuses `ALL` symbols and channel templates that would produce `X: ALL`.
+
+Use config-only mode to validate local environment and channel safety without constructing the manager or official client:
+
+```powershell
+python .\scripts\verify_ssi_streaming_realtime.py --symbols FPT,HPG --check-config-only
+```
+
+After market close, a safe run can report `manager_state=running`, symbol-scoped channels, zero observed messages, and an empty cache. That is not a live-realtime proof. During HOSE market hours, live confidence requires observed messages, parser rows, and script-local quote rows. Backend bootstrap remains a later phase.
+
 ## Configuration
 
 SSI is disabled by default.
