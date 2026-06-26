@@ -117,6 +117,8 @@ The primary UI should not render snapshot price, snapshot time, change, or sessi
 
 SSI realtime is streaming-backed. The service may read from a background manager/cache only when `SSI_STREAMING_REALTIME_ENABLED=true`, the manager is running, and the cache row is fresh. Request handlers must not open streams. When streaming runtime is disabled, not started, empty, stale, or errored, the public object remains `null` and diagnostics carry the safe reason.
 
+`GET /api/v1/stocks/vn/realtime` bypasses the generic VN response cache so each poll can reflect the latest process-local streaming cache. The streaming cache remains authoritative for freshness through optional fields such as `age_seconds`, `is_stale`, `stale_reason`, `cached_at`, and `cache_ttl_seconds`. Frontend polling for this endpoint is separate from watchlist, company, chart, and trade-tape refresh.
+
 ### Trade Tape
 
 When SSI trade tape has usable rows:

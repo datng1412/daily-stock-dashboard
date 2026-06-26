@@ -587,6 +587,8 @@ class VietnamRealtimeQuote(BaseModel):
     age_seconds: Optional[int] = None
     is_stale: Optional[bool] = None
     stale_reason: Optional[str] = None
+    cached_at: Optional[str] = None
+    cache_ttl_seconds: Optional[int] = None
     reference_price: Optional[float] = None
     reference_price_source: Optional[str] = None
     price_vs_reference: Optional[float] = None

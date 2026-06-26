@@ -13,6 +13,13 @@ describe('Vietnam time helpers', () => {
     expect(formatVietnamDateTime('2026-06-03T07:00:00Z')).toBe('03/06/2026 14:00 VN');
   });
 
+  it('formats ISO timestamps with microsecond fractional seconds', () => {
+    const timestamp = '2026-06-26T04:21:01.561821+00:00';
+
+    expect(formatVietnamDateTime(timestamp)).toBe('26/06/2026 11:21 VN');
+    expect(formatVietnamTime(timestamp)).toBe('11:21:01 VN');
+  });
+
   it('treats Mozyfin numeric timestamps as Unix seconds unless clearly milliseconds', () => {
     expect(formatVietnamDateTime(1780470000)).toBe('03/06/2026 14:00 VN');
     expect(formatVietnamDateTime('1780470000')).toBe('03/06/2026 14:00 VN');

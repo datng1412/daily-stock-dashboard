@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [fix] Make VN SSI realtime cache reads and dashboard polling reflect streaming snapshots faster with safe freshness labels.
 - [new feature] Add a config-gated FastAPI startup bootstrap for the SSI streaming realtime manager with explicit symbol lists and process-local cache reads.
 - [fix] Change the SSI streaming realtime default channel template to no-space format after live verification.
 - [fix] Carry SSI Securities/SecuritiesDetails industry metadata into Vietnam watchlist and company profile responses when provider fields exist.

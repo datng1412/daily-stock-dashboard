@@ -180,14 +180,23 @@ def test_service_reads_backend_lifecycle_cache_without_dynamic_subscription():
 
     client.on_message(_x_trade(price="131.5"))
     service = VietnamMarketService(config=_dashboard_config())
-    payload = service.build_realtime_snapshot(["FPT"], force_refresh=True)
+    payload = service.build_realtime_snapshot(["FPT"])
 
     assert payload["status"] == "ok"
     assert payload["quotes"][0]["price"] == 131.5
+    assert payload["quotes"][0]["age_seconds"] == 0
+    assert payload["quotes"][0]["cache_ttl_seconds"] == 15
+    assert payload["cache"]["response_cache_status"] == "bypassed"
+    assert payload["cache"]["streaming_cache_status"] == "hit"
     assert payload["streaming_status"] == "cache_hit"
     assert client.channels == ["X:FPT"]
 
-    outside_payload = service.build_realtime_snapshot(["HPG"], force_refresh=True)
+    client.on_message(_x_trade(price="132.5"))
+    refreshed_payload = service.build_realtime_snapshot(["FPT"])
+    assert refreshed_payload["quotes"][0]["price"] == 132.5
+    assert refreshed_payload["cache"]["response_cache_status"] == "bypassed"
+
+    outside_payload = service.build_realtime_snapshot(["HPG"])
     assert outside_payload["status"] == "unavailable"
     assert outside_payload["quotes"] == []
     assert client.channels == ["X:FPT"]

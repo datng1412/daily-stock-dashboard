@@ -431,6 +431,8 @@ const makeRealtimeResponse = (
     unavailable?: boolean;
     ageSeconds?: number;
     isStale?: boolean;
+    timestamp?: string;
+    cacheTtlSeconds?: number;
     error?: string | null;
     errorDetail?: string | null;
     rawError?: string | null;
@@ -446,18 +448,20 @@ const makeRealtimeResponse = (
   quotes: tickers.map((ticker) => {
     const rawStale = options.isStale ?? options.stale ?? false;
     const ageSeconds = options.ageSeconds ?? (rawStale ? 600 : 20);
+    const timestamp = options.timestamp ?? '2026-06-11T10:15:00+07:00';
     return ({
     symbol: ticker,
     realtimePrice: ticker === 'FPT' ? 101.5 : 100.5,
-    realtimeTime: '10:15:00',
-    realtimeTimeDisplay: '2026-06-11T10:15:00+07:00',
+    realtimeTime: timestamp,
+    realtimeTimeDisplay: timestamp,
     snapshotPrice: ticker === 'FPT' ? 101.5 : 100.5,
-    snapshotTime: '10:15:00',
-    snapshotTimeDisplay: '2026-06-11T10:15:00+07:00',
+    snapshotTime: timestamp,
+    snapshotTimeDisplay: timestamp,
     snapshotNote: 'SSI realtime snapshot; may differ from trade tape',
     ageSeconds,
     isStale: rawStale,
     staleReason: rawStale ? 'age_gt_60s' : null,
+    cacheTtlSeconds: options.cacheTtlSeconds ?? 15,
     referencePrice: 100,
     referencePriceSource: 'ssi_realtime',
     priceVsReference: ticker === 'FPT' ? 1.5 : 0.5,
@@ -3568,6 +3572,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     const panel = dataStatusPanel();
     expect(panel.getAllByText('SSI realtime live').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/updated 20s ago/).length).toBeGreaterThan(0);
     fireEvent.click(panel.getByText('Show diagnostics'));
     expect(panel.getByText('raw stale 0 | unavailable 0')).toBeInTheDocument();
   });
@@ -3655,7 +3660,8 @@ describe('VietnamDashboardPage watchlist loading', () => {
     await waitFor(() => expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledWith(defaultTickers));
 
     expect(screen.getAllByText('SSI realtime stale during trading').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('2026-06-11T10:15:00+07:00').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('10:15:00 VN').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('stale >15s').length).toBeGreaterThan(0);
     const panel = dataStatusPanel();
     fireEvent.click(panel.getByText('Show diagnostics'));
     expect(panel.getByText(`raw stale ${defaultTickers.length} | unavailable 0`)).toBeInTheDocument();
@@ -3749,15 +3755,17 @@ describe('VietnamDashboardPage watchlist loading', () => {
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
 
     expect(screen.getByRole('checkbox', { name: 'Auto-refresh realtime' })).toBeInTheDocument();
-    expect(screen.getByLabelText('SSI realtime')).toHaveValue('15');
-    expect([...screen.getByLabelText('SSI realtime').querySelectorAll('option')].map((option) => option.value)).toEqual(['10', '15', '30']);
+    expect(screen.getByRole('checkbox', { name: 'Auto-refresh realtime' })).toBeChecked();
+    expect(screen.getByLabelText('SSI realtime')).toHaveValue('3');
+    expect([...screen.getByLabelText('SSI realtime').querySelectorAll('option')].map((option) => option.value)).toEqual(['2', '3', '5', '10', '15']);
+    expect(screen.getByRole('checkbox', { name: 'Auto-refresh trade tape' })).not.toBeChecked();
     expect(screen.getByLabelText('Trade tape')).toHaveValue('10');
     expect([...screen.getByLabelText('Trade tape').querySelectorAll('option')].map((option) => option.value)).toEqual(['5', '10', '15']);
     expect(screen.queryByRole('button', { name: /KBS/i })).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/KBS/i)).not.toBeInTheDocument();
   });
 
-  it('auto-refresh realtime calls trades and quotes on their own intervals only', async () => {
+  it('auto-refresh realtime polls quotes every 3s without refreshing watchlist or trade tape', async () => {
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
@@ -3769,22 +3777,10 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     vi.useFakeTimers();
     fireEvent.click(screen.getByRole('checkbox', { name: 'Auto-refresh realtime' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Auto-refresh realtime' }));
 
     await act(async () => {
-      vi.advanceTimersByTime(10000);
-      await Promise.resolve();
-    });
-
-    expect(mockedGetVietnamRealtimeTrades).toHaveBeenCalledWith('FPT', 100);
-    expect(mockedGetVietnamRealtimeQuotes).not.toHaveBeenCalled();
-    expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistCalls);
-    expect(mockedGetVietnamObservability).toHaveBeenCalled();
-
-    mockedGetVietnamRealtimeTrades.mockClear();
-    mockedGetVietnamObservability.mockClear();
-
-    await act(async () => {
-      vi.advanceTimersByTime(5000);
+      vi.advanceTimersByTime(3000);
       await Promise.resolve();
     });
 
@@ -3792,8 +3788,9 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(mockedGetVietnamRealtimeTrades).not.toHaveBeenCalled();
     expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistCalls);
     expect(mockedGetVietnamObservability).toHaveBeenCalled();
+
     expect(dataStatusPanel().getByText('on')).toBeInTheDocument();
-    expect(dataStatusPanel().getByText('snapshot 15s | trade tape 10s')).toBeInTheDocument();
+    expect(dataStatusPanel().getByText('snapshot 3s | trade tape off')).toBeInTheDocument();
   });
 
   it('selected 5s trade tape interval calls only trades endpoint', async () => {
@@ -3808,6 +3805,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     fireEvent.change(screen.getByLabelText('Trade tape'), { target: { value: '5' } });
     vi.useFakeTimers();
     fireEvent.click(screen.getByRole('checkbox', { name: 'Auto-refresh realtime' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Auto-refresh trade tape' }));
 
     await act(async () => {
       vi.advanceTimersByTime(5000);
@@ -3835,7 +3833,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(mockedGetVietnamRealtimeTrades).not.toHaveBeenCalled();
   });
 
-  it('auto-refresh realtime skips quote ticks while quote refresh is in flight without blocking trades', async () => {
+  it('auto-refresh realtime skips quote ticks while quote refresh is in flight', async () => {
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
@@ -3850,17 +3848,18 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     vi.useFakeTimers();
     fireEvent.click(screen.getByRole('checkbox', { name: 'Auto-refresh realtime' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Auto-refresh realtime' }));
 
     await act(async () => {
-      vi.advanceTimersByTime(15000);
+      vi.advanceTimersByTime(3000);
       await Promise.resolve();
     });
     expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledTimes(1);
-    expect(mockedGetVietnamRealtimeTrades).toHaveBeenCalledWith('FPT', 100);
+    expect(mockedGetVietnamRealtimeTrades).not.toHaveBeenCalled();
 
     mockedGetVietnamRealtimeTrades.mockClear();
     await act(async () => {
-      vi.advanceTimersByTime(15000);
+      vi.advanceTimersByTime(3000);
       await Promise.resolve();
     });
     expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledTimes(1);
@@ -3885,13 +3884,15 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     vi.useFakeTimers();
     fireEvent.click(screen.getByRole('checkbox', { name: 'Auto-refresh realtime' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Auto-refresh realtime' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Auto-refresh trade tape' }));
 
     await act(async () => {
       vi.advanceTimersByTime(10000);
       await Promise.resolve();
     });
     expect(mockedGetVietnamRealtimeTrades).toHaveBeenCalledTimes(1);
-    expect(mockedGetVietnamRealtimeQuotes).not.toHaveBeenCalled();
+    expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledWith(defaultTickers);
 
     await act(async () => {
       vi.advanceTimersByTime(5000);
@@ -3916,6 +3917,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
     vi.useFakeTimers();
     fireEvent.click(screen.getByRole('checkbox', { name: 'Auto-refresh realtime' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Auto-refresh realtime' }));
 
     await act(async () => {
       vi.advanceTimersByTime(15000);
@@ -3925,7 +3927,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(mockedGetVietnamRealtimeTrades).not.toHaveBeenCalled();
   });
 
-  it('visibility restore fires at most one quote and one trade request', async () => {
+  it('visibility restore fires at most one quote request without trade tape auto-refresh', async () => {
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
@@ -3936,6 +3938,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
     vi.useFakeTimers();
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Auto-refresh realtime' }));
     fireEvent.click(screen.getByRole('checkbox', { name: 'Auto-refresh realtime' }));
 
     await act(async () => {
@@ -3953,7 +3956,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     });
 
     expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledTimes(1);
-    expect(mockedGetVietnamRealtimeTrades).toHaveBeenCalledTimes(1);
+    expect(mockedGetVietnamRealtimeTrades).not.toHaveBeenCalled();
     expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistCalls);
   });
 

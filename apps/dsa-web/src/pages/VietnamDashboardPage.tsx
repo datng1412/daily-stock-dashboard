@@ -37,7 +37,7 @@ import {
 const DEFAULT_TICKERS = ['FPT', 'VPB', 'MSB', 'SCS', 'ACV', 'ACB'];
 const CUSTOM_WATCHLIST_STORAGE_KEY = 'vnDashboard.customWatchlist.v1';
 const AUTO_REFRESH_INTERVALS = [60, 180, 300];
-const REALTIME_SNAPSHOT_REFRESH_INTERVALS = [10, 15, 30];
+const REALTIME_SNAPSHOT_REFRESH_INTERVALS = [2, 3, 5, 10, 15];
 const TRADE_TAPE_REFRESH_INTERVALS = [5, 10, 15];
 const DEFAULT_WATCHLIST = normalizeVietnamWatchlist(DEFAULT_TICKERS) ?? DEFAULT_TICKERS;
 const DETAIL_NEWS_LIMIT = 8;
@@ -369,14 +369,30 @@ const realtimeSnapshotStateVariant = (state: RealtimeSnapshotDisplayResult) => {
   return 'default' as const;
 };
 
+const realtimeSnapshotTimestamp = (quote?: VietnamRealtimeQuote | null) => (
+  quote?.snapshotTimeDisplay
+  ?? quote?.realtimeTimeDisplay
+  ?? quote?.snapshotTime
+  ?? quote?.realtimeTime
+  ?? quote?.cachedAt
+  ?? quote?.fetchedAt
+  ?? null
+);
+
+const realtimeAgeSecondsFromTimestamp = (quote?: VietnamRealtimeQuote | null) => {
+  const parsed = parseMozyTimestamp(realtimeSnapshotTimestamp(quote));
+  if (!parsed) return null;
+  return Math.max(0, Math.floor((Date.now() - parsed.getTime()) / 1000));
+};
+
 const realtimeSnapshotState = (quote?: VietnamRealtimeQuote | null, marketPhaseCode?: string | null) =>
   getRealtimeSnapshotDisplayState({
     quoteStatus: quote?.status,
-    ageSeconds: quote?.ageSeconds,
+    ageSeconds: quote?.ageSeconds ?? realtimeAgeSecondsFromTimestamp(quote),
     isStale: quote?.isStale,
     staleReason: quote?.staleReason,
     marketPhaseCode,
-    snapshotTimeDisplay: quote?.snapshotTimeDisplay ?? quote?.realtimeTimeDisplay ?? quote?.snapshotTime ?? quote?.realtimeTime,
+    snapshotTimeDisplay: realtimeSnapshotTimestamp(quote),
   });
 
 const usableRealtimeSessionVolume = (quote?: VietnamRealtimeQuote | null, state?: RealtimeSnapshotDisplayResult) => {
@@ -870,6 +886,34 @@ const rawRealtimeFreshnessText = (quote?: VietnamRealtimeQuote | null) => (
   `raw age ${quote?.ageSeconds ?? '-'}s | raw stale ${quote?.isStale === null || quote?.isStale === undefined ? '-' : String(quote.isStale)} | reason ${quote?.staleReason ?? '-'}`
 );
 
+const formatRealtimeAge = (seconds: number) => {
+  const safeSeconds = Math.max(0, Math.trunc(seconds));
+  if (safeSeconds < 60) return `${safeSeconds}s`;
+  const minutes = Math.floor(safeSeconds / 60);
+  const remainder = safeSeconds % 60;
+  return remainder ? `${minutes}m ${remainder}s` : `${minutes}m`;
+};
+
+const realtimeSnapshotFreshnessText = (quote?: VietnamRealtimeQuote | null) => {
+  if (!quote) return 'SSI realtime unavailable';
+  const age = typeof quote.ageSeconds === 'number' && Number.isFinite(quote.ageSeconds)
+    ? quote.ageSeconds
+    : realtimeAgeSecondsFromTimestamp(quote);
+  const ttl = typeof quote.cacheTtlSeconds === 'number' && Number.isFinite(quote.cacheTtlSeconds)
+    ? Math.max(0, Math.trunc(quote.cacheTtlSeconds))
+    : null;
+  if (quote.isStale === true && ttl !== null) return `stale >${ttl}s`;
+  if (age !== null && age !== undefined) return `updated ${formatRealtimeAge(age)} ago`;
+  if (parseMozyTimestamp(realtimeSnapshotTimestamp(quote))) return `updated ${formatRelativeAge(realtimeSnapshotTimestamp(quote))}`;
+  return 'SSI realtime time unknown';
+};
+
+const realtimeSnapshotTimeText = (quote?: VietnamRealtimeQuote | null) => {
+  const timestamp = realtimeSnapshotTimestamp(quote);
+  if (!parseMozyTimestamp(timestamp)) return 'SSI realtime time unknown';
+  return formatVietnamTime(timestamp);
+};
+
 const companyDisplayName = (item?: VietnamWatchItem | null) => {
   if (!item) return '-';
   const name = item.companyName ?? item.name ?? item.symbolMetadata?.name ?? item.entity;
@@ -1095,10 +1139,9 @@ const tradeTapeStatusBadgeText = (status?: string | null) => (
 const realtimeSnapshotSummaryText = (quote: VietnamRealtimeQuote | null | undefined, state: RealtimeSnapshotDisplayResult) => {
   const cleanError = realtimeErrorMessage(quote?.error);
   if (cleanError) return cleanError;
-  const time = quote?.snapshotTimeDisplay ?? quote?.realtimeTimeDisplay ?? quote?.snapshotTime ?? quote?.realtimeTime;
-  if (state.label === 'Last available SSI realtime' && time) return `Last available · ${formatVietnamTime(time)}`;
-  if (time) return `${state.label} · ${formatVietnamTime(time)}`;
-  return state.label;
+  const freshness = realtimeSnapshotFreshnessText(quote);
+  if (state.label === 'Last available SSI realtime') return `Last available - ${freshness}`;
+  return `${state.label} - ${freshness}`;
 };
 
 const realtimeProviderStatus = (
@@ -1484,6 +1527,7 @@ const DataStatusPanel: React.FC<{
   lastTradeTapeRefreshAt?: string | null;
   lastRealtimeErrorAt?: string | null;
   realtimeAutoRefreshEnabled: boolean;
+  tradeTapeAutoRefreshEnabled: boolean;
   realtimeSnapshotRefreshInterval: number;
   tradeTapeRefreshInterval: number;
   marketPhase: VietnamMarketPhase;
@@ -1503,6 +1547,7 @@ const DataStatusPanel: React.FC<{
   lastTradeTapeRefreshAt,
   lastRealtimeErrorAt,
   realtimeAutoRefreshEnabled,
+  tradeTapeAutoRefreshEnabled,
   realtimeSnapshotRefreshInterval,
   tradeTapeRefreshInterval,
   marketPhase,
@@ -1629,7 +1674,7 @@ const DataStatusPanel: React.FC<{
           <div className="rounded-lg bg-card/60 p-3">
             <dt className="text-xs text-secondary-text">Realtime auto-refresh</dt>
             <dd className="mt-1 font-medium text-foreground">{realtimeAutoRefreshEnabled ? 'on' : 'off'}</dd>
-            <dd className="mt-1 text-xs text-secondary-text">snapshot {realtimeSnapshotRefreshInterval}s | trade tape {tradeTapeRefreshInterval}s</dd>
+            <dd className="mt-1 text-xs text-secondary-text">snapshot {realtimeSnapshotRefreshInterval}s | trade tape {tradeTapeAutoRefreshEnabled ? `${tradeTapeRefreshInterval}s` : 'off'}</dd>
             <dd className="mt-1 text-xs text-secondary-text">{lastRealtimeErrorAt ? `last error ${formatVietnamTime(lastRealtimeErrorAt)}` : 'last error -'}</dd>
           </div>
         </dl>
@@ -1638,11 +1683,12 @@ const DataStatusPanel: React.FC<{
             <span className="font-medium text-foreground">Selected symbol</span> {selectedItem?.ticker ?? '-'} | daily close date {selectedItem?.latestPriceDate ?? selectedItem?.priceDate ?? '-'}
           </div>
           <div className="rounded-lg border border-border/60 bg-card/50 p-3">
-            <span className="font-medium text-foreground">SSI realtime time</span> {selectedQuote?.realtimeTimeDisplay ?? selectedQuote?.realtimeTime ?? '-'}
+            <span className="font-medium text-foreground">SSI realtime time</span> {realtimeSnapshotTimeText(selectedQuote)}
             <div className="mt-1">
               <Badge variant={realtimeSnapshotStateVariant(selectedRealtimeState)}>{selectedRealtimeState.label}</Badge>
             </div>
             <div className="mt-1">{selectedRealtimeState.reason}</div>
+            <div className="mt-1">{realtimeSnapshotFreshnessText(selectedQuote)}</div>
             <div className="mt-1">{rawRealtimeFreshnessText(selectedQuote)}</div>
           </div>
           <div className="rounded-lg border border-border/60 bg-card/50 p-3">
@@ -3681,7 +3727,8 @@ const StockDetailView: React.FC<{
           </div>
           <div>
             <dt className="text-xs text-secondary-text">Realtime time</dt>
-            <dd className="mt-1 font-medium text-foreground">{realtimeQuote?.snapshotTimeDisplay ?? realtimeQuote?.realtimeTimeDisplay ?? realtimeQuote?.snapshotTime ?? realtimeQuote?.realtimeTime ?? '-'}</dd>
+            <dd className="mt-1 font-medium text-foreground">{realtimeSnapshotTimeText(realtimeQuote)}</dd>
+            <dd className="mt-1 text-xs text-secondary-text">{realtimeSnapshotFreshnessText(realtimeQuote)}</dd>
           </div>
           <div>
             <dt className="text-xs text-secondary-text">Realtime change</dt>
@@ -3876,8 +3923,9 @@ const VietnamDashboardPage: React.FC = () => {
   const [selectedTicker, setSelectedTicker] = useState<string | null>(DEFAULT_WATCHLIST[0]);
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(false);
   const [autoRefreshInterval, setAutoRefreshInterval] = useState(180);
-  const [realtimeAutoRefreshEnabled, setRealtimeAutoRefreshEnabled] = useState(false);
-  const [realtimeSnapshotRefreshInterval, setRealtimeSnapshotRefreshInterval] = useState(15);
+  const [realtimeAutoRefreshEnabled, setRealtimeAutoRefreshEnabled] = useState(true);
+  const [realtimeSnapshotRefreshInterval, setRealtimeSnapshotRefreshInterval] = useState(3);
+  const [tradeTapeAutoRefreshEnabled, setTradeTapeAutoRefreshEnabled] = useState(false);
   const [tradeTapeRefreshInterval, setTradeTapeRefreshInterval] = useState(10);
   const [realtimeSnapshotNextRefreshAt, setRealtimeSnapshotNextRefreshAt] = useState<number | null>(null);
   const [tradeTapeNextRefreshAt, setTradeTapeNextRefreshAt] = useState<number | null>(null);
@@ -3926,7 +3974,15 @@ const VietnamDashboardPage: React.FC = () => {
   }, []);
 
   const loadRealtimeQuotes = useCallback(async (tickers: string[]) => {
-    const requestedTickers = tickers.filter(Boolean);
+    const seen = new Set<string>();
+    const requestedTickers = tickers
+      .map((ticker) => normalizeVietnamTicker(ticker))
+      .filter((ticker) => {
+        if (!/^[A-Z0-9]{2,10}$/.test(ticker) || seen.has(ticker)) return false;
+        seen.add(ticker);
+        return true;
+      })
+      .slice(0, VIETNAM_WATCHLIST_MAX_SIZE);
     if (!requestedTickers.length) {
       setRealtimeQuotes({});
       return;
@@ -3938,7 +3994,11 @@ const VietnamDashboardPage: React.FC = () => {
     try {
       const response = await stocksApi.getVietnamRealtimeQuotes(requestedTickers);
       if (requestId !== realtimeRequestIdRef.current) return;
-      setRealtimeQuotes(Object.fromEntries(response.quotes.map((quote) => [quote.symbol, quote])));
+      setRealtimeQuotes(Object.fromEntries(
+        response.quotes
+          .map((quote) => [normalizeVietnamTicker(quote.symbol ?? quote.ticker ?? ''), quote] as const)
+          .filter(([ticker]) => Boolean(ticker)),
+      ));
       setLastRealtimeSnapshotRefreshAt(new Date().toISOString());
       setRealtimeError(response.status === 'ok' ? null : realtimeErrorMessage(response.error) ?? 'SSI realtime unavailable');
       if (response.status !== 'ok') {
@@ -4285,7 +4345,7 @@ const VietnamDashboardPage: React.FC = () => {
         setRealtimeSnapshotCountdownSeconds(realtimeSnapshotRefreshInterval);
         void refreshRealtimeSnapshots();
       }
-      if (!hidden && realtimeAutoRefreshEnabled && Date.now() >= tradeTapeNextRefreshAtRef.current) {
+      if (!hidden && tradeTapeAutoRefreshEnabled && Date.now() >= tradeTapeNextRefreshAtRef.current) {
         const next = Date.now() + tradeTapeRefreshInterval * 1000;
         tradeTapeNextRefreshAtRef.current = next;
         setTradeTapeNextRefreshAt(next);
@@ -4299,6 +4359,7 @@ const VietnamDashboardPage: React.FC = () => {
     autoRefreshEnabled,
     autoRefreshInterval,
     realtimeAutoRefreshEnabled,
+    tradeTapeAutoRefreshEnabled,
     realtimeSnapshotRefreshInterval,
     tradeTapeRefreshInterval,
     refreshRealtimeSnapshots,
@@ -4368,7 +4429,7 @@ const VietnamDashboardPage: React.FC = () => {
   }, [realtimeAutoRefreshEnabled, realtimeSnapshotRefreshInterval, refreshRealtimeSnapshots]);
 
   useEffect(() => {
-    if (!realtimeAutoRefreshEnabled) {
+    if (!tradeTapeAutoRefreshEnabled) {
       setTradeTapeNextRefreshAt(null);
       setTradeTapeCountdownSeconds(null);
       return undefined;
@@ -4395,7 +4456,7 @@ const VietnamDashboardPage: React.FC = () => {
       }
     }, 1000);
     return () => window.clearInterval(timer);
-  }, [realtimeAutoRefreshEnabled, tradeTapeRefreshInterval, refreshTradeTape]);
+  }, [tradeTapeAutoRefreshEnabled, tradeTapeRefreshInterval, refreshTradeTape]);
 
   useEffect(() => {
     const rows = data?.watchlist ?? [];
@@ -4496,7 +4557,10 @@ const VietnamDashboardPage: React.FC = () => {
               <Badge variant={realtimeAutoRefreshEnabled ? 'success' : 'default'}>
                 Auto-refresh realtime {realtimeAutoRefreshEnabled ? 'ON' : 'OFF'}
               </Badge>
-              {isTabHidden && (autoRefreshEnabled || realtimeAutoRefreshEnabled) ? <Badge variant="warning">Paused while tab hidden</Badge> : null}
+              <Badge variant={tradeTapeAutoRefreshEnabled ? 'success' : 'default'}>
+                Auto-refresh trade tape {tradeTapeAutoRefreshEnabled ? 'ON' : 'OFF'}
+              </Badge>
+              {isTabHidden && (autoRefreshEnabled || realtimeAutoRefreshEnabled || tradeTapeAutoRefreshEnabled) ? <Badge variant="warning">Paused while tab hidden</Badge> : null}
               {(realtimeLoading || tradesLoading) ? <Badge variant="info">Refreshing realtime...</Badge> : null}
             </div>
             <p className="mt-1 text-xs text-secondary-text">
@@ -4558,6 +4622,15 @@ const VietnamDashboardPage: React.FC = () => {
                 ))}
               </select>
             </label>
+            <label className="inline-flex items-center gap-2 text-sm text-secondary-text">
+              <input
+                type="checkbox"
+                checked={tradeTapeAutoRefreshEnabled}
+                onChange={(event) => setTradeTapeAutoRefreshEnabled(event.target.checked)}
+                className="h-4 w-4 rounded border-border bg-elevated"
+              />
+              Auto-refresh trade tape
+            </label>
           </div>
         </div>
         <dl className="mt-4 grid gap-3 text-sm md:grid-cols-6">
@@ -4595,10 +4668,10 @@ const VietnamDashboardPage: React.FC = () => {
           <div className="rounded-lg bg-elevated/50 p-3">
             <dt className="text-xs text-secondary-text">Next trade tape</dt>
             <dd className="mt-1 font-medium text-foreground">
-              {realtimeAutoRefreshEnabled && !isTabHidden ? formatCountdown(tradeTapeCountdownSeconds) : 'Paused'}
+              {tradeTapeAutoRefreshEnabled && !isTabHidden ? formatCountdown(tradeTapeCountdownSeconds) : 'Paused'}
             </dd>
             <dd className="mt-1 text-xs text-secondary-text">
-              {realtimeAutoRefreshEnabled && !isTabHidden && tradeTapeNextRefreshAt ? formatVietnamTime(tradeTapeNextRefreshAt) : '-'}
+              {tradeTapeAutoRefreshEnabled && !isTabHidden && tradeTapeNextRefreshAt ? formatVietnamTime(tradeTapeNextRefreshAt) : '-'}
             </dd>
           </div>
         </dl>
@@ -4806,6 +4879,7 @@ const VietnamDashboardPage: React.FC = () => {
             lastTradeTapeRefreshAt={lastTradeTapeRefreshAt}
             lastRealtimeErrorAt={lastRealtimeErrorAt}
             realtimeAutoRefreshEnabled={realtimeAutoRefreshEnabled}
+            tradeTapeAutoRefreshEnabled={tradeTapeAutoRefreshEnabled}
             realtimeSnapshotRefreshInterval={realtimeSnapshotRefreshInterval}
             tradeTapeRefreshInterval={tradeTapeRefreshInterval}
             marketPhase={marketPhase}

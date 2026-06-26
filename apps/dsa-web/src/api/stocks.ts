@@ -387,6 +387,8 @@ export type VietnamRealtimeQuote = {
   ageSeconds?: number | null;
   isStale?: boolean | null;
   staleReason?: string | null;
+  cachedAt?: string | null;
+  cacheTtlSeconds?: number | null;
   referencePrice?: number | null;
   referencePriceSource?: string | null;
   priceVsReference?: number | null;
@@ -895,10 +897,11 @@ export const stocksApi = {
     return toCamelCase<VietnamIndexComponentsResponse>(response.data);
   },
 
-  async getVietnamRealtimeQuotes(tickers: string[]): Promise<VietnamRealtimeResponse> {
+  async getVietnamRealtimeQuotes(tickers: string[], options?: { signal?: AbortSignal }): Promise<VietnamRealtimeResponse> {
     const response = await apiClient.get('/api/v1/stocks/vn/realtime', {
       params: { tickers: tickers.join(',') },
       timeout: 30000,
+      signal: options?.signal,
     });
     const { toCamelCase } = await import('./utils');
     return toCamelCase<VietnamRealtimeResponse>(response.data);

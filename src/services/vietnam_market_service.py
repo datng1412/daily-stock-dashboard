@@ -2162,6 +2162,9 @@ class VietnamMarketService:
         first_bid = bid_levels[0] if bid_levels and isinstance(bid_levels[0], dict) else {}
         first_ask = ask_levels[0] if ask_levels and isinstance(ask_levels[0], dict) else {}
         fetched_at = row.get("fetched_at")
+        snapshot_time = row.get("snapshot_time") or row.get("realtime_time") or row.get("stream_timestamp") or fetched_at
+        age_seconds = _safe_int(row.get("age_seconds"))
+        cache_ttl_seconds = _safe_int(row.get("cache_ttl_seconds"))
         return {
             "symbol": symbol,
             "ticker": symbol,
@@ -2181,11 +2184,16 @@ class VietnamMarketService:
             "bid_levels": bid_levels,
             "ask_levels": ask_levels,
             "status": row.get("status") or "ok",
+            "age_seconds": age_seconds,
+            "is_stale": row.get("is_stale") if isinstance(row.get("is_stale"), bool) else None,
+            "stale_reason": row.get("stale_reason"),
+            "cached_at": row.get("cached_at"),
+            "cache_ttl_seconds": cache_ttl_seconds,
             # Compatibility fields for the existing UI/API contract.
             "realtime_price": price,
             "snapshot_price": price,
-            "realtime_time": fetched_at,
-            "snapshot_time": fetched_at,
+            "realtime_time": snapshot_time,
+            "snapshot_time": snapshot_time,
             "snapshot_note": "SSI realtime snapshot; separate from official daily close.",
             "reference_price_source": SSI_REALTIME_SOURCE,
             "open_price": _safe_float(row.get("open")),
@@ -2970,26 +2978,25 @@ class VietnamMarketService:
                 "diagnostics": diagnostics,
             }
 
-        cache_key = _cache_key(
-            "realtime_snapshot",
-            ",".join(tickers),
-            provider=self.config.realtime_data_provider,
-            enabled=self.config.ssi_realtime_enabled,
-            streaming_enabled=self.config.ssi_streaming_realtime_enabled,
-        )
-        result = _read_cache(
-            cache_key,
-            "realtime_snapshot",
-            lambda: self._get_ssi_fetcher().get_realtime_snapshot(tickers),
-            force_refresh=force_refresh,
-        )
-        payload = result["value"] if isinstance(result.get("value"), dict) else {}
+        # Realtime reads the process-local streaming cache directly. Wrapping
+        # this call in the generic response cache would hide fresh stream rows.
+        read_at = _utc_now()
+        read_error: Optional[Exception] = None
+        try:
+            payload = self._get_ssi_fetcher().get_realtime_snapshot(tickers)
+        except Exception as exc:
+            read_error = exc
+            payload = {}
+            logger.debug("SSI realtime cache read failed for %s", ",".join(tickers))
+        payload = payload if isinstance(payload, dict) else {}
         status = str(payload.get("status") or "unavailable").lower()
         quotes = [
             self._realtime_quote_from_snapshot(row, str(row.get("ticker") or row.get("symbol") or "").upper())
             for row in payload.get("quotes", [])
             if isinstance(row, dict)
         ]
+        diagnostics = payload.get("diagnostics") if isinstance(payload.get("diagnostics"), dict) else {}
+        streaming_cache_ttl_seconds = _safe_int(diagnostics.get("cache_ttl_seconds"))
         response = {
             "market": "VN",
             "source": SSI_REALTIME_SOURCE,
@@ -2999,13 +3006,15 @@ class VietnamMarketService:
             "requested_tickers": tickers,
             "quotes": quotes,
             "cache": {
-                "cache_status": result["status"],
-                "last_fetched_at": _iso(result["entry"].fetched_at),
-                "next_refresh_at": _iso(result["entry"].expires_at),
-                "ttl_seconds": VN_CACHE_TTL_SECONDS["realtime_snapshot"],
+                "cache_status": "bypassed",
+                "response_cache_status": "bypassed",
+                "streaming_cache_status": payload.get("cache_status") or "unavailable",
+                "last_fetched_at": _iso(read_at),
+                "next_refresh_at": _iso(read_at),
+                "ttl_seconds": 0,
+                "streaming_cache_ttl_seconds": streaming_cache_ttl_seconds,
             },
         }
-        diagnostics = payload.get("diagnostics") if isinstance(payload.get("diagnostics"), dict) else {}
         if diagnostics:
             response["diagnostics"] = diagnostics
         for key in ("streaming_status", "manager_state", "cache_status", "parsed_streaming_rows"):
@@ -3015,10 +3024,11 @@ class VietnamMarketService:
             response["status"] = "unavailable"
             response["error"] = VN_REALTIME_UNAVAILABLE_REASON
             response["error_detail"] = "SSI realtime returned no quote rows."
-        if result.get("error"):
+        if read_error:
             response["status"] = "unavailable"
             response["error"] = VN_REALTIME_UNAVAILABLE_REASON
-            response["error_detail"] = str(result["error"])
+            response["error_detail"] = VN_REALTIME_UNAVAILABLE_REASON
+            response["cache"]["streaming_cache_status"] = "unavailable"
         return response
 
     def build_trade_tape(

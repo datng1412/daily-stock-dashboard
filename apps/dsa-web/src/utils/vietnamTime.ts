@@ -26,6 +26,10 @@ const parseDatePartsAsVietnamTime = (
   return Number.isNaN(date.getTime()) ? null : date;
 };
 
+const normalizeIsoFractionalSeconds = (value: string) => (
+  value.replace(/(\d{2}:\d{2}:\d{2}\.\d{3})\d+(?=(?:Z|[+-]\d{2}:?\d{2})?$)/, '$1')
+);
+
 export const parseMozyTimestamp = (input: MozyTimestampInput): Date | null => {
   if (input === null || input === undefined || input === '') return null;
   if (input instanceof Date) {
@@ -68,7 +72,7 @@ export const parseMozyTimestamp = (input: MozyTimestampInput): Date | null => {
     );
   }
 
-  const date = new Date(text);
+  const date = new Date(normalizeIsoFractionalSeconds(text));
   return Number.isNaN(date.getTime()) ? null : date;
 };
 

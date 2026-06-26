@@ -16,7 +16,7 @@ import asyncio
 from typing import Optional
 import re
 
-from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile, Depends
+from fastapi import APIRouter, File, HTTPException, Query, Request, Response, UploadFile, Depends
 
 from api.deps import get_system_config_service
 
@@ -598,8 +598,11 @@ def get_vietnam_corporate_actions(
     description="Return SSI realtime/snapshot quote rows or an explicit SSI unavailable/disabled state. Does not modify daily close semantics.",
 )
 def get_vietnam_realtime_quotes(
+    response: Response,
     tickers: str = Query(..., description="Comma-separated VN tickers, for example FPT,ACB,VCB"),
 ) -> VietnamRealtimeResponse:
+    response.headers["Cache-Control"] = "no-store, no-cache, max-age=0"
+    response.headers["Pragma"] = "no-cache"
     symbols = [item.strip().upper() for item in tickers.split(",") if item.strip()]
     service = VietnamMarketService()
     try:
