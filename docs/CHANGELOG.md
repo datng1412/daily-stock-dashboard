@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [fix] Change the SSI streaming realtime default channel template to no-space format after live verification.
 - [fix] Carry SSI Securities/SecuritiesDetails industry metadata into Vietnam watchlist and company profile responses when provider fields exist.
 - [fix] Resolve SSI IndexComponents requests through IndexList identifiers and expose sanitized index/profile audit diagnostics.
 - [improvement] Add direct official SSI streaming handshake diagnostics, package inspection, and selected-channel format checks to the dev verifier.

@@ -96,6 +96,7 @@ If SSI-owned data is unavailable, show unavailable. Do not silently fallback.
 * Phase 4.0C-3 confirmed SSI realtime is streaming-based and added deterministic parser coverage for buffered `X`, `X-QUOTE`, and `X-TRADE` messages.
 * Phase 4.0C-5 added a config-disabled background streaming manager/cache skeleton. `get_realtime_snapshot()` can read only from a running manager and fresh cache when `SSI_STREAMING_REALTIME_ENABLED=true`; default runtime returns `SSI streaming realtime manager disabled.` and still does not probe speculative REST candidate names.
 * Phase 4.0C-6 added the official `ssi-fc-data` adapter behind the same disabled runtime flag. The package is imported lazily, the official client is instantiated only on explicit manager start, and missing config/package states fail closed with sanitized reasons.
+* Phase 4.0C-7E changed the default SSI streaming channel template to the live-verified no-space form `X:{symbol}`. Old spaced forms are preserved only for explicit overrides and diagnostics.
 * SSI realtime/trade-tape live endpoint names and entitlements may return unavailable. Unavailable states should include sanitized diagnostics without tokens, credentials, auth headers, or raw provider bodies.
 * Dashboard provider-status UI must keep core daily SSI availability separate from optional SSI realtime, SSI trade tape, SSI index components, and disabled news states. A `Partial` dashboard status can mean optional sections are unavailable; it must not imply daily SSI data failed when daily rows are OK.
 * KBS legacy realtime/trade-tape paths are disabled by default and require explicit legacy flags.
@@ -727,7 +728,8 @@ Phase 4.0C-3 SSI streaming realtime result:
 * Phase 4.0C-6 adds the official-client adapter behind `SSI_STREAMING_REALTIME_ENABLED=false` by default. The adapter suppresses the official header-printing path during stream start, uses symbol-scoped channels only, and remains a background-manager path rather than a request-handler path.
 * Phase 4.0C-7B adds `scripts/verify_ssi_streaming_realtime.py` as a dev-only local verification path. It validates config/channel safety, starts the manager explicitly in a standalone process, uses the real parser, polls only the script-local cache, and stops the manager in `finally`. It does not populate the FastAPI backend cache.
 * Phase 4.0C-7C adds safe callback/channel diagnostics to the verifier, including diagnosis labels, bounded envelope key/type samples, sequential channel-template discovery, and optional `InsecureRequestWarning` suppression. Backend bootstrap remains blocked until a market-hours run proves callbacks/messages/parser rows through this verifier.
-* Phase 4.0C-7D adds direct official-client handshake/subscription inspection, safe installed-package metadata inspection, selected-channel shape checks, and symbol-scoped channel format variants. Backend bootstrap remains blocked until direct or manager mode proves callback/message delivery.
+* Phase 4.0C-7D adds direct official-client handshake/subscription inspection, safe installed-package metadata inspection, selected-channel shape checks, and symbol-scoped channel format variants.
+* Phase 4.0C-7E records the live no-space channel finding: `X:FPT`, `X-QUOTE:FPT`, and `X-TRADE:FPT` receive callbacks/cache hits in verifier runs, while `X: FPT`, `X-QUOTE: FPT`, and `X-TRADE: FPT` did not. Backend bootstrap is unblocked but remains a separate Phase 4.0C-8 lifecycle task.
 * Future streaming work must avoid `X: ALL` in runtime and must not run long-lived stream connections inside request handlers.
 
 Phase 4.0C-4 official Python FC Data client inspection result:
@@ -738,7 +740,7 @@ Phase 4.0C-4 official Python FC Data client inspection result:
 * Start call: `MarketDataStream.start(on_message, on_error, selected_channel)`.
 * Subscription/change call: `MarketDataStream.swith_channel(channel)`, which invokes SignalR hub method `SwitchChannels`.
 * SignalR constants: `v2.0/signalr`, hub `FcMarketDataV2Hub`, message method `Broadcast`, error method `Error`.
-* Subscription format is a caller-provided channel string, so symbol-scoped channels such as `X-TRADE: FPT`, `X-QUOTE: FPT`, or `X: FPT` are the safe runtime direction. Do not use `X: ALL`.
+* Subscription format is a caller-provided channel string. Live verification showed symbol-scoped no-space channels such as `X-TRADE:FPT`, `X-QUOTE:FPT`, or `X:FPT` receive callbacks, while spaced forms such as `X: FPT` did not. Do not use `X:ALL` or any `ALL` subscription.
 * Runtime adapter remains deferred: the official client starts a daemon websocket thread, exposes no documented bounded receive/wait API, has a negotiation `print(self.headers)` path that can leak authorization headers, and its public `Connection.close()` path calls a non-existent transport `close()` method instead of the available `stop()` method.
 * Minimal future live design: a background adapter that wraps or patches the official client to prevent header printing, subscribes only to symbol-scoped channels, writes latest parsed messages into the existing thread-safe cache, uses the Phase 4.0C-3 parser, and leaves request handlers as bounded cache readers.
 
@@ -1600,7 +1602,7 @@ Status: provider, service, API, and UI contract added in the current working tre
 
 ### Priority 4 - SSI streaming/protocol hardening
 
-Status: Phase 4.0C-7D added direct official-client handshake/subscription diagnostics to the dev-only verifier. Backend bootstrap/production lifecycle startup remains next and is blocked until callback/message evidence exists.
+Status: Phase 4.0C-7E changed the default channel template to the live-verified no-space format. Backend bootstrap/production lifecycle startup remains next as Phase 4.0C-8.
 
 * Add controlled application lifecycle startup only after live environment validation confirms credentials, permissions, stop behavior, retry/backoff, and stream freshness.
 * Keep the verification-script cache separate from the backend cache until Phase 4.0C-8 defines startup/bootstrap ownership.

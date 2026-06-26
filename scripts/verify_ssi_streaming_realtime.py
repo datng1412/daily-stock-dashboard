@@ -181,7 +181,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--channel-template",
         default=None,
-        help='Streaming channel template. Default: env SSI_STREAMING_REALTIME_CHANNEL_TEMPLATE or "X: {symbol}".',
+        help='Streaming channel template. Default: env SSI_STREAMING_REALTIME_CHANNEL_TEMPLATE or "X:{symbol}".',
     )
     parser.add_argument(
         "--channel-templates",
@@ -262,6 +262,15 @@ def channel_format_variant_templates() -> List[str]:
         "X-TRADE: {symbol}",
         "X-TRADE:{symbol}",
     ]
+
+
+def channel_format_warning(channels: Sequence[str]) -> Optional[str]:
+    if any(re.match(r"^[A-Z-]+:\s+", str(channel or "").strip()) for channel in channels or []):
+        return (
+            "SSI streaming channels with a space after ':' were live-verified "
+            "as non-working for callbacks; default format is X:{symbol}."
+        )
+    return None
 
 
 def safe_repr_selected_channel(value: Any) -> str:
@@ -733,6 +742,9 @@ def config_only_summary(
         "backend_cache_populated": False,
         "no_secrets_observed": True,
     }
+    warning = channel_format_warning(channels)
+    if warning:
+        payload["channel_format_warning"] = warning
     if check_package:
         payload["package_available"] = package_available()
     return payload

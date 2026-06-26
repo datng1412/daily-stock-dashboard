@@ -170,6 +170,7 @@ def _set_valid_env(monkeypatch):
     monkeypatch.setenv("SSI_FASTCONNECT_CONSUMER_SECRET", SECRET_VALUE)
     monkeypatch.setenv("SSI_FASTCONNECT_BASE_URL", "https://fc-data.ssi.com.vn/api/v2/Market")
     monkeypatch.setenv("SSI_STREAMING_REALTIME_STREAM_URL", "https://fc-datahub.ssi.com.vn/")
+    monkeypatch.delenv("SSI_STREAMING_REALTIME_CHANNEL_TEMPLATE", raising=False)
 
 
 def _last_json(capsys):
@@ -199,9 +200,25 @@ def test_check_config_only_does_not_start_manager_or_client(monkeypatch, capsys)
     assert code == 0
     assert payload["started"] is False
     assert payload["requested_symbols"] == ["FPT", "HPG"]
-    assert payload["channels"] == ["X: FPT", "X: HPG"]
+    assert payload["channels"] == ["X:FPT", "X:HPG"]
+    assert "channel_format_warning" not in payload
     assert payload["script_cache_only"] is True
     assert payload["backend_cache_populated"] is False
+    assert SECRET_VALUE not in output
+
+
+def test_explicit_old_space_channel_template_override_is_respected_with_warning(monkeypatch, capsys):
+    module = _load_script(monkeypatch)
+    monkeypatch.setattr(module, "load_dotenv_if_available", lambda: None)
+    _set_valid_env(monkeypatch)
+    monkeypatch.setenv("SSI_STREAMING_REALTIME_CHANNEL_TEMPLATE", "X: {symbol}")
+
+    code = module.main(["--symbols", "fpt,hpg", "--check-config-only"])
+    payload, output = _last_json(capsys)
+
+    assert code == 0
+    assert payload["channels"] == ["X: FPT", "X: HPG"]
+    assert payload["channel_format_warning"].startswith("SSI streaming channels with a space after ':'")
     assert SECRET_VALUE not in output
 
 
@@ -280,7 +297,7 @@ def test_mock_manager_starts_with_symbol_scoped_channels_and_parser(monkeypatch,
 
     assert code == 0
     assert FakeManager.instances[0].started_symbols == ["FPT"]
-    assert FakeManager.instances[0].channels == ["X: FPT"]
+    assert FakeManager.instances[0].channels == ["X:FPT"]
     assert FakeManager.instances[0].parser.__name__ == "normalize_streaming_realtime_messages"
     assert FakeManager.instances[0].stop_calls == 1
     assert payload["quote_count"] == 1
@@ -455,7 +472,7 @@ def test_verbose_safe_output_is_single_json_object(monkeypatch, capsys):
         return 0, {
             "started": True,
             "manager_state": "running",
-            "channels": ["X: FPT"],
+            "channels": ["X:FPT"],
             "messages_observed": 0,
             "parser_rows_observed": 0,
             "cache_status": "empty",
@@ -618,9 +635,9 @@ def test_direct_official_start_failed_is_sanitized(monkeypatch):
 
 def test_direct_official_selected_channel_shapes(monkeypatch):
     module = _load_script(monkeypatch)
-    assert module.build_selected_channel(["X: FPT"], "string") == "X: FPT"
-    assert module.build_selected_channel(["X: FPT", "X: HPG"], "comma") == "X: FPT,X: HPG"
-    assert module.build_selected_channel(["X: FPT", "X: HPG"], "list") == ["X: FPT", "X: HPG"]
+    assert module.build_selected_channel(["X:FPT"], "string") == "X:FPT"
+    assert module.build_selected_channel(["X:FPT", "X:HPG"], "comma") == "X:FPT,X:HPG"
+    assert module.build_selected_channel(["X:FPT", "X:HPG"], "list") == ["X:FPT", "X:HPG"]
     with pytest.raises(ValueError):
         module.build_selected_channel(["X: ALL"], "string")
 

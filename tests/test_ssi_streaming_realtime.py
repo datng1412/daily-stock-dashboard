@@ -22,6 +22,7 @@ from data_provider.ssi_streaming_realtime import (
     SSI_STREAMING_REALTIME_MANAGER_ERROR_REASON,
     SSI_STREAMING_REALTIME_NOT_STARTED_REASON,
     SSI_STREAMING_REALTIME_PACKAGE_UNAVAILABLE_REASON,
+    build_symbol_channel,
 )
 from src.services.vietnam_market_service import VietnamDashboardConfig, VietnamMarketService, clear_vietnam_cache
 
@@ -293,8 +294,12 @@ def test_manager_start_uses_symbol_scoped_channel_only():
 
     assert status["manager_state"] == MANAGER_RUNNING
     assert client.started is True
-    assert client.channels == ["X: FPT"]
+    assert client.channels == ["X:FPT"]
     assert all("ALL" not in channel for channel in client.channels)
+
+
+def test_explicit_old_space_channel_template_remains_respected():
+    assert build_symbol_channel("fpt", "X: {symbol}") == "X: FPT"
 
 
 def test_manager_rejects_all_channel_subscription_without_starting_client():
@@ -537,14 +542,14 @@ def test_official_adapter_starts_symbol_channel_without_leaking_headers(capsys):
         import_module=_fake_official_import,
     )
 
-    adapter.start(lambda message: None, lambda error: None, ["X: FPT"])
+    adapter.start(lambda message: None, lambda error: None, ["X:FPT"])
     captured = capsys.readouterr()
 
     assert SECRET_TOKEN not in captured.out
     assert SECRET_TOKEN not in captured.err
     assert FakeOfficialClient.instances[0].config.url == "https://fc-data.ssi.com.vn/"
     assert FakeOfficialClient.instances[0].config.stream_url == "https://fc-datahub.ssi.com.vn/"
-    assert FakeOfficialStream.instances[0].started_channels == ["X: FPT"]
+    assert FakeOfficialStream.instances[0].started_channels == ["X:FPT"]
     adapter.stop()
     assert FakeOfficialStream.instances[0].transport.stop_calls == 1
 
@@ -558,7 +563,7 @@ def test_official_adapter_missing_package_fails_closed():
     )
 
     with pytest.raises(RuntimeError, match=SSI_STREAMING_REALTIME_PACKAGE_UNAVAILABLE_REASON):
-        adapter.start(lambda message: None, lambda error: None, ["X: FPT"])
+        adapter.start(lambda message: None, lambda error: None, ["X:FPT"])
 
 
 def test_manager_start_instantiates_official_wrapper_only_when_enabled():
