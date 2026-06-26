@@ -1102,7 +1102,10 @@ class SsiFastConnectFetcher:
                 },
             }
 
-        if not self.consumer_id or not self.consumer_secret or not self.streaming_realtime_stream_url:
+        if (
+            not self._streaming_realtime_manager_supplied
+            and (not self.consumer_id or not self.consumer_secret or not self.streaming_realtime_stream_url)
+        ):
             return {
                 "status": "unavailable",
                 "source": SSI_SOURCE,

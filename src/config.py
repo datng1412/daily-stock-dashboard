@@ -665,6 +665,7 @@ class Config:
     ssi_streaming_realtime_cache_ttl_seconds: int = 15
     ssi_streaming_realtime_channel_template: str = "X:{symbol}"
     ssi_streaming_realtime_stream_url: str = "https://fc-datahub.ssi.com.vn/"
+    ssi_streaming_realtime_bootstrap_symbols: str = ""
     vn_daily_data_provider: str = "ssi"
     vn_chart_data_provider: str = "ssi"
     vn_daily_stock_price_provider: str = "ssi"
@@ -1919,6 +1920,9 @@ class Config:
                 )
                 or 'https://fc-datahub.ssi.com.vn'
             ) + '/',
+            ssi_streaming_realtime_bootstrap_symbols=(
+                os.getenv('SSI_STREAMING_REALTIME_BOOTSTRAP_SYMBOLS') or ''
+            ).strip(),
             vn_daily_data_provider=parse_env_choice(
                 os.getenv('VN_DAILY_DATA_PROVIDER'),
                 {'ssi'},

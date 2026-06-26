@@ -97,6 +97,7 @@ If SSI-owned data is unavailable, show unavailable. Do not silently fallback.
 * Phase 4.0C-5 added a config-disabled background streaming manager/cache skeleton. `get_realtime_snapshot()` can read only from a running manager and fresh cache when `SSI_STREAMING_REALTIME_ENABLED=true`; default runtime returns `SSI streaming realtime manager disabled.` and still does not probe speculative REST candidate names.
 * Phase 4.0C-6 added the official `ssi-fc-data` adapter behind the same disabled runtime flag. The package is imported lazily, the official client is instantiated only on explicit manager start, and missing config/package states fail closed with sanitized reasons.
 * Phase 4.0C-7E changed the default SSI streaming channel template to the live-verified no-space form `X:{symbol}`. Old spaced forms are preserved only for explicit overrides and diagnostics.
+* Phase 4.0C-8 added a FastAPI startup/shutdown bootstrap for the SSI streaming realtime manager. It runs only when `SSI_STREAMING_REALTIME_ENABLED=true` and `SSI_STREAMING_REALTIME_BOOTSTRAP_SYMBOLS` is a small explicit symbol list. Request handlers still only read cache/status and do not start streams or subscribe dynamically.
 * SSI realtime/trade-tape live endpoint names and entitlements may return unavailable. Unavailable states should include sanitized diagnostics without tokens, credentials, auth headers, or raw provider bodies.
 * Dashboard provider-status UI must keep core daily SSI availability separate from optional SSI realtime, SSI trade tape, SSI index components, and disabled news states. A `Partial` dashboard status can mean optional sections are unavailable; it must not imply daily SSI data failed when daily rows are OK.
 * KBS legacy realtime/trade-tape paths are disabled by default and require explicit legacy flags.
@@ -727,9 +728,10 @@ Phase 4.0C-3 SSI streaming realtime result:
 * Phase 4.0C-5 supersedes the parser-only runtime state with a config-disabled background manager/cache skeleton. The default response remains unavailable with `SSI streaming realtime manager disabled.`
 * Phase 4.0C-6 adds the official-client adapter behind `SSI_STREAMING_REALTIME_ENABLED=false` by default. The adapter suppresses the official header-printing path during stream start, uses symbol-scoped channels only, and remains a background-manager path rather than a request-handler path.
 * Phase 4.0C-7B adds `scripts/verify_ssi_streaming_realtime.py` as a dev-only local verification path. It validates config/channel safety, starts the manager explicitly in a standalone process, uses the real parser, polls only the script-local cache, and stops the manager in `finally`. It does not populate the FastAPI backend cache.
-* Phase 4.0C-7C adds safe callback/channel diagnostics to the verifier, including diagnosis labels, bounded envelope key/type samples, sequential channel-template discovery, and optional `InsecureRequestWarning` suppression. Backend bootstrap remains blocked until a market-hours run proves callbacks/messages/parser rows through this verifier.
+* Phase 4.0C-7C adds safe callback/channel diagnostics to the verifier, including diagnosis labels, bounded envelope key/type samples, sequential channel-template discovery, and optional `InsecureRequestWarning` suppression.
 * Phase 4.0C-7D adds direct official-client handshake/subscription inspection, safe installed-package metadata inspection, selected-channel shape checks, and symbol-scoped channel format variants.
-* Phase 4.0C-7E records the live no-space channel finding: `X:FPT`, `X-QUOTE:FPT`, and `X-TRADE:FPT` receive callbacks/cache hits in verifier runs, while `X: FPT`, `X-QUOTE: FPT`, and `X-TRADE: FPT` did not. Backend bootstrap is unblocked but remains a separate Phase 4.0C-8 lifecycle task.
+* Phase 4.0C-7E records the live no-space channel finding: `X:FPT`, `X-QUOTE:FPT`, and `X-TRADE:FPT` receive callbacks/cache hits in verifier runs, while `X: FPT`, `X-QUOTE: FPT`, and `X-TRADE: FPT` did not.
+* Phase 4.0C-8 adds backend lifecycle startup/shutdown ownership for the process-local SSI streaming manager. Bootstrap symbols are configured by `SSI_STREAMING_REALTIME_BOOTSTRAP_SYMBOLS`, default empty. Requests do not create streams, do not add subscriptions, and do not subscribe to symbols outside the startup list.
 * Future streaming work must avoid `X: ALL` in runtime and must not run long-lived stream connections inside request handlers.
 
 Phase 4.0C-4 official Python FC Data client inspection result:
@@ -1602,10 +1604,10 @@ Status: provider, service, API, and UI contract added in the current working tre
 
 ### Priority 4 - SSI streaming/protocol hardening
 
-Status: Phase 4.0C-7E changed the default channel template to the live-verified no-space format. Backend bootstrap/production lifecycle startup remains next as Phase 4.0C-8.
+Status: Phase 4.0C-8 added backend lifecycle startup/shutdown for the process-local SSI streaming manager. It remains config-gated and bootstrap-symbol-gated; realtime is reliable only when live startup subscriptions produce fresh cache rows.
 
 * Add controlled application lifecycle startup only after live environment validation confirms credentials, permissions, stop behavior, retry/backoff, and stream freshness.
-* Keep the verification-script cache separate from the backend cache until Phase 4.0C-8 defines startup/bootstrap ownership.
+* Keep the verification-script cache separate from the backend cache; Phase 4.0C-8 backend bootstrap owns only the FastAPI process-local manager/cache.
 * Support safe subscriptions for market data, foreign room, index data, and realtime bars.
 * Add heartbeat, reconnect, and cache behavior.
 * Compare live SSI stream/probe behavior against dashboard REST expectations.

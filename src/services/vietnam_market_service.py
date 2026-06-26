@@ -1652,7 +1652,23 @@ class VietnamMarketService:
 
     def _get_ssi_fetcher(self) -> SsiFastConnectFetcher:
         if self._ssi_fetcher is None:
-            self._ssi_fetcher = SsiFastConnectFetcher()
+            streaming_realtime_manager = None
+            try:
+                from src.services.ssi_streaming_realtime_lifecycle import (
+                    get_existing_ssi_streaming_realtime_manager,
+                )
+
+                streaming_realtime_manager = get_existing_ssi_streaming_realtime_manager()
+            except Exception:  # noqa: BLE001 - lifecycle state is best-effort.
+                streaming_realtime_manager = None
+            if streaming_realtime_manager is not None:
+                self._ssi_fetcher = SsiFastConnectFetcher(
+                    realtime_enabled=self.config.ssi_realtime_enabled,
+                    streaming_realtime_enabled=self.config.ssi_streaming_realtime_enabled,
+                    streaming_realtime_manager=streaming_realtime_manager,
+                )
+            else:
+                self._ssi_fetcher = SsiFastConnectFetcher()
         return self._ssi_fetcher
 
     @staticmethod

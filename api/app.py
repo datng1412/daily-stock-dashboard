@@ -32,6 +32,12 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
+from data_provider.ssi_streaming_realtime import sanitize_streaming_error
+from src.services.ssi_streaming_realtime_lifecycle import (
+    bootstrap_ssi_streaming_realtime,
+    shutdown_ssi_streaming_realtime,
+)
+
 logger = logging.getLogger(__name__)
 
 # Match src="/assets/foo.js" / href="/assets/foo.css" produced by the
@@ -169,14 +175,52 @@ def _schedule_stock_index_background_refresh(app: FastAPI, reason: str) -> None:
     )
 
 
+async def _bootstrap_ssi_streaming_realtime_in_background(app: FastAPI) -> None:
+    try:
+        app.state.ssi_streaming_realtime_bootstrap_status = await run_in_threadpool(
+            bootstrap_ssi_streaming_realtime
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - startup must stay best-effort.
+        safe_error = sanitize_streaming_error(exc)
+        logger.warning("SSI streaming realtime bootstrap failed: %s", safe_error)
+        app.state.ssi_streaming_realtime_bootstrap_status = {
+            "bootstrap_status": "bootstrap_error",
+            "latest_error": safe_error,
+        }
+
+
+def _schedule_ssi_streaming_realtime_bootstrap(app: FastAPI) -> None:
+    task = getattr(app.state, "ssi_streaming_realtime_bootstrap_task", None)
+    if task is not None and not task.done():
+        return
+    app.state.ssi_streaming_realtime_bootstrap_status = {"bootstrap_status": "scheduled"}
+    app.state.ssi_streaming_realtime_bootstrap_task = asyncio.create_task(
+        _bootstrap_ssi_streaming_realtime_in_background(app)
+    )
+
+
 @asynccontextmanager
 async def app_lifespan(app: FastAPI):
     """Initialize and release shared services for the app lifecycle."""
     app.state.system_config_service = SystemConfigService()
     _schedule_stock_index_background_refresh(app, "startup")
+    _schedule_ssi_streaming_realtime_bootstrap(app)
     try:
         yield
     finally:
+        bootstrap_task = getattr(app.state, "ssi_streaming_realtime_bootstrap_task", None)
+        if bootstrap_task is not None and not bootstrap_task.done():
+            bootstrap_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await bootstrap_task
+        try:
+            app.state.ssi_streaming_realtime_shutdown_status = await run_in_threadpool(
+                shutdown_ssi_streaming_realtime
+            )
+        except Exception as exc:  # noqa: BLE001 - shutdown must stay best-effort.
+            logger.warning("SSI streaming realtime shutdown failed: %s", sanitize_streaming_error(exc))
         refresh_task = getattr(app.state, "stock_index_refresh_task", None)
         if refresh_task is not None and not refresh_task.done():
             refresh_task.cancel()

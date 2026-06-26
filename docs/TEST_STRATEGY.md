@@ -15,6 +15,7 @@ python -m pytest tests/test_ssi_fastconnect_fetcher.py -q
 python -m pytest tests/test_vietnam_market_service_realtime.py -q
 python -m pytest tests/test_vietnam_market_service_intraday.py -q
 python -m pytest tests/test_ssi_streaming_realtime.py -q
+python -m pytest tests/test_ssi_streaming_realtime_lifecycle.py -q
 python -m pytest tests/test_verify_ssi_streaming_realtime_script.py -q
 ```
 
@@ -26,6 +27,7 @@ Expected protection:
 - SSI realtime unavailable returns `realtime_snapshot = null`.
 - SSI streaming realtime stays disabled by default, does not instantiate or import the official client when disabled, never starts on import, and reads only from a running manager plus fresh cache.
 - SSI official streaming adapter tests use mocked official modules, suppress header-like output, reject `X: ALL`, and fail closed when streaming config or `ssi_fc_data` is unavailable.
+- SSI backend lifecycle bootstrap tests use mocked stream clients, require `SSI_STREAMING_REALTIME_BOOTSTRAP_SYMBOLS` before startup, reject unsafe bootstrap symbols, verify no-space symbol channels, stop idempotently, and prove the realtime endpoint/service reads the process-local cache without dynamic request subscriptions.
 - SSI streaming verification script tests import the script without starting streams, validate config-only/package-check/package-inspection modes, reject unsafe symbols/channels, default planned channels to no-space `X:FPT` format, preserve explicit old-space overrides with a warning, keep channel-format variants for diagnostics, use mocked manager/client/direct-official paths, classify callback/no-message/parser-zero/cache-hit/on-error/direct-start outcomes, bound safe samples, capture official stdout/stderr without raw printing, stop in `finally`, and keep the script-local cache separate from the backend cache.
 - SSI intraday stale/unavailable returns `intraday_pulse = null` and `intraday_candles = []`.
 - SSI intraday provider failures are classified into sanitized diagnostics such as `rate_limited`, without raw payloads or credentials, and without changing DailyOhlc `latest_price` ownership.

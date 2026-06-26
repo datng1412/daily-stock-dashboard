@@ -21,6 +21,7 @@ Current phase:
 * SSI streaming realtime parser coverage for buffered `X`, `X-QUOTE`, and `X-TRADE` messages.
 * Config-disabled SSI streaming manager/cache skeleton for future background runtime work.
 * Official `ssi-fc-data` Python client adapter behind the disabled streaming runtime flag.
+* FastAPI startup bootstrap for SSI streaming realtime when explicitly enabled and given a small bootstrap symbol list.
 * SSI live API plus backend cache/TTL; local DB market-data storage is deferred.
 
 Out of scope:
@@ -75,7 +76,7 @@ External providers are still required for BCTC/KQKD, financial statements, finan
 | IntradayOhlc | SSI FastConnect Data REST | Implemented and wired for compact intraday pulse | Use as strict VN intraday candle source; do not treat as realtime matched quote |
 | DailyIndex | SSI FastConnect Data REST | Implemented with 29-day chunking | Use for daily index value/change/breadth/liquidity when wired |
 | DailyStockPrice | SSI FastConnect Data REST | Implemented and wired | Use for reference, ceiling/floor, adjusted close, matched, put-through, and foreign flow |
-| Realtime snapshot | SSI FastConnect Data streaming | Provider/service/API/UI contract added; parser coverage for buffered `X`, `X-QUOTE`, and `X-TRADE`; config-disabled background manager/cache skeleton added; official client adapter is available only behind `SSI_STREAMING_REALTIME_ENABLED=true` and explicit manager start; default channel template is `X:{symbol}` | Show SSI unavailable until a bounded background adapter safely populates current rows; no KBS fallback |
+| Realtime snapshot | SSI FastConnect Data streaming | Provider/service/API/UI contract added; parser coverage for buffered `X`, `X-QUOTE`, and `X-TRADE`; config-disabled background manager/cache skeleton added; official client adapter is available only behind `SSI_STREAMING_REALTIME_ENABLED=true`; FastAPI startup can start a process-local manager only when `SSI_STREAMING_REALTIME_BOOTSTRAP_SYMBOLS` is non-empty; default channel template is `X:{symbol}` | Show SSI unavailable until the backend lifecycle cache safely populates current rows; no request-handler streaming and no KBS fallback |
 | Trade tape | SSI FastConnect Data streaming or future verified trade contract | Provider/service/API/UI contract added; live history/list semantics still need confirmation | Keep separate from realtime latest-trade messages and official daily OHLCV |
 | Realtime best bid/ask, matched data, foreign room, index stream, realtime bars/OHLC | SSI streaming/protocol hardening later | Parser/cache skeleton exists only for realtime quote/trade snapshot messages; live official stream is not connected | Keep semantics explicit and unavailable until SSI behavior is proven stable |
 | News | Future NewsProvider | Disabled/not implemented | Do not call Mozyfin; keep separate from SSI-owned market data |
@@ -92,7 +93,7 @@ External providers are still required for BCTC/KQKD, financial statements, finan
 | IndexList | `GET /Market/IndexList` | OK | Use SSI-returned index codes instead of hardcoded assumptions. |
 | IndexComponents | `GET /Market/IndexComponents` | Clean unavailable when provider request fails | Provider/service/API coverage exists, but live component rows remain unconfirmed in the current SSI environment. |
 | IntradayOhlc | `GET /Market/IntradayOhlc` | Contract exists; returned rows may be stale/mismatched or provider-throttled | Freshness must be validated against SSI DailyOhlc date before rendering intraday metrics; failures expose only sanitized diagnostics. |
-| Realtime snapshot | SSI FastConnect streaming data types `X`, `X-QUOTE`, `X-TRADE` | Parser covered; config-disabled manager/cache skeleton exists; official client adapter is config-gated and not auto-started | Phase 4.0C verified the route/service/fetcher wiring and config gate. Phase 4.0C-2 found no supported SSI REST realtime endpoint, SDK method, enum, or hidden repo contract. Phase 4.0C-3 confirmed the realtime direction is streaming. Phase 4.0C-5 added a request-safe cache read path that stays disabled by default. Phase 4.0C-6 added a lazy official-client adapter, but it is instantiated only when streaming is enabled and the manager is explicitly started. Phase 4.0C-7E changed the default channel to the live-verified no-space form `X:{symbol}`; spaced forms are retained only for diagnostics/custom overrides. Previous candidate names `RealtimeQuote`, `RealtimePrice`, `RealtimeSnapshot`, and `SecuritiesRealtime` are discovery evidence only and are no longer probed at runtime. The dashboard must not claim realtime is live unless `realtime_snapshot` is non-null and `realtime_status.status = ok`. |
+| Realtime snapshot | SSI FastConnect streaming data types `X`, `X-QUOTE`, `X-TRADE` | Parser covered; config-disabled manager/cache skeleton exists; official client adapter is config-gated; FastAPI startup bootstrap is config-gated and symbol-list gated | Phase 4.0C verified the route/service/fetcher wiring and config gate. Phase 4.0C-2 found no supported SSI REST realtime endpoint, SDK method, enum, or hidden repo contract. Phase 4.0C-3 confirmed the realtime direction is streaming. Phase 4.0C-5 added a request-safe cache read path that stays disabled by default. Phase 4.0C-6 added a lazy official-client adapter. Phase 4.0C-7E changed the default channel to the live-verified no-space form `X:{symbol}`; spaced forms are retained only for diagnostics/custom overrides. Phase 4.0C-8 added FastAPI lifecycle bootstrap that starts the process-local manager only when `SSI_STREAMING_REALTIME_ENABLED=true` and explicit bootstrap symbols are configured. Previous candidate names `RealtimeQuote`, `RealtimePrice`, `RealtimeSnapshot`, and `SecuritiesRealtime` are discovery evidence only and are no longer probed at runtime. The dashboard must not claim realtime is live unless `realtime_snapshot` is non-null and `realtime_status.status = ok`. |
 | Trade tape | SSI trade-tape endpoint candidates | Contract exists; currently unavailable/404 in latest smoke | Not confirmed live. Desired unavailable contract is `trade_tape=[]` plus `trade_tape_status`, with endpoint/http details in diagnostics. |
 | Securities/SecuritiesDetails | `GET /Market/Securities`, `GET /Market/SecuritiesDetails` | Partial metadata | Optional company name, issuer, security type, lot size, listed shares, and listed date may remain null. |
 | News | Not SSI | Disabled until separate provider exists | Mozyfin is not used for VN runtime news. |
@@ -108,7 +109,7 @@ If data is news/fundamentals/corporate actions/macro: use external provider.
 If SSI-owned data is unavailable: show unavailable, do not silently fallback.
 ```
 
-SSI realtime and trade tape are not confirmed live in production runtime. Phase 4.0C found the realtime snapshot route and service wiring correct, with the live backend returning unavailable, 0 quote rows, and a 404 from an SSI realtime REST candidate path for FPT. Phase 4.0C-2 searched the repository for FastConnect realtime REST endpoint contracts, SDK methods, enums, docs references, and configuration but did not identify a supported SSI realtime snapshot endpoint. Phase 4.0C-3 confirmed the correct SSI direction is streaming and added parser coverage for buffered `X`, `X-QUOTE`, and `X-TRADE` envelopes. Phase 4.0C-5 added a config-disabled background manager/cache skeleton. Phase 4.0C-6 added the official-client adapter behind the same disabled runtime flag. Phase 4.0C-7E records that live verifier runs receive callbacks with no-space channels such as `X:FPT`, while old spaced forms such as `X: FPT` can start transport but do not receive callbacks. Runtime still does not start streams from request handlers or on module import. The dashboard must not use daily close or intraday candles as a realtime substitute, and it must not claim realtime is live unless the realtime snapshot object exists and its public status is `ok`.
+SSI realtime and trade tape are not confirmed reliable in production runtime. Phase 4.0C found the realtime snapshot route and service wiring correct, with the live backend returning unavailable, 0 quote rows, and a 404 from an SSI realtime REST candidate path for FPT. Phase 4.0C-2 searched the repository for FastConnect realtime REST endpoint contracts, SDK methods, enums, docs references, and configuration but did not identify a supported SSI realtime snapshot endpoint. Phase 4.0C-3 confirmed the correct SSI direction is streaming and added parser coverage for buffered `X`, `X-QUOTE`, and `X-TRADE` envelopes. Phase 4.0C-5 added a config-disabled background manager/cache skeleton. Phase 4.0C-6 added the official-client adapter behind the same disabled runtime flag. Phase 4.0C-7E records that live verifier runs receive callbacks with no-space channels such as `X:FPT`, while old spaced forms such as `X: FPT` can start transport but do not receive callbacks. Phase 4.0C-8 wires FastAPI startup/shutdown to the existing manager when `SSI_STREAMING_REALTIME_ENABLED=true` and `SSI_STREAMING_REALTIME_BOOTSTRAP_SYMBOLS` is non-empty. Runtime still does not start streams from request handlers or on module import. The dashboard must not use daily close or intraday candles as a realtime substitute, and it must not claim realtime is live unless the realtime snapshot object exists and its public status is `ok`.
 
 ## Intraday Failure Diagnostics
 
@@ -203,6 +204,26 @@ Phase 4.0C-6 adds `OfficialSsiRealtimeStreamClient`, a small wrapper around `Mar
 
 This is a background-service adapter, not a one-shot request path. The current application does not auto-start a production stream lifecycle in this phase. If `SSI_STREAMING_REALTIME_ENABLED=true` but credentials are incomplete, the package is unavailable, the manager is not running, the cache is empty, or the cache is stale, realtime remains unavailable with sanitized diagnostics.
 
+## Backend Streaming Bootstrap
+
+Phase 4.0C-8 adds FastAPI startup/shutdown wiring for the existing SSI streaming realtime manager. It remains disabled by default:
+
+```text
+SSI_STREAMING_REALTIME_ENABLED=false
+SSI_STREAMING_REALTIME_BOOTSTRAP_SYMBOLS=
+```
+
+When `SSI_STREAMING_REALTIME_ENABLED=true` and `SSI_STREAMING_REALTIME_BOOTSTRAP_SYMBOLS` contains a small explicit comma-separated list, backend startup creates the process-local manager, subscribes to symbol-scoped channels such as `X:FPT`, and stores parsed snapshots in the manager cache. Shutdown stops the manager if startup started it.
+
+Important runtime boundaries:
+
+* Bootstrap symbols default empty; enabled streaming with an empty list returns `SSI streaming realtime bootstrap symbols empty.` and does not instantiate the official client.
+* `ALL`, wildcard, malformed, and duplicate bootstrap symbols are rejected or ignored before channel creation.
+* `/api/v1/stocks/vn/realtime` reads the existing process-local cache and manager status only. It does not start a stream, add subscriptions, wait for callbacks, or subscribe dynamically for requested tickers.
+* A request for a ticker outside the bootstrap list remains a cache miss unless that ticker was already configured at startup.
+* The cache is process-local. Multi-worker deployments have one manager/cache per worker process; use a small explicit symbol list and do not assume cross-worker cache sharing.
+* Config OFF has highest precedence. If `SSI_STREAMING_REALTIME_ENABLED=false`, realtime remains unavailable even if a stale process cache exists.
+
 ## Local Streaming Verification
 
 Phase 4.0C-7B added a dev-only verifier, Phase 4.0C-7C hardened it with callback/channel diagnostics, and Phase 4.0C-7D adds direct official-client handshake/subscription inspection:
@@ -254,7 +275,7 @@ Diagnostic classifications:
 * `unsafe_channel_rejected`: symbol or channel template safety validation failed.
 * `unknown`: fallback for states that do not match the above.
 
-After market close, a safe run can report `manager_state=running`, symbol-scoped channels, zero observed messages, and an empty cache. That is not a live-realtime proof. During HOSE market hours, live confidence requires observed messages, parser rows, and script-local quote rows. Phase 4.0C-7E verified that no-space channel formats produce callbacks and cache hits in the verifier. Backend bootstrap remains a later Phase 4.0C-8 task.
+After market close, a safe run can report `manager_state=running`, symbol-scoped channels, zero observed messages, and an empty cache. That is not a live-realtime proof. During HOSE market hours, live confidence requires observed messages, parser rows, and script-local quote rows. Phase 4.0C-7E verified that no-space channel formats produce callbacks and cache hits in the verifier. Phase 4.0C-8 adds backend lifecycle bootstrap, but production reliability still depends on process-local cache hits from live startup subscriptions.
 
 Phase 4.0C-7D adds package and direct official-client diagnostics for the case where manager mode starts and exposes websocket transport state but no callback is invoked.
 

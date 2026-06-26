@@ -29,6 +29,7 @@ SSI_STREAMING_REALTIME_LIVE_ADAPTER_DISABLED_REASON = "SSI streaming realtime li
 SSI_STREAMING_REALTIME_ALL_CHANNEL_FORBIDDEN_REASON = "SSI streaming realtime refuses ALL channel subscriptions."
 SSI_STREAMING_REALTIME_CONFIG_INCOMPLETE_REASON = "SSI streaming realtime configuration incomplete."
 SSI_STREAMING_REALTIME_PACKAGE_UNAVAILABLE_REASON = "SSI streaming realtime package unavailable."
+SSI_STREAMING_REALTIME_BOOTSTRAP_EMPTY_REASON = "SSI streaming realtime bootstrap symbols empty."
 
 MANAGER_DISABLED = "disabled"
 MANAGER_STOPPED = "stopped"
@@ -343,6 +344,11 @@ class SsiStreamingRealtimeManager:
         self._last_message_at: Optional[str] = None
         self._messages_observed = 0
         self._parser_rows_observed = 0
+        self._bootstrap_status: Optional[str] = None
+        self._bootstrap_reason: Optional[str] = None
+        self._bootstrap_symbols: List[str] = []
+        self._bootstrap_rejected_symbols: List[str] = []
+        self._bootstrap_started_by_lifecycle = False
 
     @property
     def state(self) -> str:
@@ -379,6 +385,23 @@ class SsiStreamingRealtimeManager:
             self._channels = channels
             self._state = MANAGER_RUNNING
             return self.status()
+
+    def set_bootstrap_context(
+        self,
+        *,
+        status: Optional[str],
+        reason: Optional[str] = None,
+        symbols: Optional[Iterable[str]] = None,
+        rejected_symbols: Optional[Iterable[str]] = None,
+        started_by_lifecycle: bool = False,
+    ) -> None:
+        """Attach backend lifecycle bootstrap diagnostics to manager status."""
+        with self._lock:
+            self._bootstrap_status = str(status).strip() if status else None
+            self._bootstrap_reason = sanitize_streaming_error(reason) if reason else None
+            self._bootstrap_symbols = normalize_streaming_symbols(symbols or [])
+            self._bootstrap_rejected_symbols = normalize_streaming_symbols(rejected_symbols or [])
+            self._bootstrap_started_by_lifecycle = bool(started_by_lifecycle)
 
     def stop(self) -> Dict[str, Any]:
         with self._lock:
@@ -463,12 +486,19 @@ class SsiStreamingRealtimeManager:
                 "diagnostics": diagnostics,
             }
         if manager_state != MANAGER_RUNNING:
+            reason = SSI_STREAMING_REALTIME_NOT_STARTED_REASON
+            streaming_status = "manager_not_started"
+            cache_status = "not_started"
+            if diagnostics.get("bootstrap_status") == "symbols_empty":
+                reason = SSI_STREAMING_REALTIME_BOOTSTRAP_EMPTY_REASON
+                streaming_status = "bootstrap_symbols_empty"
+                cache_status = "bootstrap_symbols_empty"
             return {
                 **base,
                 "status": "unavailable",
-                "reason": SSI_STREAMING_REALTIME_NOT_STARTED_REASON,
-                "streaming_status": "manager_not_started",
-                "cache_status": "not_started",
+                "reason": reason,
+                "streaming_status": streaming_status,
+                "cache_status": cache_status,
                 "manager_state": manager_state,
                 "parsed_streaming_rows": diagnostics["parser_rows_observed"],
                 "diagnostics": diagnostics,
@@ -530,6 +560,11 @@ class SsiStreamingRealtimeManager:
                 "last_message_at": self._last_message_at,
                 "messages_observed": self._messages_observed,
                 "parser_rows_observed": self._parser_rows_observed,
+                "bootstrap_status": self._bootstrap_status,
+                "bootstrap_reason": self._bootstrap_reason,
+                "bootstrap_symbols": list(self._bootstrap_symbols),
+                "bootstrap_rejected_symbols": list(self._bootstrap_rejected_symbols),
+                "bootstrap_started_by_lifecycle": self._bootstrap_started_by_lifecycle,
             }
 
     def _record_error(self, error: Any, *, set_errored: bool) -> None:

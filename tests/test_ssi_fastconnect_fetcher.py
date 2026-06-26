@@ -163,6 +163,7 @@ def test_config_defaults_keep_ssi_disabled(monkeypatch):
     assert config.ssi_streaming_realtime_cache_ttl_seconds == 15
     assert config.ssi_streaming_realtime_channel_template == "X:{symbol}"
     assert config.ssi_streaming_realtime_stream_url == "https://fc-datahub.ssi.com.vn/"
+    assert config.ssi_streaming_realtime_bootstrap_symbols == ""
     assert config.vn_intraday_data_provider == "ssi"
     assert config.vn_realtime_data_provider == "ssi"
     assert config.vn_trade_tape_provider == "ssi"
@@ -909,7 +910,7 @@ def test_streaming_quote_after_trade_does_not_clear_last_trade_price():
 
 def test_realtime_snapshot_returns_streaming_disabled_state_without_http_calls():
     session = _FakeSession(post_items=[_token_response()])
-    fetcher = _fetcher(session=session)
+    fetcher = _fetcher(session=session, streaming_realtime_enabled=False)
 
     payload = fetcher.get_realtime_snapshot(["FPT", "VPB"])
 
@@ -944,6 +945,12 @@ def test_realtime_snapshot_disabled_does_not_request_token():
     assert payload["source"] == "SSI"
     assert payload["quotes"] == []
     assert session.calls == []
+
+
+def test_streaming_realtime_bootstrap_symbols_default_empty():
+    from src.config import Config
+
+    assert Config().ssi_streaming_realtime_bootstrap_symbols == ""
 
 
 def test_trade_tape_maps_ssi_like_rows():
