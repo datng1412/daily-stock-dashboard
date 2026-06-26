@@ -527,9 +527,12 @@ class VerificationDiagnostics:
     def sample_manager_status(self, status: Dict[str, Any]) -> None:
         safe_status = {
             "manager_state": status.get("manager_state"),
+            "runtime_status": status.get("runtime_status"),
             "channels": status.get("channels") or [],
             "messages_observed": int(status.get("messages_observed") or 0),
             "parser_rows_observed": int(status.get("parser_rows_observed") or 0),
+            "is_idle": bool(status.get("is_idle")),
+            "reconnect_attempt_count": int(status.get("reconnect_attempt_count") or 0),
             "latest_error": sanitize_streaming_error(status.get("latest_error")) if status.get("latest_error") else None,
         }
         if len(self.manager_status_samples) < self.max_samples:
@@ -674,9 +677,17 @@ def summarize(
     result = {
         "started": bool(started),
         "manager_state": status.get("manager_state") or ("not_started" if not started else "unknown"),
+        "runtime_status": status.get("runtime_status"),
         "channels": list(status.get("channels") or channels),
         "messages_observed": int(status.get("messages_observed") or 0),
         "parser_rows_observed": int(status.get("parser_rows_observed") or 0),
+        "is_idle": bool(status.get("is_idle")),
+        "idle_since": status.get("idle_since"),
+        "reconnect_enabled": bool(status.get("reconnect_enabled")),
+        "reconnect_attempt_count": int(status.get("reconnect_attempt_count") or 0),
+        "next_reconnect_at": status.get("next_reconnect_at"),
+        "reconnect_backoff_seconds": status.get("reconnect_backoff_seconds"),
+        "last_reconnect_reason": status.get("last_reconnect_reason"),
         "cache_status": cache_status,
         "quote_count": len(quotes),
         "symbols_with_quotes": sorted(

@@ -28,7 +28,9 @@ Expected protection:
 - SSI streaming realtime stays disabled by default, does not instantiate or import the official client when disabled, never starts on import, and reads only from a running manager plus fresh cache.
 - SSI official streaming adapter tests use mocked official modules, suppress header-like output, reject `X: ALL`, and fail closed when streaming config or `ssi_fc_data` is unavailable.
 - SSI backend lifecycle bootstrap tests use mocked stream clients, require `SSI_STREAMING_REALTIME_BOOTSTRAP_SYMBOLS` before startup, reject unsafe bootstrap symbols, verify no-space symbol channels, stop idempotently, and prove the realtime endpoint/service reads the process-local cache without dynamic request subscriptions.
+- SSI streaming runtime hardening tests use fake clocks and mocked clients to cover idle detection, `running_idle` diagnostics without daily-data invalidation, diagnostic-only idle reconnect behavior when no backend market-hours utility exists, reconnect scheduling after start failure, bounded/capped backoff, `SSI_STREAMING_REALTIME_RECONNECT_MAX_ATTEMPTS` semantics, stop-before-reconnect, duplicate-stream prevention, lifecycle monitor ownership, clean shutdown, and no revival after shutdown begins.
 - SSI realtime cache tests should prove `/api/v1/stocks/vn/realtime` service reads bypass the generic response cache, preserve streaming cache TTL/freshness fields, and expose newer process-local cache rows on the next read without changing DailyOhlc `latest_price`.
+- SSI realtime endpoint tests should prove unexpected realtime request failures return an optional unavailable response without leaking secrets or turning the dashboard into a full-page failure.
 - SSI streaming verification script tests import the script without starting streams, validate config-only/package-check/package-inspection modes, reject unsafe symbols/channels, default planned channels to no-space `X:FPT` format, preserve explicit old-space overrides with a warning, keep channel-format variants for diagnostics, use mocked manager/client/direct-official paths, classify callback/no-message/parser-zero/cache-hit/on-error/direct-start outcomes, bound safe samples, capture official stdout/stderr without raw printing, stop in `finally`, and keep the script-local cache separate from the backend cache.
 - SSI intraday stale/unavailable returns `intraday_pulse = null` and `intraday_candles = []`.
 - SSI intraday provider failures are classified into sanitized diagnostics such as `rate_limited`, without raw payloads or credentials, and without changing DailyOhlc `latest_price` ownership.
@@ -46,6 +48,12 @@ npm.cmd --prefix apps\dsa-web test -- VietnamCompanyResearchPage
 npm.cmd --prefix apps\dsa-web test -- VietnamDashboardPage.test.tsx
 npm.cmd --prefix apps\dsa-web test -- vietnamTime.test.ts
 ```
+
+Expected protection:
+
+- Realtime polling calls only `/api/v1/stocks/vn/realtime` and does not refresh watchlist, chart, company-like, or trade-tape paths.
+- Realtime polling failures keep previous daily rows, selected ticker, chart, and any previous successful realtime snapshot visible.
+- Hidden-tab visibility handling pauses/skips realtime polling and visible-tab restoration resumes realtime polling only, without a full dashboard reload.
 
 If `C:` temp/cache space is constrained:
 

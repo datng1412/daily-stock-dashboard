@@ -42,6 +42,7 @@ Daily SSI data availability is more important than optional live or future-modul
 - Trade tape unavailable is optional/minor when DailyOhlc is valid.
 - News disabled is expected until a NewsProvider exists.
 - Optional live/future states should not erase valid daily scan data.
+- Realtime polling or visibility changes must not clear valid watchlist rows, selected ticker detail, or chart state.
 - A `partial` dashboard or ticker state can mean optional sections are unavailable; it must not imply daily SSI data failed when required DailyOhlc fields are valid.
 
 Provider endpoint details, HTTP status, retryability, and raw provider summaries belong in diagnostics, not primary UI.

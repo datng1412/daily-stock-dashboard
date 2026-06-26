@@ -40,6 +40,19 @@ MANAGER_ERRORED = "errored"
 DEFAULT_STREAMING_REALTIME_CACHE_TTL_SECONDS = 15
 DEFAULT_STREAMING_REALTIME_CHANNEL_TEMPLATE = "X:{symbol}"
 DEFAULT_STREAMING_REALTIME_STREAM_URL = "https://fc-datahub.ssi.com.vn/"
+DEFAULT_STREAMING_REALTIME_IDLE_TIMEOUT_SECONDS = 45
+DEFAULT_STREAMING_REALTIME_RECONNECT_INITIAL_DELAY_SECONDS = 2
+DEFAULT_STREAMING_REALTIME_RECONNECT_MAX_DELAY_SECONDS = 30
+
+RUNTIME_DISABLED = "disabled"
+RUNTIME_NOT_STARTED = "not_started"
+RUNTIME_STARTING = "starting"
+RUNTIME_RUNNING = "running"
+RUNTIME_RUNNING_IDLE = "running_idle"
+RUNTIME_RECONNECTING = "reconnecting"
+RUNTIME_ERRORED = "errored"
+RUNTIME_STOPPED = "stopped"
+RUNTIME_SHUTDOWN = "shutdown"
 
 _SECRET_PATTERNS = (
     re.compile(r"(?i)(authorization\s*[:=]\s*bearer\s+)[^\s,;]+"),
@@ -326,6 +339,11 @@ class SsiStreamingRealtimeManager:
         parser: Optional[Callable[[List[Any], List[str]], List[Dict[str, Any]]]] = None,
         client_factory: Optional[Callable[[], SsiRealtimeStreamClient]] = None,
         channel_template: str = DEFAULT_STREAMING_REALTIME_CHANNEL_TEMPLATE,
+        idle_timeout_seconds: int = DEFAULT_STREAMING_REALTIME_IDLE_TIMEOUT_SECONDS,
+        reconnect_enabled: bool = True,
+        reconnect_initial_delay_seconds: int = DEFAULT_STREAMING_REALTIME_RECONNECT_INITIAL_DELAY_SECONDS,
+        reconnect_max_delay_seconds: int = DEFAULT_STREAMING_REALTIME_RECONNECT_MAX_DELAY_SECONDS,
+        reconnect_max_attempts: int = 0,
         time_func: Callable[[], float] = time.time,
     ) -> None:
         self.enabled = bool(enabled)
@@ -333,6 +351,17 @@ class SsiStreamingRealtimeManager:
         self._parser = parser or (lambda messages, symbols: [])
         self._client_factory = client_factory
         self.channel_template = channel_template or DEFAULT_STREAMING_REALTIME_CHANNEL_TEMPLATE
+        self.idle_timeout_seconds = max(1, int(idle_timeout_seconds or DEFAULT_STREAMING_REALTIME_IDLE_TIMEOUT_SECONDS))
+        self.reconnect_enabled = bool(reconnect_enabled)
+        self.reconnect_initial_delay_seconds = max(
+            1,
+            int(reconnect_initial_delay_seconds or DEFAULT_STREAMING_REALTIME_RECONNECT_INITIAL_DELAY_SECONDS),
+        )
+        self.reconnect_max_delay_seconds = max(
+            self.reconnect_initial_delay_seconds,
+            int(reconnect_max_delay_seconds or DEFAULT_STREAMING_REALTIME_RECONNECT_MAX_DELAY_SECONDS),
+        )
+        self.reconnect_max_attempts = max(0, int(reconnect_max_attempts or 0))
         self._time_func = time_func
         self._lock = threading.RLock()
         self._client: Optional[SsiRealtimeStreamClient] = None
@@ -342,6 +371,8 @@ class SsiStreamingRealtimeManager:
         self._latest_error: Optional[str] = None
         self._last_error_at: Optional[str] = None
         self._last_message_at: Optional[str] = None
+        self._last_message_epoch: Optional[float] = None
+        self._started_at_epoch: Optional[float] = None
         self._messages_observed = 0
         self._parser_rows_observed = 0
         self._bootstrap_status: Optional[str] = None
@@ -349,6 +380,19 @@ class SsiStreamingRealtimeManager:
         self._bootstrap_symbols: List[str] = []
         self._bootstrap_rejected_symbols: List[str] = []
         self._bootstrap_started_by_lifecycle = False
+        self._is_idle = False
+        self._idle_since: Optional[str] = None
+        self._idle_since_epoch: Optional[float] = None
+        self._reconnect_attempt_count = 0
+        self._last_reconnect_at: Optional[str] = None
+        self._last_reconnect_epoch: Optional[float] = None
+        self._next_reconnect_at: Optional[str] = None
+        self._next_reconnect_epoch: Optional[float] = None
+        self._reconnect_backoff_seconds = self.reconnect_initial_delay_seconds
+        self._last_reconnect_reason: Optional[str] = None
+        self._last_reconnect_error: Optional[str] = None
+        self._reconnect_in_progress = False
+        self._shutdown_requested = False
 
     @property
     def state(self) -> str:
@@ -384,6 +428,16 @@ class SsiStreamingRealtimeManager:
             self._client = client
             self._channels = channels
             self._state = MANAGER_RUNNING
+            started_at = float(self._time_func())
+            self._started_at_epoch = started_at
+            self._is_idle = False
+            self._idle_since = None
+            self._idle_since_epoch = None
+            self._next_reconnect_at = None
+            self._next_reconnect_epoch = None
+            self._reconnect_backoff_seconds = self.reconnect_initial_delay_seconds
+            self._last_reconnect_error = None
+            self._shutdown_requested = False
             return self.status()
 
     def set_bootstrap_context(
@@ -407,6 +461,8 @@ class SsiStreamingRealtimeManager:
         with self._lock:
             client = self._client
             self._client = None
+            self._next_reconnect_at = None
+            self._next_reconnect_epoch = None
         if client is not None:
             try:
                 client.stop()
@@ -439,7 +495,12 @@ class SsiStreamingRealtimeManager:
             with self._lock:
                 self._messages_observed += 1
                 self._parser_rows_observed += written
-                self._last_message_at = _utc_iso_from_epoch(float(self._time_func()))
+                now = float(self._time_func())
+                self._last_message_epoch = now
+                self._last_message_at = _utc_iso_from_epoch(now)
+                self._is_idle = False
+                self._idle_since = None
+                self._idle_since_epoch = None
         except Exception as exc:
             self._record_error(exc, set_errored=False)
 
@@ -549,6 +610,7 @@ class SsiStreamingRealtimeManager:
 
     def status(self) -> Dict[str, Any]:
         with self._lock:
+            self._refresh_idle_state_locked()
             return {
                 "enabled": self.enabled,
                 "manager_state": self._state,
@@ -565,6 +627,17 @@ class SsiStreamingRealtimeManager:
                 "bootstrap_symbols": list(self._bootstrap_symbols),
                 "bootstrap_rejected_symbols": list(self._bootstrap_rejected_symbols),
                 "bootstrap_started_by_lifecycle": self._bootstrap_started_by_lifecycle,
+                "idle_timeout_seconds": self.idle_timeout_seconds,
+                "is_idle": self._is_idle,
+                "idle_since": self._idle_since,
+                "reconnect_enabled": self.reconnect_enabled,
+                "reconnect_attempt_count": self._reconnect_attempt_count,
+                "last_reconnect_at": self._last_reconnect_at,
+                "next_reconnect_at": self._next_reconnect_at,
+                "reconnect_backoff_seconds": self._reconnect_backoff_seconds,
+                "last_reconnect_reason": self._last_reconnect_reason,
+                "last_reconnect_error": self._last_reconnect_error,
+                "runtime_status": self._runtime_status_locked(),
             }
 
     def _record_error(self, error: Any, *, set_errored: bool) -> None:
@@ -573,3 +646,149 @@ class SsiStreamingRealtimeManager:
             self._last_error_at = _utc_iso_from_epoch(float(self._time_func()))
             if set_errored:
                 self._state = MANAGER_ERRORED
+
+    def mark_shutdown(self) -> None:
+        """Mark the manager as shutting down so monitor ticks cannot revive it."""
+        with self._lock:
+            self._shutdown_requested = True
+            self._next_reconnect_at = None
+            self._next_reconnect_epoch = None
+
+    def monitor_tick(self, *, wants_streaming: bool) -> Dict[str, Any]:
+        """Run one deterministic idle/reconnect monitor iteration."""
+        action = self._prepare_reconnect_action(wants_streaming=bool(wants_streaming))
+        if action is None:
+            return self.status()
+
+        symbols, reason = action
+        reconnect_error: Optional[str] = None
+        try:
+            self._stop_client_for_reconnect()
+            status = self.start(symbols)
+            if status.get("manager_state") == MANAGER_RUNNING:
+                with self._lock:
+                    self._next_reconnect_at = None
+                    self._next_reconnect_epoch = None
+                    self._reconnect_backoff_seconds = self.reconnect_initial_delay_seconds
+                    self._last_reconnect_error = None
+                    self._last_reconnect_reason = reason
+                return self.status()
+            reconnect_error = status.get("latest_error") or "reconnect attempt failed"
+        except Exception as exc:  # pragma: no cover - defensive path
+            reconnect_error = sanitize_streaming_error(exc)
+            self._record_error(exc, set_errored=True)
+        finally:
+            with self._lock:
+                self._reconnect_in_progress = False
+
+        with self._lock:
+            self._last_reconnect_error = sanitize_streaming_error(reconnect_error)
+            if self.reconnect_max_attempts > 0 and self._reconnect_attempt_count >= self.reconnect_max_attempts:
+                self._next_reconnect_at = None
+                self._next_reconnect_epoch = None
+            else:
+                self._schedule_reconnect_locked(reason=reason, from_now=True)
+        return self.status()
+
+    def _prepare_reconnect_action(self, *, wants_streaming: bool) -> Optional[Tuple[List[str], str]]:
+        with self._lock:
+            self._refresh_idle_state_locked()
+            if (
+                not self.enabled
+                or not wants_streaming
+                or self._shutdown_requested
+                or self._reconnect_in_progress
+                or not self.reconnect_enabled
+            ):
+                return None
+            symbols = list(self._requested_symbols or self._bootstrap_symbols)
+            if not symbols:
+                return None
+
+            reason = self._reconnect_reason_locked()
+            if reason is None:
+                return None
+            if self.reconnect_max_attempts > 0 and self._reconnect_attempt_count >= self.reconnect_max_attempts:
+                self._next_reconnect_at = None
+                self._next_reconnect_epoch = None
+                self._last_reconnect_reason = reason
+                self._last_reconnect_error = "reconnect max attempts reached"
+                return None
+            now = float(self._time_func())
+            if self._next_reconnect_epoch is None:
+                self._schedule_reconnect_locked(reason=reason, from_now=True)
+                return None
+            if now < self._next_reconnect_epoch:
+                return None
+
+            self._reconnect_in_progress = True
+            self._reconnect_attempt_count += 1
+            self._last_reconnect_epoch = now
+            self._last_reconnect_at = _utc_iso_from_epoch(now)
+            self._last_reconnect_reason = reason
+            self._next_reconnect_at = None
+            self._next_reconnect_epoch = None
+            return symbols, reason
+
+    def _reconnect_reason_locked(self) -> Optional[str]:
+        if self._state == MANAGER_ERRORED:
+            return "stream_error" if self._messages_observed > 0 else "start_error"
+        if self._state == MANAGER_STOPPED and self._bootstrap_started_by_lifecycle:
+            return "unexpected_stopped"
+        # Without a market-hours utility in this project, idle is reported as a
+        # diagnostic state only. This avoids off-hours reconnect loops.
+        return None
+
+    def _schedule_reconnect_locked(self, *, reason: str, from_now: bool) -> None:
+        now = float(self._time_func())
+        delay = max(1, int(self._reconnect_backoff_seconds or self.reconnect_initial_delay_seconds))
+        self._next_reconnect_epoch = now + delay if from_now else now
+        self._next_reconnect_at = _utc_iso_from_epoch(self._next_reconnect_epoch)
+        self._last_reconnect_reason = reason
+        self._reconnect_backoff_seconds = min(delay * 2, self.reconnect_max_delay_seconds)
+
+    def _stop_client_for_reconnect(self) -> None:
+        with self._lock:
+            client = self._client
+            self._client = None
+            self._channels = []
+            if self._state != MANAGER_DISABLED:
+                self._state = MANAGER_STOPPED
+        if client is not None:
+            client.stop()
+
+    def _refresh_idle_state_locked(self) -> None:
+        if self._state != MANAGER_RUNNING:
+            self._is_idle = False
+            self._idle_since = None
+            self._idle_since_epoch = None
+            return
+        baseline = self._last_message_epoch if self._last_message_epoch is not None else self._started_at_epoch
+        if baseline is None:
+            return
+        now = float(self._time_func())
+        is_idle = now - baseline >= self.idle_timeout_seconds
+        if is_idle and not self._is_idle:
+            self._idle_since_epoch = now
+            self._idle_since = _utc_iso_from_epoch(now)
+        if not is_idle:
+            self._idle_since_epoch = None
+            self._idle_since = None
+        self._is_idle = is_idle
+
+    def _runtime_status_locked(self) -> str:
+        if self._shutdown_requested:
+            return RUNTIME_SHUTDOWN
+        if not self.enabled or self._state == MANAGER_DISABLED:
+            return RUNTIME_DISABLED
+        if self._reconnect_in_progress or self._next_reconnect_epoch is not None:
+            return RUNTIME_RECONNECTING
+        if self._state == MANAGER_STARTING:
+            return RUNTIME_STARTING
+        if self._state == MANAGER_RUNNING:
+            return RUNTIME_RUNNING_IDLE if self._is_idle else RUNTIME_RUNNING
+        if self._state == MANAGER_ERRORED:
+            return RUNTIME_ERRORED
+        if self._state == MANAGER_STOPPED:
+            return RUNTIME_NOT_STARTED if not self._requested_symbols else RUNTIME_STOPPED
+        return RUNTIME_STOPPED

@@ -30,6 +30,11 @@ from src.config import get_config
 _RUNTIME_LOCK = threading.RLock()
 _RUNTIME_MANAGER: Optional[SsiStreamingRealtimeManager] = None
 _RUNTIME_STARTED_BY_LIFECYCLE = False
+_RUNTIME_WANTS_STREAMING = False
+_RUNTIME_BOOTSTRAP_SYMBOLS: List[str] = []
+_RUNTIME_MONITOR_STOP: Optional[threading.Event] = None
+_RUNTIME_MONITOR_THREAD: Optional[threading.Thread] = None
+_RUNTIME_MONITOR_INTERVAL_SECONDS = 1.0
 
 _SYMBOL_PATTERN = re.compile(r"^[A-Z0-9._-]+$")
 
@@ -66,14 +71,24 @@ def get_existing_ssi_streaming_realtime_manager() -> Optional[SsiStreamingRealti
         return _RUNTIME_MANAGER
 
 
+def is_ssi_streaming_realtime_monitor_running() -> bool:
+    """Return whether the process-local reconnect monitor is alive."""
+    with _RUNTIME_LOCK:
+        return bool(_RUNTIME_MONITOR_THREAD and _RUNTIME_MONITOR_THREAD.is_alive())
+
+
 def reset_ssi_streaming_realtime_lifecycle_for_tests() -> None:
     """Reset process-local lifecycle state for deterministic tests."""
-    global _RUNTIME_MANAGER, _RUNTIME_STARTED_BY_LIFECYCLE
+    global _RUNTIME_MANAGER, _RUNTIME_STARTED_BY_LIFECYCLE, _RUNTIME_WANTS_STREAMING, _RUNTIME_BOOTSTRAP_SYMBOLS
+    _stop_reconnect_monitor()
     with _RUNTIME_LOCK:
         manager = _RUNTIME_MANAGER
         _RUNTIME_MANAGER = None
         _RUNTIME_STARTED_BY_LIFECYCLE = False
+        _RUNTIME_WANTS_STREAMING = False
+        _RUNTIME_BOOTSTRAP_SYMBOLS = []
     if manager is not None:
+        manager.mark_shutdown()
         manager.stop()
 
 
@@ -89,21 +104,76 @@ def _new_manager(
     return fetcher.streaming_realtime_manager
 
 
+def run_ssi_streaming_realtime_monitor_tick() -> Dict[str, Any]:
+    """Run one reconnect monitor tick for tests or the lifecycle monitor."""
+    with _RUNTIME_LOCK:
+        manager = _RUNTIME_MANAGER
+        wants_streaming = _RUNTIME_WANTS_STREAMING
+    if manager is None:
+        return {"bootstrap_status": "not_started", "manager_state": "stopped"}
+    return manager.monitor_tick(wants_streaming=wants_streaming)
+
+
+def _monitor_loop(stop_event: threading.Event) -> None:
+    while not stop_event.wait(_RUNTIME_MONITOR_INTERVAL_SECONDS):
+        try:
+            run_ssi_streaming_realtime_monitor_tick()
+        except Exception:
+            continue
+
+
+def _start_reconnect_monitor(*, interval_seconds: float = 1.0) -> None:
+    global _RUNTIME_MONITOR_STOP, _RUNTIME_MONITOR_THREAD, _RUNTIME_MONITOR_INTERVAL_SECONDS
+    with _RUNTIME_LOCK:
+        if _RUNTIME_MONITOR_THREAD is not None and _RUNTIME_MONITOR_THREAD.is_alive():
+            return
+        _RUNTIME_MONITOR_INTERVAL_SECONDS = max(0.1, float(interval_seconds or 1.0))
+        stop_event = threading.Event()
+        thread = threading.Thread(
+            target=_monitor_loop,
+            args=(stop_event,),
+            name="ssi-streaming-realtime-monitor",
+            daemon=True,
+        )
+        _RUNTIME_MONITOR_STOP = stop_event
+        _RUNTIME_MONITOR_THREAD = thread
+        thread.start()
+
+
+def _stop_reconnect_monitor() -> None:
+    global _RUNTIME_MONITOR_STOP, _RUNTIME_MONITOR_THREAD
+    with _RUNTIME_LOCK:
+        stop_event = _RUNTIME_MONITOR_STOP
+        thread = _RUNTIME_MONITOR_THREAD
+        _RUNTIME_MONITOR_STOP = None
+        _RUNTIME_MONITOR_THREAD = None
+    if stop_event is not None:
+        stop_event.set()
+    if thread is not None and thread.is_alive():
+        thread.join(timeout=2.0)
+
+
 def bootstrap_ssi_streaming_realtime(
     *,
     config: Optional[Any] = None,
     client_factory: Optional[Callable[[], SsiRealtimeStreamClient]] = None,
+    start_monitor: bool = True,
+    monitor_interval_seconds: float = 1.0,
 ) -> Dict[str, Any]:
     """Start the backend SSI realtime manager when config explicitly allows it.
 
     Startup remains best-effort and non-fatal. Request handlers do not call this
     function; they only read the process-local manager if startup created it.
     """
-    global _RUNTIME_MANAGER, _RUNTIME_STARTED_BY_LIFECYCLE
+    global _RUNTIME_MANAGER, _RUNTIME_STARTED_BY_LIFECYCLE, _RUNTIME_WANTS_STREAMING, _RUNTIME_BOOTSTRAP_SYMBOLS
 
     cfg = config or get_config()
     enabled = bool(getattr(cfg, "ssi_streaming_realtime_enabled", False))
     if not enabled:
+        _stop_reconnect_monitor()
+        with _RUNTIME_LOCK:
+            _RUNTIME_WANTS_STREAMING = False
+            _RUNTIME_BOOTSTRAP_SYMBOLS = []
         return {
             "bootstrap_status": "disabled",
             "reason": SSI_STREAMING_REALTIME_DISABLED_REASON,
@@ -123,6 +193,10 @@ def bootstrap_ssi_streaming_realtime(
             _RUNTIME_MANAGER = manager
 
     if not symbols:
+        _stop_reconnect_monitor()
+        with _RUNTIME_LOCK:
+            _RUNTIME_WANTS_STREAMING = False
+            _RUNTIME_BOOTSTRAP_SYMBOLS = []
         manager.set_bootstrap_context(
             status="symbols_empty",
             reason=SSI_STREAMING_REALTIME_BOOTSTRAP_EMPTY_REASON,
@@ -153,6 +227,10 @@ def bootstrap_ssi_streaming_realtime(
             rejected_symbols.append(symbol)
 
     if not safe_symbols:
+        _stop_reconnect_monitor()
+        with _RUNTIME_LOCK:
+            _RUNTIME_WANTS_STREAMING = False
+            _RUNTIME_BOOTSTRAP_SYMBOLS = []
         manager.set_bootstrap_context(
             status="symbols_empty",
             reason=SSI_STREAMING_REALTIME_BOOTSTRAP_EMPTY_REASON,
@@ -177,30 +255,39 @@ def bootstrap_ssi_streaming_realtime(
         rejected_symbols=rejected_symbols,
         started_by_lifecycle=True,
     )
+    with _RUNTIME_LOCK:
+        _RUNTIME_WANTS_STREAMING = True
+        _RUNTIME_BOOTSTRAP_SYMBOLS = list(safe_symbols)
     status = manager.start(safe_symbols)
     manager.set_bootstrap_context(
         status="running" if status.get("manager_state") == "running" else "start_failed",
         reason=status.get("latest_error"),
         symbols=safe_symbols,
         rejected_symbols=rejected_symbols,
-        started_by_lifecycle=status.get("manager_state") == "running",
+        started_by_lifecycle=True,
     )
     status = manager.status()
     with _RUNTIME_LOCK:
         _RUNTIME_STARTED_BY_LIFECYCLE = status.get("manager_state") == "running"
+    if start_monitor:
+        _start_reconnect_monitor(interval_seconds=monitor_interval_seconds)
     return status
 
 
 def shutdown_ssi_streaming_realtime() -> Dict[str, Any]:
     """Stop the backend lifecycle manager only if startup owns it."""
-    global _RUNTIME_STARTED_BY_LIFECYCLE
+    global _RUNTIME_STARTED_BY_LIFECYCLE, _RUNTIME_WANTS_STREAMING, _RUNTIME_BOOTSTRAP_SYMBOLS
+    _stop_reconnect_monitor()
     with _RUNTIME_LOCK:
         manager = _RUNTIME_MANAGER
-        should_stop = _RUNTIME_STARTED_BY_LIFECYCLE
+        should_stop = _RUNTIME_STARTED_BY_LIFECYCLE or _RUNTIME_WANTS_STREAMING
         _RUNTIME_STARTED_BY_LIFECYCLE = False
+        _RUNTIME_WANTS_STREAMING = False
+        _RUNTIME_BOOTSTRAP_SYMBOLS = []
     if manager is None or not should_stop:
         return {"bootstrap_status": "not_started", "manager_state": "stopped"}
     try:
+        manager.mark_shutdown()
         status = manager.stop()
         manager.set_bootstrap_context(
             status="stopped",

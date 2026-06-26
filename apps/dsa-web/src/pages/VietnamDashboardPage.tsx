@@ -3963,6 +3963,14 @@ const VietnamDashboardPage: React.FC = () => {
   const tradeTapeRefreshInFlightRef = useRef(false);
   const pendingRealtimeSnapshotTickersRef = useRef<string[] | null>(null);
   const pendingTradeTapeSymbolRef = useRef<string | null>(null);
+  const unmountedRef = useRef(false);
+
+  useEffect(() => () => {
+    unmountedRef.current = true;
+    realtimeRequestIdRef.current += 1;
+    tradesRequestIdRef.current += 1;
+    corporateActionsRequestIdRef.current += 1;
+  }, []);
 
   const loadObservability = useCallback(async () => {
     try {
@@ -3993,12 +4001,19 @@ const VietnamDashboardPage: React.FC = () => {
     setRealtimeError(null);
     try {
       const response = await stocksApi.getVietnamRealtimeQuotes(requestedTickers);
-      if (requestId !== realtimeRequestIdRef.current) return;
-      setRealtimeQuotes(Object.fromEntries(
+      if (requestId !== realtimeRequestIdRef.current || unmountedRef.current) return;
+      const nextQuotes = Object.fromEntries(
         response.quotes
           .map((quote) => [normalizeVietnamTicker(quote.symbol ?? quote.ticker ?? ''), quote] as const)
           .filter(([ticker]) => Boolean(ticker)),
-      ));
+      );
+      if (Object.keys(nextQuotes).length || response.status === 'ok') {
+        setRealtimeQuotes((previous) => (
+          response.status === 'ok'
+            ? nextQuotes
+            : { ...previous, ...nextQuotes }
+        ));
+      }
       setLastRealtimeSnapshotRefreshAt(new Date().toISOString());
       setRealtimeError(response.status === 'ok' ? null : realtimeErrorMessage(response.error) ?? 'SSI realtime unavailable');
       if (response.status !== 'ok') {
@@ -4006,12 +4021,12 @@ const VietnamDashboardPage: React.FC = () => {
       }
       void loadObservability();
     } catch (err) {
-      if (requestId !== realtimeRequestIdRef.current) return;
+      if (requestId !== realtimeRequestIdRef.current || unmountedRef.current) return;
       setLastRealtimeErrorAt(new Date().toISOString());
       setRealtimeError(realtimeErrorMessage(err instanceof Error ? err.message : null) ?? (err instanceof Error ? err.message : 'SSI realtime unavailable'));
       void loadObservability();
     } finally {
-      if (requestId === realtimeRequestIdRef.current) {
+      if (requestId === realtimeRequestIdRef.current && !unmountedRef.current) {
         setRealtimeLoading(false);
       }
     }
@@ -4028,7 +4043,7 @@ const VietnamDashboardPage: React.FC = () => {
     setTradesError(null);
     try {
       const response = await stocksApi.getVietnamRealtimeTrades(symbol, 100);
-      if (requestId !== tradesRequestIdRef.current) return;
+      if (requestId !== tradesRequestIdRef.current || unmountedRef.current) return;
       if (symbol !== selectedTickerRef.current) return;
       setRealtimeTrades(response.trades);
       setLastTradeTapeRefreshAt(new Date().toISOString());
@@ -4038,12 +4053,12 @@ const VietnamDashboardPage: React.FC = () => {
       }
       void loadObservability();
     } catch (err) {
-      if (requestId !== tradesRequestIdRef.current) return;
+      if (requestId !== tradesRequestIdRef.current || unmountedRef.current) return;
       setLastRealtimeErrorAt(new Date().toISOString());
       setTradesError(realtimeErrorMessage(err instanceof Error ? err.message : null) ?? (err instanceof Error ? err.message : 'Trade tape unavailable'));
       void loadObservability();
     } finally {
-      if (requestId === tradesRequestIdRef.current) {
+      if (requestId === tradesRequestIdRef.current && !unmountedRef.current) {
         setTradesLoading(false);
       }
     }
@@ -4061,16 +4076,16 @@ const VietnamDashboardPage: React.FC = () => {
     setCorporateActionsError(null);
     try {
       const response = await stocksApi.getVietnamCorporateActions([symbol], 6);
-      if (requestId !== corporateActionsRequestIdRef.current) return;
+      if (requestId !== corporateActionsRequestIdRef.current || unmountedRef.current) return;
       if (symbol !== selectedTickerRef.current) return;
       setCorporateActions(response);
       setCorporateActionsError(response.status === 'error' ? response.error ?? 'Corporate action history/calendar unavailable.' : null);
     } catch (err) {
-      if (requestId !== corporateActionsRequestIdRef.current) return;
+      if (requestId !== corporateActionsRequestIdRef.current || unmountedRef.current) return;
       setCorporateActions(null);
       setCorporateActionsError(err instanceof Error ? err.message : 'Corporate action history/calendar unavailable.');
     } finally {
-      if (requestId === corporateActionsRequestIdRef.current) {
+      if (requestId === corporateActionsRequestIdRef.current && !unmountedRef.current) {
         setCorporateActionsLoading(false);
       }
     }

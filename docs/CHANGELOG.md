@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [fix] Restore VN dashboard stability by isolating realtime polling from daily watchlist/chart state and making optional realtime endpoint failures fail open.
+- [fix] Harden the VN SSI streaming realtime runtime with idle diagnostics, bounded reconnect backoff, sanitized runtime fields, and clean lifecycle shutdown.
 - [fix] Make VN SSI realtime cache reads and dashboard polling reflect streaming snapshots faster with safe freshness labels.
 - [new feature] Add a config-gated FastAPI startup bootstrap for the SSI streaming realtime manager with explicit symbol lists and process-local cache reads.
 - [fix] Change the SSI streaming realtime default channel template to no-space format after live verification.

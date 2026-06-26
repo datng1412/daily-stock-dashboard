@@ -3017,7 +3017,7 @@ class VietnamMarketService:
         }
         if diagnostics:
             response["diagnostics"] = diagnostics
-        for key in ("streaming_status", "manager_state", "cache_status", "parsed_streaming_rows"):
+        for key in ("streaming_status", "manager_state", "runtime_status", "cache_status", "parsed_streaming_rows"):
             if key in payload:
                 response[key] = payload.get(key)
         if status == "ok" and not quotes:

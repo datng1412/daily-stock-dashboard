@@ -2,9 +2,11 @@
 
 import importlib
 from datetime import datetime
+from types import SimpleNamespace
 
 import pandas as pd
 import pytest
+from fastapi import Response
 
 from api.v1.endpoints.stocks import get_vietnam_realtime_quotes, get_vietnam_realtime_trades
 from data_provider import vnstock_realtime_fetcher as provider
@@ -202,6 +204,28 @@ def test_missing_timestamp_does_not_crash(monkeypatch):
     assert quote["stale_reason"] == "timestamp_unparseable"
 
 
+def test_vietnam_realtime_endpoint_fails_open_without_secret_leak(monkeypatch):
+    secret = "SECRET_REALTIME_TOKEN"
+
+    class BrokenVietnamMarketService:
+        config = SimpleNamespace(allow_legacy_kbs_provider=False, kbs_enabled=False)
+
+        def build_realtime_snapshot(self, symbols):
+            raise RuntimeError(f"Authorization: Bearer {secret}; accountId={secret}")
+
+    monkeypatch.setattr("api.v1.endpoints.stocks.VietnamMarketService", BrokenVietnamMarketService)
+
+    payload = get_vietnam_realtime_quotes(Response(), tickers="FPT,HPG")
+    payload_dict = payload.dict()
+
+    assert payload.status == "unavailable"
+    assert payload.requested_tickers == ["FPT", "HPG"]
+    assert payload.quotes == []
+    assert payload.cache["cache_status"] == "unavailable"
+    assert secret not in str(payload_dict)
+    assert "Bearer" not in str(payload_dict)
+
+
 def test_stale_quote_is_marked_stale(monkeypatch):
     row = {
         "symbol": "FPT",
@@ -312,8 +336,12 @@ def test_vnstock_quote_and_trade_cache_ttls_are_separate():
 
 def test_realtime_endpoint_maps_quotes(monkeypatch):
     monkeypatch.setattr(VnstockRealtimeFetcher, "_load_classes", _fake_load_classes)
+    monkeypatch.setattr(
+        "api.v1.endpoints.stocks.VietnamMarketService",
+        lambda: SimpleNamespace(config=SimpleNamespace(allow_legacy_kbs_provider=True, kbs_enabled=True)),
+    )
 
-    response = get_vietnam_realtime_quotes("fpt")
+    response = get_vietnam_realtime_quotes(Response(), tickers="fpt")
 
     assert response.status == "ok"
     assert response.requested_tickers == ["FPT"]
@@ -323,6 +351,10 @@ def test_realtime_endpoint_maps_quotes(monkeypatch):
 
 def test_trades_endpoint_maps_trade_rows(monkeypatch):
     monkeypatch.setattr(VnstockRealtimeFetcher, "_load_classes", _fake_load_classes)
+    monkeypatch.setattr(
+        "api.v1.endpoints.stocks.VietnamMarketService",
+        lambda: SimpleNamespace(config=SimpleNamespace(allow_legacy_kbs_provider=True, kbs_enabled=True)),
+    )
 
     response = get_vietnam_realtime_trades("fpt", limit=100)
 

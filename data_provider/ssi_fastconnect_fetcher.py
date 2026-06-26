@@ -23,6 +23,9 @@ from src.config import get_config, parse_env_bool, parse_env_int
 from data_provider.ssi_streaming_realtime import (
     DEFAULT_STREAMING_REALTIME_CACHE_TTL_SECONDS,
     DEFAULT_STREAMING_REALTIME_CHANNEL_TEMPLATE,
+    DEFAULT_STREAMING_REALTIME_IDLE_TIMEOUT_SECONDS,
+    DEFAULT_STREAMING_REALTIME_RECONNECT_INITIAL_DELAY_SECONDS,
+    DEFAULT_STREAMING_REALTIME_RECONNECT_MAX_DELAY_SECONDS,
     DEFAULT_STREAMING_REALTIME_STREAM_URL,
     OfficialSsiRealtimeStreamClient,
     RealtimeSnapshotCache,
@@ -533,6 +536,11 @@ class SsiFastConnectFetcher:
         streaming_realtime_cache_ttl_seconds: Optional[int] = None,
         streaming_realtime_channel_template: Optional[str] = None,
         streaming_realtime_stream_url: Optional[str] = None,
+        streaming_realtime_idle_timeout_seconds: Optional[int] = None,
+        streaming_realtime_reconnect_enabled: Optional[bool] = None,
+        streaming_realtime_reconnect_initial_delay_seconds: Optional[int] = None,
+        streaming_realtime_reconnect_max_delay_seconds: Optional[int] = None,
+        streaming_realtime_reconnect_max_attempts: Optional[int] = None,
         streaming_realtime_client_factory: Optional[Callable[[], SsiRealtimeStreamClient]] = None,
         streaming_realtime_manager: Optional[SsiStreamingRealtimeManager] = None,
         intraday_rate_limit_cooldown_seconds: Optional[int] = None,
@@ -655,6 +663,61 @@ class SsiFastConnectFetcher:
             or os.getenv("SSI_STREAMING_REALTIME_STREAM_URL")
             or DEFAULT_STREAMING_REALTIME_STREAM_URL
         ).strip() or DEFAULT_STREAMING_REALTIME_STREAM_URL
+        self.streaming_realtime_idle_timeout_seconds = int(
+            streaming_realtime_idle_timeout_seconds
+            if streaming_realtime_idle_timeout_seconds is not None
+            else getattr(config, "ssi_streaming_realtime_idle_timeout_seconds", None)
+            or parse_env_int(
+                os.getenv("SSI_STREAMING_REALTIME_IDLE_TIMEOUT_SECONDS"),
+                DEFAULT_STREAMING_REALTIME_IDLE_TIMEOUT_SECONDS,
+                field_name="SSI_STREAMING_REALTIME_IDLE_TIMEOUT_SECONDS",
+                minimum=1,
+            )
+        )
+        self.streaming_realtime_reconnect_enabled = (
+            bool(streaming_realtime_reconnect_enabled)
+            if streaming_realtime_reconnect_enabled is not None
+            else bool(
+                getattr(
+                    config,
+                    "ssi_streaming_realtime_reconnect_enabled",
+                    parse_env_bool(os.getenv("SSI_STREAMING_REALTIME_RECONNECT_ENABLED"), default=True),
+                )
+            )
+        )
+        self.streaming_realtime_reconnect_initial_delay_seconds = int(
+            streaming_realtime_reconnect_initial_delay_seconds
+            if streaming_realtime_reconnect_initial_delay_seconds is not None
+            else getattr(config, "ssi_streaming_realtime_reconnect_initial_delay_seconds", None)
+            or parse_env_int(
+                os.getenv("SSI_STREAMING_REALTIME_RECONNECT_INITIAL_DELAY_SECONDS"),
+                DEFAULT_STREAMING_REALTIME_RECONNECT_INITIAL_DELAY_SECONDS,
+                field_name="SSI_STREAMING_REALTIME_RECONNECT_INITIAL_DELAY_SECONDS",
+                minimum=1,
+            )
+        )
+        self.streaming_realtime_reconnect_max_delay_seconds = int(
+            streaming_realtime_reconnect_max_delay_seconds
+            if streaming_realtime_reconnect_max_delay_seconds is not None
+            else getattr(config, "ssi_streaming_realtime_reconnect_max_delay_seconds", None)
+            or parse_env_int(
+                os.getenv("SSI_STREAMING_REALTIME_RECONNECT_MAX_DELAY_SECONDS"),
+                DEFAULT_STREAMING_REALTIME_RECONNECT_MAX_DELAY_SECONDS,
+                field_name="SSI_STREAMING_REALTIME_RECONNECT_MAX_DELAY_SECONDS",
+                minimum=1,
+            )
+        )
+        self.streaming_realtime_reconnect_max_attempts = int(
+            streaming_realtime_reconnect_max_attempts
+            if streaming_realtime_reconnect_max_attempts is not None
+            else getattr(config, "ssi_streaming_realtime_reconnect_max_attempts", None)
+            or parse_env_int(
+                os.getenv("SSI_STREAMING_REALTIME_RECONNECT_MAX_ATTEMPTS"),
+                0,
+                field_name="SSI_STREAMING_REALTIME_RECONNECT_MAX_ATTEMPTS",
+                minimum=0,
+            )
+        )
         self._streaming_realtime_client_factory_supplied = streaming_realtime_client_factory is not None
         self._streaming_realtime_manager_supplied = streaming_realtime_manager is not None
         if streaming_realtime_client_factory is None and self.streaming_realtime_enabled:
@@ -665,6 +728,11 @@ class SsiFastConnectFetcher:
             parser=self.normalize_streaming_realtime_messages,
             client_factory=streaming_realtime_client_factory,
             channel_template=self.streaming_realtime_channel_template,
+            idle_timeout_seconds=self.streaming_realtime_idle_timeout_seconds,
+            reconnect_enabled=self.streaming_realtime_reconnect_enabled,
+            reconnect_initial_delay_seconds=self.streaming_realtime_reconnect_initial_delay_seconds,
+            reconnect_max_delay_seconds=self.streaming_realtime_reconnect_max_delay_seconds,
+            reconnect_max_attempts=self.streaming_realtime_reconnect_max_attempts,
         )
         self.session = session or requests.Session()
         self.request_delay_seconds = max(0.0, float(request_delay_seconds or 0))
@@ -1166,6 +1234,7 @@ class SsiFastConnectFetcher:
             }
 
         result = dict(self.streaming_realtime_manager.snapshot(normalized_symbols))
+        diagnostics = result.get("diagnostics") if isinstance(result.get("diagnostics"), dict) else {}
         result.setdefault("source", SSI_SOURCE)
         result.setdefault("requested_tickers", normalized_symbols)
         result.setdefault("quotes", [])
@@ -1174,6 +1243,7 @@ class SsiFastConnectFetcher:
         result.setdefault("endpoint_attempts", [])
         result.setdefault("discovery_status", result.get("streaming_status") or "streaming_manager")
         result.setdefault("streaming_data_types", list(SSI_REALTIME_STREAMING_DATA_TYPES))
+        result.setdefault("runtime_status", diagnostics.get("runtime_status"))
         return result
 
     def normalize_streaming_realtime_messages(

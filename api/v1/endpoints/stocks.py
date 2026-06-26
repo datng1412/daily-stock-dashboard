@@ -624,10 +624,17 @@ def get_vietnam_realtime_quotes(
             cache={"cache_status": "unavailable"},
         )
     except Exception as e:
-        logger.error("Vietnam realtime quotes failed: %s", e, exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail={"error": "vn_realtime_failed", "message": str(e)},
+        logger.warning("Vietnam realtime quotes unavailable: %s", e, exc_info=True)
+        return VietnamRealtimeResponse(
+            market="VN",
+            source="SSI realtime contract",
+            status="unavailable",
+            error="SSI realtime unavailable.",
+            error_detail="Optional SSI realtime is unavailable. Daily SSI data is still available.",
+            requested_tickers=symbols,
+            quotes=[],
+            cache={"cache_status": "unavailable"},
+            diagnostics={"runtime_status": "unavailable"},
         )
 
 

@@ -3596,6 +3596,31 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(screen.queryByText('SSI unavailable')).not.toBeInTheDocument();
   });
 
+  it('realtime unavailable poll keeps the previous successful snapshot visible', async () => {
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledWith(defaultTickers));
+    expect(screen.getAllByText('101.5').length).toBeGreaterThan(0);
+    const watchlistCalls = mockedGetVietnamWatchlist.mock.calls.length;
+    const chartCalls = mockedGetVietnamChart.mock.calls.length;
+    const corporateActionsCalls = mockedGetVietnamCorporateActions.mock.calls.length;
+
+    mockedGetVietnamRealtimeQuotes.mockResolvedValueOnce({
+      ...makeRealtimeResponse(defaultTickers, { unavailable: true }),
+      quotes: [],
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /refresh realtime/i }));
+
+    await waitFor(() => expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledTimes(2));
+    expect(screen.getAllByText('101.5').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('SSI realtime unavailable. Daily SSI data is still available.').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Last update failed')).not.toBeInTheDocument();
+    expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistCalls);
+    expect(mockedGetVietnamChart).toHaveBeenCalledTimes(chartCalls);
+    expect(mockedGetVietnamCorporateActions).toHaveBeenCalledTimes(corporateActionsCalls);
+  });
+
   it('does not render fake realtime or trade tape metrics when SSI live sections are unavailable', async () => {
     mockedGetVietnamRealtimeQuotes.mockImplementation(async (tickers) => makeRealtimeResponse(tickers, {
       unavailable: true,
@@ -3706,6 +3731,8 @@ describe('VietnamDashboardPage watchlist loading', () => {
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
     await waitFor(() => expect(mockedGetVietnamRealtimeTrades).toHaveBeenCalledWith('FPT', 100));
     const watchlistCalls = mockedGetVietnamWatchlist.mock.calls.length;
+    const chartCalls = mockedGetVietnamChart.mock.calls.length;
+    const corporateActionsCalls = mockedGetVietnamCorporateActions.mock.calls.length;
     mockedGetVietnamRealtimeQuotes.mockClear();
     mockedGetVietnamRealtimeTrades.mockClear();
     mockedGetVietnamObservability.mockClear();
@@ -3771,6 +3798,8 @@ describe('VietnamDashboardPage watchlist loading', () => {
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
     await waitFor(() => expect(mockedGetVietnamRealtimeTrades).toHaveBeenCalledWith('FPT', 100));
     const watchlistCalls = mockedGetVietnamWatchlist.mock.calls.length;
+    const chartCalls = mockedGetVietnamChart.mock.calls.length;
+    const corporateActionsCalls = mockedGetVietnamCorporateActions.mock.calls.length;
     mockedGetVietnamRealtimeQuotes.mockClear();
     mockedGetVietnamRealtimeTrades.mockClear();
     mockedGetVietnamObservability.mockClear();
@@ -3787,6 +3816,8 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledWith(defaultTickers);
     expect(mockedGetVietnamRealtimeTrades).not.toHaveBeenCalled();
     expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistCalls);
+    expect(mockedGetVietnamChart).toHaveBeenCalledTimes(chartCalls);
+    expect(mockedGetVietnamCorporateActions).toHaveBeenCalledTimes(corporateActionsCalls);
     expect(mockedGetVietnamObservability).toHaveBeenCalled();
 
     expect(dataStatusPanel().getByText('on')).toBeInTheDocument();
@@ -3799,6 +3830,8 @@ describe('VietnamDashboardPage watchlist loading', () => {
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
     await waitFor(() => expect(mockedGetVietnamRealtimeTrades).toHaveBeenCalledWith('FPT', 100));
     const watchlistCalls = mockedGetVietnamWatchlist.mock.calls.length;
+    const chartCalls = mockedGetVietnamChart.mock.calls.length;
+    const corporateActionsCalls = mockedGetVietnamCorporateActions.mock.calls.length;
     mockedGetVietnamRealtimeQuotes.mockClear();
     mockedGetVietnamRealtimeTrades.mockClear();
 
@@ -3933,6 +3966,8 @@ describe('VietnamDashboardPage watchlist loading', () => {
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
     await waitFor(() => expect(mockedGetVietnamRealtimeTrades).toHaveBeenCalledWith('FPT', 100));
     const watchlistCalls = mockedGetVietnamWatchlist.mock.calls.length;
+    const chartCalls = mockedGetVietnamChart.mock.calls.length;
+    const corporateActionsCalls = mockedGetVietnamCorporateActions.mock.calls.length;
     mockedGetVietnamRealtimeQuotes.mockClear();
     mockedGetVietnamRealtimeTrades.mockClear();
 
@@ -3958,6 +3993,8 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledTimes(1);
     expect(mockedGetVietnamRealtimeTrades).not.toHaveBeenCalled();
     expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistCalls);
+    expect(mockedGetVietnamChart).toHaveBeenCalledTimes(chartCalls);
+    expect(mockedGetVietnamCorporateActions).toHaveBeenCalledTimes(corporateActionsCalls);
   });
 
   it('selecting ticker fetches latest trades without reloading the watchlist', async () => {

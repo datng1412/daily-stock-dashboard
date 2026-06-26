@@ -315,6 +315,8 @@ Response rules:
 - Request handlers do not open streams, start managers, or add dynamic ticker subscriptions. When `SSI_STREAMING_REALTIME_ENABLED=false`, the endpoint returns unavailable with reason `SSI streaming realtime manager disabled.` even if old cache data exists.
 - When streaming is enabled, this endpoint may read only from a running process-local manager and fresh cache rows created by startup bootstrap. Disabled, empty-bootstrap-symbols, incomplete-config, package-unavailable, not-started, empty-cache, stale-cache, and manager-error states remain unavailable with `realtime_snapshot=null`; safe manager/cache details belong in diagnostics.
 - The endpoint bypasses the generic VN response cache and returns no-store response headers so process-local streaming cache updates can surface on the next poll. Streaming cache TTL and per-row `age_seconds`, `is_stale`, `stale_reason`, `cached_at`, and `cache_ttl_seconds` remain the freshness contract.
+- Runtime diagnostics may include `runtime_status`, `manager_state`, `messages_observed`, `parser_rows_observed`, idle fields, reconnect counters, next reconnect time, current backoff, and sanitized error summaries. `running_idle` is a realtime runtime diagnostic and does not imply daily SSI data failed.
+- Reconnect is lifecycle-owned. This endpoint does not trigger reconnect, does not start or stop streams, and does not subscribe request tickers outside the bootstrap symbol list.
 - Legacy KBS may exist behind explicit development flags, but it is not a normal VN runtime fallback.
 - Primary UI should label this section as SSI realtime or realtime snapshot, not KBS.
 

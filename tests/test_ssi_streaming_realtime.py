@@ -14,6 +14,8 @@ from data_provider.ssi_streaming_realtime import (
     MANAGER_RUNNING,
     OfficialSsiRealtimeStreamClient,
     RealtimeSnapshotCache,
+    RUNTIME_RECONNECTING,
+    RUNTIME_RUNNING_IDLE,
     SsiStreamingRealtimeManager,
     SSI_STREAMING_REALTIME_CACHE_EMPTY_REASON,
     SSI_STREAMING_REALTIME_CACHE_STALE_REASON,
@@ -179,7 +181,13 @@ def _fetcher(**kwargs) -> SsiFastConnectFetcher:
     return SsiFastConnectFetcher(**defaults)
 
 
-def _manager(*, enabled: bool = True, client: FakeStreamClient | None = None, now=None) -> SsiStreamingRealtimeManager:
+def _manager(
+    *,
+    enabled: bool = True,
+    client: FakeStreamClient | None = None,
+    now=None,
+    **overrides,
+) -> SsiStreamingRealtimeManager:
     parser_fetcher = _fetcher()
     time_func = (lambda: now[0]) if now is not None else None
     kwargs = {
@@ -190,6 +198,7 @@ def _manager(*, enabled: bool = True, client: FakeStreamClient | None = None, no
     if time_func is not None:
         kwargs["cache"] = RealtimeSnapshotCache(15, time_func=time_func)
         kwargs["time_func"] = time_func
+    kwargs.update(overrides)
     return SsiStreamingRealtimeManager(**kwargs)
 
 
@@ -423,6 +432,221 @@ def test_empty_and_stale_cache_return_unavailable():
     assert stale_payload["status"] == "unavailable"
     assert stale_payload["reason"] == SSI_STREAMING_REALTIME_CACHE_STALE_REASON
     assert stale_payload["cache_status"] == "stale"
+
+
+def test_running_manager_with_no_messages_past_idle_timeout_reports_idle():
+    now = [100.0]
+    client = FakeStreamClient()
+    manager = _manager(client=client, now=now, idle_timeout_seconds=10)
+    manager.start(["FPT"])
+
+    now[0] = 111.0
+    status = manager.status()
+    payload = manager.snapshot(["FPT"])
+
+    assert status["is_idle"] is True
+    assert status["runtime_status"] == RUNTIME_RUNNING_IDLE
+    assert payload["diagnostics"]["is_idle"] is True
+    assert payload["diagnostics"]["runtime_status"] == RUNTIME_RUNNING_IDLE
+
+
+def test_running_manager_with_recent_message_reports_not_idle():
+    now = [100.0]
+    client = FakeStreamClient()
+    manager = _manager(client=client, now=now, idle_timeout_seconds=10)
+    manager.start(["FPT"])
+    now[0] = 105.0
+    manager.handle_message(_x_trade())
+    now[0] = 112.0
+
+    status = manager.status()
+
+    assert status["is_idle"] is False
+    assert status["runtime_status"] == MANAGER_RUNNING
+
+
+def test_idle_without_market_hours_utility_is_diagnostic_only_not_reconnect_loop():
+    now = [100.0]
+    clients = [FakeStreamClient()]
+    manager = _manager(
+        client=clients[0],
+        now=now,
+        idle_timeout_seconds=10,
+        reconnect_enabled=True,
+    )
+    manager.start(["FPT"])
+    now[0] = 120.0
+
+    status = manager.monitor_tick(wants_streaming=True)
+
+    assert status["is_idle"] is True
+    assert status["runtime_status"] == RUNTIME_RUNNING_IDLE
+    assert status["reconnect_attempt_count"] == 0
+    assert status["next_reconnect_at"] is None
+    assert clients[0].stop_calls == 0
+
+
+def test_running_idle_realtime_does_not_make_daily_data_invalid():
+    now = [100.0]
+    client = FakeStreamClient()
+    parser_fetcher = _fetcher(streaming_realtime_enabled=True)
+    manager = SsiStreamingRealtimeManager(
+        enabled=True,
+        cache=RealtimeSnapshotCache(15, time_func=lambda: now[0]),
+        parser=parser_fetcher.normalize_streaming_realtime_messages,
+        client_factory=lambda: client,
+        idle_timeout_seconds=10,
+        time_func=lambda: now[0],
+    )
+    manager.start(["FPT"])
+    now[0] = 120.0
+    fetcher = _fetcher(
+        streaming_realtime_enabled=True,
+        streaming_realtime_manager=manager,
+    )
+    service = _service_with_fetcher(FakeMarketFetcher(fetcher))
+
+    item = service.build_watchlist(["FPT"], force_refresh=True)["watchlist"][0]
+
+    assert item["status"] == "ok"
+    assert item["latest_price_source"] == "SSI DailyOhlc"
+    assert item["realtime_status"]["status"] == "unavailable"
+    assert item["realtime_status"]["diagnostics"]["runtime_status"] == RUNTIME_RUNNING_IDLE
+    assert item["data_quality_summary"]["checks"]["daily_ohlc"] == "ok"
+
+
+def test_reconnect_enabled_schedules_reconnect_after_start_failure():
+    now = [100.0]
+    manager = _manager(
+        client=FakeStreamClient(fail_start=True),
+        now=now,
+        reconnect_initial_delay_seconds=2,
+        reconnect_max_delay_seconds=10,
+    )
+    manager.start(["FPT"])
+
+    status = manager.monitor_tick(wants_streaming=True)
+
+    assert status["manager_state"] == MANAGER_ERRORED
+    assert status["runtime_status"] == RUNTIME_RECONNECTING
+    assert status["reconnect_attempt_count"] == 0
+    assert status["last_reconnect_reason"] == "start_error"
+    assert status["next_reconnect_at"] is not None
+
+
+def test_reconnect_backoff_increases_and_caps_after_failed_attempts():
+    now = [100.0]
+    clients = []
+
+    def factory():
+        client = FakeStreamClient(fail_start=True)
+        clients.append(client)
+        return client
+
+    parser_fetcher = _fetcher()
+    manager = SsiStreamingRealtimeManager(
+        enabled=True,
+        parser=parser_fetcher.normalize_streaming_realtime_messages,
+        client_factory=factory,
+        idle_timeout_seconds=10,
+        reconnect_initial_delay_seconds=2,
+        reconnect_max_delay_seconds=5,
+        time_func=lambda: now[0],
+    )
+    manager.start(["FPT"])
+    first = manager.monitor_tick(wants_streaming=True)
+    assert first["reconnect_backoff_seconds"] == 4
+
+    now[0] = 102.0
+    second = manager.monitor_tick(wants_streaming=True)
+    assert second["reconnect_attempt_count"] == 1
+    assert second["reconnect_backoff_seconds"] == 5
+
+    now[0] = 106.0
+    third = manager.monitor_tick(wants_streaming=True)
+    assert third["reconnect_attempt_count"] == 2
+    assert third["reconnect_backoff_seconds"] == 5
+    assert len(clients) == 3
+
+
+def test_reconnect_max_attempts_positive_stops_after_attempt_limit():
+    now = [100.0]
+    manager = _manager(
+        client=FakeStreamClient(fail_start=True),
+        now=now,
+        reconnect_initial_delay_seconds=2,
+        reconnect_max_attempts=1,
+    )
+    manager.start(["FPT"])
+    manager.monitor_tick(wants_streaming=True)
+    now[0] = 102.0
+
+    status = manager.monitor_tick(wants_streaming=True)
+
+    assert status["reconnect_attempt_count"] == 1
+    assert status["next_reconnect_at"] is None
+    assert status["last_reconnect_error"] is not None
+
+
+def test_reconnect_max_attempts_zero_allows_unlimited_attempts():
+    now = [100.0]
+    manager = _manager(
+        client=FakeStreamClient(fail_start=True),
+        now=now,
+        reconnect_initial_delay_seconds=1,
+        reconnect_max_attempts=0,
+    )
+    manager.start(["FPT"])
+    for expected_attempts in range(1, 4):
+        manager.monitor_tick(wants_streaming=True)
+        now[0] += manager.status()["reconnect_backoff_seconds"]
+        status = manager.monitor_tick(wants_streaming=True)
+        assert status["reconnect_attempt_count"] == expected_attempts
+
+
+def test_reconnect_stops_previous_stream_before_starting_new_one():
+    now = [100.0]
+    clients = [FakeStreamClient(), FakeStreamClient()]
+
+    def factory():
+        return clients.pop(0)
+
+    parser_fetcher = _fetcher()
+    manager = SsiStreamingRealtimeManager(
+        enabled=True,
+        parser=parser_fetcher.normalize_streaming_realtime_messages,
+        client_factory=factory,
+        reconnect_initial_delay_seconds=2,
+        time_func=lambda: now[0],
+    )
+    manager.start(["FPT"])
+    first_client = manager._client
+    manager.handle_error("stream transport error")
+    manager.monitor_tick(wants_streaming=True)
+    now[0] = 102.0
+
+    status = manager.monitor_tick(wants_streaming=True)
+
+    assert status["manager_state"] == MANAGER_RUNNING
+    assert first_client.stop_calls == 1
+    assert status["reconnect_attempt_count"] == 1
+
+
+def test_repeated_monitor_ticks_before_due_do_not_create_parallel_streams():
+    now = [100.0]
+    clients = [FakeStreamClient(fail_start=True)]
+    manager = _manager(
+        client=clients[0],
+        now=now,
+        reconnect_initial_delay_seconds=5,
+    )
+    manager.start(["FPT"])
+
+    manager.monitor_tick(wants_streaming=True)
+    manager.monitor_tick(wants_streaming=True)
+    manager.monitor_tick(wants_streaming=True)
+
+    assert manager.status()["reconnect_attempt_count"] == 0
 
 
 def test_fetcher_config_off_returns_unavailable_even_if_manager_cache_has_data():

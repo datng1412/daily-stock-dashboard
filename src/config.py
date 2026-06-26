@@ -666,6 +666,11 @@ class Config:
     ssi_streaming_realtime_channel_template: str = "X:{symbol}"
     ssi_streaming_realtime_stream_url: str = "https://fc-datahub.ssi.com.vn/"
     ssi_streaming_realtime_bootstrap_symbols: str = ""
+    ssi_streaming_realtime_idle_timeout_seconds: int = 45
+    ssi_streaming_realtime_reconnect_enabled: bool = True
+    ssi_streaming_realtime_reconnect_initial_delay_seconds: int = 2
+    ssi_streaming_realtime_reconnect_max_delay_seconds: int = 30
+    ssi_streaming_realtime_reconnect_max_attempts: int = 0
     vn_daily_data_provider: str = "ssi"
     vn_chart_data_provider: str = "ssi"
     vn_daily_stock_price_provider: str = "ssi"
@@ -1923,6 +1928,34 @@ class Config:
             ssi_streaming_realtime_bootstrap_symbols=(
                 os.getenv('SSI_STREAMING_REALTIME_BOOTSTRAP_SYMBOLS') or ''
             ).strip(),
+            ssi_streaming_realtime_idle_timeout_seconds=parse_env_int(
+                os.getenv('SSI_STREAMING_REALTIME_IDLE_TIMEOUT_SECONDS'),
+                45,
+                field_name='SSI_STREAMING_REALTIME_IDLE_TIMEOUT_SECONDS',
+                minimum=1,
+            ),
+            ssi_streaming_realtime_reconnect_enabled=parse_env_bool(
+                os.getenv('SSI_STREAMING_REALTIME_RECONNECT_ENABLED'),
+                default=True,
+            ),
+            ssi_streaming_realtime_reconnect_initial_delay_seconds=parse_env_int(
+                os.getenv('SSI_STREAMING_REALTIME_RECONNECT_INITIAL_DELAY_SECONDS'),
+                2,
+                field_name='SSI_STREAMING_REALTIME_RECONNECT_INITIAL_DELAY_SECONDS',
+                minimum=1,
+            ),
+            ssi_streaming_realtime_reconnect_max_delay_seconds=parse_env_int(
+                os.getenv('SSI_STREAMING_REALTIME_RECONNECT_MAX_DELAY_SECONDS'),
+                30,
+                field_name='SSI_STREAMING_REALTIME_RECONNECT_MAX_DELAY_SECONDS',
+                minimum=1,
+            ),
+            ssi_streaming_realtime_reconnect_max_attempts=parse_env_int(
+                os.getenv('SSI_STREAMING_REALTIME_RECONNECT_MAX_ATTEMPTS'),
+                0,
+                field_name='SSI_STREAMING_REALTIME_RECONNECT_MAX_ATTEMPTS',
+                minimum=0,
+            ),
             vn_daily_data_provider=parse_env_choice(
                 os.getenv('VN_DAILY_DATA_PROVIDER'),
                 {'ssi'},

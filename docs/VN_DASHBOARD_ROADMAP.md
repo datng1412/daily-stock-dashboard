@@ -733,7 +733,8 @@ Phase 4.0C-3 SSI streaming realtime result:
 * Phase 4.0C-7E records the live no-space channel finding: `X:FPT`, `X-QUOTE:FPT`, and `X-TRADE:FPT` receive callbacks/cache hits in verifier runs, while `X: FPT`, `X-QUOTE: FPT`, and `X-TRADE: FPT` did not.
 * Phase 4.0C-8 adds backend lifecycle startup/shutdown ownership for the process-local SSI streaming manager. Bootstrap symbols are configured by `SSI_STREAMING_REALTIME_BOOTSTRAP_SYMBOLS`, default empty. Requests do not create streams, do not add subscriptions, and do not subscribe to symbols outside the startup list.
 * Phase 4.0C-9 tunes realtime cache reads and UI polling: `/api/v1/stocks/vn/realtime` bypasses the generic VN response cache and returns no-store headers, quote polling is separate from watchlist/chart/company refresh with a 3-second default, trade-tape polling remains separately opt-in, and ISO timestamps with microsecond fractions render as Vietnam time with freshness labels.
-* Future streaming work must avoid `X: ALL` in runtime and must not run long-lived stream connections inside request handlers.
+* Phase 4.0C-10 hardens the SSI streaming realtime runtime with idle/stuck-stream diagnostics, lifecycle-owned reconnect monitoring, bounded exponential backoff, reconnect attempt counters, sanitized runtime diagnostics, and clean shutdown/cancellation. Idle is diagnostic-only for reconnect decisions until a backend market-hours/session utility exists, so off-hours silence does not create an unbounded reconnect loop.
+* Future streaming work must avoid `X: ALL` in runtime and must not run long-lived stream connections inside request handlers. WebSocket/SSE delivery and trade-tape product implementation remain future phases, not part of Phase 4.0C-10.
 
 Phase 4.0C-4 official Python FC Data client inspection result:
 

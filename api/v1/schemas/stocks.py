@@ -630,6 +630,7 @@ class VietnamRealtimeResponse(BaseModel):
     diagnostics: Dict[str, Any] = Field(default_factory=dict)
     streaming_status: Optional[str] = None
     manager_state: Optional[str] = None
+    runtime_status: Optional[str] = None
     cache_status: Optional[str] = None
     parsed_streaming_rows: Optional[int] = None
 

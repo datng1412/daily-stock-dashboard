@@ -203,7 +203,7 @@ Phase 4.0C-6 adds `OfficialSsiRealtimeStreamClient`, a small wrapper around `Mar
 * Shutdown uses the bundled transport `stop()` method when available and treats the official broken `Connection.close()` path defensively.
 * Tests use mocked official modules/clients only; they do not open a websocket or require live SSI.
 
-This is a background-service adapter, not a one-shot request path. The current application does not auto-start a production stream lifecycle in this phase. If `SSI_STREAMING_REALTIME_ENABLED=true` but credentials are incomplete, the package is unavailable, the manager is not running, the cache is empty, or the cache is stale, realtime remains unavailable with sanitized diagnostics.
+This is a background-service adapter, not a one-shot request path. If `SSI_STREAMING_REALTIME_ENABLED=true` but credentials are incomplete, the package is unavailable, bootstrap symbols are empty, the manager is not running, the cache is empty, or the cache is stale, realtime remains unavailable with sanitized diagnostics.
 
 ## Backend Streaming Bootstrap
 
@@ -212,6 +212,11 @@ Phase 4.0C-8 adds FastAPI startup/shutdown wiring for the existing SSI streaming
 ```text
 SSI_STREAMING_REALTIME_ENABLED=false
 SSI_STREAMING_REALTIME_BOOTSTRAP_SYMBOLS=
+SSI_STREAMING_REALTIME_IDLE_TIMEOUT_SECONDS=45
+SSI_STREAMING_REALTIME_RECONNECT_ENABLED=true
+SSI_STREAMING_REALTIME_RECONNECT_INITIAL_DELAY_SECONDS=2
+SSI_STREAMING_REALTIME_RECONNECT_MAX_DELAY_SECONDS=30
+SSI_STREAMING_REALTIME_RECONNECT_MAX_ATTEMPTS=0
 ```
 
 When `SSI_STREAMING_REALTIME_ENABLED=true` and `SSI_STREAMING_REALTIME_BOOTSTRAP_SYMBOLS` contains a small explicit comma-separated list, backend startup creates the process-local manager, subscribes to symbol-scoped channels such as `X:FPT`, and stores parsed snapshots in the manager cache. Shutdown stops the manager if startup started it.
@@ -227,6 +232,20 @@ Important runtime boundaries:
 * Config OFF has highest precedence. If `SSI_STREAMING_REALTIME_ENABLED=false`, realtime remains unavailable even if a stale process cache exists.
 * The dashboard polls the realtime quote endpoint separately from watchlist, chart, and company requests. The default quote polling interval is 3 seconds; trade-tape polling remains a separate opt-in loop.
 * UI freshness labels use backend `age_seconds` and `cache_ttl_seconds` when present, then fall back to parsed timestamps. ISO timestamps with microsecond fractions such as `2026-06-26T04:21:01.561821+00:00` are displayed in Vietnam time.
+
+## Streaming Runtime Hardening
+
+Phase 4.0C-10 adds runtime hardening for the process-local SSI streaming manager:
+
+* The manager tracks `messages_observed`, `parser_rows_observed`, `last_message_at`, sanitized error state, idle state, reconnect counters, next reconnect time, current backoff, and `runtime_status`.
+* `runtime_status=running_idle` means the process-local stream has been quiet beyond `SSI_STREAMING_REALTIME_IDLE_TIMEOUT_SECONDS`. It does not mean SSI DailyOhlc, DailyStockPrice, intraday, or trade-tape failed.
+* Because this repository does not currently have a backend market-hours/session utility, idle state is diagnostic-only for reconnect decisions. The monitor does not reconnect endlessly just because no messages arrive in an unknown or likely inactive window.
+* Reconnect is eligible for start failure, stream error callback, and unexpected stopped/errored lifecycle state while the lifecycle still wants streaming.
+* Reconnect uses bounded exponential backoff. The first delay is `SSI_STREAMING_REALTIME_RECONNECT_INITIAL_DELAY_SECONDS`, the delay doubles until `SSI_STREAMING_REALTIME_RECONNECT_MAX_DELAY_SECONDS`, and `SSI_STREAMING_REALTIME_RECONNECT_MAX_ATTEMPTS=0` means unlimited attempts while the backend is running.
+* Reconnect attempts are counted after the initial startup call. The initial bootstrap start is not counted as a reconnect attempt.
+* Before reconnecting, the manager stops the current stream client when one exists, then starts a new stream for the preserved bootstrap symbols. Repeated monitor ticks before the scheduled time do not create parallel streams.
+* The lifecycle monitor starts only when streaming is enabled and a safe non-empty bootstrap symbol list exists. Shutdown cancels the monitor, marks the manager as shutdown, stops the stream, and prevents later monitor ticks from reviving streaming.
+* Diagnostics remain sanitized: no raw callbacks, raw payloads, auth headers, tokens, consumer IDs, consumer secrets, account IDs, raw auth responses, stdout/stderr, or official package output are exposed.
 
 ## Local Streaming Verification
 
@@ -344,6 +363,12 @@ SSI_STREAMING_REALTIME_ENABLED=false
 SSI_STREAMING_REALTIME_CACHE_TTL_SECONDS=15
 SSI_STREAMING_REALTIME_CHANNEL_TEMPLATE=X:{symbol}
 SSI_STREAMING_REALTIME_STREAM_URL=https://fc-datahub.ssi.com.vn/
+SSI_STREAMING_REALTIME_BOOTSTRAP_SYMBOLS=
+SSI_STREAMING_REALTIME_IDLE_TIMEOUT_SECONDS=45
+SSI_STREAMING_REALTIME_RECONNECT_ENABLED=true
+SSI_STREAMING_REALTIME_RECONNECT_INITIAL_DELAY_SECONDS=2
+SSI_STREAMING_REALTIME_RECONNECT_MAX_DELAY_SECONDS=30
+SSI_STREAMING_REALTIME_RECONNECT_MAX_ATTEMPTS=0
 
 VN_DAILY_DATA_PROVIDER=ssi
 VN_CHART_DATA_PROVIDER=ssi
