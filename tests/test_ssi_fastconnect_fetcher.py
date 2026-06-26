@@ -161,7 +161,7 @@ def test_config_defaults_keep_ssi_disabled(monkeypatch):
     assert config.ssi_fastconnect_trade_tape_enabled is True
     assert config.ssi_streaming_realtime_enabled is False
     assert config.ssi_streaming_realtime_cache_ttl_seconds == 15
-    assert config.ssi_streaming_realtime_channel_template == "X: {symbol}"
+    assert config.ssi_streaming_realtime_channel_template == "X:{symbol}"
     assert config.ssi_streaming_realtime_stream_url == "https://fc-datahub.ssi.com.vn/"
     assert config.vn_intraday_data_provider == "ssi"
     assert config.vn_realtime_data_provider == "ssi"
