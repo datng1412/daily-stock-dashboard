@@ -726,6 +726,8 @@ Phase 4.0C-3 SSI streaming realtime result:
 * Phase 4.0C-5 supersedes the parser-only runtime state with a config-disabled background manager/cache skeleton. The default response remains unavailable with `SSI streaming realtime manager disabled.`
 * Phase 4.0C-6 adds the official-client adapter behind `SSI_STREAMING_REALTIME_ENABLED=false` by default. The adapter suppresses the official header-printing path during stream start, uses symbol-scoped channels only, and remains a background-manager path rather than a request-handler path.
 * Phase 4.0C-7B adds `scripts/verify_ssi_streaming_realtime.py` as a dev-only local verification path. It validates config/channel safety, starts the manager explicitly in a standalone process, uses the real parser, polls only the script-local cache, and stops the manager in `finally`. It does not populate the FastAPI backend cache.
+* Phase 4.0C-7C adds safe callback/channel diagnostics to the verifier, including diagnosis labels, bounded envelope key/type samples, sequential channel-template discovery, and optional `InsecureRequestWarning` suppression. Backend bootstrap remains blocked until a market-hours run proves callbacks/messages/parser rows through this verifier.
+* Phase 4.0C-7D adds direct official-client handshake/subscription inspection, safe installed-package metadata inspection, selected-channel shape checks, and symbol-scoped channel format variants. Backend bootstrap remains blocked until direct or manager mode proves callback/message delivery.
 * Future streaming work must avoid `X: ALL` in runtime and must not run long-lived stream connections inside request handlers.
 
 Phase 4.0C-4 official Python FC Data client inspection result:
@@ -1598,7 +1600,7 @@ Status: provider, service, API, and UI contract added in the current working tre
 
 ### Priority 4 - SSI streaming/protocol hardening
 
-Status: Phase 4.0C-7B added the dev-only local streaming verification script and deterministic tests. Backend bootstrap/production lifecycle startup remains next.
+Status: Phase 4.0C-7D added direct official-client handshake/subscription diagnostics to the dev-only verifier. Backend bootstrap/production lifecycle startup remains next and is blocked until callback/message evidence exists.
 
 * Add controlled application lifecycle startup only after live environment validation confirms credentials, permissions, stop behavior, retry/backoff, and stream freshness.
 * Keep the verification-script cache separate from the backend cache until Phase 4.0C-8 defines startup/bootstrap ownership.

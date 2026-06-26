@@ -205,7 +205,7 @@ This is a background-service adapter, not a one-shot request path. The current a
 
 ## Local Streaming Verification
 
-Phase 4.0C-7B adds a dev-only verifier:
+Phase 4.0C-7B added a dev-only verifier, Phase 4.0C-7C hardened it with callback/channel diagnostics, and Phase 4.0C-7D adds direct official-client handshake/subscription inspection:
 
 ```powershell
 python .\scripts\verify_ssi_streaming_realtime.py --symbols FPT,HPG,SSI,VPB --wait-seconds 60
@@ -222,6 +222,8 @@ Important boundaries:
 * The script does not add production auto-start.
 * The script prints only sanitized summary fields, not raw callbacks, auth responses, headers, tokens, consumer IDs, or consumer secrets.
 * The script refuses `ALL` symbols and channel templates that would produce `X: ALL`.
+* The script can record bounded callback diagnostics without storing raw callback payloads or full `Content`.
+* The script can test multiple channel templates sequentially, not concurrently.
 
 Use config-only mode to validate local environment and channel safety without constructing the manager or official client:
 
@@ -229,7 +231,73 @@ Use config-only mode to validate local environment and channel safety without co
 python .\scripts\verify_ssi_streaming_realtime.py --symbols FPT,HPG --check-config-only
 ```
 
+Config-only output includes normalized symbols, planned channels, config completeness booleans, and the stream URL host only. It does not print raw env values. Add `--check-package` to report whether `ssi_fc_data` is importable without starting a stream.
+
+Use safe verbose diagnostics when investigating a stream that starts but observes no messages:
+
+```powershell
+python .\scripts\verify_ssi_streaming_realtime.py --symbols FPT,HPG,SSI,VPB --channel-templates "X: {symbol};X-QUOTE: {symbol};X-TRADE: {symbol}" --wait-seconds 90 --verbose-safe --suppress-insecure-warning
+```
+
+`--verbose-safe` keeps the final output as one JSON object. It adds bounded samples such as top-level callback keys, detected `DataType`/`RType`, content key names, content type, payload lengths, manager status samples, and safe client state class/count/boolean information. It does not store or print full raw messages, full `Content`, auth headers, tokens, consumer IDs, consumer secrets, raw auth responses, or websocket frames.
+
+Diagnostic classifications:
+
+* `cache_hit`: the script-local cache produced parsed snapshot rows.
+* `manager_start_failed`: manager start did not reach running state.
+* `manager_error`: manager entered an errored state.
+* `callback_never_called`: callback attachment could not be confirmed and no callback evidence appeared.
+* `callback_called_parser_zero_rows`: the message callback ran but parser output was empty.
+* `on_error_called`: the official stream error callback was invoked.
+* `no_message_after_start`: manager stayed running with no callback/error evidence during the bounded wait.
+* `config_invalid`: required local verification config was missing.
+* `unsafe_channel_rejected`: symbol or channel template safety validation failed.
+* `unknown`: fallback for states that do not match the above.
+
 After market close, a safe run can report `manager_state=running`, symbol-scoped channels, zero observed messages, and an empty cache. That is not a live-realtime proof. During HOSE market hours, live confidence requires observed messages, parser rows, and script-local quote rows. Backend bootstrap remains a later phase.
+
+Phase 4.0C-7D adds package and direct official-client diagnostics for the case where manager mode starts and exposes websocket transport state but no callback is invoked.
+
+Package inspection:
+
+```powershell
+python .\scripts\verify_ssi_streaming_realtime.py --inspect-package-source
+```
+
+This mode imports the installed `ssi_fc_data` modules and reports only safe metadata: module file paths, package version, `MarketDataStream` constructor/start signatures, public method names, and class-level capability booleans. It does not construct the official client, start streaming, print source snippets, or print credentials, headers, tokens, auth responses, or raw provider data.
+
+Direct official mode:
+
+```powershell
+python .\scripts\verify_ssi_streaming_realtime.py --direct-official --symbols FPT --channel-format-variants --wait-seconds 30 --verbose-safe --suppress-insecure-warning
+```
+
+This mode bypasses the manager, cache, and parser. It constructs `MarketDataClient` and `MarketDataStream` directly, calls `MarketDataStream.start(on_message, on_error, selected_channel)`, captures official stdout/stderr, counts direct callbacks, samples only safe envelope metadata, and defensively stops the stream transport. Captured stdout/stderr are never printed raw; if they look header/token-like, the output reports only `captured_output_secret_like_detected=true`.
+
+Direct mode classifications:
+
+* `direct_callback_hit`: the direct `on_message` callback ran.
+* `direct_no_message_after_start`: direct start returned, callback/error did not fire during the bounded wait.
+* `direct_on_error_called`: the direct official `on_error` callback ran.
+* `direct_start_failed`: direct start raised before a usable wait.
+* `package_unavailable`: `ssi_fc_data` import failed.
+* `unsupported_selected_channel_shape`: selected-channel shape validation failed.
+* `unsafe_channel_rejected`: symbol/channel safety validation failed before start.
+
+Channel-format variants are symbol-scoped only and run sequentially:
+
+```text
+X: {symbol}
+X:{symbol}
+X-QUOTE: {symbol}
+X-QUOTE:{symbol}
+X-TRADE: {symbol}
+X-TRADE:{symbol}
+```
+
+Selected-channel shape diagnostics support `--selected-channel-shape string|list|comma`. The default `string` preserves the known official sample shape. `list` and `comma` exist only for local diagnostics and must still use symbol-scoped channels. None of these modes uses `X: ALL`.
+
+Direct callback proof is verification evidence only. It does not make realtime production-reliable and does not populate the backend cache. Backend bootstrap remains blocked until direct or manager-mode diagnostics show market-hours callback/message evidence and parser rows without unsafe output.
 
 ## Configuration
 
