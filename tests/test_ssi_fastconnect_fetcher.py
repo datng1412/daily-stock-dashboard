@@ -164,6 +164,11 @@ def test_config_defaults_keep_ssi_disabled(monkeypatch):
     assert config.ssi_streaming_realtime_channel_template == "X:{symbol}"
     assert config.ssi_streaming_realtime_stream_url == "https://fc-datahub.ssi.com.vn/"
     assert config.ssi_streaming_realtime_bootstrap_symbols == ""
+    assert config.ssi_streaming_realtime_idle_timeout_seconds == 45
+    assert config.ssi_streaming_realtime_reconnect_enabled is True
+    assert config.ssi_streaming_realtime_reconnect_initial_delay_seconds == 2
+    assert config.ssi_streaming_realtime_reconnect_max_delay_seconds == 30
+    assert config.ssi_streaming_realtime_reconnect_max_attempts == 0
     assert config.vn_intraday_data_provider == "ssi"
     assert config.vn_realtime_data_provider == "ssi"
     assert config.vn_trade_tape_provider == "ssi"
@@ -951,6 +956,9 @@ def test_streaming_realtime_bootstrap_symbols_default_empty():
     from src.config import Config
 
     assert Config().ssi_streaming_realtime_bootstrap_symbols == ""
+    assert Config().ssi_streaming_realtime_idle_timeout_seconds == 45
+    assert Config().ssi_streaming_realtime_reconnect_enabled is True
+    assert Config().ssi_streaming_realtime_reconnect_max_attempts == 0
 
 
 def test_trade_tape_maps_ssi_like_rows():
