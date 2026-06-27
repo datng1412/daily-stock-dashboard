@@ -28,9 +28,15 @@ Conventions:
 | `reference_price` | Session reference/basic price | SSI DailyStockPrice | VND | yes | no | Daily core data/limits | Separate from canonical latest price. |
 | `ceiling_price` | Daily price ceiling | SSI DailyStockPrice | VND | yes | no | Price limit block | Render only when value exists. |
 | `floor_price` | Daily price floor | SSI DailyStockPrice | VND | yes | no | Price limit block | Render only when value exists. |
+| `daily_stock_price.quality_status` | Enrichment completeness independent of DailyOhlc validity | Service-derived from SSI DailyStockPrice row | `ok`, `partial`, or `unavailable` | no | no | Source coverage/data quality | Partial enrichment must not invalidate a usable DailyOhlc row. |
+| `daily_stock_price.date_match` / `daily_stock_price_date_match` | DailyStockPrice date alignment against DailyOhlc | Service-derived | `matched`, `mismatched`, `unknown`, or `unavailable` | no | no | Source coverage/caveat | Missing DailyStockPrice date is `unknown`; request failure/empty rows are `unavailable`. |
+| `daily_stock_price.missing_fields` | Normalized enrichment fields that SSI did not supply | Service-derived | list of field names | no | no | Diagnostics/source coverage | Missing is null, not zero. |
+| `daily_stock_price.units` | Units for enrichment fields that have values | Service-derived | field-to-unit map | no | no | Diagnostics/UI formatting | Omits null fields so units do not imply availability. |
 | `volume` | Daily OHLCV volume | SSI DailyOhlc | shares | yes | yes for daily volume | Daily core data/chart | Can differ from DailyStockPrice matched volume. |
 | `matched_volume` | Matched trading volume | SSI DailyStockPrice | shares | yes | source-specific | Trading stats | Handoff FPT example differed from DailyOhlc volume. |
 | `matched_value` | Matched trading value | SSI DailyStockPrice | VND | yes | source-specific | Trading stats/liquidity | Keep source label visible. |
+| `put_through_volume` | Put-through trading volume | SSI DailyStockPrice | shares | yes | source-specific | Trading stats | Do not fill from DailyOhlc volume. |
+| `put_through_value` | Put-through trading value | SSI DailyStockPrice | VND | yes | source-specific | Trading stats | Null remains unavailable; provider zero remains zero. |
 | `amount` / `value` | Daily trading value/amount from OHLCV or provider | SSI DailyOhlc or normalized source field | VND | yes | source-specific | Chart/daily core | Label source to avoid mixing with matched value. |
 
 ## Foreign Flow Fields
@@ -67,6 +73,10 @@ Conventions:
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `intraday_candles` | Usable intraday candles | SSI IntradayOhlc | list of OHLCV candles | no, empty list if unavailable | no | Live availability/chart adjunct | `[]` when unavailable/stale/no usable rows. |
 | `intraday_pulse` | Compact intraday summary object | Derived from usable SSI IntradayOhlc | object | yes | no | Live availability/Data Quality Summary | Phase 2.1 normalizes unavailable watchlist/company intraday pulse to `null`. |
+| `intraday_requested_timeframe` / `intraday.requested_timeframe` | SSI IntradayOhlc request hint | API query/service config | text | yes | no | Intraday cadence note | Compatibility `intraday_timeframe` has the same request-hint meaning and is not proof of actual candle interval. |
+| `intraday_actual_granularity` / `intraday.actual_granularity` | Detected provider-returned candle cadence | Service-derived from sorted provider timestamps | text | yes | no | Intraday cadence badge/note | Values include `1m`, `5m`, `15m`, `30m`, `1h`, `daily-like`, or `unknown`; do not infer when status is unavailable. |
+| `intraday_actual_granularity_seconds` / `intraday.actual_granularity_seconds` | Detected regular candle spacing in seconds | Service-derived from sorted provider timestamps | seconds | yes | no | Diagnostics/cadence note | Null for single-row, missing timestamp, or irregular cadence. |
+| `intraday_cadence_status` / `intraday.cadence_status` | Relationship between requested timeframe and detected provider cadence | Service-derived classification | enum | yes | no | Intraday cadence note | Values: `matched`, `different_from_requested`, `irregular`, `unknown`, `unavailable`. |
 | `intraday_status.diagnostics` / `intraday.diagnostics` | Technical details for unavailable SSI intraday requests | Provider/service diagnostics | object | yes | no | Collapsible diagnostics only | May include `failure_class`, `endpoint=IntradayOhlc`, HTTP status, provider code, requested timeframe, internal page size, and public candle limit; never render as primary metrics. |
 | `realtime_snapshot` | Realtime snapshot object | SSI FastConnect streaming realtime contract | object | yes | no | Live availability | `null` until SSI streaming messages are connected through a running background manager, parsed, cached fresh, and status is `ok`; parser/cache/adapter tests alone are not live support. |
 | `realtime_snapshot.age_seconds` | Age of the process-local streaming cache row at response time | SSI streaming manager cache | seconds | yes | no | Realtime freshness label | Used for labels such as `updated 2s ago`; does not change daily price ownership. |

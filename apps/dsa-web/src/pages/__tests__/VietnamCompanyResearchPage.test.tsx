@@ -43,6 +43,32 @@ const makeCompanySnapshot = (): VietnamCompanyResearchResponse => ({
     source: 'SSI DailyOhlc',
     status: 'ok',
   },
+  dailyStockPrice: {
+    status: 'ok',
+    qualityStatus: 'ok',
+    source: 'SSI DailyStockPrice',
+    date: '2026-06-17',
+    dateMatch: 'matched',
+    referencePrice: 123,
+    ceilingPrice: 131.6,
+    floorPrice: 114.4,
+    adjustedClose: 124.6,
+    matchedVolume: 1_234_567,
+    matchedValue: 123_456_789_000,
+    putThroughVolume: 1_000,
+    putThroughValue: 25_000_000,
+    foreignBuyVolume: 100_000,
+    foreignSellVolume: 80_000,
+    foreignNetVolume: 20_000,
+    foreignBuyValue: 1_000_000_000,
+    foreignSellValue: 800_000_000,
+    foreignNetValue: 200_000_000,
+    missingFields: [],
+    units: {
+      matchedVolume: 'shares',
+      matchedValue: 'VND',
+    },
+  },
   foreignFlow: {
     foreignBuyVolume: 100_000,
     foreignSellVolume: 80_000,
@@ -50,6 +76,10 @@ const makeCompanySnapshot = (): VietnamCompanyResearchResponse => ({
     foreignBuyValue: 1_000_000_000,
     foreignSellValue: 800_000_000,
     foreignNetValue: 200_000_000,
+    date: '2026-06-17',
+    dateMatch: 'matched',
+    volumeUnit: 'shares',
+    valueUnit: 'VND',
     source: 'SSI DailyStockPrice',
     status: 'ok',
   },
@@ -179,10 +209,16 @@ describe('VietnamCompanyResearchPage', () => {
     expect(screen.getByText('No data quality issues detected.')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Source coverage' })).toBeInTheDocument();
     expect(screen.getByText('Daily OHLCV')).toBeInTheDocument();
-    expect(screen.getByText('Canonical latest price')).toBeInTheDocument();
-    expect(screen.getByText('Reference price')).toBeInTheDocument();
+    expect(screen.getByText('Canonical latest price (VND)')).toBeInTheDocument();
+    expect(screen.getByText('Reference price (VND)')).toBeInTheDocument();
     expect(screen.getByText('Canonical price: SSI DailyOhlc. Reference and limit fields: SSI DailyStockPrice.')).toBeInTheDocument();
-    expect(screen.getByText('Daily OHLCV volume')).toBeInTheDocument();
+    expect(screen.getByText('Daily OHLCV volume (shares)')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'DailyStockPrice enrichment' })).toBeInTheDocument();
+    expect(screen.getByText('Matched volume (shares)')).toBeInTheDocument();
+    expect(screen.getByText('Matched value (VND)')).toBeInTheDocument();
+    expect(screen.getByText('Put-through volume (shares)')).toBeInTheDocument();
+    expect(screen.getByText('Foreign net volume (shares)')).toBeInTheDocument();
+    expect(screen.getByText('Foreign net value (VND)')).toBeInTheDocument();
     expect(screen.getByText('SSI realtime/session volume')).toBeInTheDocument();
     expect(screen.getByText('Latest trade tape volume')).toBeInTheDocument();
     expect(screen.getByText('Latest trade tape price')).toBeInTheDocument();
@@ -305,6 +341,67 @@ describe('VietnamCompanyResearchPage', () => {
     expect(summary).toHaveTextContent('DailyStockPrice 70,800');
     expect(summary).toHaveTextContent('Realtime: unavailable');
     expect(screen.getByRole('heading', { name: 'Price summary' })).toBeInTheDocument();
+  });
+
+  it('renders DailyStockPrice date mismatch without replacing canonical daily fields', async () => {
+    const snapshot = makeCompanySnapshot();
+    snapshot.dailyStockPrice = {
+      ...snapshot.dailyStockPrice,
+      qualityStatus: 'partial',
+      date: '2026-06-16',
+      dateMatch: 'mismatched',
+      stalenessReason: 'DailyStockPrice date differs from DailyOhlc.',
+    };
+    snapshot.foreignFlow.date = '2026-06-16';
+    snapshot.foreignFlow.dateMatch = 'mismatched';
+    vi.mocked(stocksApi.getVietnamCompanyResearch).mockResolvedValue(snapshot);
+
+    renderPage();
+
+    expect(await screen.findByText('DailyStockPrice date differs from DailyOhlc.')).toBeInTheDocument();
+    expect(screen.getByText('Canonical latest price (VND)')).toBeInTheDocument();
+    expect(screen.getAllByText('SSI DailyOhlc').length).toBeGreaterThan(0);
+  });
+
+  it('hides null optional DailyStockPrice metrics instead of rendering zero', async () => {
+    const snapshot = makeCompanySnapshot();
+    snapshot.dailyStockPrice = {
+      status: 'ok',
+      qualityStatus: 'partial',
+      source: 'SSI DailyStockPrice',
+      date: '2026-06-17',
+      dateMatch: 'matched',
+      referencePrice: 123,
+      matchedVolume: null,
+      matchedValue: null,
+      putThroughVolume: null,
+      putThroughValue: null,
+      foreignNetVolume: null,
+      foreignNetValue: null,
+    };
+    snapshot.foreignFlow = {
+      source: 'SSI DailyStockPrice',
+      status: 'missing',
+      date: '2026-06-17',
+      dateMatch: 'matched',
+      volumeUnit: 'shares',
+      valueUnit: 'VND',
+      foreignBuyVolume: null,
+      foreignSellVolume: null,
+      foreignNetVolume: null,
+      foreignBuyValue: null,
+      foreignSellValue: null,
+      foreignNetValue: null,
+    };
+    vi.mocked(stocksApi.getVietnamCompanyResearch).mockResolvedValue(snapshot);
+
+    renderPage();
+
+    expect(await screen.findByRole('heading', { name: 'DailyStockPrice enrichment' })).toBeInTheDocument();
+    expect(screen.queryByText('Matched volume (shares)')).not.toBeInTheDocument();
+    expect(screen.queryByText('Put-through value (VND)')).not.toBeInTheDocument();
+    expect(screen.queryByText('Foreign net volume (shares)')).not.toBeInTheDocument();
+    expect(screen.getByText('SSI DailyStockPrice foreign flow unavailable.')).toBeInTheDocument();
   });
 
   it('renders profile partial in the data quality summary', async () => {

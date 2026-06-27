@@ -447,6 +447,11 @@ Strict DailyStockPrice behavior:
 * The selected ticker detail surfaces SSI reference, ceiling/floor, foreign net volume/value, matched volume/value, put-through volume/value, and adjusted close when present.
 * Successful watchlist enrichments set `daily_stock_price.status` to `ok` and expose the same values as optional `ssi_*` convenience fields for UI compatibility.
 * Legacy Mozyfin foreign-history caveats such as stale foreign date and insufficient 5D/20D foreign rows are suppressed when SSI DailyStockPrice is available.
+* Normalized rows are publicly labeled `SSI DailyStockPrice`; the generic provider label `SSI` is not used for the enrichment block.
+* `quality_status`, `date_match`, `staleness_reason`, `missing_fields`, `field_coverage`, present-value-only `units`, and sanitized diagnostics make partial or mismatched enrichment explicit without changing DailyOhlc validity.
+* Date match is `matched`, `mismatched`, `unknown`, or `unavailable`. A mismatched or missing date never changes canonical `latest_price`, which remains SSI DailyOhlc close.
+* Volume fields use shares and value/price fields use VND. Missing fields stay null; SSI-provided zero remains zero.
+* Diagnostics are allowlisted to endpoint, symbol/date range, row count, selected date, DailyOhlc date, match state, coverage, and failure class. Raw payloads and authentication/account values are excluded.
 
 Strict IntradayOhlc behavior:
 
@@ -455,7 +460,8 @@ Strict IntradayOhlc behavior:
 * If SSI IntradayOhlc is disabled, fails, or returns no candles, the intraday block returns `disabled` or `unavailable` while the SSI DailyOhlc row remains valid when daily data is present.
 * After SSI returns a rate-limit signal for a symbol/timeframe, `SSI_INTRADAY_RATE_LIMIT_COOLDOWN_SECONDS` suppresses repeat IntradayOhlc provider calls for that same symbol/timeframe and returns sanitized cooldown diagnostics instead.
 * The service validates latest intraday candle date against the latest SSI daily trading date. If the dates mismatch, intraday is marked unavailable and no intraday pulse labels are derived from stale candles.
-* Returned candle cadence is detected from timestamps when possible and labeled as provider-returned granularity. `intraday_requested_timeframe` records the request hint, while `intraday_actual_granularity` and `intraday_actual_granularity_seconds` record detected returned cadence. The compatibility field `intraday_timeframe` must be read as the requested timeframe, not the actual candle interval.
+* Returned candle cadence is detected from sorted provider timestamps when possible and labeled as provider-returned granularity. `intraday_requested_timeframe` records the request hint, while `intraday_actual_granularity`, `intraday_actual_granularity_seconds`, and `intraday_cadence_status` record detected returned cadence and whether it matched the request. The compatibility field `intraday_timeframe` must be read as the requested timeframe, not the actual candle interval.
+* `intraday_cadence_status` values are `matched`, `different_from_requested`, `irregular`, `unknown`, and `unavailable`. Duplicate timestamps are ignored for spacing; single-row, missing-timestamp, or malformed rows are classified conservatively instead of producing fake precision.
 * The dashboard should use neutral labels such as latest intraday close and intraday change instead of assuming the requested timeframe describes the returned rows.
 * Intraday candles are not realtime matched quotes and must remain separate from SSI realtime snapshot, SSI trade tape, and official SSI DailyOhlc close.
 * Mozyfin and KBS are not used as intraday candle fallback providers.

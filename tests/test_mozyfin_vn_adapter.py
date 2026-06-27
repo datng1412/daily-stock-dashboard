@@ -836,7 +836,7 @@ def test_ssi_daily_stock_price_enrichment_maps_limit_and_foreign_fields(monkeypa
     assert item["foreign"]["net"] == 20000
     assert item["foreign"]["net_value"] == 200000000
     assert item["daily_stock_price"]["status"] == "ok"
-    assert item["daily_stock_price"]["source"] == "SSI"
+    assert item["daily_stock_price"]["source"] == "SSI DailyStockPrice"
     assert item["ssi_reference_price"] == 123.0
     assert item["ssi_ceiling_price"] == 131.6
     assert item["ssi_floor_price"] == 114.4

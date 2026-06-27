@@ -165,7 +165,9 @@ const makeItem = (ticker: string): VietnamWatchItem => ({
   },
   dailyStockPrice: {
     status: 'ok',
+    qualityStatus: 'ok',
     date: '2026-06-10',
+    dateMatch: 'matched',
     referencePrice: 99,
     ceilingPrice: 106,
     floorPrice: 92,
@@ -235,6 +237,11 @@ const makeItem = (ticker: string): VietnamWatchItem => ({
   news: [],
   newsStatus: { status: 'disabled', source: null, message: 'News provider disabled.' },
   intradayTimeframe: '1h',
+  intradayRequestedTimeframe: '1h',
+  intradayActualGranularity: 'unknown',
+  intradayActualGranularitySeconds: null,
+  intradayGranularityLabel: 'provider-returned',
+  intradayCadenceStatus: 'unavailable',
   intradaySource: 'SSI',
   intradayIsRealtimeQuote: false,
   intradayWarning: 'SSI IntradayOhlc is disabled.',
@@ -248,7 +255,12 @@ const makeItem = (ticker: string): VietnamWatchItem => ({
       reason: 'SSI IntradayOhlc is disabled.',
     },
   ],
-  intradayStatus: { status: 'disabled', source: 'SSI', message: 'SSI IntradayOhlc is disabled.' },
+  intradayStatus: {
+    status: 'disabled',
+    source: 'SSI DailyStockPrice',
+    message: 'SSI IntradayOhlc is disabled.',
+    intradayCadenceStatus: 'unavailable',
+  },
   dataQualitySummary: {
     overallStatus: 'ok',
     canonicalPriceSource: 'SSI DailyOhlc',
@@ -2545,6 +2557,9 @@ describe('VietnamDashboardPage watchlist loading', () => {
       intradaySource: 'SSI',
       intradayGranularity: '1m',
       intradayGranularityLabel: '1m',
+      intradayActualGranularity: '1m',
+      intradayActualGranularitySeconds: 60,
+      intradayCadenceStatus: 'different_from_requested',
       intradayLatestDate: '2026-06-12',
       dailyPriceDate: '2026-06-19',
       dateMatch: 'mismatched',
@@ -2560,6 +2575,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
           intradayLatestDate: '2026-06-12',
           dailyPriceDate: '2026-06-19',
           dateMatch: 'mismatched',
+          intradayCadenceStatus: 'different_from_requested',
         },
       },
     };
@@ -2569,6 +2585,8 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     expect((await screen.findAllByText('SSI IntradayOhlc latest candle date does not match latest daily trading date.')).length).toBeGreaterThan(0);
     expect(screen.getByText('SSI intraday unavailable.')).toBeInTheDocument();
+    expect(screen.getAllByText(/Returned cadence differs from requested 1h: 1m/).length).toBeGreaterThan(0);
+    expect(screen.queryByText('1H intraday')).not.toBeInTheDocument();
     expect(screen.queryByText('2026-06-12 / 2026-06-19')).not.toBeInTheDocument();
     expect(screen.queryByText('Intraday pulse (1m)')).not.toBeInTheDocument();
     expect(screen.queryByText(/1H close|Latest 1H|Session 1H/)).not.toBeInTheDocument();
@@ -2583,19 +2601,19 @@ describe('VietnamDashboardPage watchlist loading', () => {
     const detail = within(screen.getByText('Stock detail').closest('section') as HTMLElement);
     expect(detail.getByRole('heading', { name: 'DailyStockPrice coverage' })).toBeInTheDocument();
     expect(detail.getByText('Reference')).toBeInTheDocument();
-    expect(within(detail.getByText('Reference').closest('div') as HTMLElement).getByText('99')).toBeInTheDocument();
+    expect(within(detail.getByText('Reference').closest('div') as HTMLElement).getByText('99 VND')).toBeInTheDocument();
     expect(detail.getByText('Ceiling / floor')).toBeInTheDocument();
-    expect(detail.getByText('106 / 92')).toBeInTheDocument();
+    expect(detail.getByText('106 / 92 VND')).toBeInTheDocument();
     expect(detail.getByText('Foreign net')).toBeInTheDocument();
     expect(within(detail.getByText('Foreign net').closest('div') as HTMLElement).getByText('5 shares')).toBeInTheDocument();
     expect(detail.getByText('Foreign net value')).toBeInTheDocument();
-    expect(detail.getByText('200,000')).toBeInTheDocument();
+    expect(detail.getByText('200,000 VND')).toBeInTheDocument();
     expect(detail.getByText('Matched value')).toBeInTheDocument();
-    expect(detail.getByText('123,456,789,000')).toBeInTheDocument();
+    expect(detail.getByText('123,456,789,000 VND')).toBeInTheDocument();
     expect(detail.getByText('Put-through value')).toBeInTheDocument();
-    expect(detail.getByText('25,000,000')).toBeInTheDocument();
+    expect(detail.getByText('25,000,000 VND')).toBeInTheDocument();
     expect(detail.getByText('Adjusted close')).toBeInTheDocument();
-    expect(detail.getAllByText('100').length).toBeGreaterThan(0);
+    expect(detail.getByText('100 VND')).toBeInTheDocument();
     expect(detail.getByText('Vs reference')).toBeInTheDocument();
     expect(within(detail.getByText('Vs reference').closest('div') as HTMLElement).getByText('+1 / +1.01%')).toBeInTheDocument();
     expect(detail.getByText('Adjusted close is shown only when SSI provides it. Corporate actions are not inferred from reference or adjusted prices.')).toBeInTheDocument();
@@ -2774,7 +2792,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     const detail = within(screen.getByText('Stock detail').closest('section') as HTMLElement);
     expect(detail.getByText('Daily close')).toBeInTheDocument();
     expect(detail.getByText('26,500 / 26,500')).toBeInTheDocument();
-    expect(within(detail.getByText('Reference').closest('div') as HTMLElement).getByText('26,000')).toBeInTheDocument();
+    expect(within(detail.getByText('Reference').closest('div') as HTMLElement).getByText('26,000 VND')).toBeInTheDocument();
     expect(within(detail.getByText('Vs reference').closest('div') as HTMLElement).getByText('+500 / +1.92%')).toBeInTheDocument();
     expect(detail.getByRole('heading', { name: 'Corporate actions' })).toBeInTheDocument();
     expect(detail.getByText('Recent and upcoming events')).toBeInTheDocument();
@@ -3082,6 +3100,11 @@ describe('VietnamDashboardPage watchlist loading', () => {
           volume: 1234567,
         },
       ],
+      intradayRequestedTimeframe: '1h',
+      intradayActualGranularity: '1m',
+      intradayActualGranularitySeconds: 60,
+      intradayGranularityLabel: '1m',
+      intradayCadenceStatus: 'different_from_requested',
       intradayPulse: {
         latest1hClose: 102,
         latest1hOpen: 100,
@@ -3100,8 +3123,17 @@ describe('VietnamDashboardPage watchlist loading', () => {
         direction: 'up',
         rangePercent: 4,
         volumeVsAvg1h: 1.75,
+        intradayRequestedTimeframe: '1h',
+        intradayActualGranularity: '1m',
+        intradayActualGranularitySeconds: 60,
+        intradayCadenceStatus: 'different_from_requested',
       },
-      intradayStatus: { status: 'ok', source: 'SSI', message: null },
+      intradayStatus: {
+        status: 'ok',
+        source: 'SSI',
+        message: null,
+        intradayCadenceStatus: 'different_from_requested',
+      },
       intradayWarning: 'SSI IntradayOhlc candle data is not a realtime matched quote.',
     };
     mockedGetVietnamWatchlist.mockResolvedValue(response);
@@ -3125,6 +3157,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(screen.queryByText('Vol ratio')).not.toBeInTheDocument();
     expect(screen.getAllByText('Realtime volume').length).toBeGreaterThan(0);
     expect(screen.getByText('SSI IntradayOhlc candles are separate from SSI realtime board and trade tape context.')).toBeInTheDocument();
+    expect(screen.getAllByText(/Returned cadence differs from requested 1h: 1m/).length).toBeGreaterThan(0);
     expect(screen.getAllByText('1,234,567').length).toBeGreaterThanOrEqual(2);
     expect(screen.getAllByText('3,456,000').length).toBeGreaterThan(0);
     expect(screen.getAllByText('0.72x').length).toBeGreaterThan(0);
@@ -3596,6 +3629,33 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(screen.queryByText('SSI unavailable')).not.toBeInTheDocument();
   });
 
+  it('shows a concise DailyStockPrice date mismatch caveat without clearing daily detail', async () => {
+    const response = makeResponse(defaultTickers);
+    response.watchlist[0] = {
+      ...response.watchlist[0],
+      dailyStockPriceDate: '2026-06-09',
+      dailyStockPriceDateMatch: 'mismatched',
+      dailyStockPriceStalenessReason: 'DailyStockPrice date differs from DailyOhlc.',
+      dailyStockPrice: {
+        ...response.watchlist[0].dailyStockPrice,
+        qualityStatus: 'partial',
+        date: '2026-06-09',
+        dateMatch: 'mismatched',
+        stalenessReason: 'DailyStockPrice date differs from DailyOhlc.',
+      },
+    };
+    mockedGetVietnamWatchlist.mockResolvedValue(response);
+
+    render(<VietnamDashboardPage />);
+
+    const detail = within(await screen.findByText('Stock detail').then((node) => node.closest('section') as HTMLElement));
+    expect(detail.getByText('DailyStockPrice date differs from DailyOhlc.')).toBeInTheDocument();
+    expect(detail.getByText('Daily close')).toBeInTheDocument();
+    expect(detail.getByText('100 / 100')).toBeInTheDocument();
+    expect(detail.getByText('partial')).toBeInTheDocument();
+    expect(detail.getByText('mismatched')).toBeInTheDocument();
+  });
+
   it('realtime unavailable poll keeps the previous successful snapshot visible', async () => {
     render(<VietnamDashboardPage />);
 
@@ -3745,6 +3805,8 @@ describe('VietnamDashboardPage watchlist loading', () => {
     });
     await waitFor(() => expect(mockedGetVietnamObservability).toHaveBeenCalled());
     expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistCalls);
+    expect(mockedGetVietnamChart).toHaveBeenCalledTimes(chartCalls);
+    expect(mockedGetVietnamCorporateActions).toHaveBeenCalledTimes(corporateActionsCalls);
   });
 
   it('manual Refresh realtime does not create overlapping duplicate requests', async () => {
@@ -3848,6 +3910,8 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(mockedGetVietnamRealtimeTrades).toHaveBeenCalledWith('FPT', 100);
     expect(mockedGetVietnamRealtimeQuotes).not.toHaveBeenCalled();
     expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistCalls);
+    expect(mockedGetVietnamChart).toHaveBeenCalledTimes(chartCalls);
+    expect(mockedGetVietnamCorporateActions).toHaveBeenCalledTimes(corporateActionsCalls);
   });
 
   it('changing SSI realtime intervals does not call watchlist endpoints', async () => {

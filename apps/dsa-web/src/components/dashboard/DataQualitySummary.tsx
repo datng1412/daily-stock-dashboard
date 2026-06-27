@@ -70,6 +70,16 @@ const formatIssueCopy = (issue: VietnamDataQualityIssue) => {
           formatNumber(fields.dailyStockPriceClose) ? `DailyStockPrice ${formatNumber(fields.dailyStockPriceClose)}` : null,
         ].filter(Boolean).join(' | '),
       };
+    case 'daily_stock_price_date_mismatch':
+      return {
+        title: 'DailyStockPrice date differs from DailyOhlc.',
+        detail: [
+          safeString(fields.dailyOhlcDate) ? `DailyOhlc ${safeString(fields.dailyOhlcDate)}` : null,
+          safeString(fields.dailyStockPriceDate) ? `DailyStockPrice ${safeString(fields.dailyStockPriceDate)}` : null,
+        ].filter(Boolean).join(' | '),
+      };
+    case 'daily_stock_price_partial':
+      return { title: 'DailyStockPrice enrichment partial.', detail: null };
     case 'profile_partial':
       return { title: 'Profile metadata partial.', detail: null };
     case 'final_close_status_unknown':

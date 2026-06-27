@@ -49,6 +49,9 @@ export type VietnamWatchItem = {
   dailyClose?: number | null;
   priceDate?: string | null;
   ohlcvDate?: string | null;
+  dailyStockPriceDate?: string | null;
+  dailyStockPriceDateMatch?: 'matched' | 'mismatched' | 'unknown' | 'unavailable' | string | null;
+  dailyStockPriceStalenessReason?: string | null;
   quoteDate?: string | null;
   foreignNetDate?: string | null;
   foreignDateMatch?: string | null;
@@ -177,6 +180,7 @@ export type VietnamWatchItem = {
   intradayGranularitySeconds?: number | null;
   intradayActualGranularitySeconds?: number | null;
   intradayGranularityLabel?: string | null;
+  intradayCadenceStatus?: string | null;
   intradayLatestDate?: string | null;
   dailyPriceDate?: string | null;
   dateMatch?: string | null;
@@ -229,6 +233,7 @@ export type VietnamWatchItem = {
     intradayGranularitySeconds?: number | null;
     intradayActualGranularitySeconds?: number | null;
     intradayGranularityLabel?: string | null;
+    intradayCadenceStatus?: string | null;
     intradayLatestDate?: string | null;
     dailyPriceDate?: string | null;
     dateMatch?: string | null;
@@ -255,6 +260,7 @@ export type VietnamWatchItem = {
     intradayGranularitySeconds?: number | null;
     intradayActualGranularitySeconds?: number | null;
     intradayGranularityLabel?: string | null;
+    intradayCadenceStatus?: string | null;
     diagnostics?: Record<string, unknown> | null;
   };
   realtimeSource?: string | null;
@@ -301,8 +307,11 @@ export type VietnamSymbolMetadata = {
 
 export type VietnamDailyStockPrice = {
   status?: 'ok' | 'unavailable' | string | null;
+  qualityStatus?: 'ok' | 'partial' | 'unavailable' | string | null;
   reason?: string | null;
   date?: string | null;
+  dateMatch?: 'matched' | 'mismatched' | 'unknown' | 'unavailable' | string | null;
+  stalenessReason?: string | null;
   referencePrice?: number | null;
   ceilingPrice?: number | null;
   floorPrice?: number | null;
@@ -324,6 +333,10 @@ export type VietnamDailyStockPrice = {
   foreignSellValue?: number | null;
   foreignNetValue?: number | null;
   source?: string | null;
+  missingFields?: string[];
+  fieldCoverage?: Record<string, boolean>;
+  units?: Record<string, string>;
+  diagnostics?: Record<string, unknown>;
 };
 
 export type VietnamCacheMetadata = {
@@ -526,6 +539,10 @@ export type VietnamCompanyForeignFlow = {
   foreignBuyValue?: number | null;
   foreignSellValue?: number | null;
   foreignNetValue?: number | null;
+  date?: string | null;
+  dateMatch?: 'matched' | 'mismatched' | 'unknown' | 'unavailable' | string | null;
+  volumeUnit?: string | null;
+  valueUnit?: string | null;
   source?: string | null;
   status: 'ok' | 'missing' | string;
 };
@@ -566,6 +583,7 @@ export type VietnamCompanyIntraday = {
     intradayRequestedTimeframe?: string | null;
     intradayActualGranularity?: string | null;
     intradayActualGranularitySeconds?: number | null;
+    intradayCadenceStatus?: string | null;
     direction?: 'up' | 'down' | 'flat' | 'unknown' | null;
   } | null;
   requestedTimeframe?: string | null;
@@ -574,6 +592,7 @@ export type VietnamCompanyIntraday = {
   granularitySeconds?: number | null;
   actualGranularitySeconds?: number | null;
   granularityLabel?: string | null;
+  cadenceStatus?: string | null;
   latestDate?: string | null;
   dailyPriceDate?: string | null;
   dateMatch?: string | null;
@@ -644,6 +663,7 @@ export type VietnamCompanyResearchResponse = {
   profile: VietnamCompanyProfile;
   price: VietnamCompanyPrice;
   tradingStats: VietnamCompanyTradingStats;
+  dailyStockPrice?: VietnamDailyStockPrice;
   foreignFlow: VietnamCompanyForeignFlow;
   technical: VietnamCompanyTechnical;
   intraday?: VietnamCompanyIntraday;

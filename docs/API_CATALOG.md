@@ -83,8 +83,11 @@ Implemented contract notes:
 
 - Watchlist `trade_tape` is public list data. It returns `[]` when unavailable/no rows and trade rows when usable.
 - Realtime/trade-tape status messages are short and user-safe. Sanitized provider details may appear under status diagnostics or other diagnostics-only structures.
-- Intraday unavailable status may include sanitized diagnostics such as `failure_class`, `endpoint=IntradayOhlc`, HTTP status, provider code, requested timeframe, internal page size, and public limit.
+- Intraday cadence fields are public: `intraday_requested_timeframe` is the request hint, `intraday_actual_granularity` / `intraday_actual_granularity_seconds` describe detected regular provider spacing, and `intraday_cadence_status` is `matched`, `different_from_requested`, `irregular`, `unknown`, or `unavailable`.
+- Intraday unavailable status may include sanitized diagnostics such as `failure_class`, `endpoint=IntradayOhlc`, HTTP status, provider code, requested timeframe, internal page size, public limit, usable row count, date match, and cadence status.
 - DailyOhlc and DailyStockPrice can disagree on same ticker/date.
+- `daily_stock_price` exposes `status`, `quality_status`, `source=SSI DailyStockPrice`, `date`, `date_match`, `staleness_reason`, normalized enrichment fields, `missing_fields`, value-specific `units`, and sanitized diagnostics.
+- Top-level compatibility fields are `daily_stock_price_date`, `daily_stock_price_date_match`, and `daily_stock_price_staleness_reason`. A mismatch never changes `latest_price` or the daily row status.
 
 Future changes:
 
@@ -136,6 +139,7 @@ Response sections:
 - Header/profile.
 - Price summary.
 - Trading stats.
+- DailyStockPrice enrichment.
 - Foreign flow.
 - Technical snapshot.
 - Intraday.
@@ -151,14 +155,17 @@ Source ownership:
 - Company `price.source` and `price.canonical_source` identify `SSI DailyOhlc`; `price.reference_source` identifies `SSI DailyStockPrice` for reference, ceiling, and floor fields.
 - Company `trading_stats` uses SSI DailyOhlc daily open/high/low/close/volume/value.
 - Reference/limits, foreign flow, matched/put-through, and adjusted-close values use SSI DailyStockPrice when exposed.
+- Company `daily_stock_price` retains the source-specific enrichment block and date-match metadata. Foreign flow declares shares for volume and VND for value.
 - Profile metadata uses SSI Securities/SecuritiesDetails when available, including industry/sector only when SSI returns a mapped metadata field.
 
 Null/empty rules:
 
 - `intraday.candles = []` and `intraday.pulse = null` when intraday is unavailable.
+- `intraday.requested_timeframe` is a request hint; `intraday.actual_granularity`, `intraday.actual_granularity_seconds`, and `intraday.cadence_status` describe the detected provider-returned cadence when available.
 - `realtime_snapshot = null` when unavailable.
 - `trade_tape.trades = []` when unavailable/no rows.
 - Future module lists stay empty while not implemented/unavailable.
+- Missing optional DailyStockPrice and foreign-flow metrics remain null and are not rendered as zero.
 
 Implemented contract notes:
 

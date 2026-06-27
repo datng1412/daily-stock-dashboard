@@ -7,6 +7,7 @@ from src.services.vietnam_market_service import (
     VietnamMarketService,
     clear_vietnam_cache,
 )
+from src.services.vietnam_company_research_service import VietnamCompanyResearchService
 
 
 class ExplodingManager:
@@ -176,6 +177,10 @@ def test_ssi_intraday_success_returns_sorted_candles_and_daily_stays_ok(monkeypa
     assert item["intraday_status"]["status"] == "ok"
     assert item["intraday_requested_timeframe"] == "1h"
     assert item["intraday_actual_granularity"] == "1h"
+    assert item["intraday_actual_granularity_seconds"] == 3600
+    assert item["intraday_cadence_status"] == "matched"
+    assert item["intraday_status"]["intraday_cadence_status"] == "matched"
+    assert item["intraday_status"]["diagnostics"]["filtered_usable_row_count"] == 3
     assert [candle["date_time"] for candle in item["intraday_candles"]] == sorted(
         candle["date_time"] for candle in item["intraday_candles"]
     )
@@ -227,10 +232,14 @@ def test_ssi_intraday_date_mismatch_is_unavailable_without_downgrading_daily_row
     assert item["intraday_status"]["intraday_latest_date"] == "2026-06-29"
     assert item["intraday_status"]["daily_price_date"] == "2026-06-30"
     assert item["intraday_status"]["date_match"] == "mismatched"
+    assert item["intraday_status"]["failure_class"] == "stale_or_date_mismatched"
+    assert item["intraday_status"]["diagnostics"]["failure_class"] == "stale_or_date_mismatched"
     assert item["intraday_requested_timeframe"] == "1h"
     assert item["intraday_actual_granularity"] == "1m"
+    assert item["intraday_cadence_status"] == "different_from_requested"
     assert item["intraday_status"]["intraday_requested_timeframe"] == "1h"
     assert item["intraday_status"]["intraday_actual_granularity"] == "1m"
+    assert item["intraday_status"]["intraday_cadence_status"] == "different_from_requested"
     assert item["intraday_candles"] == []
     assert item["intraday_pulse"] is None
     assert item["intraday_labels"] == []
@@ -282,14 +291,89 @@ def test_ssi_intraday_detects_provider_returned_minute_granularity():
     assert item["intraday_requested_timeframe"] == "1h"
     assert item["intraday_granularity"] == "1m"
     assert item["intraday_actual_granularity"] == "1m"
+    assert item["intraday_actual_granularity_seconds"] == 60
+    assert item["intraday_cadence_status"] == "different_from_requested"
     assert item["intraday_timeframe"] == "1h"
     assert item["intraday_status"]["intraday_granularity"] == "1m"
     assert item["intraday_status"]["intraday_actual_granularity"] == "1m"
+    assert item["intraday_status"]["intraday_cadence_status"] == "different_from_requested"
     assert item["intraday_pulse"]["intraday_granularity"] == "1m"
     assert item["intraday_pulse"]["intraday_actual_granularity"] == "1m"
+    assert item["intraday_pulse"]["intraday_cadence_status"] == "different_from_requested"
     assert item["intraday_pulse"]["latest_intraday_close"] == 133.0
     assert item["intraday_pulse"]["intraday_change"] == 0.5
     assert not any("1H" in detail["reason"] for detail in item["intraday_details"])
+
+
+def test_ssi_intraday_detects_regular_five_minute_granularity():
+    fetcher = FakeSsiFetcher(
+        {
+            "status": "ok",
+            "source": "SSI",
+            "rows": [
+                {
+                    "date_time": f"2026-06-30T10:{minute:02d}:00+07:00",
+                    "open": 131.0,
+                    "high": 132.0,
+                    "low": 130.5,
+                    "close": 131.5 + index,
+                    "volume": 2000 + index,
+                    "ticker": "FPT",
+                    "source": "SSI",
+                }
+                for index, minute in enumerate([0, 5, 10])
+            ],
+        }
+    )
+
+    item = _service(fetcher).build_watchlist(
+        ["FPT"],
+        force_refresh=True,
+        include_intraday=True,
+        intraday_timeframe="5m",
+    )["watchlist"][0]
+
+    assert item["intraday_status"]["status"] == "ok"
+    assert item["intraday_requested_timeframe"] == "5m"
+    assert item["intraday_actual_granularity"] == "5m"
+    assert item["intraday_actual_granularity_seconds"] == 300
+    assert item["intraday_cadence_status"] == "matched"
+
+
+def test_ssi_intraday_irregular_spacing_is_conservative():
+    fetcher = FakeSsiFetcher(
+        {
+            "status": "ok",
+            "source": "SSI",
+            "rows": [
+                {
+                    "date_time": value,
+                    "open": 131.0,
+                    "high": 132.0,
+                    "low": 130.5,
+                    "close": 131.5 + index,
+                    "volume": 2000 + index,
+                    "ticker": "FPT",
+                    "source": "SSI",
+                }
+                for index, value in enumerate(
+                    [
+                        "2026-06-30T10:00:00+07:00",
+                        "2026-06-30T10:01:00+07:00",
+                        "2026-06-30T10:20:00+07:00",
+                    ]
+                )
+            ],
+        }
+    )
+
+    item = _service(fetcher).build_watchlist(["FPT"], force_refresh=True, include_intraday=True)["watchlist"][0]
+
+    assert item["intraday_status"]["status"] == "ok"
+    assert item["intraday_actual_granularity"] == "unknown"
+    assert item["intraday_actual_granularity_seconds"] is None
+    assert item["intraday_cadence_status"] == "irregular"
+    assert item["intraday_status"]["intraday_cadence_status"] == "irregular"
 
 
 def test_ssi_intraday_failure_does_not_downgrade_daily_row():
@@ -355,6 +439,7 @@ def test_ssi_intraday_empty_rows_are_optional_and_do_not_fake_daily_data():
     assert item["daily_stock_price"]["status"] == "ok"
     assert item["intraday_status"]["status"] == "unavailable"
     assert item["intraday_status"]["message"] == "SSI IntradayOhlc returned no candles."
+    assert item["intraday_cadence_status"] == "unavailable"
     assert item["intraday_candles"] == []
     assert item["intraday_pulse"] is None
     assert item["realtime_snapshot"] is None
@@ -405,6 +490,31 @@ def test_ssi_intraday_can_be_disabled_without_mozyfin_fallback():
     assert item["status"] == "ok"
     assert item["intraday_source"] == "SSI IntradayOhlc"
     assert item["intraday_status"]["status"] == "disabled"
+    assert item["intraday_cadence_status"] == "unavailable"
     assert item["intraday_candles"] == []
     assert item["intraday_pulse"] is None
     assert fetcher.intraday_calls == 0
+
+
+def test_company_intraday_mapping_preserves_cadence_and_null_unavailable_contract():
+    service = VietnamCompanyResearchService(market_service=_service(FakeSsiFetcher()))
+
+    snapshot = service.get_company_research_snapshot("FPT", force_refresh=True)
+
+    assert snapshot["intraday"]["status"] == "ok"
+    assert snapshot["intraday"]["requested_timeframe"] == "1h"
+    assert snapshot["intraday"]["actual_granularity"] == "1h"
+    assert snapshot["intraday"]["actual_granularity_seconds"] == 3600
+    assert snapshot["intraday"]["cadence_status"] == "matched"
+
+
+def test_company_intraday_unavailable_uses_empty_candles_and_null_pulse():
+    fetcher = FakeSsiFetcher({"status": "ok", "source": "SSI", "rows": []})
+    service = VietnamCompanyResearchService(market_service=_service(fetcher))
+
+    snapshot = service.get_company_research_snapshot("FPT", force_refresh=True)
+
+    assert snapshot["intraday"]["status"] == "unavailable"
+    assert snapshot["intraday"]["candles"] == []
+    assert snapshot["intraday"]["pulse"] is None
+    assert snapshot["intraday"]["cadence_status"] == "unavailable"

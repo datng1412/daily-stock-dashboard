@@ -751,6 +751,8 @@ Phase 4.0C-4 official Python FC Data client inspection result:
 
 ### Phase 4.1A - Intraday Cadence and Freshness Correctness
 
+Status: completed in the current working tree.
+
 Goal:
 
 Detect actual returned intraday cadence and avoid overclaiming a fixed interval unless verified.
@@ -767,7 +769,16 @@ Acceptance criteria:
 * Stale intraday never appears as a fresh live signal.
 * Daily SSI rows remain valid when intraday is optional/unavailable.
 
+Implemented result:
+
+* `intraday_requested_timeframe` remains the request hint, while `intraday_actual_granularity`, `intraday_actual_granularity_seconds`, and `intraday_cadence_status` are derived from sorted provider timestamps.
+* Cadence status is conservative: regular rows are `matched` or `different_from_requested`, irregular spacing is `irregular`, insufficient timestamps are `unknown`, and disabled/unavailable sections are `unavailable`.
+* Stale/date-mismatched intraday still returns `intraday_candles=[]` and `intraday_pulse=null` with sanitized `stale_or_date_mismatched` diagnostics; daily SSI rows and `latest_price=SSI DailyOhlc` remain valid.
+* Dashboard and company UI copy now says provider cadence or returned-cadence caveats instead of presenting requested `1h` as the actual interval.
+
 ### Phase 4.2A - DailyStockPrice Enrichment Reliability
+
+Status: completed in the current working tree.
 
 Goal:
 
@@ -791,6 +802,15 @@ Acceptance criteria:
 
 * Each enrichment field has verified source, unit, date, and missing-state behavior.
 * Partial DailyStockPrice coverage does not invalidate usable DailyOhlc rows.
+
+Implemented result:
+
+* Existing evidence-backed aliases cover reference/limits, matched and put-through statistics, foreign volume/value, adjusted close, and trading date; no speculative provider aliases or chunking changes were added.
+* Watchlist and company contracts now expose an explicit `SSI DailyStockPrice` block with availability status, quality status, date match, missing-field coverage, value-specific units, and sanitized diagnostics.
+* Date alignment is `matched`, `mismatched`, `unknown`, or `unavailable`. A mismatch keeps the DailyOhlc row usable, marks enrichment partial, and surfaces a concise source-labeled caveat.
+* Missing values remain null and absent units metadata does not imply availability. DailyOhlc volume and DailyStockPrice matched volume remain separate concepts.
+* Dashboard and company UI show DailyStockPrice volume as shares and value/price fields as VND, hide missing optional metrics, and keep canonical daily close on SSI DailyOhlc.
+* Targeted backend tests, company/watchlist frontend tests, TypeScript compilation, lint, and the production Vite build passed. Browser UI smoke passed against the current static build; current-code live API smoke was not run because the available port 8000 backend predated this phase and no separate credential-safe live process was available.
 
 ### Phase 4.3A - Profile and Securities Metadata Reliability
 

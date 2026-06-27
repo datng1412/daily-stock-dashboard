@@ -427,6 +427,41 @@ def _date_match_status(left: Optional[str], right: Optional[str]) -> str:
     return "matched" if left == right else "mismatched"
 
 
+DAILY_STOCK_PRICE_ENRICHMENT_FIELDS = (
+    "reference_price",
+    "ceiling_price",
+    "floor_price",
+    "matched_volume",
+    "matched_value",
+    "put_through_volume",
+    "put_through_value",
+    "foreign_buy_volume",
+    "foreign_sell_volume",
+    "foreign_net_volume",
+    "foreign_buy_value",
+    "foreign_sell_value",
+    "foreign_net_value",
+    "adjusted_close",
+)
+
+DAILY_STOCK_PRICE_FIELD_UNITS = {
+    "reference_price": "VND",
+    "ceiling_price": "VND",
+    "floor_price": "VND",
+    "matched_volume": "shares",
+    "matched_value": "VND",
+    "put_through_volume": "shares",
+    "put_through_value": "VND",
+    "foreign_buy_volume": "shares",
+    "foreign_sell_volume": "shares",
+    "foreign_net_volume": "shares",
+    "foreign_buy_value": "VND",
+    "foreign_sell_value": "VND",
+    "foreign_net_value": "VND",
+    "adjusted_close": "VND",
+}
+
+
 def _status_from_block(block: Any, default: str = "unavailable") -> str:
     if not isinstance(block, dict):
         return default
@@ -468,6 +503,11 @@ INTRADAY_DIAGNOSTIC_KEYS = {
     "intraday_granularity",
     "intraday_granularity_seconds",
     "intraday_granularity_label",
+    "intraday_actual_granularity",
+    "intraday_actual_granularity_seconds",
+    "intraday_cadence_status",
+    "normalized_row_count",
+    "filtered_usable_row_count",
 }
 
 
@@ -546,7 +586,20 @@ def build_vietnam_data_quality_summary(row: Dict[str, Any]) -> Dict[str, Any]:
         and daily_source_is_ssi
         else "unavailable"
     )
-    daily_stock_price_check = "ok" if daily_stock_price.get("status") == "ok" and daily_stock_close is not None else "unavailable"
+    daily_stock_price_status = str(daily_stock_price.get("status") or "unavailable")
+    daily_stock_price_quality = str(daily_stock_price.get("quality_status") or "")
+    if daily_stock_price_status != "ok":
+        daily_stock_price_check = "unavailable"
+    elif daily_stock_price_quality in {"ok", "partial"}:
+        daily_stock_price_check = daily_stock_price_quality
+    else:
+        daily_stock_price_check = "ok"
+    daily_stock_price_date_match = str(
+        daily_stock_price.get("date_match")
+        or row.get("daily_stock_price_date_match")
+        or "unknown"
+    )
+    daily_stock_price_missing_fields = list(daily_stock_price.get("missing_fields") or [])
     date_match = str(row.get("date_match") or "")
     intraday_check = "stale" if intraday_status == "unavailable" and date_match == "mismatched" else intraday_status
 
@@ -580,7 +633,32 @@ def build_vietnam_data_quality_summary(row: Dict[str, Any]) -> Dict[str, Any]:
                     "daily_ohlc_close": daily_close,
                     "daily_stock_price_close": daily_stock_close,
                     "date": daily_date,
+                    "daily_ohlc_source": SSI_DAILY_OHLC_SOURCE,
+                    "daily_stock_price_source": SSI_DAILY_STOCK_PRICE_SOURCE,
                 },
+            }
+        )
+    if daily_stock_price_status == "ok" and daily_stock_price_date_match == "mismatched":
+        issues.append(
+            {
+                "code": "daily_stock_price_date_mismatch",
+                "severity": "warning",
+                "message": "SSI DailyStockPrice date differs from SSI DailyOhlc.",
+                "fields": {
+                    "daily_ohlc_date": daily_date,
+                    "daily_stock_price_date": daily_stock_date,
+                    "daily_ohlc_source": SSI_DAILY_OHLC_SOURCE,
+                    "daily_stock_price_source": SSI_DAILY_STOCK_PRICE_SOURCE,
+                },
+            }
+        )
+    if daily_stock_price_status == "ok" and daily_stock_price_missing_fields:
+        issues.append(
+            {
+                "code": "daily_stock_price_partial",
+                "severity": "info",
+                "message": "SSI DailyStockPrice enrichment is partial.",
+                "fields": {"missing_fields": daily_stock_price_missing_fields},
             }
         )
     if final_close_status == "unknown":
@@ -652,6 +730,7 @@ def build_vietnam_data_quality_summary(row: Dict[str, Any]) -> Dict[str, Any]:
         )
 
     optional_partial_checks = {
+        "daily_stock_price": daily_stock_price_check,
         "intraday": intraday_check,
         "realtime": realtime_status,
         "trade_tape": trade_tape_status,
@@ -1057,7 +1136,56 @@ def _intraday_candle_vn_datetime(candle: Dict[str, Any]) -> Optional[datetime]:
     return timestamp.astimezone(VN_TIMEZONE)
 
 
-def _detect_intraday_granularity(candles: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _requested_timeframe_seconds(timeframe: Optional[str]) -> Optional[int]:
+    raw = str(timeframe or "").strip().lower()
+    if not raw:
+        return None
+    aliases = {
+        "1": 60,
+        "1m": 60,
+        "1min": 60,
+        "5": 300,
+        "5m": 300,
+        "5min": 300,
+        "15": 900,
+        "15m": 900,
+        "15min": 900,
+        "30": 1800,
+        "30m": 1800,
+        "30min": 1800,
+        "60": 3600,
+        "60m": 3600,
+        "1h": 3600,
+        "1hour": 3600,
+        "1d": 86400,
+        "d": 86400,
+        "day": 86400,
+    }
+    return aliases.get(raw)
+
+
+def _granularity_label_from_seconds(seconds: Optional[int]) -> str:
+    if seconds is None:
+        return "unknown"
+    if 45 <= seconds <= 90:
+        return "1m"
+    if 240 <= seconds <= 360:
+        return "5m"
+    if 840 <= seconds <= 960:
+        return "15m"
+    if 1740 <= seconds <= 1860:
+        return "30m"
+    if 3300 <= seconds <= 3900:
+        return "1h"
+    if 82800 <= seconds <= 90000:
+        return "daily-like"
+    return f"{max(1, round(seconds / 60))}m"
+
+
+def _detect_intraday_granularity(
+    candles: List[Dict[str, Any]],
+    requested_timeframe: Optional[str] = None,
+) -> Dict[str, Any]:
     datetimes = [_intraday_candle_vn_datetime(candle) for candle in candles]
     datetimes = sorted(value for value in datetimes if value is not None)
     deltas = [
@@ -1070,24 +1198,33 @@ def _detect_intraday_granularity(candles: List[Dict[str, Any]]) -> Dict[str, Any
             "intraday_granularity": "unknown",
             "intraday_granularity_seconds": None,
             "intraday_granularity_label": "provider-returned",
+            "intraday_actual_granularity": "unknown",
+            "intraday_actual_granularity_seconds": None,
+            "intraday_cadence_status": "unknown",
         }
     seconds = int(statistics.median(deltas))
-    if 45 <= seconds <= 90:
-        granularity = "1m"
-    elif 240 <= seconds <= 360:
-        granularity = "5m"
-    elif 840 <= seconds <= 960:
-        granularity = "15m"
-    elif 1740 <= seconds <= 1860:
-        granularity = "30m"
-    elif 3300 <= seconds <= 3900:
-        granularity = "1h"
+    unique_deltas = sorted(set(deltas))
+    tolerance = max(30, int(seconds * 0.2))
+    irregular = len(unique_deltas) > 1 and any(abs(delta - seconds) > tolerance for delta in unique_deltas)
+    if irregular:
+        granularity = "unknown"
+        cadence_status = "irregular"
     else:
-        granularity = f"{max(1, round(seconds / 60))}m"
+        granularity = _granularity_label_from_seconds(seconds)
+        requested_seconds = _requested_timeframe_seconds(requested_timeframe)
+        if requested_seconds is None:
+            cadence_status = "unknown"
+        elif abs(seconds - requested_seconds) <= max(30, int(requested_seconds * 0.2)):
+            cadence_status = "matched"
+        else:
+            cadence_status = "different_from_requested"
     return {
         "intraday_granularity": granularity,
-        "intraday_granularity_seconds": seconds,
+        "intraday_granularity_seconds": None if irregular else seconds,
         "intraday_granularity_label": granularity,
+        "intraday_actual_granularity": granularity,
+        "intraday_actual_granularity_seconds": None if irregular else seconds,
+        "intraday_cadence_status": cadence_status,
     }
 
 
@@ -1796,6 +1933,7 @@ class VietnamMarketService:
         intraday_timeframe: str,
         intraday_limit: int,
     ) -> Dict[str, Any]:
+        normalized_row_count = len(rows or [])
         df = pd.DataFrame(rows or [])
         if not df.empty and "date_time" in df.columns:
             df = df.sort_values("date_time").reset_index(drop=True)
@@ -1805,23 +1943,27 @@ class VietnamMarketService:
                 intraday_timeframe,
                 status="unavailable",
                 reason="SSI IntradayOhlc returned no candles.",
+                diagnostics={
+                    "normalized_row_count": normalized_row_count,
+                    "filtered_usable_row_count": 0,
+                    "intraday_cadence_status": "unavailable",
+                },
             )
-        granularity = _detect_intraday_granularity(candles)
+        granularity = _detect_intraday_granularity(candles, intraday_timeframe)
         intraday_latest_date = _intraday_candle_vn_date(candles[-1]) if candles else None
         pulse = calculate_intraday_pulse(candles)
         pulse.update(granularity)
         pulse["intraday_latest_date"] = intraday_latest_date
         pulse["intraday_requested_timeframe"] = intraday_timeframe
-        pulse["intraday_actual_granularity"] = granularity["intraday_granularity"]
-        pulse["intraday_actual_granularity_seconds"] = granularity["intraday_granularity_seconds"]
+        pulse["intraday_actual_granularity"] = granularity["intraday_actual_granularity"]
+        pulse["intraday_actual_granularity_seconds"] = granularity["intraday_actual_granularity_seconds"]
+        pulse["intraday_cadence_status"] = granularity["intraday_cadence_status"]
         details = derive_intraday_details(candles, pulse)
         labels = [detail["label"] for detail in details]
         return {
             "intraday_timeframe": intraday_timeframe,
             "intraday_requested_timeframe": intraday_timeframe,
             **granularity,
-            "intraday_actual_granularity": granularity["intraday_granularity"],
-            "intraday_actual_granularity_seconds": granularity["intraday_granularity_seconds"],
             "intraday_latest_date": intraday_latest_date,
             "daily_price_date": None,
             "date_match": "unknown",
@@ -1843,8 +1985,18 @@ class VietnamMarketService:
                 "date_match": "unknown",
                 **granularity,
                 "intraday_requested_timeframe": intraday_timeframe,
-                "intraday_actual_granularity": granularity["intraday_granularity"],
-                "intraday_actual_granularity_seconds": granularity["intraday_granularity_seconds"],
+                "intraday_actual_granularity": granularity["intraday_actual_granularity"],
+                "intraday_actual_granularity_seconds": granularity["intraday_actual_granularity_seconds"],
+                "diagnostics": {
+                    "endpoint": "IntradayOhlc",
+                    "symbol": symbol,
+                    "requested_timeframe": intraday_timeframe,
+                    "public_limit": intraday_limit,
+                    "normalized_row_count": normalized_row_count,
+                    "filtered_usable_row_count": len(candles),
+                    "intraday_latest_date": intraday_latest_date,
+                    **granularity,
+                },
             },
         }
 
@@ -1861,6 +2013,9 @@ class VietnamMarketService:
         intraday_granularity = diagnostics.get("intraday_granularity") or "unknown"
         intraday_granularity_seconds = diagnostics.get("intraday_granularity_seconds")
         intraday_granularity_label = diagnostics.get("intraday_granularity_label") or "provider-returned"
+        intraday_cadence_status = diagnostics.get("intraday_cadence_status") or (
+            "unavailable" if status in {"unavailable", "disabled"} else "unknown"
+        )
         status_payload = {
             "status": status,
             "source": SSI_INTRADAY_SOURCE,
@@ -1868,6 +2023,7 @@ class VietnamMarketService:
             "intraday_requested_timeframe": intraday_timeframe,
             "intraday_actual_granularity": intraday_granularity,
             "intraday_actual_granularity_seconds": intraday_granularity_seconds,
+            "intraday_cadence_status": intraday_cadence_status,
         }
         status_payload.update(diagnostics)
         if diagnostics:
@@ -1880,6 +2036,7 @@ class VietnamMarketService:
             "intraday_granularity_seconds": intraday_granularity_seconds,
             "intraday_actual_granularity_seconds": intraday_granularity_seconds,
             "intraday_granularity_label": intraday_granularity_label,
+            "intraday_cadence_status": intraday_cadence_status,
             "intraday_latest_date": diagnostics.get("intraday_latest_date"),
             "daily_price_date": diagnostics.get("daily_price_date"),
             "date_match": diagnostics.get("date_match") or "unknown",
@@ -1969,10 +2126,14 @@ class VietnamMarketService:
             "intraday_granularity": intraday_payload.get("intraday_granularity") or "unknown",
             "intraday_granularity_seconds": intraday_payload.get("intraday_granularity_seconds"),
             "intraday_granularity_label": intraday_payload.get("intraday_granularity_label") or "provider-returned",
+            "intraday_actual_granularity": intraday_payload.get("intraday_actual_granularity") or intraday_payload.get("intraday_granularity") or "unknown",
+            "intraday_actual_granularity_seconds": intraday_payload.get("intraday_actual_granularity_seconds") or intraday_payload.get("intraday_granularity_seconds"),
+            "intraday_cadence_status": intraday_payload.get("intraday_cadence_status") or "unknown",
         }
         if intraday_latest_date and daily_date:
             diagnostics["date_match"] = "matched" if intraday_latest_date == daily_date else "mismatched"
         if diagnostics["date_match"] == "mismatched":
+            diagnostics["failure_class"] = "stale_or_date_mismatched"
             return self._ssi_intraday_unavailable_payload(
                 str(intraday_payload.get("intraday_timeframe") or self.config.intraday_timeframe or "provider"),
                 status="unavailable",
@@ -1987,8 +2148,9 @@ class VietnamMarketService:
                 "daily_price_date": daily_date,
                 "date_match": diagnostics["date_match"],
                 "intraday_requested_timeframe": updated.get("intraday_requested_timeframe") or updated.get("intraday_timeframe"),
-                "intraday_actual_granularity": updated.get("intraday_actual_granularity") or diagnostics["intraday_granularity"],
-                "intraday_actual_granularity_seconds": updated.get("intraday_actual_granularity_seconds") or diagnostics["intraday_granularity_seconds"],
+                "intraday_actual_granularity": updated.get("intraday_actual_granularity") or diagnostics["intraday_actual_granularity"],
+                "intraday_actual_granularity_seconds": updated.get("intraday_actual_granularity_seconds") or diagnostics["intraday_actual_granularity_seconds"],
+                "intraday_cadence_status": updated.get("intraday_cadence_status") or diagnostics["intraday_cadence_status"],
             }
         )
         status_payload = dict(updated.get("intraday_status") or {})
@@ -1998,10 +2160,22 @@ class VietnamMarketService:
                 "daily_price_date": daily_date,
                 "date_match": diagnostics["date_match"],
                 "intraday_requested_timeframe": updated.get("intraday_requested_timeframe") or updated.get("intraday_timeframe"),
-                "intraday_actual_granularity": updated.get("intraday_actual_granularity") or diagnostics["intraday_granularity"],
-                "intraday_actual_granularity_seconds": updated.get("intraday_actual_granularity_seconds") or diagnostics["intraday_granularity_seconds"],
+                "intraday_actual_granularity": updated.get("intraday_actual_granularity") or diagnostics["intraday_actual_granularity"],
+                "intraday_actual_granularity_seconds": updated.get("intraday_actual_granularity_seconds") or diagnostics["intraday_actual_granularity_seconds"],
+                "intraday_cadence_status": updated.get("intraday_cadence_status") or diagnostics["intraday_cadence_status"],
             }
         )
+        status_diagnostics = dict(status_payload.get("diagnostics") or {})
+        status_diagnostics.update(
+            {
+                "daily_price_date": daily_date,
+                "date_match": diagnostics["date_match"],
+                "intraday_cadence_status": status_payload.get("intraday_cadence_status"),
+                "intraday_actual_granularity": status_payload.get("intraday_actual_granularity"),
+                "intraday_actual_granularity_seconds": status_payload.get("intraday_actual_granularity_seconds"),
+            }
+        )
+        status_payload["diagnostics"] = status_diagnostics
         updated["intraday_status"] = status_payload
         pulse = dict(updated.get("intraday_pulse") or {})
         pulse.update(
@@ -2010,8 +2184,9 @@ class VietnamMarketService:
                 "daily_price_date": daily_date,
                 "date_match": diagnostics["date_match"],
                 "intraday_requested_timeframe": updated.get("intraday_requested_timeframe") or updated.get("intraday_timeframe"),
-                "intraday_actual_granularity": updated.get("intraday_actual_granularity") or diagnostics["intraday_granularity"],
-                "intraday_actual_granularity_seconds": updated.get("intraday_actual_granularity_seconds") or diagnostics["intraday_granularity_seconds"],
+                "intraday_actual_granularity": updated.get("intraday_actual_granularity") or diagnostics["intraday_actual_granularity"],
+                "intraday_actual_granularity_seconds": updated.get("intraday_actual_granularity_seconds") or diagnostics["intraday_actual_granularity_seconds"],
+                "intraday_cadence_status": updated.get("intraday_cadence_status") or diagnostics["intraday_cadence_status"],
             }
         )
         updated["intraday_pulse"] = pulse
@@ -2026,6 +2201,7 @@ class VietnamMarketService:
             "intraday_granularity_seconds": None,
             "intraday_actual_granularity_seconds": None,
             "intraday_granularity_label": "provider-returned",
+            "intraday_cadence_status": "unavailable",
             "intraday_latest_date": None,
             "daily_price_date": None,
             "date_match": "unknown",
@@ -2043,6 +2219,7 @@ class VietnamMarketService:
                 "intraday_requested_timeframe": intraday_timeframe,
                 "intraday_actual_granularity": "unknown",
                 "intraday_actual_granularity_seconds": None,
+                "intraday_cadence_status": "unavailable",
             },
         }
 
@@ -2318,11 +2495,27 @@ class VietnamMarketService:
             "unavailable_reason": None,
         }
 
-    def _latest_ssi_daily_stock_price(self, symbol: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    def _latest_ssi_daily_stock_price(
+        self,
+        symbol: str,
+    ) -> Tuple[Optional[Dict[str, Any]], Optional[str], Dict[str, Any]]:
         if self.config.daily_stock_price_provider != VN_PROVIDER_SSI:
-            return None, None
+            return None, None, {
+                "endpoint": "DailyStockPrice",
+                "symbol": symbol,
+                "normalized_row_count": 0,
+                "failure_class": "disabled",
+            }
         to_date = datetime.now(VN_TIMEZONE).date()
         from_date = to_date - timedelta(days=28)
+        diagnostics = {
+            "endpoint": "DailyStockPrice",
+            "symbol": symbol,
+            "from_date": from_date.isoformat(),
+            "to_date": to_date.isoformat(),
+            "normalized_row_count": 0,
+            "selected_latest_row_date": None,
+        }
         payload = self._get_ssi_fetcher().get_daily_stock_price(
             symbol,
             market=get_vn_exchange(symbol),
@@ -2331,11 +2524,106 @@ class VietnamMarketService:
             limit=260,
         )
         if payload.get("status") != "ok":
-            return None, self._safe_provider_reason(payload, SSI_UNAVAILABLE_REASON)
+            diagnostics["failure_class"] = str(payload.get("failure_class") or "provider_unavailable")
+            return None, self._safe_provider_reason(payload, SSI_UNAVAILABLE_REASON), diagnostics
         rows = payload.get("rows") or []
+        diagnostics["normalized_row_count"] = len(rows) if isinstance(rows, list) else 0
         if not rows:
-            return None, SSI_UNAVAILABLE_REASON
-        return rows[-1], None
+            diagnostics["failure_class"] = "empty_result"
+            return None, SSI_UNAVAILABLE_REASON, diagnostics
+        selected = rows[-1]
+        diagnostics["selected_latest_row_date"] = _valid_date_string(selected.get("date"))
+        return selected, None, diagnostics
+
+    @staticmethod
+    def _normalize_ssi_daily_stock_price_enrichment(
+        row: Dict[str, Any],
+        *,
+        daily_ohlc_date: Optional[str],
+        diagnostics: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        normalized = dict(row)
+        normalized["status"] = "ok"
+        normalized["source"] = SSI_DAILY_STOCK_PRICE_SOURCE
+        normalized["date"] = _valid_date_string(row.get("date"))
+
+        for field in DAILY_STOCK_PRICE_ENRICHMENT_FIELDS:
+            normalized[field] = _safe_float(row.get(field))
+
+        date_match = _date_match_status(daily_ohlc_date, normalized["date"])
+        field_coverage = {
+            field: normalized.get(field) is not None
+            for field in DAILY_STOCK_PRICE_ENRICHMENT_FIELDS
+        }
+        missing_fields = [
+            field
+            for field, available in field_coverage.items()
+            if not available
+        ]
+        units = {
+            field: DAILY_STOCK_PRICE_FIELD_UNITS[field]
+            for field, available in field_coverage.items()
+            if available
+        }
+        staleness_reason = None
+        if date_match == "mismatched":
+            staleness_reason = "DailyStockPrice date differs from DailyOhlc."
+        elif date_match == "unknown":
+            staleness_reason = "DailyStockPrice date alignment with DailyOhlc is unknown."
+
+        safe_diagnostics = dict(diagnostics)
+        safe_diagnostics.update(
+            {
+                "selected_latest_row_date": normalized["date"],
+                "daily_ohlc_date": daily_ohlc_date,
+                "date_match": date_match,
+                "missing_fields": missing_fields,
+                "field_coverage": field_coverage,
+            }
+        )
+        normalized.update(
+            {
+                "quality_status": "partial" if date_match != "matched" or missing_fields else "ok",
+                "date_match": date_match,
+                "staleness_reason": staleness_reason,
+                "missing_fields": missing_fields,
+                "field_coverage": field_coverage,
+                "units": units,
+                "diagnostics": safe_diagnostics,
+            }
+        )
+        return normalized
+
+    @staticmethod
+    def _unavailable_ssi_daily_stock_price(
+        *,
+        reason: Optional[str],
+        daily_ohlc_date: Optional[str],
+        diagnostics: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        field_coverage = {field: False for field in DAILY_STOCK_PRICE_ENRICHMENT_FIELDS}
+        safe_diagnostics = dict(diagnostics)
+        safe_diagnostics.update(
+            {
+                "daily_ohlc_date": daily_ohlc_date,
+                "date_match": "unavailable",
+                "missing_fields": list(DAILY_STOCK_PRICE_ENRICHMENT_FIELDS),
+                "field_coverage": field_coverage,
+            }
+        )
+        return {
+            "status": "unavailable",
+            "quality_status": "unavailable",
+            "source": SSI_DAILY_STOCK_PRICE_SOURCE,
+            "reason": reason or SSI_UNAVAILABLE_REASON,
+            "date": None,
+            "date_match": "unavailable",
+            "staleness_reason": "SSI DailyStockPrice enrichment is unavailable.",
+            "missing_fields": list(DAILY_STOCK_PRICE_ENRICHMENT_FIELDS),
+            "field_coverage": field_coverage,
+            "units": {},
+            "diagnostics": safe_diagnostics,
+        }
 
     @staticmethod
     def _normalize_ssi_symbol_metadata(
@@ -2456,7 +2744,14 @@ class VietnamMarketService:
                 enriched_limit[target_key] = value
         enriched_limit["reference_source"] = SSI_DAILY_STOCK_PRICE_SOURCE
         enriched_limit["source"] = SSI_DAILY_STOCK_PRICE_SOURCE
-        enriched_limit["status"] = "ok"
+        enriched_limit["status"] = (
+            "ok"
+            if any(
+                _safe_float(enriched_limit.get(field)) is not None
+                for field in ("reference_price", "ceiling_price", "floor_price")
+            )
+            else "unavailable"
+        )
         close = _safe_float(latest_price_row.get("close"))
         ceiling = _safe_float(enriched_limit.get("ceiling_price"))
         floor = _safe_float(enriched_limit.get("floor_price"))
@@ -2472,14 +2767,35 @@ class VietnamMarketService:
                 "buy": _safe_float(latest_price_row.get("foreign_buy_volume")),
                 "sell": _safe_float(latest_price_row.get("foreign_sell_volume")),
                 "net": _safe_float(latest_price_row.get("foreign_net_volume")),
+                "buy_value": _safe_float(latest_price_row.get("foreign_buy_value")),
+                "sell_value": _safe_float(latest_price_row.get("foreign_sell_value")),
+                "net_value": _safe_float(latest_price_row.get("foreign_net_value")),
                 "date": latest_price_row.get("date"),
-                "net_unit": "shares",
                 "buy_raw_field": "foreign_buy_volume",
                 "sell_raw_field": "foreign_sell_volume",
                 "latest_price": None,
                 "price_raw_field": None,
                 "price_date": None,
+                "source": SSI_DAILY_STOCK_PRICE_SOURCE,
             }
+        )
+        enriched_foreign["status"] = (
+            "ok"
+            if any(
+                enriched_foreign.get(field) is not None
+                for field in ("buy", "sell", "net", "buy_value", "sell_value", "net_value")
+            )
+            else "unavailable"
+        )
+        enriched_foreign["net_unit"] = (
+            "shares"
+            if any(enriched_foreign.get(field) is not None for field in ("buy", "sell", "net"))
+            else None
+        )
+        enriched_foreign["value_unit"] = (
+            "VND"
+            if any(enriched_foreign.get(field) is not None for field in ("buy_value", "sell_value", "net_value"))
+            else None
         )
         history_row = {
             "buy": enriched_foreign.get("buy"),
@@ -3256,6 +3572,7 @@ class VietnamMarketService:
         foreign_flow_source = SSI_DAILY_STOCK_PRICE_SOURCE if strict_daily_stock_price else "disabled"
         ssi_daily_stock_price: Optional[Dict[str, Any]] = None
         ssi_daily_stock_price_reason: Optional[str] = None
+        ssi_daily_stock_price_diagnostics: Dict[str, Any] = {}
         if strict_daily_stock_price:
             limit_state = {
                 "limit_pct": get_vn_price_limit_pct(symbol),
@@ -3272,7 +3589,7 @@ class VietnamMarketService:
                 "sell": None,
                 "net": None,
                 "date": None,
-                "net_unit": "shares",
+                "net_unit": None,
                 "buy_raw_field": None,
                 "sell_raw_field": None,
                 "latest_price": None,
@@ -3281,11 +3598,17 @@ class VietnamMarketService:
                 "source": SSI_DAILY_STOCK_PRICE_SOURCE,
                 "status": "unavailable",
             }
-        ssi_daily_stock_price, ssi_daily_stock_price_reason = self._latest_ssi_daily_stock_price(symbol)
+        (
+            ssi_daily_stock_price,
+            ssi_daily_stock_price_reason,
+            ssi_daily_stock_price_diagnostics,
+        ) = self._latest_ssi_daily_stock_price(symbol)
         if ssi_daily_stock_price:
-            ssi_daily_stock_price = dict(ssi_daily_stock_price)
-            ssi_daily_stock_price.setdefault("status", "ok")
-            ssi_daily_stock_price.setdefault("source", SSI_DAILY_STOCK_PRICE_SOURCE)
+            ssi_daily_stock_price = self._normalize_ssi_daily_stock_price_enrichment(
+                ssi_daily_stock_price,
+                daily_ohlc_date=ohlcv_date,
+                diagnostics=ssi_daily_stock_price_diagnostics,
+            )
             limit_state, foreign, foreign_history = self._apply_ssi_daily_stock_price_enrichment(
                 symbol,
                 ssi_daily_stock_price,
@@ -3295,15 +3618,12 @@ class VietnamMarketService:
             )
             reference_source = SSI_DAILY_STOCK_PRICE_SOURCE
             foreign_flow_source = SSI_DAILY_STOCK_PRICE_SOURCE
-            limit_state["status"] = "ok"
-            foreign["status"] = "ok"
-            foreign["source"] = SSI_DAILY_STOCK_PRICE_SOURCE
         elif strict_daily_stock_price:
-            ssi_daily_stock_price = {
-                "status": "unavailable",
-                "source": SSI_DAILY_STOCK_PRICE_SOURCE,
-                "reason": ssi_daily_stock_price_reason or SSI_UNAVAILABLE_REASON,
-            }
+            ssi_daily_stock_price = self._unavailable_ssi_daily_stock_price(
+                reason=ssi_daily_stock_price_reason,
+                daily_ohlc_date=ohlcv_date,
+                diagnostics=ssi_daily_stock_price_diagnostics,
+            )
         ssi_daily_stock_price_available = (
             bool(ssi_daily_stock_price)
             and ssi_daily_stock_price.get("status") != "unavailable"
@@ -3498,6 +3818,9 @@ class VietnamMarketService:
             "daily_close": close,
             "price_date": latest_price_date,
             "ohlcv_date": ohlcv_date,
+            "daily_stock_price_date": (ssi_daily_stock_price or {}).get("date"),
+            "daily_stock_price_date_match": (ssi_daily_stock_price or {}).get("date_match"),
+            "daily_stock_price_staleness_reason": (ssi_daily_stock_price or {}).get("staleness_reason"),
             "quote_date": quote_date,
             "foreign_net_date": foreign_net_date,
             "foreign_date_match": foreign_date_match,
@@ -3537,6 +3860,7 @@ class VietnamMarketService:
                 "source": foreign_flow_source,
                 "status": foreign.get("status"),
                 "net_unit": foreign_net_unit,
+                "value_unit": foreign.get("value_unit"),
                 "date": foreign_net_date,
                 "date_match": foreign_date_match,
                 "buy_raw_field": foreign_buy_raw_field,

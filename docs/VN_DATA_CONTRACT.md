@@ -80,6 +80,10 @@ When SSI IntradayOhlc is usable:
 ```text
 intraday_status.status = ok
 intraday_source = SSI IntradayOhlc
+intraday_requested_timeframe = request hint, for example 1h
+intraday_actual_granularity = detected provider-returned cadence, for example 1m or 1h
+intraday_actual_granularity_seconds = detected cadence in seconds when regular
+intraday_cadence_status = matched, different_from_requested, irregular, unknown, or unavailable
 intraday_candles = [ ... ]
 intraday_pulse = { ... }
 ```
@@ -89,13 +93,14 @@ When intraday is unavailable, stale, disabled, or date-mismatched:
 ```text
 intraday_status.status = unavailable or disabled
 intraday_source = SSI IntradayOhlc
+intraday_cadence_status = unavailable or unknown
 intraday_candles = []
 intraday_pulse = null
 ```
 
-Stale latest-date metadata and date-match details should move to `intraday_status` or diagnostics when there is no usable intraday section.
+Stale latest-date metadata, date-match details, and cadence diagnostics should move to `intraday_status` or diagnostics when there is no usable intraday section. `intraday_timeframe` is a compatibility request hint and must not be treated as the actual provider interval unless `intraday_cadence_status = matched`.
 
-The company endpoint follows the same missing-object rule. When nested company `intraday.status = unavailable`, `intraday.candles = []` and `intraday.pulse = null`. Company `intraday.diagnostics` may carry sanitized failure details such as `failure_class`, `endpoint`, `http_status`, and provider code.
+The company endpoint follows the same missing-object rule. When nested company `intraday.status = unavailable`, `intraday.candles = []` and `intraday.pulse = null`. Company `intraday.cadence_status` mirrors the watchlist cadence classification, and `intraday.diagnostics` may carry sanitized failure details such as `failure_class`, `endpoint`, `http_status`, and provider code.
 
 ### Realtime Snapshot
 
@@ -222,6 +227,16 @@ Rules:
 | KBS | Legacy optional only | Disabled by default |
 
 Compatibility aliases must stay within the same source owner. Do not use SSI DailyStockPrice close to overwrite `latest_price`, do not use DailyOhlc volume to fill matched volume, and do not use realtime, trade-tape, Mozyfin, or KBS values to fill daily fields.
+
+### DailyStockPrice Enrichment Contract
+
+`daily_stock_price.status` records provider-row availability. `daily_stock_price.quality_status` is `ok`, `partial`, or `unavailable`; it does not downgrade a usable SSI DailyOhlc row.
+
+Date alignment is exposed through `daily_stock_price.date`, `daily_stock_price.date_match`, and the compatibility fields `daily_stock_price_date`, `daily_stock_price_date_match`, and `daily_stock_price_staleness_reason`. Date-match values are `matched`, `mismatched`, `unknown`, or `unavailable`. Missing dates are `unknown`; failed or empty DailyStockPrice requests are `unavailable`.
+
+`missing_fields` and `field_coverage` describe normalized enrichment completeness. `units` includes only fields whose values exist, so units metadata is not evidence that a null field is available. Price/value fields use VND; volume fields use shares. Zero returned by SSI remains zero, while missing values remain null.
+
+Sanitized `daily_stock_price.diagnostics` may include endpoint name, requested symbol/date range, normalized row count, selected row date, DailyOhlc date, date match, missing fields, field coverage, and failure class. It must not include raw provider payloads, credentials, tokens, auth headers, account identifiers, or raw auth responses.
 
 ## UI Rendering Rules
 

@@ -33,6 +33,7 @@ Expected protection:
 - SSI realtime endpoint tests should prove unexpected realtime request failures return an optional unavailable response without leaking secrets or turning the dashboard into a full-page failure.
 - SSI streaming verification script tests import the script without starting streams, validate config-only/package-check/package-inspection modes, reject unsafe symbols/channels, default planned channels to no-space `X:FPT` format, preserve explicit old-space overrides with a warning, keep channel-format variants for diagnostics, use mocked manager/client/direct-official paths, classify callback/no-message/parser-zero/cache-hit/on-error/direct-start outcomes, bound safe samples, capture official stdout/stderr without raw printing, stop in `finally`, and keep the script-local cache separate from the backend cache.
 - SSI intraday stale/unavailable returns `intraday_pulse = null` and `intraday_candles = []`.
+- SSI intraday cadence tests cover regular `1m`, `5m`, and `1h` rows, requested-versus-actual mismatch, irregular spacing, and unavailable cadence status without changing DailyOhlc ownership.
 - SSI intraday provider failures are classified into sanitized diagnostics such as `rate_limited`, without raw payloads or credentials, and without changing DailyOhlc `latest_price` ownership.
 - SSI intraday provider-code/HTTP `429` starts a deterministic symbol/timeframe cooldown; active cooldown skips IntradayOhlc provider requests and remains unavailable without blocking DailyOhlc or DailyStockPrice.
 - SSI trade tape unavailable returns public `trade_tape = []`.
@@ -97,6 +98,8 @@ Add focused tests when implementing Data Quality Summary:
 - Company price source decision is reflected consistently in API and UI.
 - SSI profile metadata maps industry/sector aliases through `symbol_metadata`, watchlist rows, and company profile only when provider data exists.
 - SSI index components resolve provider-owned identifiers from IndexList, keep the public requested code stable, and expose sanitized diagnostics for unavailable component rows.
+- DailyStockPrice tests cover reference/limits, matched and put-through volume/value, foreign volume/value, adjusted close, zero-versus-null behavior, matched/mismatched/missing dates, unavailable enrichment, sanitized diagnostics, and unchanged SSI DailyOhlc `latest_price`.
+- Frontend tests assert shares/VND units, explicit SSI DailyStockPrice source labels, concise date-mismatch caveats, hidden null optional metrics, retained daily rows/chart, and isolated realtime refresh behavior.
 
 ## Phase 2 Contract Tests Needed
 

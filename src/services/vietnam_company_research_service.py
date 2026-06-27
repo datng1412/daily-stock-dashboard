@@ -74,6 +74,9 @@ class VietnamCompanyResearchService:
     def _snapshot_from_watch_item(self, symbol: str, row: Dict[str, Any]) -> Dict[str, Any]:
         metadata = _dict(row.get("symbol_metadata"))
         daily_stock_price = _dict(row.get("daily_stock_price"))
+        if daily_stock_price:
+            daily_stock_price = dict(daily_stock_price)
+            daily_stock_price["source"] = SSI_DAILY_STOCK_PRICE_SOURCE
         price_limit = _dict(row.get("price_limit"))
         foreign = _dict(row.get("foreign"))
         indicators = _dict(row.get("indicators"))
@@ -127,8 +130,28 @@ class VietnamCompanyResearchService:
             "foreign_buy_value": _first_present(daily_stock_price.get("foreign_buy_value"), foreign.get("buy_value")),
             "foreign_sell_value": _first_present(daily_stock_price.get("foreign_sell_value"), foreign.get("sell_value")),
             "foreign_net_value": _first_present(daily_stock_price.get("foreign_net_value"), row.get("ssi_foreign_net_value"), foreign.get("net_value")),
+            "date": _first_present(daily_stock_price.get("date"), row.get("daily_stock_price_date"), foreign.get("date")),
+            "date_match": _first_present(daily_stock_price.get("date_match"), row.get("daily_stock_price_date_match"), foreign.get("date_match")),
             "source": SSI_DAILY_STOCK_PRICE_SOURCE,
         }
+        foreign_flow["volume_unit"] = (
+            "shares"
+            if _has_value(
+                foreign_flow["foreign_buy_volume"],
+                foreign_flow["foreign_sell_volume"],
+                foreign_flow["foreign_net_volume"],
+            )
+            else None
+        )
+        foreign_flow["value_unit"] = (
+            "VND"
+            if _has_value(
+                foreign_flow["foreign_buy_value"],
+                foreign_flow["foreign_sell_value"],
+                foreign_flow["foreign_net_value"],
+            )
+            else None
+        )
         foreign_flow["status"] = _status_for(
             foreign_flow["foreign_buy_volume"],
             foreign_flow["foreign_sell_volume"],
@@ -167,6 +190,7 @@ class VietnamCompanyResearchService:
             "granularity_seconds": row.get("intraday_granularity_seconds"),
             "actual_granularity_seconds": row.get("intraday_actual_granularity_seconds") or row.get("intraday_granularity_seconds"),
             "granularity_label": row.get("intraday_granularity_label"),
+            "cadence_status": row.get("intraday_cadence_status") or intraday_status.get("intraday_cadence_status"),
             "latest_date": row.get("intraday_latest_date"),
             "daily_price_date": row.get("daily_price_date"),
             "date_match": row.get("date_match"),
@@ -206,6 +230,7 @@ class VietnamCompanyResearchService:
             "profile": profile,
             "price": price,
             "trading_stats": trading_stats,
+            "daily_stock_price": daily_stock_price,
             "foreign_flow": foreign_flow,
             "technical": technical,
             "intraday": intraday,
@@ -237,10 +262,10 @@ class VietnamCompanyResearchService:
             for field in ("reference_price", "ceiling_price", "floor_price")
         )
         daily_stock_status = (
-            "ok"
+            str(daily_stock_price.get("quality_status") or "ok")
             if daily_stock_price.get("status") == "ok"
-            or foreign_flow.get("status") == "ok"
-            or has_daily_stock_price_fields
+            else "ok"
+            if foreign_flow.get("status") == "ok" or has_daily_stock_price_fields
             else "missing"
         )
         intraday_status = _dict(intraday).get("status") or "unavailable"
@@ -295,8 +320,24 @@ class VietnamCompanyResearchService:
             "foreign_buy_value": None,
             "foreign_sell_value": None,
             "foreign_net_value": None,
+            "date": None,
+            "date_match": "unavailable",
+            "volume_unit": None,
+            "value_unit": None,
             "source": SSI_DAILY_STOCK_PRICE_SOURCE,
             "status": "missing",
+        }
+        missing_daily_stock_price = {
+            "status": "unavailable",
+            "quality_status": "unavailable",
+            "source": SSI_DAILY_STOCK_PRICE_SOURCE,
+            "date": None,
+            "date_match": "unavailable",
+            "staleness_reason": "SSI DailyStockPrice enrichment is unavailable.",
+            "missing_fields": [],
+            "field_coverage": {},
+            "units": {},
+            "diagnostics": {},
         }
         missing_technical = {
             "ma20": None,
@@ -312,8 +353,11 @@ class VietnamCompanyResearchService:
             "candles": [],
             "pulse": None,
             "granularity": "unknown",
+            "actual_granularity": "unknown",
             "granularity_seconds": None,
+            "actual_granularity_seconds": None,
             "granularity_label": "provider-returned",
+            "cadence_status": "unavailable",
             "latest_date": None,
             "daily_price_date": None,
             "date_match": "unknown",
@@ -339,12 +383,13 @@ class VietnamCompanyResearchService:
             "profile": profile,
             "price": missing_price,
             "trading_stats": missing_trading,
+            "daily_stock_price": missing_daily_stock_price,
             "foreign_flow": missing_foreign,
             "technical": missing_technical,
             "intraday": missing_intraday,
             "realtime": missing_realtime,
             "trade_tape": missing_trade_tape,
-            "source_coverage": self._source_coverage(profile, missing_price, missing_trading, missing_foreign, missing_technical, {}, missing_intraday, missing_realtime, missing_trade_tape),
+            "source_coverage": self._source_coverage(profile, missing_price, missing_trading, missing_foreign, missing_technical, missing_daily_stock_price, missing_intraday, missing_realtime, missing_trade_tape),
             "news": self._placeholder("not_implemented", NEWS_FUTURE_SOURCE, NOT_IMPLEMENTED_MESSAGE),
             "financials": self._placeholder("not_implemented", EXTERNAL_FUTURE_SOURCE),
             "events": self._placeholder("not_implemented", EXTERNAL_FUTURE_SOURCE),

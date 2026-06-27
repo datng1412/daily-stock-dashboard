@@ -319,7 +319,7 @@ def test_data_quality_summary_has_no_mismatch_when_daily_sources_match():
 
     assert summary["canonical_price_source"] == "SSI DailyOhlc"
     assert summary["checks"]["daily_ohlc"] == "ok"
-    assert summary["checks"]["daily_stock_price"] == "ok"
+    assert summary["checks"]["daily_stock_price"] == "partial"
     assert "daily_ohlc_vs_daily_stock_price_mismatch" not in _issue_codes(summary)
     assert item["latest_price"] == 130.0
     assert item["latest_price_source"] == "SSI DailyOhlc"
@@ -394,6 +394,8 @@ def test_data_quality_summary_warns_on_same_date_daily_source_mismatch():
         "daily_ohlc_close": 130.0,
         "daily_stock_price_close": 131.0,
         "date": "2026-06-30",
+        "daily_ohlc_source": "SSI DailyOhlc",
+        "daily_stock_price_source": "SSI DailyStockPrice",
     }
     assert item["latest_price"] == 130.0
     assert item["latest_price_source"] == "SSI DailyOhlc"

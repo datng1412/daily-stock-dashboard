@@ -424,6 +424,24 @@ const intradayGranularityText = (item?: VietnamWatchItem | null) => (
   ?? 'provider-returned'
 );
 
+const intradayCadenceStatus = (item?: VietnamWatchItem | null) => (
+  item?.intradayCadenceStatus
+  ?? item?.intradayStatus?.intradayCadenceStatus
+  ?? item?.intradayPulse?.intradayCadenceStatus
+  ?? 'unknown'
+);
+
+const intradayCadenceText = (item?: VietnamWatchItem | null) => {
+  const cadence = intradayGranularityText(item);
+  const requested = item?.intradayRequestedTimeframe ?? item?.intradayTimeframe ?? null;
+  const status = intradayCadenceStatus(item);
+  if (status === 'matched' && requested) return `Provider cadence: ${cadence}`;
+  if (status === 'different_from_requested' && requested) return `Returned cadence differs from requested ${requested}: ${cadence}`;
+  if (status === 'irregular') return 'Provider cadence irregular';
+  if (status === 'unavailable') return 'Provider cadence unavailable';
+  return cadence === 'unknown' || cadence === 'provider-returned' ? 'Provider cadence unknown' : `Provider cadence: ${cadence}`;
+};
+
 const intradayLatestClose = (item: VietnamWatchItem) => item.intradayPulse?.latestIntradayClose ?? item.intradayPulse?.latest1hClose ?? null;
 const intradayLatestHigh = (item: VietnamWatchItem) => item.intradayPulse?.latestIntradayHigh ?? item.intradayPulse?.latest1hHigh ?? null;
 const intradayLatestLow = (item: VietnamWatchItem) => item.intradayPulse?.latestIntradayLow ?? item.intradayPulse?.latest1hLow ?? null;
@@ -3296,24 +3314,44 @@ const StockDetailView: React.FC<{
   const ssiDailyClose = item.latestPrice ?? item.close ?? null;
   const priceVsReference = ssiDailyClose != null && ssiReferencePrice != null ? ssiDailyClose - ssiReferencePrice : null;
   const priceVsReferencePct = priceVsReference != null && ssiReferencePrice ? priceVsReference / ssiReferencePrice * 100 : null;
-  const ssiDailyHasCoreValues = [ssiReferencePrice, ssiCeilingPrice, ssiFloorPrice, ssiDailyStockPrice.date].some(hasDisplayValue);
+  const ssiDailyHasCoreValues = [
+    ssiReferencePrice,
+    ssiCeilingPrice,
+    ssiFloorPrice,
+    ssiDailyStockPrice.adjustedClose,
+    ssiDailyStockPrice.matchedVolume,
+    ssiDailyStockPrice.matchedValue,
+    ssiDailyStockPrice.putThroughVolume,
+    ssiDailyStockPrice.putThroughValue,
+    ssiDailyStockPrice.foreignBuyVolume,
+    ssiDailyStockPrice.foreignSellVolume,
+    ssiDailyStockPrice.foreignNetVolume,
+    ssiDailyStockPrice.foreignBuyValue,
+    ssiDailyStockPrice.foreignSellValue,
+    ssiDailyStockPrice.foreignNetValue,
+  ].some(hasDisplayValue);
   const ssiDailyStatus = ssiDailyStockPrice.status ?? item.priceLimit?.status ?? (
     ssiDailyHasCoreValues ? 'ok' : 'unavailable'
   );
   const hasSsiDailyStockPrice = ssiDailyStatus === 'ok' && ssiDailyHasCoreValues;
-  const ssiDailySource = ssiDailyStockPrice.source ?? item.referenceSource ?? item.priceLimit?.source ?? 'SSI DailyStockPrice';
+  const rawSsiDailySource = ssiDailyStockPrice.source ?? item.referenceSource ?? item.priceLimit?.source;
+  const ssiDailySource = !rawSsiDailySource || rawSsiDailySource === 'SSI' ? 'SSI DailyStockPrice' : rawSsiDailySource;
+  const ssiDailyQualityStatus = ssiDailyStockPrice.qualityStatus ?? ssiDailyStatus;
+  const ssiDailyDateMatch = ssiDailyStockPrice.dateMatch ?? item.dailyStockPriceDateMatch ?? 'unknown';
   const ssiDailyRows = [
-    { label: 'Reference price', value: formatPrice(ssiReferencePrice), show: hasDisplayValue(ssiReferencePrice) },
-    { label: 'Ceiling price / floor price', value: `${formatPrice(ssiCeilingPrice)} / ${formatPrice(ssiFloorPrice)}`, show: hasDisplayValue(ssiCeilingPrice) || hasDisplayValue(ssiFloorPrice) },
+    { label: 'Reference price', value: `${formatPrice(ssiReferencePrice)} VND`, show: hasDisplayValue(ssiReferencePrice) },
+    { label: 'Ceiling price / floor price', value: `${formatPrice(ssiCeilingPrice)} / ${formatPrice(ssiFloorPrice)} VND`, show: hasDisplayValue(ssiCeilingPrice) && hasDisplayValue(ssiFloorPrice) },
+    { label: 'Ceiling price', value: `${formatPrice(ssiCeilingPrice)} VND`, show: hasDisplayValue(ssiCeilingPrice) && !hasDisplayValue(ssiFloorPrice) },
+    { label: 'Floor price', value: `${formatPrice(ssiFloorPrice)} VND`, show: hasDisplayValue(ssiFloorPrice) && !hasDisplayValue(ssiCeilingPrice) },
     { label: 'Foreign buy', value: `${formatNumber(ssiDailyStockPrice.foreignBuyVolume)} shares`, show: hasDisplayValue(ssiDailyStockPrice.foreignBuyVolume) },
     { label: 'Foreign sell', value: `${formatNumber(ssiDailyStockPrice.foreignSellVolume)} shares`, show: hasDisplayValue(ssiDailyStockPrice.foreignSellVolume) },
     { label: 'Foreign net volume', value: `${formatNumber(ssiDailyStockPrice.foreignNetVolume ?? item.ssiForeignNetVolume ?? item.foreign?.net)} shares`, tone: signalTone(ssiDailyStockPrice.foreignNetVolume ?? item.ssiForeignNetVolume ?? item.foreign?.net), show: hasDisplayValue(ssiDailyStockPrice.foreignNetVolume ?? item.ssiForeignNetVolume ?? item.foreign?.net) },
-    { label: 'Foreign net value', value: formatNumber(ssiDailyStockPrice.foreignNetValue ?? item.ssiForeignNetValue ?? item.foreign?.netValue), tone: signalTone(ssiDailyStockPrice.foreignNetValue ?? item.ssiForeignNetValue ?? item.foreign?.netValue), show: hasDisplayValue(ssiDailyStockPrice.foreignNetValue ?? item.ssiForeignNetValue ?? item.foreign?.netValue) },
-    { label: 'Matched volume', value: formatNumber(ssiDailyStockPrice.matchedVolume ?? item.ssiMatchedVolume), show: hasDisplayValue(ssiDailyStockPrice.matchedVolume ?? item.ssiMatchedVolume) },
-    { label: 'Matched value', value: formatNumber(ssiDailyStockPrice.matchedValue ?? item.ssiMatchedValue), show: hasDisplayValue(ssiDailyStockPrice.matchedValue ?? item.ssiMatchedValue) },
-    { label: 'Put-through volume', value: formatNumber(ssiDailyStockPrice.putThroughVolume ?? item.ssiPutThroughVolume), show: hasDisplayValue(ssiDailyStockPrice.putThroughVolume ?? item.ssiPutThroughVolume) },
-    { label: 'Put-through value', value: formatNumber(ssiDailyStockPrice.putThroughValue ?? item.ssiPutThroughValue), show: hasDisplayValue(ssiDailyStockPrice.putThroughValue ?? item.ssiPutThroughValue) },
-    { label: 'Adjusted close', value: formatPrice(ssiDailyStockPrice.adjustedClose ?? item.ssiAdjustedClose), show: hasDisplayValue(ssiDailyStockPrice.adjustedClose ?? item.ssiAdjustedClose) },
+    { label: 'Foreign net value', value: `${formatNumber(ssiDailyStockPrice.foreignNetValue ?? item.ssiForeignNetValue ?? item.foreign?.netValue)} VND`, tone: signalTone(ssiDailyStockPrice.foreignNetValue ?? item.ssiForeignNetValue ?? item.foreign?.netValue), show: hasDisplayValue(ssiDailyStockPrice.foreignNetValue ?? item.ssiForeignNetValue ?? item.foreign?.netValue) },
+    { label: 'Matched volume', value: `${formatNumber(ssiDailyStockPrice.matchedVolume ?? item.ssiMatchedVolume)} shares`, show: hasDisplayValue(ssiDailyStockPrice.matchedVolume ?? item.ssiMatchedVolume) },
+    { label: 'Matched value', value: `${formatNumber(ssiDailyStockPrice.matchedValue ?? item.ssiMatchedValue)} VND`, show: hasDisplayValue(ssiDailyStockPrice.matchedValue ?? item.ssiMatchedValue) },
+    { label: 'Put-through volume', value: `${formatNumber(ssiDailyStockPrice.putThroughVolume ?? item.ssiPutThroughVolume)} shares`, show: hasDisplayValue(ssiDailyStockPrice.putThroughVolume ?? item.ssiPutThroughVolume) },
+    { label: 'Put-through value', value: `${formatNumber(ssiDailyStockPrice.putThroughValue ?? item.ssiPutThroughValue)} VND`, show: hasDisplayValue(ssiDailyStockPrice.putThroughValue ?? item.ssiPutThroughValue) },
+    { label: 'Adjusted close', value: `${formatPrice(ssiDailyStockPrice.adjustedClose ?? item.ssiAdjustedClose)} VND`, show: hasDisplayValue(ssiDailyStockPrice.adjustedClose ?? item.ssiAdjustedClose) },
   ].filter((row) => row.show);
   const symbolMetadata = item.symbolMetadata ?? {};
   const symbolMetadataRows = [
@@ -3351,6 +3389,14 @@ const StockDetailView: React.FC<{
       </div>
       <div className="mt-4 grid gap-3">
       <SelectedTickerDisclosure title="Price context" defaultOpen>
+        <p className="mb-3 text-xs text-secondary-text">
+          Daily close: SSI DailyOhlc · Reference and limits: SSI DailyStockPrice · Prices: VND.
+        </p>
+        {ssiDailyDateMatch === 'mismatched' ? (
+          <p className="mb-3 rounded-lg border border-warning/30 bg-warning/10 p-2 text-xs text-warning">
+            DailyStockPrice date differs from DailyOhlc.
+          </p>
+        ) : null}
         <dl className="grid gap-3 text-sm md:grid-cols-3 xl:grid-cols-4">
           <div className="rounded-lg bg-card/60 p-3">
             <dt className="text-xs text-secondary-text">Daily close</dt>
@@ -3379,7 +3425,7 @@ const StockDetailView: React.FC<{
               {formatReferenceDelta(priceVsReference, priceVsReferencePct)}
             </dd>
           </div>
-          {ssiDailyRows.filter((row) => ['Reference price', 'Ceiling price / floor price', 'Adjusted close'].includes(row.label)).map((row) => (
+          {ssiDailyRows.filter((row) => ['Reference price', 'Ceiling price / floor price', 'Ceiling price', 'Floor price', 'Adjusted close'].includes(row.label)).map((row) => (
             <div key={`${item.ticker}-price-context-${row.label}`} className="rounded-lg bg-card/60 p-3">
               <dt className="text-xs text-secondary-text">{row.label === 'Reference price' ? 'Reference' : row.label === 'Ceiling price / floor price' ? 'Ceiling / floor' : row.label}</dt>
               <dd className={cn('mt-1 font-medium text-foreground', row.tone)}>{row.value}</dd>
@@ -3400,6 +3446,9 @@ const StockDetailView: React.FC<{
       </SelectedTickerDisclosure>
 
       <SelectedTickerDisclosure title="Flow context">
+        <p className="mb-3 text-xs text-secondary-text">
+          SSI DailyStockPrice · Volume fields: shares · Value fields: VND.
+        </p>
         <dl className="grid gap-3 text-sm md:grid-cols-3 xl:grid-cols-4">
           <div className="rounded-lg bg-card/60 p-3">
             <dt className="text-xs text-secondary-text">20D avg volume</dt>
@@ -3530,8 +3579,9 @@ const StockDetailView: React.FC<{
             <p className="mt-1 text-xs text-secondary-text">Reference, limits, matched, put-through, and foreign fields.</p>
           </div>
           <div className="flex flex-wrap gap-1">
-            <Badge variant={ssiDailyStatus === 'ok' ? 'info' : 'default'}>{ssiDailyStatus ?? 'unavailable'}</Badge>
+            <Badge variant={ssiDailyQualityStatus === 'ok' ? 'info' : 'warning'}>{ssiDailyQualityStatus ?? 'unavailable'}</Badge>
             <Badge variant="default">{ssiDailySource}</Badge>
+            <Badge variant={dateMatchVariant(ssiDailyDateMatch)}>{ssiDailyDateMatch}</Badge>
           </div>
         </div>
         <p className="mt-3 text-sm text-secondary-text">
@@ -3601,13 +3651,13 @@ const StockDetailView: React.FC<{
           <div>
             <h3 className="text-sm font-semibold text-foreground">Intraday</h3>
             <p className="mt-1 text-xs text-secondary-text">
-              {item.intradaySource ?? item.intradayStatus?.source ?? 'SSI IntradayOhlc'} provider-returned candles ({intradayGranularityText(item)}) status: {item.intradayStatus?.status ?? 'disabled'}.
+              {item.intradaySource ?? item.intradayStatus?.source ?? 'SSI IntradayOhlc'} provider-returned candles. {intradayCadenceText(item)}. Status: {item.intradayStatus?.status ?? 'disabled'}.
             </p>
           </div>
           <div className="flex flex-wrap gap-1">
             <Badge variant={sectionStateVariant(intradaySectionState)}>{intradaySectionState}</Badge>
             <Badge variant="default">{item.intradaySource ?? item.intradayStatus?.source ?? 'SSI'}</Badge>
-            <Badge variant="default">{intradayGranularityText(item)}</Badge>
+            <Badge variant={intradayCadenceStatus(item) === 'matched' ? 'info' : 'warning'}>{intradayCadenceText(item)}</Badge>
             <Badge variant={item.intradayIsRealtimeQuote ? 'success' : 'warning'}>
               {item.intradayIsRealtimeQuote ? 'Realtime quote' : 'Not realtime quote'}
             </Badge>
@@ -3675,6 +3725,11 @@ const StockDetailView: React.FC<{
           <div className="rounded-lg bg-card/60 p-3">
             <dt className="text-xs text-secondary-text">Session candles</dt>
             <dd className="mt-1 font-medium text-foreground">{formatNumber(sessionCandlesCount)}</dd>
+          </div>
+          <div className="rounded-lg bg-card/60 p-3">
+            <dt className="text-xs text-secondary-text">Provider cadence</dt>
+            <dd className="mt-1 font-medium text-foreground">{intradayCadenceText(item)}</dd>
+            <dd className="mt-1 text-xs text-secondary-text">Requested {item.intradayRequestedTimeframe ?? item.intradayTimeframe ?? '-'}</dd>
           </div>
           <div className="rounded-lg bg-card/60 p-3">
             <dt className="text-xs text-secondary-text">Intraday / daily date</dt>

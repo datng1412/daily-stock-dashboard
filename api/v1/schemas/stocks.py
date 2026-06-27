@@ -132,8 +132,11 @@ class VietnamDailyStockPrice(BaseModel):
     """SSI DailyStockPrice enrichment row for Vietnam dashboard detail fields."""
 
     status: Optional[str] = None
+    quality_status: Optional[str] = None
     reason: Optional[str] = None
     date: Optional[str] = None
+    date_match: Optional[str] = None
+    staleness_reason: Optional[str] = None
     reference_price: Optional[float] = None
     ceiling_price: Optional[float] = None
     floor_price: Optional[float] = None
@@ -155,6 +158,10 @@ class VietnamDailyStockPrice(BaseModel):
     foreign_sell_value: Optional[float] = None
     foreign_net_value: Optional[float] = None
     source: Optional[str] = None
+    missing_fields: List[str] = Field(default_factory=list)
+    field_coverage: Dict[str, bool] = Field(default_factory=dict)
+    units: Dict[str, str] = Field(default_factory=dict)
+    diagnostics: Dict[str, Any] = Field(default_factory=dict)
 
 
 class VietnamSymbolMetadata(BaseModel):
@@ -216,6 +223,9 @@ class VietnamWatchItem(BaseModel):
     daily_close: Optional[float] = None
     price_date: Optional[str] = None
     ohlcv_date: Optional[str] = None
+    daily_stock_price_date: Optional[str] = None
+    daily_stock_price_date_match: Optional[str] = None
+    daily_stock_price_staleness_reason: Optional[str] = None
     quote_date: Optional[str] = None
     foreign_net_date: Optional[str] = None
     foreign_date_match: Optional[str] = None
@@ -264,6 +274,7 @@ class VietnamWatchItem(BaseModel):
     intraday_granularity_seconds: Optional[float] = None
     intraday_actual_granularity_seconds: Optional[float] = None
     intraday_granularity_label: Optional[str] = None
+    intraday_cadence_status: Optional[str] = None
     intraday_latest_date: Optional[str] = None
     daily_price_date: Optional[str] = None
     date_match: Optional[str] = None
@@ -419,6 +430,10 @@ class VietnamCompanyForeignFlow(BaseModel):
     foreign_buy_value: Optional[float] = None
     foreign_sell_value: Optional[float] = None
     foreign_net_value: Optional[float] = None
+    date: Optional[str] = None
+    date_match: Optional[str] = None
+    volume_unit: Optional[str] = None
+    value_unit: Optional[str] = None
     source: Optional[str] = None
     status: str = "missing"
 
@@ -447,6 +462,7 @@ class VietnamCompanyIntraday(BaseModel):
     granularity_seconds: Optional[float] = None
     actual_granularity_seconds: Optional[float] = None
     granularity_label: Optional[str] = None
+    cadence_status: Optional[str] = None
     latest_date: Optional[str] = None
     daily_price_date: Optional[str] = None
     date_match: Optional[str] = None
@@ -499,6 +515,7 @@ class VietnamCompanyResearchResponse(BaseModel):
     profile: VietnamCompanyProfile
     price: VietnamCompanyPrice
     trading_stats: VietnamCompanyTradingStats
+    daily_stock_price: VietnamDailyStockPrice = Field(default_factory=VietnamDailyStockPrice)
     foreign_flow: VietnamCompanyForeignFlow
     technical: VietnamCompanyTechnical
     intraday: VietnamCompanyIntraday = Field(default_factory=VietnamCompanyIntraday)

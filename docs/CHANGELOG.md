@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [improvement] Detect SSI IntradayOhlc actual cadence and expose conservative cadence status while preserving daily SSI price ownership.
+- [fix] Harden SSI DailyStockPrice enrichment with explicit date alignment, partial coverage, units, sanitized diagnostics, and null-safe dashboard/company rendering without changing canonical DailyOhlc price.
 - [documentation] Record Phase 4.0C-10B VN SSI realtime release-gate validation and local Windows validation caveats.
 - [fix] Restore VN dashboard stability by isolating realtime polling from daily watchlist/chart state and making optional realtime endpoint failures fail open.
 - [fix] Harden the VN SSI streaming realtime runtime with idle diagnostics, bounded reconnect backoff, sanitized runtime fields, and clean lifecycle shutdown.

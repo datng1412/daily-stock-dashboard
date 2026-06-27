@@ -124,6 +124,17 @@ const hasCompanyRealtimeData = (snapshot: VietnamCompanyResearchResponse) => (
   && hasMetricValue(snapshot.realtime.snapshot?.price ?? snapshot.realtime.snapshot?.realtimePrice)
 );
 
+const companyIntradayCadenceText = (snapshot: VietnamCompanyResearchResponse) => {
+  const intraday = snapshot.intraday;
+  const cadence = intraday?.granularityLabel ?? intraday?.actualGranularity ?? intraday?.granularity ?? 'unknown';
+  const requested = intraday?.requestedTimeframe ?? null;
+  if (intraday?.cadenceStatus === 'matched' && requested) return `Provider cadence: ${cadence}`;
+  if (intraday?.cadenceStatus === 'different_from_requested' && requested) return `Returned cadence differs from requested ${requested}: ${cadence}`;
+  if (intraday?.cadenceStatus === 'irregular') return 'Provider cadence irregular';
+  if (intraday?.cadenceStatus === 'unavailable') return 'Provider cadence unavailable';
+  return cadence === 'unknown' || cadence === 'provider-returned' ? 'Provider cadence unknown' : `Provider cadence: ${cadence}`;
+};
+
 const hasCompanyTradeTapeData = (snapshot: VietnamCompanyResearchResponse) => (
   snapshot.tradeTape?.status === 'ok'
   && (snapshot.tradeTape.trades?.length ?? 0) > 0
@@ -193,6 +204,7 @@ const SourceCoveragePanel: React.FC<{ snapshot: VietnamCompanyResearchResponse }
 
 const CompanyDiagnosticsPanel: React.FC<{ snapshot: VietnamCompanyResearchResponse }> = ({ snapshot }) => {
   const rows = [
+    ...liveStatusDiagnosticRows('SSI DailyStockPrice status', snapshot.dailyStockPrice?.diagnostics),
     ...liveStatusDiagnosticRows('SSI intraday status', snapshot.intraday?.diagnostics),
     ...liveStatusDiagnosticRows('SSI realtime status', snapshot.realtime?.diagnostics),
     ...liveStatusDiagnosticRows('SSI trade tape status', snapshot.tradeTape?.diagnostics),
@@ -301,39 +313,49 @@ const VietnamCompanyResearchPage: React.FC = () => {
   if (!snapshot) return null;
 
   const priceRows: MetricRow[] = [
-    { label: 'Canonical latest price', value: snapshot.price.latestPrice, formatter: formatPrice },
-    { label: 'Daily close', value: snapshot.price.dailyClose, formatter: formatPrice },
-    { label: 'Reference price', value: snapshot.price.referencePrice, formatter: formatPrice },
-    { label: 'Ceiling price', value: snapshot.price.ceilingPrice, formatter: formatPrice },
-    { label: 'Floor price', value: snapshot.price.floorPrice, formatter: formatPrice },
+    { label: 'Canonical latest price (VND)', value: snapshot.price.latestPrice, formatter: formatPrice },
+    { label: 'Daily close (VND)', value: snapshot.price.dailyClose, formatter: formatPrice },
+    { label: 'Reference price (VND)', value: snapshot.price.referencePrice, formatter: formatPrice },
+    { label: 'Ceiling price (VND)', value: snapshot.price.ceilingPrice, formatter: formatPrice },
+    { label: 'Floor price (VND)', value: snapshot.price.floorPrice, formatter: formatPrice },
     { label: 'Price date', value: snapshot.price.priceDate, formatter: (value) => formatNumber(value) },
   ];
   const tradingRows: MetricRow[] = [
-    { label: 'Open', value: snapshot.tradingStats.open, formatter: formatPrice },
-    { label: 'High', value: snapshot.tradingStats.high, formatter: formatPrice },
-    { label: 'Low', value: snapshot.tradingStats.low, formatter: formatPrice },
-    { label: 'Close', value: snapshot.tradingStats.close, formatter: formatPrice },
-    { label: 'Daily OHLCV volume', value: snapshot.tradingStats.volume },
-    { label: 'Daily OHLCV value', value: snapshot.tradingStats.value },
+    { label: 'Open (VND)', value: snapshot.tradingStats.open, formatter: formatPrice },
+    { label: 'High (VND)', value: snapshot.tradingStats.high, formatter: formatPrice },
+    { label: 'Low (VND)', value: snapshot.tradingStats.low, formatter: formatPrice },
+    { label: 'Close (VND)', value: snapshot.tradingStats.close, formatter: formatPrice },
+    { label: 'Daily OHLCV volume (shares)', value: snapshot.tradingStats.volume },
+    { label: 'Daily OHLCV value (VND)', value: snapshot.tradingStats.value },
   ];
+  const dailyStockPriceRows: MetricRow[] = [
+    { label: 'Matched volume (shares)', value: snapshot.dailyStockPrice?.matchedVolume },
+    { label: 'Matched value (VND)', value: snapshot.dailyStockPrice?.matchedValue },
+    { label: 'Put-through volume (shares)', value: snapshot.dailyStockPrice?.putThroughVolume },
+    { label: 'Put-through value (VND)', value: snapshot.dailyStockPrice?.putThroughValue },
+    { label: 'Adjusted close (VND)', value: snapshot.dailyStockPrice?.adjustedClose, formatter: formatPrice },
+    { label: 'DailyStockPrice date', value: snapshot.dailyStockPrice?.date, formatter: (value?: number | string | null) => formatNumber(value) },
+  ].filter((row: MetricRow) => hasMetricValue(row.value));
+  const dailyStockPriceStatus = snapshot.dailyStockPrice?.qualityStatus ?? snapshot.dailyStockPrice?.status ?? 'unavailable';
+  const dailyStockPriceDateMatch = snapshot.dailyStockPrice?.dateMatch ?? snapshot.foreignFlow.dateMatch ?? 'unknown';
   const foreignRows: MetricRow[] = [
-    { label: 'Foreign buy volume', value: snapshot.foreignFlow.foreignBuyVolume },
-    { label: 'Foreign sell volume', value: snapshot.foreignFlow.foreignSellVolume },
+    { label: 'Foreign buy volume (shares)', value: snapshot.foreignFlow.foreignBuyVolume },
+    { label: 'Foreign sell volume (shares)', value: snapshot.foreignFlow.foreignSellVolume },
     {
-      label: 'Foreign net volume',
+      label: 'Foreign net volume (shares)',
       value: snapshot.foreignFlow.foreignNetVolume,
       formatter: formatSignedNumber,
       tone: typeof snapshot.foreignFlow.foreignNetVolume === 'number' && snapshot.foreignFlow.foreignNetVolume < 0 ? 'text-danger' : 'text-success',
     },
-    { label: 'Foreign buy value', value: snapshot.foreignFlow.foreignBuyValue },
-    { label: 'Foreign sell value', value: snapshot.foreignFlow.foreignSellValue },
+    { label: 'Foreign buy value (VND)', value: snapshot.foreignFlow.foreignBuyValue },
+    { label: 'Foreign sell value (VND)', value: snapshot.foreignFlow.foreignSellValue },
     {
-      label: 'Foreign net value',
+      label: 'Foreign net value (VND)',
       value: snapshot.foreignFlow.foreignNetValue,
       formatter: formatSignedNumber,
       tone: typeof snapshot.foreignFlow.foreignNetValue === 'number' && snapshot.foreignFlow.foreignNetValue < 0 ? 'text-danger' : 'text-success',
     },
-  ];
+  ].filter((row: MetricRow) => hasMetricValue(row.value));
   const technicalRows: MetricRow[] = [
     { label: 'MA20', value: snapshot.technical.ma20, formatter: formatPrice },
     { label: 'MA50', value: snapshot.technical.ma50, formatter: formatPrice },
@@ -358,6 +380,7 @@ const VietnamCompanyResearchPage: React.FC = () => {
     { label: 'Intraday change %', value: intradayPulse?.intradayChangePercent ?? intradayPulse?.latest1hChangePercent, formatter: (value) => `${formatNumber(value, 2)}%` },
     { label: 'Latest intraday volume', value: intradayPulse?.latestIntradayVolume ?? intradayPulse?.latest1hVolume },
     { label: 'Session volume from intraday', value: intradayPulse?.sessionVolumeFromIntraday ?? intradayPulse?.sessionVolumeFrom1H },
+    { label: 'Provider cadence', value: companyIntradayCadenceText(snapshot), formatter: (value) => formatNumber(value) },
     { label: 'Candles loaded', value: snapshot.intraday?.candles?.length ?? 0 },
   ];
   const realtimeRows: MetricRow[] = [
@@ -398,18 +421,43 @@ const VietnamCompanyResearchPage: React.FC = () => {
           <p className="mb-3 text-xs text-secondary-text">
             Canonical price: {formatSource(snapshot.price.canonicalSource ?? snapshot.price.source)}. Reference and limit fields: {formatSource(snapshot.price.referenceSource)}.
           </p>
+          {dailyStockPriceDateMatch === 'mismatched' ? (
+            <p className="mb-3 rounded-lg border border-warning/30 bg-warning/10 p-2 text-xs text-warning">
+              DailyStockPrice date differs from DailyOhlc.
+            </p>
+          ) : null}
           <MetricGrid rows={priceRows} />
         </SectionShell>
         <SectionShell title="Trading stats" source={snapshot.tradingStats.source} status={snapshot.tradingStats.status}>
           <MetricGrid rows={tradingRows} />
         </SectionShell>
+        <SectionShell title="DailyStockPrice enrichment" source={snapshot.dailyStockPrice?.source ?? 'SSI DailyStockPrice'} status={dailyStockPriceStatus}>
+          <p className="mb-3 text-xs text-secondary-text">
+            Matched and put-through volume use shares; matched and put-through value use VND. Canonical daily close remains SSI DailyOhlc.
+          </p>
+          {dailyStockPriceRows.length ? (
+            <MetricGrid rows={dailyStockPriceRows} />
+          ) : (
+            <p className="text-sm text-secondary-text">SSI DailyStockPrice enrichment unavailable.</p>
+          )}
+        </SectionShell>
         <SectionShell title="Foreign flow" source={snapshot.foreignFlow.source} status={snapshot.foreignFlow.status}>
-          <MetricGrid rows={foreignRows} />
+          <p className="mb-3 text-xs text-secondary-text">
+            SSI DailyStockPrice · Volume: shares · Value: VND.
+          </p>
+          {foreignRows.length ? (
+            <MetricGrid rows={foreignRows} />
+          ) : (
+            <p className="text-sm text-secondary-text">SSI DailyStockPrice foreign flow unavailable.</p>
+          )}
         </SectionShell>
         <SectionShell title="Technical snapshot" source={snapshot.technical.source} status={snapshot.technical.status}>
           <MetricGrid rows={technicalRows} />
         </SectionShell>
         <SectionShell title="Intraday pulse" source={snapshot.intraday?.source ?? 'SSI IntradayOhlc'} status={snapshot.intraday?.status ?? 'unavailable'}>
+          <p className="mb-3 text-xs text-secondary-text">
+            {companyIntradayCadenceText(snapshot)}. Requested {snapshot.intraday?.requestedTimeframe ?? '-'}; SSI IntradayOhlc is not a realtime matched quote.
+          </p>
           {hasIntradayData ? (
             <MetricGrid rows={intradayRows} />
           ) : (
