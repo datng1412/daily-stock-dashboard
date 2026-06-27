@@ -23,7 +23,7 @@ type DiagnosticRow = {
 };
 
 const statusVariant = (status?: string | null): StatusVariant => {
-  if (status === 'ok') return 'success';
+  if (status === 'ok' || status === 'complete') return 'success';
   if (status === 'partial') return 'warning';
   if (status === 'not_implemented') return 'info';
   if (status === 'missing' || status === 'unavailable' || status === 'disabled') return 'warning';
@@ -204,6 +204,7 @@ const SourceCoveragePanel: React.FC<{ snapshot: VietnamCompanyResearchResponse }
 
 const CompanyDiagnosticsPanel: React.FC<{ snapshot: VietnamCompanyResearchResponse }> = ({ snapshot }) => {
   const rows = [
+    ...liveStatusDiagnosticRows('SSI profile metadata status', snapshot.profile.diagnostics),
     ...liveStatusDiagnosticRows('SSI DailyStockPrice status', snapshot.dailyStockPrice?.diagnostics),
     ...liveStatusDiagnosticRows('SSI intraday status', snapshot.intraday?.diagnostics),
     ...liveStatusDiagnosticRows('SSI realtime status', snapshot.realtime?.diagnostics),
@@ -244,9 +245,13 @@ const CompanyHeader: React.FC<{ snapshot: VietnamCompanyResearchResponse; onRefr
           <Badge variant={statusVariant(snapshot.status)} size="md">{statusLabel(snapshot.status)}</Badge>
           <Badge variant="info" size="md">Company research</Badge>
         </div>
-        <p className="mt-2 text-sm text-secondary-text">
-          {snapshot.profile.name || 'Company name unavailable'}{snapshot.profile.exchange ? ` | ${snapshot.profile.exchange}` : ''}
-        </p>
+        {snapshot.profile.name || snapshot.profile.exchange || snapshot.profile.market ? (
+          <p className="mt-2 text-sm text-secondary-text">
+            {[snapshot.profile.name, snapshot.profile.exchange, snapshot.profile.market]
+              .filter((value, index, values) => Boolean(value) && values.indexOf(value) === index)
+              .join(' | ')}
+          </p>
+        ) : null}
       </div>
       <Button type="button" variant="secondary" onClick={onRefresh} isLoading={refreshing} loadingText="Refreshing">
         <RefreshCw className="h-4 w-4" />
@@ -320,6 +325,29 @@ const VietnamCompanyResearchPage: React.FC = () => {
     { label: 'Floor price (VND)', value: snapshot.price.floorPrice, formatter: formatPrice },
     { label: 'Price date', value: snapshot.price.priceDate, formatter: (value) => formatNumber(value) },
   ];
+  const profileRows: MetricRow[] = [
+    { label: 'Ticker', value: snapshot.profile.ticker },
+    { label: 'Company name', value: snapshot.profile.name },
+    { label: 'English name', value: snapshot.profile.nameEn },
+    { label: 'Exchange', value: snapshot.profile.exchange },
+    { label: 'Market', value: snapshot.profile.market },
+    { label: 'Industry', value: snapshot.profile.industry },
+    {
+      label: 'Sector',
+      value: snapshot.profile.sector,
+    },
+    { label: 'Security type', value: snapshot.profile.securityType },
+    { label: 'Issuer', value: snapshot.profile.issuer },
+    { label: 'Lot size', value: snapshot.profile.lotSize },
+    { label: 'Listed shares', value: snapshot.profile.listedShares },
+    { label: 'Listed date', value: snapshot.profile.listedDate },
+  ].filter((row: MetricRow) => (
+    hasMetricValue(row.value)
+    && !(row.label === 'Sector' && row.value === snapshot.profile.industry)
+  ));
+  const profileQualityStatus = snapshot.profile.qualityStatus ?? (
+    snapshot.profile.status === 'ok' ? 'partial' : 'unavailable'
+  );
   const tradingRows: MetricRow[] = [
     { label: 'Open (VND)', value: snapshot.tradingStats.open, formatter: formatPrice },
     { label: 'High (VND)', value: snapshot.tradingStats.high, formatter: formatPrice },
@@ -406,13 +434,13 @@ const VietnamCompanyResearchPage: React.FC = () => {
       {error ? <section className="rounded-lg border border-warning/30 bg-warning/10 p-3 text-sm text-warning">{error}</section> : null}
       <DataQualitySummary summary={snapshot.dataQualitySummary} />
       <section className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
-        <SectionShell title="Company profile" source={snapshot.profile.source} status={snapshot.profile.status}>
-          <MetricGrid rows={[
-            { label: 'Ticker', value: snapshot.profile.ticker, formatter: (value) => formatNumber(value) },
-            { label: 'Company name', value: snapshot.profile.name, formatter: (value) => formatNumber(value) },
-            { label: 'Exchange', value: snapshot.profile.exchange, formatter: (value) => formatNumber(value) },
-            { label: 'Industry', value: snapshot.profile.industry, formatter: (value) => formatNumber(value) },
-          ]} />
+        <SectionShell title="Company profile" source={snapshot.profile.source} status={profileQualityStatus}>
+          <MetricGrid rows={profileRows} />
+          {profileQualityStatus === 'partial' ? (
+            <p className="mt-3 text-xs text-secondary-text">Profile partial. Some metadata is unavailable.</p>
+          ) : profileQualityStatus === 'unavailable' ? (
+            <p className="mt-3 text-xs text-secondary-text">Profile unavailable. Daily SSI data is still available.</p>
+          ) : null}
         </SectionShell>
         <SourceCoveragePanel snapshot={snapshot} />
       </section>

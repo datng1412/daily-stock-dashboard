@@ -168,6 +168,8 @@ class VietnamSymbolMetadata(BaseModel):
     """SSI Securities/SecuritiesDetails metadata for Vietnam dashboard symbols."""
 
     status: Optional[str] = None
+    quality_status: Optional[str] = None
+    completeness: Optional[float] = None
     reason: Optional[str] = None
     symbol: Optional[str] = None
     exchange: Optional[str] = None
@@ -176,11 +178,15 @@ class VietnamSymbolMetadata(BaseModel):
     name: Optional[str] = None
     name_en: Optional[str] = None
     industry: Optional[str] = None
+    sector: Optional[str] = None
     issuer: Optional[str] = None
     lot_size: Optional[int] = None
     listed_shares: Optional[int] = None
     listed_date: Optional[str] = None
     source: Optional[str] = None
+    missing_fields: List[str] = Field(default_factory=list)
+    field_coverage: Dict[str, bool] = Field(default_factory=dict)
+    diagnostics: Dict[str, Any] = Field(default_factory=dict)
 
 
 class VietnamWatchItem(BaseModel):
@@ -196,6 +202,7 @@ class VietnamWatchItem(BaseModel):
     market: Optional[str] = None
     security_type: Optional[str] = None
     industry: Optional[str] = None
+    sector: Optional[str] = None
     metadata_source: Optional[str] = None
     symbol_metadata: VietnamSymbolMetadata = Field(default_factory=VietnamSymbolMetadata)
     issuer: Optional[str] = None
@@ -387,10 +394,23 @@ class VietnamCompanyProfile(BaseModel):
 
     ticker: str
     name: Optional[str] = None
+    name_en: Optional[str] = None
     exchange: Optional[str] = None
+    market: Optional[str] = None
     industry: Optional[str] = None
+    sector: Optional[str] = None
+    security_type: Optional[str] = None
+    issuer: Optional[str] = None
+    lot_size: Optional[int] = None
+    listed_shares: Optional[int] = None
+    listed_date: Optional[str] = None
     source: Optional[str] = None
     status: str = "missing"
+    quality_status: Optional[str] = None
+    completeness: Optional[float] = None
+    missing_fields: List[str] = Field(default_factory=list)
+    field_coverage: Dict[str, bool] = Field(default_factory=dict)
+    diagnostics: Dict[str, Any] = Field(default_factory=dict)
 
 
 class VietnamCompanyPrice(BaseModel):

@@ -83,13 +83,37 @@ class VietnamCompanyResearchService:
         bollinger = _dict(indicators.get("bollinger"))
 
         profile_name = _first_present(row.get("company_name"), row.get("name"), metadata.get("name"), metadata.get("name_en"))
+        metadata_status = metadata.get("status")
+        profile_status = (
+            metadata_status
+            if metadata_status in {"ok", "unavailable"}
+            else "ok"
+            if _has_value(profile_name, metadata.get("exchange"))
+            else "unavailable"
+        )
+        profile_quality = metadata.get("quality_status") or (
+            "partial" if profile_status == "ok" else "unavailable"
+        )
         profile = {
             "ticker": symbol,
             "name": profile_name,
+            "name_en": metadata.get("name_en"),
             "exchange": _first_present(row.get("exchange"), metadata.get("exchange"), row.get("market")),
+            "market": _first_present(row.get("market"), metadata.get("market")),
             "industry": _first_present(row.get("industry"), metadata.get("industry")),
+            "sector": _first_present(row.get("sector"), metadata.get("sector")),
+            "security_type": _first_present(row.get("security_type"), metadata.get("security_type")),
+            "issuer": _first_present(row.get("issuer"), metadata.get("issuer")),
+            "lot_size": _first_present(row.get("lot_size"), metadata.get("lot_size")),
+            "listed_shares": _first_present(row.get("listed_shares"), metadata.get("listed_shares")),
+            "listed_date": _first_present(row.get("listed_date"), metadata.get("listed_date")),
             "source": _first_present(metadata.get("source_label"), metadata.get("source")) or SSI_SECURITIES_DETAILS_SOURCE,
-            "status": "ok" if metadata.get("status") == "ok" or _has_value(profile_name, row.get("exchange"), metadata.get("exchange")) else "missing",
+            "status": profile_status,
+            "quality_status": profile_quality,
+            "completeness": metadata.get("completeness"),
+            "missing_fields": list(metadata.get("missing_fields") or []),
+            "field_coverage": dict(metadata.get("field_coverage") or {}),
+            "diagnostics": dict(metadata.get("diagnostics") or {}),
         }
         if profile["source"] == "SSI":
             profile["source"] = SSI_SECURITIES_DETAILS_SOURCE
@@ -277,7 +301,11 @@ class VietnamCompanyResearchService:
             {"block": "Intraday OHLCV", "source": SSI_INTRADAY_SOURCE, "status": intraday_status},
             {"block": "Realtime snapshot", "source": SSI_REALTIME_SOURCE, "status": realtime_status},
             {"block": "Trade tape", "source": SSI_TRADE_TAPE_SOURCE, "status": trade_tape_status},
-            {"block": "Profile", "source": profile.get("source") or SSI_SECURITIES_DETAILS_SOURCE, "status": profile.get("status", "missing")},
+            {
+                "block": "Profile",
+                "source": profile.get("source") or SSI_SECURITIES_DETAILS_SOURCE,
+                "status": profile.get("quality_status") or profile.get("status", "unavailable"),
+            },
             {"block": "News", "source": NEWS_FUTURE_SOURCE, "status": "not_implemented"},
             {"block": "Financials", "source": EXTERNAL_FUTURE_SOURCE, "status": "not_implemented"},
             {"block": "Corporate actions", "source": EXTERNAL_FUTURE_SOURCE, "status": "not_implemented"},
@@ -290,7 +318,27 @@ class VietnamCompanyResearchService:
         return payload
 
     def _unavailable_payload(self, symbol: str, errors: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        profile = {"ticker": symbol, "name": None, "exchange": None, "industry": None, "source": SSI_SECURITIES_DETAILS_SOURCE, "status": "missing"}
+        profile = {
+            "ticker": symbol,
+            "name": None,
+            "name_en": None,
+            "exchange": None,
+            "market": None,
+            "industry": None,
+            "sector": None,
+            "security_type": None,
+            "issuer": None,
+            "lot_size": None,
+            "listed_shares": None,
+            "listed_date": None,
+            "source": SSI_SECURITIES_DETAILS_SOURCE,
+            "status": "unavailable",
+            "quality_status": "unavailable",
+            "completeness": 0.0,
+            "missing_fields": [],
+            "field_coverage": {},
+            "diagnostics": {},
+        }
         missing_price = {
             "latest_price": None,
             "daily_close": None,

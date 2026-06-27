@@ -97,6 +97,7 @@ Add focused tests when implementing Data Quality Summary:
 - Profile provider `ok` plus missing `name`/`industry` produces profile completeness `partial`.
 - Company price source decision is reflected consistently in API and UI.
 - SSI profile metadata maps industry/sector aliases through `symbol_metadata`, watchlist rows, and company profile only when provider data exists.
+- SSI metadata tests cover complete, partial, same-SSI fallback, unavailable, and wrong/missing-symbol rows; assert sanitized diagnostics and unchanged DailyOhlc `latest_price`/DailyStockPrice enrichment.
 - SSI index components resolve provider-owned identifiers from IndexList, keep the public requested code stable, and expose sanitized diagnostics for unavailable component rows.
 - DailyStockPrice tests cover reference/limits, matched and put-through volume/value, foreign volume/value, adjusted close, zero-versus-null behavior, matched/mismatched/missing dates, unavailable enrichment, sanitized diagnostics, and unchanged SSI DailyOhlc `latest_price`.
 - Frontend tests assert shares/VND units, explicit SSI DailyStockPrice source labels, concise date-mismatch caveats, hidden null optional metrics, retained daily rows/chart, and isolated realtime refresh behavior.
@@ -124,6 +125,7 @@ Add or update frontend tests for:
 - Collapsible diagnostics contain source coverage and endpoint diagnostics.
 - Primary UI contains no endpoint dumps or raw provider errors.
 - Null metadata rows are hidden; profile partial is visible.
+- Profile unavailable keeps valid daily and DailyStockPrice sections visible and does not synthesize company names or metadata rows.
 
 ## Future Progressive Loading Tests Needed
 

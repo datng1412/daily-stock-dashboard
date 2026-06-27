@@ -24,7 +24,7 @@ const COMPACT_CHECK_KEYS = new Set<CheckKey>(['dailyOhlc', 'intraday', 'realtime
 const DIAGNOSTIC_PATTERN = /(attempted endpoint|endpoint|http(?:\s*status)?\s*\d|http status|raw provider|raw error|token|authorization|access token|account)/i;
 
 const statusVariant = (status?: string | null): BadgeVariant => {
-  if (status === 'ok' || status === 'final' || status === 'unadjusted') return 'success';
+  if (status === 'ok' || status === 'complete' || status === 'final' || status === 'unadjusted') return 'success';
   if (status === 'error') return 'danger';
   if (status === 'partial' || status === 'stale' || status === 'unknown' || status === 'provisional') return 'warning';
   if (status === 'unavailable' || status === 'disabled' || status === 'not_implemented') return 'warning';
@@ -81,7 +81,9 @@ const formatIssueCopy = (issue: VietnamDataQualityIssue) => {
     case 'daily_stock_price_partial':
       return { title: 'DailyStockPrice enrichment partial.', detail: null };
     case 'profile_partial':
-      return { title: 'Profile metadata partial.', detail: null };
+      return { title: 'Profile partial. Some metadata is unavailable.', detail: null };
+    case 'profile_unavailable':
+      return { title: 'Profile unavailable. Daily SSI data is still available.', detail: null };
     case 'final_close_status_unknown':
       return { title: 'Final close status unknown.', detail: null };
     case 'adjusted_price_status_unknown':

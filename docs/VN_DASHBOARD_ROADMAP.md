@@ -814,6 +814,8 @@ Implemented result:
 
 ### Phase 4.3A - Profile and Securities Metadata Reliability
 
+Status: completed on 2026-06-28.
+
 Goal:
 
 Verify SSI profile and securities metadata coverage without conflating metadata completeness with daily-row validity.
@@ -831,6 +833,18 @@ Acceptance criteria:
 * Available fields have explicit SSI source ownership.
 * Missing optional metadata remains null and produces partial metadata state.
 * Metadata partial state does not make valid daily data unavailable.
+
+Result:
+
+* `SecuritiesDetails` remains the primary SSI metadata endpoint, with `Securities` as the only fallback and only within SSI.
+* Symbol, exchange, market, name, English name, industry, sector, security type, issuer, lot size, listed shares, and listed date are normalized only from observed SSI aliases.
+* Metadata now exposes independent provider availability and quality state through `status`, `quality_status`, `completeness`, `missing_fields`, and `field_coverage`.
+* Metadata selection requires an exact requested-symbol match. A lone mismatched or symbol-less row is no longer accepted.
+* Dashboard and company profile views hide missing metadata rows, show concise partial/unavailable states, and keep sanitized endpoint diagnostics collapsed.
+* Valid SSI DailyOhlc and DailyStockPrice data remains usable when metadata is partial or unavailable. `latest_price` remains SSI DailyOhlc.
+* Targeted validation passed: 106 backend tests and 141 dashboard/company frontend tests, plus direct TypeScript compilation, ESLint, and production Vite build.
+* Current-code API/browser smoke on FPT returned metadata `status=ok`, `quality_status=partial`, source `SSI Securities`, and coverage for symbol/exchange/market only. The UI hid absent metadata rows, showed the partial caveat, retained SSI DailyOhlc `latest_price=70,800`, and retained DailyStockPrice enrichment.
+* The normal `npm.cmd --prefix apps\dsa-web run build` launcher remained blocked by Windows `EPERM` while resolving `C:\Users\dat.tienn`; equivalent local TypeScript, ESLint, and Vite entry points passed.
 
 ### Phase 4.4A - Index Data Capability
 
@@ -996,7 +1010,7 @@ Acceptance criteria:
 
 ### P2 - data enrichment
 
-* Improve SSI Securities/SecuritiesDetails metadata mapping for `company_name`/`name`, issuer, lot size, listed shares, listed date, and security type. Current smoke still shows many optional symbol metadata fields as null.
+* Revalidate SSI Securities/SecuritiesDetails aliases only when a sanitized live row-key audit provides new provider evidence. Phase 4.3A intentionally leaves unsupported optional metadata null.
 * Add SSI DailyStockPrice foreign-flow history if available. Current response can have latest foreign net only and `foreign_net_history_count=1`, so `foreign_net_5d` and `foreign_net_20d` remain null. Compute 5D/20D only from matched-date historical DailyStockPrice rows; otherwise expose an insufficient-history state instead of silent nulls.
 * Clean quote metadata semantics. Current responses can have `quote_date` while `quote_price_date` and `quote_price_raw_field` are null/unreliable. Distinguish quote metadata from actual price source.
 * Improve `final_close_status`. Current response can say `final_close_status=unknown` and warn the daily candle may still be in progress. Desired follow-up: use VN trading calendar/session time when possible, expose `in_progress`/`provisional` during session, and use `final` or `unknown_after_close` after session if SSI does not confirm finality.

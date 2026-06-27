@@ -22,6 +22,8 @@ export type VietnamWatchItem = {
   exchange?: string | null;
   market?: string | null;
   securityType?: string | null;
+  industry?: string | null;
+  sector?: string | null;
   metadataSource?: string | null;
   symbolMetadata?: VietnamSymbolMetadata;
   issuer?: string | null;
@@ -291,6 +293,8 @@ export type VietnamWatchItem = {
 
 export type VietnamSymbolMetadata = {
   status?: 'ok' | 'unavailable' | string | null;
+  qualityStatus?: 'complete' | 'partial' | 'unavailable' | 'unknown' | string | null;
+  completeness?: number | null;
   reason?: string | null;
   symbol?: string | null;
   exchange?: string | null;
@@ -298,11 +302,16 @@ export type VietnamSymbolMetadata = {
   securityType?: string | null;
   name?: string | null;
   nameEn?: string | null;
+  industry?: string | null;
+  sector?: string | null;
   issuer?: string | null;
   lotSize?: number | null;
   listedShares?: number | null;
   listedDate?: string | null;
   source?: string | null;
+  missingFields?: string[];
+  fieldCoverage?: Record<string, boolean>;
+  diagnostics?: Record<string, unknown>;
 };
 
 export type VietnamDailyStockPrice = {
@@ -502,10 +511,23 @@ export type VietnamChartResponse = {
 export type VietnamCompanyProfile = {
   ticker: string;
   name?: string | null;
+  nameEn?: string | null;
   exchange?: string | null;
+  market?: string | null;
   industry?: string | null;
+  sector?: string | null;
+  securityType?: string | null;
+  issuer?: string | null;
+  lotSize?: number | null;
+  listedShares?: number | null;
+  listedDate?: string | null;
   source?: string | null;
-  status: 'ok' | 'missing' | string;
+  status: 'ok' | 'unavailable' | 'missing' | string;
+  qualityStatus?: 'complete' | 'partial' | 'unavailable' | 'unknown' | string | null;
+  completeness?: number | null;
+  missingFields?: string[];
+  fieldCoverage?: Record<string, boolean>;
+  diagnostics?: Record<string, unknown>;
 };
 
 export type VietnamCompanyPrice = {

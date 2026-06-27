@@ -16,10 +16,27 @@ const makeCompanySnapshot = (): VietnamCompanyResearchResponse => ({
   profile: {
     ticker: 'FPT',
     name: 'FPT Corporation',
+    nameEn: 'FPT Corporation',
     exchange: 'HOSE',
-    industry: null,
+    market: 'HOSE',
+    industry: 'Information Technology',
+    sector: 'Technology',
+    securityType: 'stock',
+    issuer: 'FPT',
+    lotSize: 100,
+    listedShares: 1_471_000_000,
+    listedDate: '2006-12-13',
     source: 'SSI SecuritiesDetails',
     status: 'ok',
+    qualityStatus: 'complete',
+    completeness: 1,
+    missingFields: [],
+    fieldCoverage: { symbol: true, name: true, industry: true },
+    diagnostics: {
+      endpoint: 'SecuritiesDetails',
+      requestedSymbol: 'FPT',
+      normalizedRowCount: 1,
+    },
   },
   price: {
     latestPrice: 124.6,
@@ -413,8 +430,8 @@ describe('VietnamCompanyResearchPage', () => {
       issues: [
         {
           code: 'profile_partial',
-          severity: 'warning',
-          message: 'Profile metadata is partial.',
+          severity: 'info',
+          message: 'Profile partial. Some metadata is unavailable.',
           fields: { missingFields: ['name', 'industry'] },
         },
       ],
@@ -435,8 +452,73 @@ describe('VietnamCompanyResearchPage', () => {
     renderPage();
 
     const summary = await screen.findByLabelText('Data Quality Summary');
-    expect(summary).toHaveTextContent('Profile metadata partial.');
+    expect(summary).toHaveTextContent('Profile partial. Some metadata is unavailable.');
     expect(summary).toHaveTextContent('Profile: partial');
+  });
+
+  it('keeps the company page useful with symbol, exchange, and market only', async () => {
+    const snapshot = makeCompanySnapshot();
+    snapshot.profile = {
+      ticker: 'FPT',
+      name: null,
+      nameEn: null,
+      exchange: 'HOSE',
+      market: 'HOSE',
+      industry: null,
+      sector: null,
+      securityType: null,
+      issuer: null,
+      lotSize: null,
+      listedShares: null,
+      listedDate: null,
+      source: 'SSI SecuritiesDetails',
+      status: 'ok',
+      qualityStatus: 'partial',
+      completeness: 0.25,
+      missingFields: ['name', 'name_en', 'industry', 'sector', 'issuer'],
+      fieldCoverage: { symbol: true, exchange: true, market: true, name: false },
+    };
+    vi.mocked(stocksApi.getVietnamCompanyResearch).mockResolvedValue(snapshot);
+
+    renderPage();
+
+    expect(await screen.findByRole('heading', { name: 'FPT' })).toBeInTheDocument();
+    expect(screen.queryByText('Company name unavailable')).not.toBeInTheDocument();
+    expect(screen.getByText('Profile partial. Some metadata is unavailable.')).toBeInTheDocument();
+    const profile = within(screen.getByRole('heading', { name: 'Company profile' }).closest('section') as HTMLElement);
+    expect(profile.getByText('Ticker')).toBeInTheDocument();
+    expect(profile.getByText('Exchange')).toBeInTheDocument();
+    expect(profile.getAllByText('HOSE')).toHaveLength(2);
+    expect(profile.queryByText('Company name')).not.toBeInTheDocument();
+    expect(profile.queryByText('Industry')).not.toBeInTheDocument();
+    expect(profile.queryByText('Sector')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Price summary' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'DailyStockPrice enrichment' })).toBeInTheDocument();
+  });
+
+  it('keeps daily sections visible when profile metadata is unavailable', async () => {
+    const snapshot = makeCompanySnapshot();
+    snapshot.profile = {
+      ticker: 'FPT',
+      name: null,
+      source: 'SSI SecuritiesDetails',
+      status: 'unavailable',
+      qualityStatus: 'unavailable',
+      completeness: 0,
+      missingFields: ['name', 'industry', 'sector'],
+      fieldCoverage: { name: false, industry: false, sector: false },
+      diagnostics: { endpoint: 'SecuritiesDetails', failureClass: 'provider_unavailable' },
+    };
+    vi.mocked(stocksApi.getVietnamCompanyResearch).mockResolvedValue(snapshot);
+
+    renderPage();
+
+    expect(await screen.findByText('Profile unavailable. Daily SSI data is still available.')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Price summary' })).toBeInTheDocument();
+    expect(screen.getByText('Canonical latest price (VND)')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Foreign flow' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'SSI realtime' })).toBeInTheDocument();
+    expect(screen.queryByText('Company name unavailable')).not.toBeInTheDocument();
   });
 
   it('handles a missing data quality summary without blocking existing cards', async () => {

@@ -461,6 +461,21 @@ DAILY_STOCK_PRICE_FIELD_UNITS = {
     "adjusted_close": "VND",
 }
 
+SYMBOL_METADATA_FIELDS = (
+    "symbol",
+    "exchange",
+    "market",
+    "name",
+    "name_en",
+    "industry",
+    "sector",
+    "security_type",
+    "issuer",
+    "lot_size",
+    "listed_shares",
+    "listed_date",
+)
+
 
 def _status_from_block(block: Any, default: str = "unavailable") -> str:
     if not isinstance(block, dict):
@@ -603,15 +618,23 @@ def build_vietnam_data_quality_summary(row: Dict[str, Any]) -> Dict[str, Any]:
     date_match = str(row.get("date_match") or "")
     intraday_check = "stale" if intraday_status == "unavailable" and date_match == "mismatched" else intraday_status
 
-    profile_status = "unavailable"
-    missing_profile_fields: List[str] = []
     metadata = row.get("symbol_metadata") if isinstance(row.get("symbol_metadata"), dict) else {}
-    if metadata.get("status") == "ok" or row.get("company_name") or row.get("name"):
-        if not (row.get("company_name") or row.get("name") or metadata.get("name") or metadata.get("name_en")):
+    metadata_status = str(metadata.get("status") or "unavailable")
+    metadata_quality = str(metadata.get("quality_status") or "")
+    missing_profile_fields = list(metadata.get("missing_fields") or [])
+    if metadata_status != "ok":
+        profile_status = "unavailable"
+    elif metadata_quality in {"complete", "partial", "unknown"}:
+        profile_status = metadata_quality
+    else:
+        fallback_name = row.get("company_name") or row.get("name") or metadata.get("name") or metadata.get("name_en")
+        fallback_industry = row.get("industry") or metadata.get("industry") or metadata.get("sector")
+        missing_profile_fields = []
+        if not fallback_name:
             missing_profile_fields.append("name")
-        if not row.get("industry"):
+        if not fallback_industry:
             missing_profile_fields.append("industry")
-        profile_status = "partial" if missing_profile_fields else "ok"
+        profile_status = "partial" if missing_profile_fields else "complete"
 
     issues: List[Dict[str, Any]] = []
     if daily_ohlc_check != "ok":
@@ -723,9 +746,18 @@ def build_vietnam_data_quality_summary(row: Dict[str, Any]) -> Dict[str, Any]:
         issues.append(
             {
                 "code": "profile_partial",
-                "severity": "warning",
-                "message": "Profile metadata is partial.",
+                "severity": "info",
+                "message": "Profile partial. Some metadata is unavailable.",
                 "fields": {"missing_fields": missing_profile_fields},
+            }
+        )
+    elif profile_status == "unavailable":
+        issues.append(
+            {
+                "code": "profile_unavailable",
+                "severity": "info",
+                "message": "Profile unavailable. Daily SSI data is still available.",
+                "fields": {},
             }
         )
 
@@ -2629,8 +2661,9 @@ class VietnamMarketService:
     def _normalize_ssi_symbol_metadata(
         row: Dict[str, Any],
         source_label: str = SSI_SECURITIES_DETAILS_SOURCE,
+        diagnostics: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        return {
+        normalized = {
             "status": "ok",
             "symbol": str(row.get("symbol")).upper() if row.get("symbol") not in (None, "") else None,
             "exchange": row.get("exchange"),
@@ -2639,11 +2672,80 @@ class VietnamMarketService:
             "name": row.get("name"),
             "name_en": row.get("name_en"),
             "industry": row.get("industry"),
+            "sector": row.get("sector"),
             "issuer": row.get("issuer"),
             "lot_size": _safe_int(row.get("lot_size")),
             "listed_shares": _safe_int(row.get("listed_shares")),
             "listed_date": row.get("listed_date"),
             "source": source_label,
+        }
+        field_coverage = {
+            field: normalized.get(field) not in (None, "")
+            for field in SYMBOL_METADATA_FIELDS
+        }
+        missing_fields = [
+            field
+            for field, available in field_coverage.items()
+            if not available
+        ]
+        safe_diagnostics = dict(diagnostics or {})
+        safe_diagnostics.update(
+            {
+                "selected_row_source": source_label,
+                "field_coverage": field_coverage,
+                "missing_fields": missing_fields,
+            }
+        )
+        normalized.update(
+            {
+                "quality_status": "complete" if not missing_fields else "partial" if normalized["symbol"] else "unknown",
+                "completeness": round(
+                    sum(1 for available in field_coverage.values() if available) / len(SYMBOL_METADATA_FIELDS),
+                    4,
+                ),
+                "missing_fields": missing_fields,
+                "field_coverage": field_coverage,
+                "diagnostics": safe_diagnostics,
+            }
+        )
+        return normalized
+
+    @staticmethod
+    def _unavailable_ssi_symbol_metadata(
+        *,
+        reason: Optional[str],
+        diagnostics: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        field_coverage = {field: False for field in SYMBOL_METADATA_FIELDS}
+        safe_diagnostics = dict(diagnostics)
+        safe_diagnostics.update(
+            {
+                "selected_row_source": None,
+                "field_coverage": field_coverage,
+                "missing_fields": list(SYMBOL_METADATA_FIELDS),
+            }
+        )
+        return {
+            "status": "unavailable",
+            "quality_status": "unavailable",
+            "completeness": 0.0,
+            "source": SSI_SECURITIES_DETAILS_SOURCE,
+            "reason": reason or SSI_UNAVAILABLE_REASON,
+            "symbol": None,
+            "exchange": None,
+            "market": None,
+            "security_type": None,
+            "name": None,
+            "name_en": None,
+            "industry": None,
+            "sector": None,
+            "issuer": None,
+            "lot_size": None,
+            "listed_shares": None,
+            "listed_date": None,
+            "missing_fields": list(SYMBOL_METADATA_FIELDS),
+            "field_coverage": field_coverage,
+            "diagnostics": safe_diagnostics,
         }
 
     @staticmethod
@@ -2657,7 +2759,7 @@ class VietnamMarketService:
         for row in rows:
             if isinstance(row, dict) and str(row.get("symbol") or "").upper() == normalized_symbol:
                 return row
-        return rows[0] if len(rows) == 1 and isinstance(rows[0], dict) else None
+        return None
 
     def _load_ssi_symbol_metadata(self, symbol: str) -> Dict[str, Any]:
         normalized_symbol = vn_ticker(symbol)
@@ -2665,34 +2767,75 @@ class VietnamMarketService:
         fetcher = self._get_ssi_fetcher()
 
         details_payload = fetcher.get_securities_details(symbol=normalized_symbol, market=market)
+        details_rows = details_payload.get("rows") if isinstance(details_payload, dict) else None
+        details_row_count = len(details_rows) if isinstance(details_rows, list) else 0
+        attempted_endpoints = ["SecuritiesDetails"]
         row = self._matching_ssi_metadata_row(details_payload, normalized_symbol)
         if row:
-            return self._normalize_ssi_symbol_metadata(row, SSI_SECURITIES_DETAILS_SOURCE)
+            return self._normalize_ssi_symbol_metadata(
+                row,
+                SSI_SECURITIES_DETAILS_SOURCE,
+                diagnostics={
+                    "endpoint": "SecuritiesDetails",
+                    "attempted_endpoints": attempted_endpoints,
+                    "requested_symbol": normalized_symbol,
+                    "normalized_row_count": details_row_count,
+                    "endpoint_row_counts": {"SecuritiesDetails": details_row_count},
+                },
+            )
 
         securities_payload = fetcher.get_securities(market=market)
+        attempted_endpoints.append("Securities")
+        securities_rows = securities_payload.get("rows") if isinstance(securities_payload, dict) else None
+        securities_row_count = len(securities_rows) if isinstance(securities_rows, list) else 0
         row = self._matching_ssi_metadata_row(securities_payload, normalized_symbol)
         if row:
-            return self._normalize_ssi_symbol_metadata(row, SSI_SECURITIES_SOURCE)
+            return self._normalize_ssi_symbol_metadata(
+                row,
+                SSI_SECURITIES_SOURCE,
+                diagnostics={
+                    "endpoint": "Securities",
+                    "attempted_endpoints": attempted_endpoints,
+                    "requested_symbol": normalized_symbol,
+                    "normalized_row_count": securities_row_count,
+                    "endpoint_row_counts": {
+                        "SecuritiesDetails": details_row_count,
+                        "Securities": securities_row_count,
+                    },
+                    "fallback_within_ssi": True,
+                },
+            )
 
         reason = self._safe_provider_reason(details_payload, SSI_UNAVAILABLE_REASON)
         if isinstance(securities_payload, dict) and securities_payload.get("status") != "ok":
             reason = self._safe_provider_reason(securities_payload, reason)
-        return {
-            "status": "unavailable",
-            "source": SSI_SECURITIES_DETAILS_SOURCE,
-            "reason": reason,
-            "symbol": None,
-            "exchange": None,
-            "market": None,
-            "security_type": None,
-            "name": None,
-            "name_en": None,
-            "industry": None,
-            "issuer": None,
-            "lot_size": None,
-            "listed_shares": None,
-            "listed_date": None,
-        }
+        provider_failed = (
+            not isinstance(details_payload, dict)
+            or details_payload.get("status") != "ok"
+            or not isinstance(securities_payload, dict)
+            or securities_payload.get("status") != "ok"
+        )
+        failure_class = (
+            "provider_unavailable"
+            if provider_failed
+            else "empty_result"
+            if details_row_count == 0 and securities_row_count == 0
+            else "no_matching_symbol"
+        )
+        return self._unavailable_ssi_symbol_metadata(
+            reason=reason,
+            diagnostics={
+                "endpoint": "SecuritiesDetails",
+                "attempted_endpoints": attempted_endpoints,
+                "requested_symbol": normalized_symbol,
+                "normalized_row_count": 0,
+                "endpoint_row_counts": {
+                    "SecuritiesDetails": details_row_count,
+                    "Securities": securities_row_count,
+                },
+                "failure_class": failure_class,
+            },
+        )
 
     def _ssi_symbol_metadata(self, symbol: str, force_refresh: bool = False) -> Dict[str, Any]:
         key = _cache_key("symbol_metadata", symbol, provider=VN_PROVIDER_SSI, market=get_vn_exchange(symbol))
@@ -2708,22 +2851,16 @@ class VietnamMarketService:
                 return value
         except Exception:
             logger.debug("SSI symbol metadata unavailable for %s", symbol)
-        return {
-            "status": "unavailable",
-            "source": SSI_SECURITIES_DETAILS_SOURCE,
-            "reason": SSI_UNAVAILABLE_REASON,
-            "symbol": None,
-            "exchange": None,
-            "market": None,
-            "security_type": None,
-            "name": None,
-            "name_en": None,
-            "industry": None,
-            "issuer": None,
-            "lot_size": None,
-            "listed_shares": None,
-            "listed_date": None,
-        }
+        return self._unavailable_ssi_symbol_metadata(
+            reason=SSI_UNAVAILABLE_REASON,
+            diagnostics={
+                "endpoint": "SecuritiesDetails",
+                "attempted_endpoints": ["SecuritiesDetails", "Securities"],
+                "requested_symbol": vn_ticker(symbol),
+                "normalized_row_count": 0,
+                "failure_class": "service_error",
+            },
+        )
 
     @staticmethod
     def _apply_ssi_daily_stock_price_enrichment(
@@ -3467,7 +3604,7 @@ class VietnamMarketService:
         if ohlcv_result["error"]:
             cache_errors["ohlcv"] = ohlcv_result["error"]
         symbol_metadata = self._ssi_symbol_metadata(symbol, force_refresh=force_refresh)
-        metadata_source = symbol_metadata.get("source") if symbol_metadata.get("status") == "ok" else VN_SOURCE_SSI
+        metadata_source = symbol_metadata.get("source") or SSI_SECURITIES_DETAILS_SOURCE
         company_name = symbol_metadata.get("name") if symbol_metadata.get("status") == "ok" else None
         if df is None or df.empty:
             unavailable_reason = provider_meta.get("unavailable_reason") or "No OHLCV rows were returned."
@@ -3480,6 +3617,7 @@ class VietnamMarketService:
                 "company_name": company_name,
                 "security_type": symbol_metadata.get("security_type"),
                 "industry": symbol_metadata.get("industry"),
+                "sector": symbol_metadata.get("sector"),
                 "market": symbol_metadata.get("market"),
                 "metadata_source": metadata_source,
                 "symbol_metadata": symbol_metadata,
@@ -3791,6 +3929,7 @@ class VietnamMarketService:
             "market": symbol_metadata.get("market"),
             "security_type": symbol_metadata.get("security_type"),
             "industry": symbol_metadata.get("industry"),
+            "sector": symbol_metadata.get("sector"),
             "metadata_source": metadata_source,
             "symbol_metadata": symbol_metadata,
             "issuer": symbol_metadata.get("issuer"),

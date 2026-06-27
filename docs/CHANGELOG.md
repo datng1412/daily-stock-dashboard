@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [fix] Harden SSI profile metadata with exact-symbol selection, explicit completeness, sanitized diagnostics, and null-safe dashboard/company states without changing daily price ownership.
 - [improvement] Detect SSI IntradayOhlc actual cadence and expose conservative cadence status while preserving daily SSI price ownership.
 - [fix] Harden SSI DailyStockPrice enrichment with explicit date alignment, partial coverage, units, sanitized diagnostics, and null-safe dashboard/company rendering without changing canonical DailyOhlc price.
 - [documentation] Record Phase 4.0C-10B VN SSI realtime release-gate validation and local Windows validation caveats.

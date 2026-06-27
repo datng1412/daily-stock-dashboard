@@ -216,7 +216,7 @@ Rules:
 | Foreign 5D/20D flow | Future enhancement | Compute only from matched-date historical DailyStockPrice rows |
 | Index list | SSI IndexList | Use SSI-returned index codes and identifiers |
 | Index components | SSI IndexComponents | Resolve through SSI IndexList identifiers; use only when SSI returns rows |
-| Symbol metadata | SSI Securities/SecuritiesDetails | Optional fields, including industry, may remain null |
+| Symbol metadata | SSI SecuritiesDetails, then SSI Securities fallback | Optional fields remain null; metadata availability/quality never changes daily validity |
 | Intraday candles | SSI IntradayOhlc | Strict source; no fallback |
 | Realtime snapshot | SSI FastConnect streaming realtime contract | Parser, manager/cache, official-client adapter, and FastAPI startup bootstrap exist behind disabled-by-default config; request handlers read process-local cache only |
 | Trade tape | SSI trade-tape contract | Contract exists; live list/history semantics not confirmed |
@@ -227,6 +227,20 @@ Rules:
 | KBS | Legacy optional only | Disabled by default |
 
 Compatibility aliases must stay within the same source owner. Do not use SSI DailyStockPrice close to overwrite `latest_price`, do not use DailyOhlc volume to fill matched volume, and do not use realtime, trade-tape, Mozyfin, or KBS values to fill daily fields.
+
+## Symbol Metadata Contract
+
+`symbol_metadata.status` describes provider availability and remains `ok` or `unavailable`. `quality_status` separately describes field completeness as `complete`, `partial`, `unknown`, or `unavailable`.
+
+The metadata block exposes nullable `symbol`, `exchange`, `market`, `name`, `name_en`, `industry`, `sector`, `security_type`, `issuer`, `lot_size`, `listed_shares`, and `listed_date`, plus:
+
+* `completeness`: covered-field ratio from `0` to `1`.
+* `missing_fields`: normalized optional fields with no SSI value.
+* `field_coverage`: per-field boolean coverage.
+* `source`: the selected SSI endpoint.
+* `diagnostics`: sanitized endpoint attempts, row counts, selection source, and failure class.
+
+`SecuritiesDetails` is attempted first. `Securities` is an allowed same-provider fallback. A row is usable only when its normalized symbol exactly matches the requested ticker. Do not infer missing names, industry, sector, issuer, or listing fields from the ticker, exchange, prices, or another provider.
 
 ### DailyStockPrice Enrichment Contract
 
@@ -295,7 +309,7 @@ Cache errors and provider unavailable states are separate concepts. A provider 4
 
 ### P2
 
-* Future selected-ticker/source-coverage work: improve SSI metadata mapping for company name, issuer, security type, lot size, listed shares, listed date, and industry if available.
+* Future selected-ticker/source-coverage work: add aliases only after sanitized SSI row-key evidence; unsupported metadata stays null.
 * Future DailyStockPrice history or caching work: add historical SSI DailyStockPrice foreign-flow support if available.
 * Phase 1 and Phase 2: clean quote metadata semantics when quote is disabled or unreliable.
 * Phase 1: improve `final_close_status` using VN session/calendar rules.

@@ -101,20 +101,38 @@ const makeItem = (ticker: string): VietnamWatchItem => ({
   exchange: 'HOSE',
   market: 'HOSE',
   securityType: 'stock',
-  metadataSource: 'SSI',
+  industry: 'Information Technology',
+  sector: 'Technology',
+  metadataSource: 'SSI SecuritiesDetails',
   symbolMetadata: {
     status: 'ok',
+    qualityStatus: 'complete',
+    completeness: 1,
     symbol: ticker,
     exchange: 'HOSE',
     market: 'HOSE',
     securityType: 'stock',
     name: `${ticker} Listed Company`,
     nameEn: `${ticker} Corporation`,
+    industry: 'Information Technology',
+    sector: 'Technology',
     issuer: `${ticker} issuer`,
     lotSize: 100,
     listedShares: 123456789,
     listedDate: '2006-12-13',
-    source: 'SSI',
+    source: 'SSI SecuritiesDetails',
+    missingFields: [],
+    fieldCoverage: {
+      symbol: true,
+      name: true,
+      industry: true,
+      sector: true,
+    },
+    diagnostics: {
+      endpoint: 'SecuritiesDetails',
+      requestedSymbol: ticker,
+      normalizedRowCount: 1,
+    },
   },
   issuer: `${ticker} issuer`,
   lotSize: 100,
@@ -1806,8 +1824,8 @@ describe('VietnamDashboardPage watchlist loading', () => {
         },
         {
           code: 'profile_partial',
-          severity: 'warning',
-          message: 'Profile metadata is partial.',
+          severity: 'info',
+          message: 'Profile partial. Some metadata is unavailable.',
           fields: { missingFields: ['industry'] },
         },
         {
@@ -1844,7 +1862,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(header.getByText('Daily source: SSI DailyOhlc')).toBeInTheDocument();
     expect(header.queryByText('Daily source unavailable')).not.toBeInTheDocument();
     expect(header.getByText('DailyOhlc differs from DailyStockPrice for the same date.')).toBeInTheDocument();
-    expect(header.getByText('Profile metadata partial.')).toBeInTheDocument();
+    expect(header.getByText('Profile partial. Some metadata is unavailable.')).toBeInTheDocument();
     expect(header.getByText('2 more data-quality issue(s) hidden.')).toBeInTheDocument();
     expect(header.getByText('Intraday: unavailable')).toBeInTheDocument();
     expect(header.getByText('Realtime: unavailable')).toBeInTheDocument();
@@ -2645,7 +2663,11 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(detail.getByText('English name')).toBeInTheDocument();
     expect(detail.getByText('FPT Corporation')).toBeInTheDocument();
     expect(detail.getByText('Exchange / market')).toBeInTheDocument();
-    expect(detail.getByText('HOSE / HOSE')).toBeInTheDocument();
+    expect(detail.getByText('HOSE')).toBeInTheDocument();
+    expect(detail.getByText('Industry')).toBeInTheDocument();
+    expect(detail.getByText('Information Technology')).toBeInTheDocument();
+    expect(detail.getByText('Sector')).toBeInTheDocument();
+    expect(detail.getByText('Technology')).toBeInTheDocument();
     expect(detail.getByText('Security type')).toBeInTheDocument();
     expect(detail.getByText('FPT issuer')).toBeInTheDocument();
     expect(detail.getByText('Lot size')).toBeInTheDocument();
@@ -2666,8 +2688,16 @@ describe('VietnamDashboardPage watchlist loading', () => {
       listedDate: null,
       symbolMetadata: {
         status: 'unavailable',
-        source: 'SSI',
+        qualityStatus: 'unavailable',
+        completeness: 0,
+        source: 'SSI SecuritiesDetails',
         reason: 'SSI FastConnect request failed',
+        missingFields: ['name', 'industry', 'issuer'],
+        fieldCoverage: {
+          name: false,
+          industry: false,
+          issuer: false,
+        },
       },
     };
     mockedGetVietnamWatchlist.mockResolvedValue(response);
@@ -2675,9 +2705,12 @@ describe('VietnamDashboardPage watchlist loading', () => {
     render(<VietnamDashboardPage />);
 
     const detail = within(await screen.findByText('Stock detail').then((node) => node.closest('section') as HTMLElement));
-    expect(detail.queryByRole('heading', { name: 'Symbol metadata' })).not.toBeInTheDocument();
+    expect(detail.getByRole('heading', { name: 'Symbol metadata' })).toBeInTheDocument();
+    expect(detail.getByText('Profile unavailable. Daily SSI data is still available.')).toBeInTheDocument();
     expect(detail.queryByText('Vietnamese name')).not.toBeInTheDocument();
     expect(detail.queryByText('Listed shares')).not.toBeInTheDocument();
+    expect(screen.queryByText('Company unavailable')).not.toBeInTheDocument();
+    expect(detail.getByText('Daily close')).toBeInTheDocument();
   });
 
   it('hides absent optional SSI DailyStockPrice rows without blank detail fields', async () => {

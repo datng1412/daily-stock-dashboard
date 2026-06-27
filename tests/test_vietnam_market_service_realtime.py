@@ -409,7 +409,7 @@ def test_data_quality_summary_marks_profile_partial_without_failing_daily_row():
 
     assert item["status"] == "ok"
     assert summary["checks"]["profile"] == "partial"
-    assert profile_issue["severity"] == "warning"
+    assert profile_issue["severity"] == "info"
     assert "name" in profile_issue["fields"]["missing_fields"]
     assert "industry" in profile_issue["fields"]["missing_fields"]
 

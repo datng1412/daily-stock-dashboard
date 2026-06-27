@@ -65,7 +65,9 @@ Conventions:
 | `final_close_status` | Finality of daily close | Service/session/source metadata | enum/classification | yes | yes for finality | Data Quality Summary, daily badge | Current value can be `unknown`; do not imply final close if not confirmed. |
 | `adjusted_price_status` | Adjustment metadata availability | Service/source metadata | enum/classification | yes | yes for adjustment caveat | Data Quality Summary | `unknown` means no reliable adjusted-price event semantics. |
 | `profile.status` | Provider response status for profile block | SSI Securities/SecuritiesDetails normalization | provider status | yes | no for completeness | Source coverage/diagnostics | May be `ok` while fields are null. |
-| `profile_quality` / `profile.completeness` | Data-quality completeness for profile fields | Service-derived quality classification | classification | yes | yes for UI quality | Header badge/Data Quality Summary | Preferred future shape for partial metadata. |
+| `profile.quality_status` | Data-quality classification for profile fields | Service-derived from SSI field coverage | classification | no | yes for UI quality | Header badge/Data Quality Summary | `complete`, `partial`, `unknown`, or `unavailable`; independent of daily validity. |
+| `profile.completeness` | Covered metadata fields divided by defined metadata fields | Service-derived | ratio 0..1 | no | yes for UI quality | Source coverage/diagnostics | `0` when metadata is unavailable. |
+| `profile.missing_fields` / `profile.field_coverage` | Explicit absent fields and per-field coverage | Service-derived | list/object | no | no | Source coverage/diagnostics | Missing fields stay null and must not be inferred. |
 
 ## Live Data Fields
 
@@ -102,8 +104,12 @@ Conventions:
 | Field | Meaning | Source | Unit | Nullable | Canonical | UI placement | Known caveat |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `profile.name` | Company/security display name | SSI Securities/SecuritiesDetails when available | text | yes | yes for display if present | Company hero/header | Handoff found this can be `null` while provider status is `ok`; show profile partial. |
-| `profile.industry` | Industry/sector label if available | SSI metadata if available | text | yes | no | Company profile/details | Do not invent industry; hide row if absent. |
-| `profile.completeness` / `profile_quality` | Quality classification for profile missingness | Service-derived | classification | yes | yes for UI status | Header badge/Data Quality Summary | Preferred future contract: `partial` when key fields are missing even if provider status is `ok`. |
+| `profile.name_en` | English company/security name | SSI Securities/SecuritiesDetails when available | text | yes | no | Company profile/details | Hide when absent. |
+| `profile.exchange` / `profile.market` | SSI exchange and market labels | SSI Securities/SecuritiesDetails | text | yes | no | Header/profile | Keep distinct when SSI provides distinct values; do not invent either value. |
+| `profile.industry` / `profile.sector` | Industry and sector labels | SSI Securities/SecuritiesDetails | text | yes | no | Company profile/details | Preserve separate fields; hide duplicate or absent display rows. |
+| `profile.security_type` / `profile.issuer` | Security classification and issuer | SSI Securities/SecuritiesDetails | text | yes | no | Company profile/details | Do not derive from ticker or exchange. |
+| `profile.lot_size` / `profile.listed_shares` | Trading lot and listed share count | SSI Securities/SecuritiesDetails | shares | yes | no | Company profile/details | Zero is preserved; missing is null. |
+| `profile.listed_date` | SSI listing date | SSI Securities/SecuritiesDetails | date/text | yes | no | Company profile/details | No date inference. |
 
 ## Current Decision Points
 

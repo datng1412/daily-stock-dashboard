@@ -551,9 +551,11 @@ Company research current behavior:
 
 `IndexComponents` rows normalize `index_code`, `symbol`, `exchange`, `market`, `weight`, `name`, and `source` when SSI returns component rows. The service first checks `IndexList` for a provider-owned identifier matching the requested code, then calls `IndexComponents` with that identifier. Responses include sanitized diagnostics for the requested index, provider identifier, identifier source, provider status, and reason. Missing optional component fields remain null.
 
-`Securities` and `SecuritiesDetails` rows normalize symbol metadata such as symbol, exchange, market, security type, names, industry/sector, issuer, lot size, listed shares, and listed date when present.
+`Securities` and `SecuritiesDetails` rows normalize symbol metadata such as symbol, exchange, market, security type, names, industry, sector, issuer, lot size, listed shares, and listed date when present. Aliases are limited to field names already observed in provider fixtures/tests; absent fields remain null.
 
-VN watchlist/detail responses now expose SSI metadata through `symbol_metadata` plus compatibility fields such as `company_name`, `industry`, `security_type`, `metadata_source`, `issuer`, `lot_size`, `listed_shares`, and `listed_date`. The service queries `SecuritiesDetails` first and may use `Securities` only as an SSI same-provider metadata fallback. Mozyfin is not used for SSI-owned symbol metadata.
+VN watchlist/detail responses expose SSI metadata through `symbol_metadata` plus compatibility fields such as `company_name`, `industry`, `sector`, `security_type`, `metadata_source`, `issuer`, `lot_size`, `listed_shares`, and `listed_date`. The service queries `SecuritiesDetails` first and may use `Securities` only as an SSI same-provider metadata fallback. Selection requires an exact normalized symbol match. A single mismatched or symbol-less row is not accepted. Mozyfin is not used for SSI-owned symbol metadata.
+
+Metadata availability and completeness are separate. `status` is `ok` or `unavailable`; `quality_status` is `complete`, `partial`, `unknown`, or `unavailable`. `completeness`, `missing_fields`, and `field_coverage` make partial coverage explicit. Sanitized diagnostics contain attempted endpoint names, normalized row counts, selected endpoint, coverage, and failure class; they never contain tokens, auth headers, or raw provider payloads.
 
 ## Unavailable behavior
 
@@ -605,7 +607,7 @@ Probe mode tests both documented FC Data base URL shapes and prints only endpoin
 
 ## Known limitations / operational notes
 
-* SSI metadata coverage may be limited. A live metadata row can be `status=ok` while only returning symbol, exchange, market, and source; optional name, issuer, type, lot-size, listed-shares, and listed-date fields may remain null.
+* SSI metadata coverage may be limited. A live metadata row can be `status=ok` and `quality_status=partial` while only returning symbol, exchange, market, and source; optional name, industry, sector, issuer, type, lot-size, listed-shares, and listed-date fields may remain null. This does not invalidate SSI DailyOhlc or DailyStockPrice.
 * Live IndexList validation works in the current SSI environment, but `market=HOSE` can still return cross-market-looking index codes such as `HNX30`, `HNXINDEX`, and `HNXUPCOMINDEX`; use SSI-returned rows instead of assuming the request market filter is strict.
 * Live IndexComponents validation for `VN30`, with and without `market=HOSE`, returned a clean unavailable state in the current SSI environment. This may be endpoint permission, endpoint path, SSI data availability, or undocumented parameter shape. Do not hardcode VN30 members or fallback to Mozyfin/KBS.
 * Quote fields are not currently a reliable REST latest-price source. Watchlist payloads can have `quote_cache=missing`, `quote=null`, `quote_price_date=null`, and `quote_price_raw_field=null`; `latest_price` uses SSI DailyOhlc close when SSI daily rows are available.

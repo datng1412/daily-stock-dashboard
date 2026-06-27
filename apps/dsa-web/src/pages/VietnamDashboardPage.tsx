@@ -933,29 +933,14 @@ const realtimeSnapshotTimeText = (quote?: VietnamRealtimeQuote | null) => {
 };
 
 const companyDisplayName = (item?: VietnamWatchItem | null) => {
-  if (!item) return '-';
+  if (!item) return null;
   const name = item.companyName ?? item.name ?? item.symbolMetadata?.name ?? item.entity;
-  if (!name || name === item.ticker) return 'Company unavailable';
+  if (!name || name === item.ticker || name === item.entity) return null;
   return name;
 };
 
-const metadataValue = (item: VietnamWatchItem, key: 'exchange' | 'market' | 'securityType' | 'issuer' | 'lotSize' | 'listedShares' | 'listedDate') => (
+const metadataValue = (item: VietnamWatchItem, key: 'exchange' | 'market' | 'securityType' | 'industry' | 'sector' | 'issuer' | 'lotSize' | 'listedShares' | 'listedDate') => (
   item.symbolMetadata?.[key] ?? item[key] ?? null
-);
-
-const hasSsiSymbolMetadata = (item: VietnamWatchItem) => (
-  item.symbolMetadata?.status === 'ok'
-  && [
-    item.symbolMetadata?.name,
-    item.symbolMetadata?.nameEn,
-    item.symbolMetadata?.exchange,
-    item.symbolMetadata?.market,
-    item.symbolMetadata?.securityType,
-    item.symbolMetadata?.issuer,
-    item.symbolMetadata?.lotSize,
-    item.symbolMetadata?.listedShares,
-    item.symbolMetadata?.listedDate,
-  ].some(hasDisplayValue)
 );
 
 const sumSsiForeignNetVolume = (items: VietnamWatchItem[]) => (
@@ -1888,7 +1873,9 @@ const SelectedTickerHeader: React.FC<{
               <p className="label-uppercase text-cyan">Selected ticker</p>
               <div className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-1">
                 <h2 className="text-2xl font-semibold text-foreground">{item.ticker}</h2>
-                <p className="min-w-0 text-sm text-secondary-text">{companyDisplayName(item)}</p>
+                {companyDisplayName(item) ? (
+                  <p className="min-w-0 text-sm text-secondary-text">{companyDisplayName(item)}</p>
+                ) : null}
               </div>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -2445,7 +2432,9 @@ const IndicatorTable: React.FC<{
                     >
                       {item.ticker}
                     </a>
-                    <div className="mt-1 text-xs font-normal text-secondary-text">{companyDisplayName(item)}</div>
+                    {companyDisplayName(item) ? (
+                      <div className="mt-1 text-xs font-normal text-secondary-text">{companyDisplayName(item)}</div>
+                    ) : null}
                   </td>
                   <td className="px-3 py-3 text-right">
                     <div className="font-medium text-foreground">{formatPrice(close)}</div>
@@ -3354,10 +3343,21 @@ const StockDetailView: React.FC<{
     { label: 'Adjusted close', value: `${formatPrice(ssiDailyStockPrice.adjustedClose ?? item.ssiAdjustedClose)} VND`, show: hasDisplayValue(ssiDailyStockPrice.adjustedClose ?? item.ssiAdjustedClose) },
   ].filter((row) => row.show);
   const symbolMetadata = item.symbolMetadata ?? {};
+  const metadataExchangeMarket = [
+    metadataValue(item, 'exchange'),
+    metadataValue(item, 'market'),
+  ].filter(hasDisplayValue).filter((value, index, values) => values.indexOf(value) === index).join(' / ');
+  const metadataIndustry = metadataValue(item, 'industry');
+  const metadataSector = metadataValue(item, 'sector');
+  const metadataQualityStatus = symbolMetadata.qualityStatus ?? (
+    symbolMetadata.status === 'ok' ? 'partial' : 'unavailable'
+  );
   const symbolMetadataRows = [
     { label: 'Vietnamese name', value: symbolMetadata.name ?? item.companyName ?? item.name, show: hasDisplayValue(symbolMetadata.name ?? item.companyName ?? item.name) },
     { label: 'English name', value: symbolMetadata.nameEn, show: hasDisplayValue(symbolMetadata.nameEn) },
-    { label: 'Exchange / market', value: `${metadataValue(item, 'exchange') ?? '-'} / ${metadataValue(item, 'market') ?? '-'}`, show: hasDisplayValue(metadataValue(item, 'exchange')) || hasDisplayValue(metadataValue(item, 'market')) },
+    { label: 'Exchange / market', value: metadataExchangeMarket, show: hasDisplayValue(metadataExchangeMarket) },
+    { label: 'Industry', value: metadataIndustry, show: hasDisplayValue(metadataIndustry) },
+    { label: 'Sector', value: metadataSector, show: hasDisplayValue(metadataSector) && metadataSector !== metadataIndustry },
     { label: 'Security type', value: metadataValue(item, 'securityType'), show: hasDisplayValue(metadataValue(item, 'securityType')) },
     { label: 'Issuer', value: metadataValue(item, 'issuer'), show: hasDisplayValue(metadataValue(item, 'issuer')) },
     { label: 'Lot size', value: formatNumber(metadataValue(item, 'lotSize') as number | null), show: hasDisplayValue(metadataValue(item, 'lotSize') as number | null) },
@@ -3550,28 +3550,33 @@ const StockDetailView: React.FC<{
       </SelectedTickerDisclosure>
 
       <SelectedTickerDisclosure title="Source coverage">
-      {hasSsiSymbolMetadata(item) && symbolMetadataRows.length ? (
-        <div className="rounded-lg border border-border/60 bg-elevated/30 p-4">
+      <div className="rounded-lg border border-border/60 bg-elevated/30 p-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <h3 className="text-sm font-semibold text-foreground">Symbol metadata</h3>
               <p className="mt-1 text-xs text-secondary-text">SSI Securities and SecuritiesDetails coverage.</p>
             </div>
             <div className="flex flex-wrap gap-1">
-              <Badge variant="info">{symbolMetadata.status ?? 'ok'}</Badge>
-              <Badge variant="default">{symbolMetadata.source ?? item.metadataSource ?? 'SSI'}</Badge>
+              <Badge variant={metadataQualityStatus === 'complete' ? 'success' : 'warning'}>{metadataQualityStatus}</Badge>
+              <Badge variant="default">{symbolMetadata.source ?? item.metadataSource ?? 'SSI SecuritiesDetails'}</Badge>
             </div>
           </div>
-          <dl className="mt-3 grid gap-3 text-sm md:grid-cols-3 xl:grid-cols-4">
+          {symbolMetadataRows.length ? (
+            <dl className="mt-3 grid gap-3 text-sm md:grid-cols-3 xl:grid-cols-4">
             {symbolMetadataRows.map((row) => (
               <div key={`${item.ticker}-metadata-${row.label}`}>
                 <dt className="text-xs text-secondary-text">{row.label}</dt>
                 <dd className="mt-1 font-medium text-foreground">{row.value}</dd>
               </div>
             ))}
-          </dl>
+            </dl>
+          ) : null}
+          {metadataQualityStatus === 'partial' ? (
+            <p className="mt-3 text-xs text-secondary-text">Profile partial. Some metadata is unavailable.</p>
+          ) : metadataQualityStatus === 'unavailable' ? (
+            <p className="mt-3 text-xs text-secondary-text">Profile unavailable. Daily SSI data is still available.</p>
+          ) : null}
         </div>
-      ) : null}
       <div className="mt-4 rounded-lg border border-border/60 bg-elevated/30 p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
@@ -3939,6 +3944,12 @@ const StockDetailView: React.FC<{
               intradayDetails: item.intradayDetails,
             }, null, 2)}</pre>
           </div>
+          {symbolMetadata.diagnostics && Object.keys(symbolMetadata.diagnostics).length ? (
+            <div>
+              <p className="font-medium text-foreground">Profile metadata diagnostics</p>
+              <pre className="mt-1 max-h-44 overflow-auto rounded bg-background/60 p-2">{JSON.stringify(symbolMetadata.diagnostics, null, 2)}</pre>
+            </div>
+          ) : null}
         </div>
       </SelectedTickerDisclosure>
       </div>

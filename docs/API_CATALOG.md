@@ -157,6 +157,7 @@ Source ownership:
 - Reference/limits, foreign flow, matched/put-through, and adjusted-close values use SSI DailyStockPrice when exposed.
 - Company `daily_stock_price` retains the source-specific enrichment block and date-match metadata. Foreign flow declares shares for volume and VND for value.
 - Profile metadata uses SSI Securities/SecuritiesDetails when available, including industry/sector only when SSI returns a mapped metadata field.
+- `profile.status` reports availability. `profile.quality_status`, `profile.completeness`, `profile.missing_fields`, and `profile.field_coverage` report completeness independently.
 
 Null/empty rules:
 
@@ -166,12 +167,14 @@ Null/empty rules:
 - `trade_tape.trades = []` when unavailable/no rows.
 - Future module lists stay empty while not implemented/unavailable.
 - Missing optional DailyStockPrice and foreign-flow metrics remain null and are not rendered as zero.
+- Missing optional profile fields remain null. Profile unavailability does not clear usable DailyOhlc or DailyStockPrice sections.
 
 Implemented contract notes:
 
 - Company intraday unavailable shape is `status = unavailable`, `candles = []`, and `pulse = null`.
 - Company `intraday.diagnostics` is optional and diagnostic-only; it may include sanitized SSI IntradayOhlc failure classification such as `rate_limited` without raw provider payloads or secrets.
-- Profile can have `name = null` and `industry = null` while provider status is `ok`; docs define this as provider OK plus profile completeness `partial`.
+- Profile can have `name = null` and `industry = null` while provider status is `ok`; this is provider OK plus `quality_status = partial`.
+- Profile fields include symbol, name/name_en, exchange, market, industry, sector, security type, issuer, lot size, listed shares, and listed date. Diagnostics contain only sanitized SSI endpoint attempts, row counts, selection source, field coverage, and failure classification.
 - Company price and trading stats now align shared daily values with SSI DailyOhlc; remaining numeric differences versus DailyStockPrice are intentional when fields are explicitly labeled as reference, matched, put-through, adjusted, or foreign-flow values.
 - News placeholders use `NewsProvider future`; financials/events/corporate-action placeholders use `external provider future`. `not_implemented` is allowed for future modules, not live-provider statuses.
 
