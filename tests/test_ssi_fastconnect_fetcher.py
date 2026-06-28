@@ -1742,6 +1742,7 @@ def test_securities_maps_symbol_metadata():
         "name": "FPT Corp",
         "name_en": "FPT Corporation",
         "industry": "Information Technology",
+        "sector": None,
         "issuer": "FPT",
         "lot_size": 100,
         "listed_shares": 123456789,
@@ -1789,6 +1790,7 @@ def test_securities_details_maps_symbol_metadata():
     assert row["name"] == "FPT Corp"
     assert row["name_en"] is None
     assert row["industry"] == "Technology"
+    assert row["sector"] == "Technology"
     assert row["issuer"] == "FPT"
     assert row["lot_size"] == 100
     assert row["listed_shares"] == 123456789
@@ -1819,6 +1821,7 @@ def test_securities_details_missing_metadata_fields_become_none():
 
     assert row["symbol"] == "FPT"
     assert row["industry"] is None
+    assert row["sector"] is None
     assert row["exchange"] == "HOSE"
     assert row["market"] == "HOSE"
     assert row["security_type"] is None
