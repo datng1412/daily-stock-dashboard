@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [test] Stabilize the Vietnam dashboard trade-tape auto-refresh regression by waiting for the initial selected-ticker chart load before asserting no chart/watchlist refresh.
+- [documentation] Record Phase 4.5C live SSI capability-gate findings for DailyStockPrice history, DailyIndex partial status, VN30 components, and optional live-section unavailable states.
 - [improvement] Populate bounded SSI DailyStockPrice 5D/20D foreign net volume summaries from recent per-symbol rows without changing DailyOhlc latest-price ownership or adding external providers.
 - [documentation] Complete the SSI-first remaining capability audit before external providers and classify SSI, unknown, and external-required VN data domains.
 - [documentation] Select corporate actions as the first external VN provider domain and record provider, legal, scoring, and fallback gates.

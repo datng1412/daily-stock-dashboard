@@ -100,6 +100,7 @@ If SSI-owned data is unavailable, show unavailable. Do not silently fallback.
 * Phase 4.0C-8 added a FastAPI startup/shutdown bootstrap for the SSI streaming realtime manager. It runs only when `SSI_STREAMING_REALTIME_ENABLED=true` and `SSI_STREAMING_REALTIME_BOOTSTRAP_SYMBOLS` is a small explicit symbol list. Request handlers still only read cache/status and do not start streams or subscribe dynamically.
 * Phase 4.0C-10B release-gate validation confirmed disabled and enabled SSI realtime modes keep daily watchlist rows on `SSI DailyOhlc`, keep optional realtime separate, stop polling while the tab is hidden, and shut down the lifecycle with `SIGINT` without traceback or secret-like log output. Local `npm.cmd` remained blocked by the Windows host-profile `EPERM` issue, so web validation used direct local Vite/Vitest entry points. In the disabled-mode headless browser smoke, the chart card was attached with 125 SSI daily points but its bounding box stayed hidden; the enabled-mode smoke rendered the chart card visibly.
 * Phase 4.5B implemented bounded SSI DailyStockPrice historical foreign-flow summaries from the existing per-symbol recent window. Current classification: DailyOhlc and DailyStockPrice are `strong`; IndexList, exact VN30 IndexComponents, and supported market metadata are `usable`; DailyIndex and IntradayOhlc are `partial`; true trade-tape history is `unavailable_parameter_unknown`; realtime snapshot is `optional_live_dependent`; `VNINDEX` remains unresolved; fundamentals, statements, ratios, corporate actions, dividends/rights/splits, news, and macro are `external_provider_required`.
+* Phase 4.5C live gate on 2026-06-29 confirmed SSI AccessToken, DailyOhlc, chunked DailyStockPrice, IndexList, DailyIndex, and VN30 IndexComponents are reachable with sanitized smoke output. DailyStockPrice recent history populated 20 rows for FPT/HPG/SSI and produced non-null 5D/20D foreign-net summaries while `latest_price_source` remained `SSI DailyOhlc`. VN30 DailyIndex remained `partial` because the public row lacked a usable positive `index_value` and `exchange`; exact `VNINDEX` remained unresolved. Intraday, realtime snapshot, and trade tape remained optional/unavailable without blocking daily rows.
 * SSI realtime/trade-tape live endpoint names and entitlements may return unavailable. Unavailable states should include sanitized diagnostics without tokens, credentials, auth headers, or raw provider bodies.
 * Dashboard provider-status UI must keep core daily SSI availability separate from optional SSI realtime, SSI trade tape, SSI index components, and disabled news states. A `Partial` dashboard status can mean optional sections are unavailable; it must not imply daily SSI data failed when daily rows are OK.
 * KBS legacy realtime/trade-tape paths are disabled by default and require explicit legacy flags.
@@ -958,6 +959,33 @@ Exit criteria:
 
 * Watchlist rows remain stable and `latest_price_source=SSI DailyOhlc`.
 * DailyStockPrice 5D/20D history uses only bounded per-symbol SSI rows and does not add broad full-market scans.
+* No external provider runtime, fallback provider, VNStocks, FiinGroup, scraping, fake rows, WebSocket/SSE, FC Trading/order/account APIs, or commit/push is introduced.
+
+### Phase 4.5C - SSI Live Capability Gate and Evidence-Based Fix
+
+Status: completed on 2026-06-29.
+
+Goal:
+
+Run the remaining SSI capability gate against deterministic tests first, then live SSI only where credentials and network are available. Fix only evidence-backed defects and document provider/entitlement gaps without adding external providers, fallback providers, fake rows, streaming UI productization, or daily-price ownership changes.
+
+Result:
+
+* Deterministic backend coverage passed for the SSI fetcher, DailyStockPrice, intraday, profile metadata, index, realtime, and no-Mozyfin suites.
+* Live SSI smoke confirmed AccessToken, DailyOhlc, chunked DailyStockPrice, IndexList, DailyIndex, and VN30 IndexComponents remain reachable with sanitized output only.
+* DailyStockPrice live history returned 249 rows for FPT in the 2025-06-30 to 2026-06-29 smoke window and the local API smoke populated 20 recent foreign-flow rows for FPT, HPG, and SSI. The selected rows produced non-null latest-available 5D/20D foreign-net summaries without changing `latest_price_source=SSI DailyOhlc`.
+* VN30 DailyIndex remained optional and partial. The local API smoke returned a VN30 row dated 2026-06-29, but the public row still lacked a usable `index_value` and `exchange`; exact `VNINDEX` remained `identifier_unavailable`.
+* VN30 IndexComponents remained usable. The local API smoke returned 30 component rows through exact `index_code=VN30`, with no hardcoded constituents or fallback provider.
+* IntradayOhlc, realtime snapshot, and trade tape remained unavailable in the local API smoke. Daily SSI watchlist rows stayed `ok`, and missing object/list contracts remained `null`/`[]`.
+* No evidence-backed parser or service bug was found for DailyIndex level aliases, VNINDEX identifier resolution, true trade-tape history, or final close/session status. Those remain deferred/provider-dependent rather than guessed.
+* Fixed a frontend regression-test race in the selected 5-second trade-tape polling case: the test now waits for the initial selected-ticker chart request before recording the baseline used to assert trade-tape polling does not refresh chart, watchlist, or corporate-actions data.
+
+Exit criteria:
+
+* `latest_price` remains SSI DailyOhlc.
+* DailyStockPrice 5D/20D foreign-flow summaries remain bounded to per-symbol recent SSI rows.
+* DailyIndex remains optional/partial until SSI returns a usable positive level and exact identifier evidence.
+* Intraday, realtime, and trade tape unavailable states remain non-fatal and do not erase daily rows.
 * No external provider runtime, fallback provider, VNStocks, FiinGroup, scraping, fake rows, WebSocket/SSE, FC Trading/order/account APIs, or commit/push is introduced.
 
 ### Phase 5.0A - External Provider Contract Design

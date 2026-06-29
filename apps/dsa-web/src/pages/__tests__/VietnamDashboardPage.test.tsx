@@ -4011,6 +4011,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
     await waitFor(() => expect(mockedGetVietnamRealtimeTrades).toHaveBeenCalledWith('FPT', 100));
+    await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('FPT', '6M'));
     const watchlistCalls = mockedGetVietnamWatchlist.mock.calls.length;
     const chartCalls = mockedGetVietnamChart.mock.calls.length;
     const corporateActionsCalls = mockedGetVietnamCorporateActions.mock.calls.length;

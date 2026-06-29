@@ -55,6 +55,7 @@ Expected protection:
 - Realtime polling calls only `/api/v1/stocks/vn/realtime` and does not refresh watchlist, chart, company-like, or trade-tape paths.
 - Realtime polling failures keep previous daily rows, selected ticker, chart, and any previous successful realtime snapshot visible.
 - Hidden-tab visibility handling pauses/skips realtime polling and visible-tab restoration resumes realtime polling only, without a full dashboard reload.
+- Trade-tape auto-refresh tests should wait for the initial selected-ticker chart request before capturing no-refresh baselines, so the initial chart effect is not misclassified as a trade-tape timer refresh.
 
 If `C:` temp/cache space is constrained:
 
@@ -103,6 +104,7 @@ Add focused tests when implementing Data Quality Summary:
 - `tests/test_ssi_index_capability_probe.py` covers provider-derived candidate generation, exact/no-guess matching, hard candidate/date/market budgets, endpoint-specific result classification, error-row rejection, whitelisted output, secret omission, and sequential execution. Importing the script does not start a probe.
 - DailyStockPrice tests cover reference/limits, matched and put-through volume/value, foreign volume/value, bounded 5D/20D latest-available foreign net volume history, adjusted close, zero-versus-null behavior, matched/mismatched/missing dates, unavailable enrichment, sanitized diagnostics, one bounded per-symbol recent-window call, and unchanged SSI DailyOhlc `latest_price`.
 - Frontend tests assert shares/VND units, explicit SSI DailyStockPrice source labels, concise date-mismatch caveats, hidden null optional metrics, retained daily rows/chart, and isolated realtime refresh behavior.
+- The selected 5-second trade-tape polling regression should assert that the timer calls only the trade endpoint after initial selected-ticker chart loading has completed.
 
 ## Phase 2 Contract Tests Needed
 
