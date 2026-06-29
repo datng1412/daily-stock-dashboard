@@ -192,16 +192,42 @@ News disabled state must not be treated as a daily market-data failure. Mozyfin 
 Future enrichment modules such as financials, corporate actions, events, ownership, and richer profile details may appear as placeholder sections while implementation is pending. If they are exposed before implementation, their status may be:
 
 ```text
+disabled
+not_configured
 not_implemented
+unavailable
+partial
+ok
+error
 ```
 
 Rules:
 
 * `not_implemented` means no provider integration exists yet.
+* `not_configured` means a future provider name was selected but no authorized adapter is wired.
 * `disabled` means the feature exists but is intentionally off.
 * `unavailable` means the feature is enabled or attempted but no usable data was returned.
 * Placeholder future sections must use `null` for missing objects and `[]` for missing lists.
 * Future-module placeholders must not be rendered as provider failures or daily-data failures.
+
+### CorporateActionsProvider Contract
+
+Phase 5.0B adds a contract proof only. It does not add a live external provider.
+
+`GET /api/v1/stocks/vn/corporate-actions` returns:
+
+* `status`: `disabled`, `not_configured`, `not_implemented`, `unavailable`, `partial`, `ok`, or `error`.
+* `source`: `CorporateActionsProvider disabled` when the default disabled provider is used, otherwise the future provider contract source.
+* `provider`: a sanitized provider label such as `disabled` or a future configured provider name.
+* `events`: normalized corporate-action rows, or `[]` when no verified rows exist.
+* `items`: backward-compatible alias for the same list as `events`.
+* `diagnostics`: sanitized provider diagnostics only.
+
+Normalized event rows may include `ticker`, `event_id`, `event_type`, `event_subtype`, `title`, `announcement_date`, `ex_date`, `record_date`, `payment_date`, `effective_date`, `cash_dividend_per_share`, `cash_dividend_currency`, `stock_dividend_ratio`, `bonus_share_ratio`, `rights_issue_ratio`, `rights_issue_price`, `split_ratio`, `source`, `source_url`, `source_document_url`, `provider`, `provider_event_id`, `last_updated`, `raw_available`, `confidence`, `status`, and `missing_fields`. Compatibility aliases `rights_ratio`, `description`, and `last_checked_at` may remain while existing UI code migrates.
+
+Corporate-action diagnostics may include provider, request domain, status, row count, failure class, last checked time, and requested ticker count. They must not include raw provider bodies, tokens, auth headers, API keys, account IDs, commercial credentials, or raw auth responses.
+
+Disabled, not-configured, unavailable, and provider-error states must keep `events=[]` and `items=[]`. They must not imply the ticker has no corporate actions; they mean no verified provider rows are available to this dashboard.
 
 ## Source Ownership
 
@@ -223,7 +249,7 @@ Rules:
 | Trade tape | SSI trade-tape contract | Contract exists; live list/history semantics not confirmed |
 | News | Future NewsProvider | Disabled now |
 | Financials | Future external provider | Not implemented |
-| Corporate actions | Future external provider | Not implemented; no inference |
+| Corporate actions | `CorporateActionsProvider` future external boundary | Disabled/not configured by default; no inference |
 | Mozyfin | Disabled for VN runtime | No fallback |
 | KBS | Legacy optional only | Disabled by default |
 
@@ -269,7 +295,7 @@ Sanitized `daily_stock_price.diagnostics` may include endpoint name, requested s
 
 ## External Provider Boundary
 
-Phase 4.5A/5.0A do not add a live external provider or change public fields. Corporate actions are the first selected domain for provider qualification, but they remain `not_implemented` or `unavailable` until the access and legal gates in `docs/VN_EXTERNAL_PROVIDER_STRATEGY.md` pass. VNStocks and FiinGroup are candidate external providers only, both `needs_verification`; they are not runtime sources, fallback providers, or implementation sources in the current contract.
+Phase 4.5A/5.0A do not add a live external provider. Phase 5.0B adds only a disabled-by-default `CorporateActionsProvider` contract proof. Corporate actions are the first selected domain for provider qualification, but they remain `disabled`, `not_configured`, or unavailable until the access and legal gates in `docs/VN_EXTERNAL_PROVIDER_STRATEGY.md` pass. VNStocks and FiinGroup are candidate external providers only, both `needs_verification`; they are not runtime sources, fallback providers, or implementation sources in the current contract.
 
 External provider rules:
 

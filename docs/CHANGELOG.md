@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [new feature] Add a disabled-by-default CorporateActionsProvider contract proof with normalized event fields, empty-list behavior, and sanitized diagnostics.
+- [test] Add deterministic corporate-actions provider contract tests for disabled, not-configured, failure-sanitization, normalized event, and schema compatibility behavior.
 - [test] Stabilize the Vietnam dashboard trade-tape auto-refresh regression by waiting for the initial selected-ticker chart load before asserting no chart/watchlist refresh.
 - [documentation] Record Phase 4.5C live SSI capability-gate findings for DailyStockPrice history, DailyIndex partial status, VN30 components, and optional live-section unavailable states.
 - [improvement] Populate bounded SSI DailyStockPrice 5D/20D foreign net volume summaries from recent per-symbol rows without changing DailyOhlc latest-price ownership or adding external providers.

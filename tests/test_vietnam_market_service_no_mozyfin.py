@@ -329,8 +329,10 @@ def test_default_vn_service_does_not_construct_mozyfin_manager_when_disabled(mon
     )
     actions = service.build_corporate_actions(["FPT"])
 
-    assert actions["status"] == "unavailable"
-    assert actions["source"] is None
+    assert actions["status"] == "disabled"
+    assert actions["source"] == "CorporateActionsProvider disabled"
+    assert actions["events"] == []
+    assert actions["items"] == []
     assert "Mozyfin" not in str(actions)
 
 

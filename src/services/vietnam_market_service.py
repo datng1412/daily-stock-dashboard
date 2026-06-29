@@ -17,6 +17,15 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 from data_provider.base import DataFetcherManager
+from data_provider.corporate_actions_provider import (
+    CORPORATE_ACTION_PROVIDER_SOURCE,
+    CORPORATE_ACTIONS_UNAVAILABLE_REASON,
+    CorporateActionsProvider,
+    DisabledCorporateActionsProvider,
+    NotConfiguredCorporateActionsProvider,
+    normalize_provider_status,
+    sanitize_corporate_actions_text,
+)
 from data_provider.ssi_fastconnect_fetcher import SsiFastConnectFetcher
 from data_provider.ssi_streaming_realtime import SSI_STREAMING_REALTIME_DISABLED_REASON
 from src.config import get_config
@@ -78,6 +87,7 @@ SSI_TRADE_TAPE_SOURCE = "SSI trade-tape contract"
 SSI_INDEX_LIST_SOURCE = "SSI IndexList"
 SSI_DAILY_INDEX_SOURCE = "SSI DailyIndex"
 SSI_INDEX_COMPONENTS_SOURCE = "SSI IndexComponents"
+CORPORATE_ACTIONS_SOURCE = CORPORATE_ACTION_PROVIDER_SOURCE
 SSI_UNAVAILABLE_REASON = "SSI FastConnect unavailable"
 VN_INTRADAY_WARNING = "SSI IntradayOhlc candle data is not a realtime matched quote."
 VN_INTRADAY_DISABLED_REASON = "SSI IntradayOhlc is disabled."
@@ -354,6 +364,9 @@ class VietnamDashboardConfig:
     ssi_realtime_enabled: bool = True
     ssi_streaming_realtime_enabled: bool = False
     ssi_trade_tape_enabled: bool = True
+    corporate_actions_provider_enabled: bool = False
+    corporate_actions_provider: str = "disabled"
+    corporate_actions_provider_timeout_seconds: int = 10
     kbs_enabled: bool = False
     allow_legacy_kbs_provider: bool = False
     provider_comparison_enabled: bool = False
@@ -373,6 +386,9 @@ def _default_dashboard_config() -> VietnamDashboardConfig:
         ssi_realtime_enabled=getattr(app_config, "ssi_fastconnect_realtime_enabled", True),
         ssi_streaming_realtime_enabled=getattr(app_config, "ssi_streaming_realtime_enabled", False),
         ssi_trade_tape_enabled=getattr(app_config, "ssi_fastconnect_trade_tape_enabled", True),
+        corporate_actions_provider_enabled=getattr(app_config, "vn_corporate_actions_provider_enabled", False),
+        corporate_actions_provider=getattr(app_config, "vn_corporate_actions_provider", "disabled"),
+        corporate_actions_provider_timeout_seconds=getattr(app_config, "vn_corporate_actions_provider_timeout_seconds", 10),
         kbs_enabled=getattr(app_config, "kbs_enabled", False),
         allow_legacy_kbs_provider=getattr(app_config, "vn_allow_legacy_kbs_provider", False),
         provider_comparison_enabled=getattr(app_config, "vn_provider_comparison_enabled", False),
@@ -1905,6 +1921,7 @@ class VietnamMarketService:
         manager: Optional[DataFetcherManager] = None,
         config: Optional[VietnamDashboardConfig] = None,
         ssi_fetcher: Optional[SsiFastConnectFetcher] = None,
+        corporate_actions_provider: Optional[CorporateActionsProvider] = None,
     ):
         self.config = config or _default_dashboard_config()
         if manager is not None:
@@ -1914,6 +1931,7 @@ class VietnamMarketService:
         else:
             self.manager = None
         self._ssi_fetcher = ssi_fetcher
+        self._corporate_actions_provider = corporate_actions_provider
 
     def _get_ssi_fetcher(self) -> SsiFastConnectFetcher:
         if self._ssi_fetcher is None:
@@ -1935,6 +1953,14 @@ class VietnamMarketService:
             else:
                 self._ssi_fetcher = SsiFastConnectFetcher()
         return self._ssi_fetcher
+
+    def _get_corporate_actions_provider(self) -> CorporateActionsProvider:
+        if self._corporate_actions_provider is not None:
+            return self._corporate_actions_provider
+        provider_name = str(self.config.corporate_actions_provider or "disabled").strip().lower()
+        if not self.config.corporate_actions_provider_enabled or provider_name in {"", "disabled", "none"}:
+            return DisabledCorporateActionsProvider()
+        return NotConfiguredCorporateActionsProvider(provider_name)
 
     @staticmethod
     def _provider_label(provider: str) -> str:
@@ -3259,22 +3285,70 @@ class VietnamMarketService:
         return health
 
     def build_corporate_actions(self, tickers: Optional[Iterable[str]] = None, months_back: int = 6) -> Dict[str, Any]:
-        """Return VN corporate-action calendar/history shape when an explicit event source is unavailable."""
+        """Return VN corporate-action calendar/history through the safe provider contract."""
         symbols = normalize_vietnam_tickers(tickers)
         safe_months_back = max(1, min(int(months_back or 6), 24))
+        provider = self._get_corporate_actions_provider()
+        try:
+            payload = provider.fetch_corporate_actions(symbols, months_back=safe_months_back)
+        except Exception as exc:  # noqa: BLE001 - optional external domain must fail open.
+            checked_at = datetime.now(timezone.utc).isoformat()
+            provider_name = sanitize_corporate_actions_text(getattr(provider, "provider_name", "unknown"), max_length=80)
+            safe_error = sanitize_corporate_actions_text(exc)
+            payload = {
+                "market": "VN",
+                "status": "error",
+                "source": CORPORATE_ACTIONS_SOURCE,
+                "provider": provider_name,
+                "last_checked_at": checked_at,
+                "requested_tickers": symbols,
+                "months_back": safe_months_back,
+                "events": [],
+                "items": [],
+                "error": CORPORATE_ACTIONS_UNAVAILABLE_REASON,
+                "error_detail": "Corporate actions provider failed; SSI daily data remains independent.",
+                "diagnostics": {
+                    "provider": provider_name,
+                    "request_domain": "corporate_actions",
+                    "status": "error",
+                    "row_count": 0,
+                    "failure_class": "provider_error",
+                    "last_checked_at": checked_at,
+                    "error_summary": safe_error,
+                    "requested_tickers_count": len(symbols),
+                },
+            }
+
+        payload = dict(payload or {})
+        status = normalize_provider_status(payload.get("status"))
+        events = [dict(item) for item in (payload.get("events") or payload.get("items") or []) if isinstance(item, dict)]
+        diagnostics = payload.get("diagnostics") if isinstance(payload.get("diagnostics"), dict) else {}
+        diagnostics = {
+            "provider": sanitize_corporate_actions_text(diagnostics.get("provider") or payload.get("provider") or "unknown", max_length=80),
+            "request_domain": "corporate_actions",
+            "status": status,
+            "row_count": len(events),
+            "failure_class": sanitize_corporate_actions_text(diagnostics.get("failure_class") or status, max_length=80),
+            "last_checked_at": payload.get("last_checked_at") or diagnostics.get("last_checked_at") or datetime.now(timezone.utc).isoformat(),
+            "requested_tickers_count": len(symbols),
+        }
+        if payload.get("diagnostics") and "error_summary" in payload["diagnostics"]:
+            diagnostics["error_summary"] = sanitize_corporate_actions_text(payload["diagnostics"].get("error_summary"))
+
+        last_checked_at = payload.get("last_checked_at") or diagnostics["last_checked_at"]
         return {
             "market": "VN",
-            "status": "unavailable",
-            "source": None,
-            "last_checked_at": datetime.now(timezone.utc).isoformat(),
+            "status": status,
+            "source": payload.get("source") or CORPORATE_ACTIONS_SOURCE,
+            "provider": payload.get("provider") or diagnostics["provider"],
+            "last_checked_at": last_checked_at,
             "requested_tickers": symbols,
             "months_back": safe_months_back,
-            "items": [],
-            "error": "Corporate action calendar unavailable.",
-            "error_detail": (
-                "No verified Vietnam corporate-action event provider is configured. "
-                "Events are not inferred from KBS reference price, price gaps, adjusted reference, or OHLCV changes."
-            ),
+            "events": events,
+            "items": events,
+            "error": payload.get("error") if status != "ok" else None,
+            "error_detail": payload.get("error_detail") if status != "ok" else None,
+            "diagnostics": diagnostics,
         }
 
     def build_daily_index(

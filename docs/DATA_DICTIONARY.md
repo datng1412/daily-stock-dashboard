@@ -89,6 +89,22 @@ Conventions:
 | `trade_tape.trades` | Company detail trade tape rows | SSI trade-tape contract | list | no, empty list if unavailable | no | Company live availability | Company detail keeps rows under the nested block while preserving the same empty-list rule. |
 | `trade_tape_status` | Public status/source/message for trade tape | Service status wrapper | object | yes | no | Live availability status | Message should be short; sanitized endpoint/provider details belong in status diagnostics or other diagnostics-only structures. |
 
+## Corporate Actions Fields
+
+| Field | Meaning | Source | Unit | Nullable | Canonical | UI placement | Known caveat |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `corporate_actions.status` | Availability of the future corporate-actions provider contract | CorporateActionsProvider boundary | enum | no | yes for section state | Corporate actions card/source coverage | Default is disabled; disabled/not-configured/error states do not prove the ticker has no events. |
+| `corporate_actions.source` / `provider` | Contract and provider labels | CorporateActionsProvider boundary | text | yes | yes for provenance | Source badge/diagnostics | Future provider names are labels only until a live adapter is authorized. |
+| `corporate_actions.events` | Normalized corporate-action event rows | Future external provider | list | no, empty list if unavailable | yes for event list | Corporate actions card/future event overlay | `[]` means no verified rows are available, not verified absence of actions. |
+| `corporate_actions.items` | Backward-compatible alias for `events` | CorporateActionsProvider boundary | list | no, empty list if unavailable | no | Compatibility/API clients | Keep in sync with `events` while existing clients migrate. |
+| `events[].event_type` | Normalized event type | Future external provider | enum/text | no | yes for event classification | Event row label | Values include cash dividend, stock dividend, bonus share, rights issue, stock split, merger, listing change, meeting, other, and unknown. |
+| `events[].announcement_date` / `ex_date` / `record_date` / `payment_date` / `effective_date` | Distinct event dates | Future external provider | date/text | yes | yes when supplied | Event row details | Do not substitute one date for another; missing remains null. |
+| `events[].cash_dividend_per_share` / `cash_dividend_currency` | Cash dividend amount and currency | Future external provider | VND or provider currency | yes | source-specific | Event row details | Null is not zero. |
+| `events[].stock_dividend_ratio` / `bonus_share_ratio` / `rights_issue_ratio` / `rights_issue_price` / `split_ratio` | Stock dividend, bonus, rights, issue price, and split terms | Future external provider | ratio/VND | yes | source-specific | Event row details | Do not derive ratios from price gaps or reference-price changes. |
+| `events[].source` / `source_url` / `source_document_url` / `provider_event_id` | Provenance and provider identity | Future external provider | text/url | yes | yes for auditability | Event row source note/diagnostics | Future adapters must retain provenance; raw provider bodies stay out of public responses. |
+| `events[].missing_fields` | Normalized optional fields absent from the provider row | Service/provider normalization | list | no | no | Diagnostics/source coverage | Missing fields should not be rendered as fake metric rows. |
+| `corporate_actions.diagnostics` | Sanitized provider diagnostics | CorporateActionsProvider boundary | object | no | no | Collapsible diagnostics only | May include provider, request domain, status, row count, failure class, last checked time, and requested ticker count only. |
+
 ## Diagnostics Fields
 
 | Field | Meaning | Source | Unit | Nullable | Canonical | UI placement | Known caveat |
@@ -130,7 +146,7 @@ Conventions:
 - Company shared daily fields: company `latest_price`, `daily_close`, daily OHLCV open/high/low/close/volume, and daily value align with the watchlist SSI DailyOhlc fields. Company reference, limits, foreign flow, matched/put-through, and adjusted-close values remain SSI DailyStockPrice-specific.
 - Dashboard top summary `Foreign net volume` sums `ssi_foreign_net_volume` from the latest successful complete watchlist response in shares. Do not mix this with `ssi_foreign_net_value`, which is VND and should be shown as a separate value-based metric if added.
 - Active dashboard labels use `Realtime snapshot`, `SSI realtime`, and `Trade tape` for live sections. Realtime status may be unavailable because the streaming manager is disabled, not started, empty, stale, or errored. KBS/Mozyfin names are reserved for legacy diagnostics or historical notes, not normal runtime UI.
-- Future module statuses: live-provider statuses remain `ok`, `unavailable`, `disabled`; future modules may use `not_implemented` until Phase 2 chooses a normalized shape.
+- Future module statuses: corporate actions may use `disabled`, `not_configured`, `not_implemented`, `unavailable`, `partial`, `ok`, or `error`; other live-provider statuses remain `ok`, `unavailable`, or `disabled` unless their own contract expands.
 
 ## Standard Source Labels
 
@@ -142,6 +158,7 @@ Conventions:
 - `SSI realtime contract`: optional FastConnect streaming realtime snapshot contract; live support is not confirmed by this label or by parser/cache/adapter test presence.
 - `SSI trade-tape contract`: optional trade-tape contract; live support is not confirmed by this label.
 - `SSI IndexList` / `SSI DailyIndex` / `SSI IndexComponents`: index identifiers, daily index context, and component rows.
+- `CorporateActionsProvider disabled`: default future-module state for corporate actions; no external provider call is made.
 - `disabled`: intentionally disabled public sections, including current VN news status.
 - `NewsProvider future`: future VN news domain; not implemented today.
 - `external provider future`: future financials/corporate-action domains; not implemented today.

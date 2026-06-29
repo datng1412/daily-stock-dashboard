@@ -157,18 +157,19 @@ No automated candidate is classified `implement_next` yet because the legal/acce
 7. Explicit source-labeled VNINDEX fallback.
 8. Broker-connected holdings/cost basis, only under a separate privacy/security project.
 
-## Phase 5.0B Entry Gate
+## Phase 5.0B Contract Proof
 
-The next phase should be **CorporateActionsProvider Qualification and Contract Proof**.
+Status: contract proof implemented on 2026-06-29; commercial/legal qualification remains unresolved.
 
 Deliverables:
 
-* written provider/access decision;
-* thin normalized event contract;
-* one sanitized provider fixture or provenance-required manual fixture;
-* disabled-by-default adapter boundary;
-* deterministic tests for null/empty behavior, corrections, duplicate events, and SSI isolation;
-* no frontend expansion until real event rows pass the contract.
+* Added a disabled-by-default `CorporateActionsProvider` contract boundary.
+* Added configuration placeholders that default to disabled and do not authorize external calls.
+* Added normalized event fields for dates, ratios, cash dividends, provenance, provider IDs, and missing-field tracking.
+* Kept `events=[]` and legacy `items=[]` compatibility when no provider rows exist.
+* Added sanitized diagnostics limited to provider, request domain, status, row count, failure class, last checked time, and request size.
+* Added deterministic tests for disabled default behavior, future provider names with no import/call, provider failure sanitization, normalized event provenance, and schema compatibility.
+* Updated the frontend to show corporate actions as a disabled/unavailable future module instead of implying an empty verified event calendar.
 
 Suggested normalized event fields:
 
@@ -196,12 +197,16 @@ updated_at
 Required status behavior:
 
 ```text
-disabled/not_implemented -> events=[]
-enabled provider failure -> status=unavailable, events=[]
+disabled/not_configured/not_implemented -> events=[]
+enabled provider failure -> status=error or unavailable, events=[]
 usable provider rows -> status=ok, events=[...]
 ```
 
 Diagnostics must be limited to provider name, request domain, status, row count, failure class, and last fetched time. Raw provider bodies, tokens, headers, account IDs, and commercial credentials must never be returned.
+
+This proof does not implement VNStocks, FiinGroup, scraping, broker APIs, production external-provider runtime, fallback providers, fake events, or changes to SSI DailyOhlc/DailyStockPrice ownership. `latest_price` remains SSI DailyOhlc.
+
+Before a live adapter is written, Phase 5.1A must still obtain and record all access, entitlement, rate-limit, historical-depth, correction, storage, display, redistribution, provenance, and symbol-mapping answers listed above.
 
 ## Verified Facts and Remaining Unknowns
 

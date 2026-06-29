@@ -85,7 +85,7 @@ Operational rule:
 
 - The preferred automated candidate is FiinGroup API Datafeed only after written entitlement, authentication, rate-limit, storage, display, and redistribution terms are verified.
 - If commercial access is not approved, the fallback is provenance-required manual import through a separate `CorporateActionsProvider`; public portals must not be scraped.
-- Until the gate passes, corporate actions remain `not_implemented` or `unavailable` with `events=[]`.
+- Phase 5.0B provides only a disabled-by-default `CorporateActionsProvider` contract proof. Until the gate passes, corporate actions remain `disabled`, `not_configured`, `not_implemented`, or unavailable with `events=[]` and legacy `items=[]`.
 - Financial statements, ratios, metadata fallback, news, macro, and external VNINDEX remain deferred in the order recorded in `docs/VN_EXTERNAL_PROVIDER_STRATEGY.md`.
 - The existing portfolio subsystem remains user-owned and separate from external VN market-data provider selection.
 

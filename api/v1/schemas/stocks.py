@@ -616,17 +616,34 @@ class VietnamCorporateActionEvent(BaseModel):
     """Vietnam corporate-action calendar/history event."""
 
     ticker: str
+    event_id: Optional[str] = None
     event_type: str = "unknown"
+    event_subtype: Optional[str] = None
+    title: Optional[str] = None
     status: str = "past"
+    announcement_date: Optional[str] = None
     ex_date: Optional[str] = None
     record_date: Optional[str] = None
     payment_date: Optional[str] = None
+    effective_date: Optional[str] = None
     cash_dividend_per_share: Optional[float] = None
+    cash_dividend_currency: Optional[str] = None
     stock_dividend_ratio: Optional[str] = None
+    bonus_share_ratio: Optional[str] = None
+    rights_issue_ratio: Optional[str] = None
+    rights_issue_price: Optional[float] = None
+    split_ratio: Optional[str] = None
     rights_ratio: Optional[str] = None
     description: Optional[str] = None
     source: Optional[str] = None
     source_url: Optional[str] = None
+    source_document_url: Optional[str] = None
+    provider: Optional[str] = None
+    provider_event_id: Optional[str] = None
+    last_updated: Optional[str] = None
+    raw_available: Optional[bool] = None
+    confidence: Optional[float] = None
+    missing_fields: List[str] = Field(default_factory=list)
     last_checked_at: Optional[str] = None
 
 
@@ -636,12 +653,15 @@ class VietnamCorporateActionsResponse(BaseModel):
     market: str = "VN"
     status: str = "unavailable"
     source: Optional[str] = None
+    provider: Optional[str] = None
     last_checked_at: Optional[str] = None
     requested_tickers: List[str] = Field(default_factory=list)
     months_back: int = 6
+    events: List[VietnamCorporateActionEvent] = Field(default_factory=list)
     items: List[VietnamCorporateActionEvent] = Field(default_factory=list)
     error: Optional[str] = None
     error_detail: Optional[str] = None
+    diagnostics: Dict[str, Any] = Field(default_factory=dict)
 
 
 class VietnamRealtimeQuote(BaseModel):

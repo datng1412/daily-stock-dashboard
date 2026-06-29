@@ -205,10 +205,10 @@ Check:
 
 ## Phase 5 External Provider Contract Tests
 
-Phase 5.0A is documentation-only and adds no runtime tests. When Phase 5.0B adds a `CorporateActionsProvider` boundary or import proof, deterministic tests must cover:
+Phase 5.0A is documentation-only and adds no runtime tests. Phase 5.0B adds `tests/test_corporate_actions_provider_contract.py` for the disabled-by-default `CorporateActionsProvider` boundary. Deterministic tests cover:
 
 - Provider disabled by default.
-- `not_implemented`/`disabled` and provider failure return `events=[]`.
+- `not_configured`/`disabled` and provider failure return `events=[]`.
 - Provider failure does not alter or remove valid SSI daily watchlist/company rows.
 - No provider is invoked as a silent SSI fallback.
 - Event dates remain distinct: announcement, ex-date, record date, and payment/execution date.
@@ -217,7 +217,8 @@ Phase 5.0A is documentation-only and adds no runtime tests. When Phase 5.0B adds
 - Source, source URL/document, and import/provider provenance are retained.
 - Diagnostics contain only provider, request domain, status, row count, failure class, and fetch time.
 - Tokens, auth headers, account IDs, credentials, and raw provider payloads are absent.
-- Manual import rejects rows without ticker, event type, source provenance, and at least one usable event date.
+- Public schema compatibility keeps both `events` and legacy `items` list fields.
+- A future manual import must reject rows without ticker, event type, source provenance, and at least one usable event date.
 
 Live provider tests remain out of deterministic CI. They require an approved commercial entitlement and sanitized fixtures.
 

@@ -3457,6 +3457,10 @@ const StockDetailView: React.FC<{
   const upcomingCorporateActions = corporateActionEvents.filter((event) => event.status === 'upcoming');
   const recentCorporateActions = corporateActionEvents.filter((event) => event.status === 'recent' || event.status === 'past');
   const displayCorporateActions = [...upcomingCorporateActions, ...recentCorporateActions];
+  const corporateActionsUnavailable = (
+    Boolean(corporateActionsError)
+    || ['disabled', 'not_configured', 'not_implemented', 'unavailable', 'error'].includes(corporateActions?.status ?? '')
+  );
   return (
     <section className="rounded-lg border border-border/70 bg-card p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -3699,7 +3703,7 @@ const StockDetailView: React.FC<{
         </div>
         {corporateActionsLoading ? (
           <p className="mt-3 text-sm text-secondary-text">Checking corporate action calendar...</p>
-        ) : corporateActionsError || corporateActions?.status === 'unavailable' ? (
+        ) : corporateActionsUnavailable ? (
           <p className="mt-3 text-sm text-secondary-text">Corporate action history/calendar unavailable.</p>
         ) : displayCorporateActions.length ? (
           <div className="mt-3 grid gap-4">

@@ -381,7 +381,7 @@ Select external domains and providers without changing SSI ownership. Corporate 
 
 ### Phase 5.0B - CorporateActionsProvider Qualification
 
-Verify entitlement, auth, limits, provenance, correction semantics, and storage/display/redistribution rights. Prove a thin disabled-by-default contract with a sanitized licensed or manual fixture.
+Phase 5.0B proves a thin disabled-by-default contract with normalized event fields, empty-list behavior, and sanitized diagnostics. Entitlement, auth, limits, provenance, correction semantics, and storage/display/redistribution rights remain required before any live adapter.
 
 ### Phase 5.1A - Corporate Actions and Dividends Provider
 

@@ -45,10 +45,11 @@ This document gives Codex and other agents enough context to resume project work
 ## External Provider State
 
 - Phase 5.0A selected corporate actions/dividends/rights/splits as the first external VN domain to qualify.
+- Phase 5.0B added only a disabled-by-default `CorporateActionsProvider` contract proof with normalized `events`/`items`, sanitized diagnostics, and no external provider calls.
 - Phase 4.5A records VNStocks and FiinGroup as `candidate_external_provider` with `needs_verification` only; neither provider is authorized, configured, called, or used as fallback.
 - FiinGroup API Datafeed is the preferred automated candidate only after commercial access, rate-limit, storage, display, and redistribution terms are verified in writing.
 - Provenance-required manual import is the fallback strategy; public VSDC/HOSE/HNX/SSC/company pages must not be scraped without explicit approval and verified terms.
-- No external provider, credential, configuration, endpoint, or runtime behavior is enabled yet.
+- No external provider, credential, live adapter, fallback provider, scraping path, or production external-provider runtime is enabled yet.
 - Financial statements, metadata fallback, ratios, news, macro, and explicit external VNINDEX remain deferred in the order recorded in `docs/VN_EXTERNAL_PROVIDER_STRATEGY.md`.
 - The existing portfolio subsystem is user-owned and separate from VN external market-data provider selection.
 

@@ -678,6 +678,9 @@ class Config:
     vn_intraday_data_provider: str = "ssi"
     vn_realtime_data_provider: str = "ssi"
     vn_trade_tape_provider: str = "ssi"
+    vn_corporate_actions_provider_enabled: bool = False
+    vn_corporate_actions_provider: str = "disabled"
+    vn_corporate_actions_provider_timeout_seconds: int = 10
     vn_provider_comparison_enabled: bool = False
     kbs_enabled: bool = False
     vn_allow_legacy_kbs_provider: bool = False
@@ -1997,6 +2000,22 @@ class Config:
                 {'ssi'},
                 'ssi',
                 field_name='VN_TRADE_TAPE_PROVIDER',
+            ),
+            vn_corporate_actions_provider_enabled=parse_env_bool(
+                os.getenv('VN_CORPORATE_ACTIONS_PROVIDER_ENABLED'),
+                default=False,
+            ),
+            vn_corporate_actions_provider=parse_env_choice(
+                os.getenv('VN_CORPORATE_ACTIONS_PROVIDER'),
+                {'disabled', 'manual', 'vnstocks', 'fiingroup'},
+                'disabled',
+                field_name='VN_CORPORATE_ACTIONS_PROVIDER',
+            ),
+            vn_corporate_actions_provider_timeout_seconds=parse_env_int(
+                os.getenv('VN_CORPORATE_ACTIONS_PROVIDER_TIMEOUT_SECONDS'),
+                10,
+                field_name='VN_CORPORATE_ACTIONS_PROVIDER_TIMEOUT_SECONDS',
+                minimum=1,
             ),
             vn_provider_comparison_enabled=parse_env_bool(
                 os.getenv('VN_PROVIDER_COMPARISON_ENABLED'),

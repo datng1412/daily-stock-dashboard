@@ -1009,6 +1009,8 @@ Result:
 
 ### Phase 5.0B - CorporateActionsProvider Qualification and Contract Proof
 
+Status: contract proof completed on 2026-06-29; provider access/legal qualification remains unresolved.
+
 Goal:
 
 Resolve the access/legal gate and prove one bounded corporate-action contract before production integration.
@@ -1032,6 +1034,16 @@ Acceptance criteria:
 * Provider/source decision is written and evidence-backed.
 * Contract tests prove null/empty, provenance, correction, duplicate, and SSI-isolation behavior.
 * Adapter remains disabled by default until a live proof is explicitly approved.
+
+Result:
+
+* Added a `CorporateActionsProvider` boundary with disabled and not-configured implementations that perform no external I/O.
+* Added disabled-by-default `VN_CORPORATE_ACTIONS_PROVIDER_*` config placeholders for future provider wiring.
+* Expanded the public corporate-actions response with normalized `events`, backward-compatible `items`, provider/source labels, and sanitized diagnostics.
+* Preserved `events=[]`/`items=[]` for disabled, not-configured, unavailable, and error states.
+* Proved provider failure remains optional and does not affect SSI DailyOhlc/DailyStockPrice rows or `latest_price`.
+* Updated dashboard rendering so the corporate-actions card shows an unavailable/disabled future-module state rather than implying verified absence of events.
+* Did not implement VNStocks, FiinGroup, scraping, external fallback runtime, fake events, FC Trading, WebSocket/SSE product behavior, or any change to `latest_price`.
 
 ### Phase 5.1A - Corporate Actions and Dividends Provider
 

@@ -787,30 +787,50 @@ export type VietnamIndexComponentsResponse = {
 
 export type VietnamCorporateActionEvent = {
   ticker: string;
-  eventType: 'cash_dividend' | 'stock_dividend' | 'bonus_share' | 'rights_issue' | 'split' | 'meeting' | 'unknown' | string;
+  eventId?: string | null;
+  eventType: 'cash_dividend' | 'stock_dividend' | 'bonus_share' | 'rights_issue' | 'stock_split' | 'merger' | 'listing_change' | 'meeting' | 'other' | 'unknown' | string;
+  eventSubtype?: string | null;
+  title?: string | null;
   status: 'upcoming' | 'recent' | 'past' | string;
+  announcementDate?: string | null;
   exDate?: string | null;
   recordDate?: string | null;
   paymentDate?: string | null;
+  effectiveDate?: string | null;
   cashDividendPerShare?: number | null;
+  cashDividendCurrency?: string | null;
   stockDividendRatio?: string | null;
+  bonusShareRatio?: string | null;
+  rightsIssueRatio?: string | null;
+  rightsIssuePrice?: number | null;
+  splitRatio?: string | null;
   rightsRatio?: string | null;
   description?: string | null;
   source?: string | null;
   sourceUrl?: string | null;
+  sourceDocumentUrl?: string | null;
+  provider?: string | null;
+  providerEventId?: string | null;
+  lastUpdated?: string | null;
+  rawAvailable?: boolean | null;
+  confidence?: number | null;
+  missingFields?: string[];
   lastCheckedAt?: string | null;
 };
 
 export type VietnamCorporateActionsResponse = {
   market: 'VN';
-  status: 'ok' | 'unavailable' | 'error' | string;
+  status: 'ok' | 'disabled' | 'not_configured' | 'not_implemented' | 'unavailable' | 'partial' | 'error' | string;
   source?: string | null;
+  provider?: string | null;
   lastCheckedAt?: string | null;
   requestedTickers: string[];
   monthsBack: number;
+  events?: VietnamCorporateActionEvent[];
   items: VietnamCorporateActionEvent[];
   error?: string | null;
   errorDetail?: string | null;
+  diagnostics?: Record<string, unknown>;
 };
 
 export type VietnamObservabilityResponse = {
