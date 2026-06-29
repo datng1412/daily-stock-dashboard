@@ -3453,7 +3453,7 @@ const StockDetailView: React.FC<{
     { label: 'Listed shares', value: formatNumber(metadataValue(item, 'listedShares') as number | null), show: hasDisplayValue(metadataValue(item, 'listedShares') as number | null) },
     { label: 'Listed date', value: metadataValue(item, 'listedDate'), show: hasDisplayValue(metadataValue(item, 'listedDate')) },
   ].filter((row) => row.show);
-  const corporateActionEvents = (corporateActions?.items ?? []).filter((event) => event.ticker === item.ticker);
+  const corporateActionEvents = (corporateActions?.events ?? corporateActions?.items ?? []).filter((event) => event.ticker === item.ticker);
   const upcomingCorporateActions = corporateActionEvents.filter((event) => event.status === 'upcoming');
   const recentCorporateActions = corporateActionEvents.filter((event) => event.status === 'recent' || event.status === 'past');
   const displayCorporateActions = [...upcomingCorporateActions, ...recentCorporateActions];

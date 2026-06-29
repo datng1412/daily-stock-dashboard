@@ -2896,7 +2896,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
       source: 'provider_name',
       error: null,
       errorDetail: null,
-      items: [
+      events: [
         {
           ticker: 'FPT',
           eventType: 'cash_dividend',
@@ -2919,6 +2919,20 @@ describe('VietnamDashboardPage watchlist loading', () => {
           paymentDate: null,
           description: 'Annual general meeting',
           source: 'provider_name',
+          sourceUrl: null,
+          lastCheckedAt: '2026-06-11T10:00:00+07:00',
+        },
+      ],
+      items: [
+        {
+          ticker: 'FPT',
+          eventType: 'meeting',
+          status: 'recent',
+          exDate: null,
+          recordDate: '2026-04-01',
+          paymentDate: null,
+          description: 'Legacy item should not render when canonical events exist',
+          source: 'legacy_provider',
           sourceUrl: null,
           lastCheckedAt: '2026-06-11T10:00:00+07:00',
         },
@@ -2957,6 +2971,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(detail.getByText('meeting')).toBeInTheDocument();
     expect(detail.getByText('Annual general meeting')).toBeInTheDocument();
     expect(detail.getAllByText(/Source: provider_name/).length).toBeGreaterThan(0);
+    expect(detail.queryByText('Legacy item should not render when canonical events exist')).not.toBeInTheDocument();
   });
 
   it('shows the OK-empty corporate-action state without inferring events', async () => {

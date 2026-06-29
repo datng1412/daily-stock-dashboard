@@ -219,8 +219,8 @@ Phase 5.0B adds a contract proof only. It does not add a live external provider.
 * `status`: `disabled`, `not_configured`, `not_implemented`, `unavailable`, `partial`, `ok`, or `error`.
 * `source`: `CorporateActionsProvider disabled` when the default disabled provider is used, otherwise the future provider contract source.
 * `provider`: a sanitized provider label such as `disabled` or a future configured provider name.
-* `events`: normalized corporate-action rows, or `[]` when no verified rows exist.
-* `items`: backward-compatible alias for the same list as `events`.
+* `events`: canonical normalized corporate-action rows, or `[]` when no verified rows exist.
+* `items`: backward-compatible alias derived from `events`.
 * `diagnostics`: sanitized provider diagnostics only.
 
 Normalized event rows may include `ticker`, `event_id`, `event_type`, `event_subtype`, `title`, `announcement_date`, `ex_date`, `record_date`, `payment_date`, `effective_date`, `cash_dividend_per_share`, `cash_dividend_currency`, `stock_dividend_ratio`, `bonus_share_ratio`, `rights_issue_ratio`, `rights_issue_price`, `split_ratio`, `source`, `source_url`, `source_document_url`, `provider`, `provider_event_id`, `last_updated`, `raw_available`, `confidence`, `status`, and `missing_fields`. Compatibility aliases `rights_ratio`, `description`, and `last_checked_at` may remain while existing UI code migrates.
@@ -228,6 +228,8 @@ Normalized event rows may include `ticker`, `event_id`, `event_type`, `event_sub
 Corporate-action diagnostics may include provider, request domain, status, row count, failure class, last checked time, and requested ticker count. They must not include raw provider bodies, tokens, auth headers, API keys, account IDs, commercial credentials, or raw auth responses.
 
 Disabled, not-configured, unavailable, and provider-error states must keep `events=[]` and `items=[]`. They must not imply the ticker has no corporate actions; they mean no verified provider rows are available to this dashboard.
+
+Future adapters must treat `events` as the only canonical event list. If an adapter or legacy caller provides both `events` and `items`, the service/API keeps `events` and derives `items` from it so the two lists cannot diverge.
 
 ## Source Ownership
 

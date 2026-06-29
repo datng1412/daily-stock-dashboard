@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [fix] Harden the corporate-actions contract so canonical `events` always drives the legacy `items` alias across service, schema, and dashboard rendering.
 - [new feature] Add a disabled-by-default CorporateActionsProvider contract proof with normalized event fields, empty-list behavior, and sanitized diagnostics.
 - [test] Add deterministic corporate-actions provider contract tests for disabled, not-configured, failure-sanitization, normalized event, and schema compatibility behavior.
 - [test] Stabilize the Vietnam dashboard trade-tape auto-refresh regression by waiting for the initial selected-ticker chart load before asserting no chart/watchlist refresh.

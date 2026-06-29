@@ -11,7 +11,7 @@
 
 from typing import Any, Dict, Optional, List
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class StockQuote(BaseModel):
@@ -662,6 +662,13 @@ class VietnamCorporateActionsResponse(BaseModel):
     error: Optional[str] = None
     error_detail: Optional[str] = None
     diagnostics: Dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def keep_legacy_items_mirrored(self) -> "VietnamCorporateActionsResponse":
+        """Keep ``events`` canonical and ``items`` as a compatibility alias."""
+        if self.events != self.items:
+            self.items = list(self.events)
+        return self
 
 
 class VietnamRealtimeQuote(BaseModel):

@@ -46,16 +46,22 @@ Why this domain is first:
 
 ### Verify before implementation
 
-Phase 5.0B must obtain and record all of the following before a live adapter is written:
+Phase 5.0B/5.1A must obtain and record all of the following before a live adapter is written:
 
-1. FiinGroup product entitlement covering corporate events for HOSE, HNX, and UPCoM.
-2. Authentication flow, production base URL, pagination, date filters, timeout expectations, rate limits, and retry rules.
-3. Historical depth and correction/update behavior.
-4. Contractual permission to store normalized rows and display them in this dashboard.
-5. Contractual permission, or prohibition, for redistribution to other users/deployments.
-6. Source provenance guarantees, especially when `SourceUrl` or attachment fields are empty.
-7. Symbol mapping rules between FiinGroup `OrganCode`/ticker and SSI symbols.
-8. A sanitized one-ticker fixture covering cash dividend, stock dividend/bonus, rights issue, correction/cancellation, and missing optional dates.
+1. FiinGroup product entitlement covering corporate events for HOSE, HNX, and UPCoM, or mark each exchange coverage answer as `needs_verification`.
+2. VNStocks entitlement, source terms, automation terms, storage/display rights, redistribution rights, rate limits, and event-field coverage, or keep VNStocks as `needs_verification`.
+3. Authentication flow, production base URL, pagination, date filters, timeout expectations, retry rules, rate limits, pricing, and support/SLA.
+4. Historical depth, update cadence, correction/cancellation behavior, duplicate event identifiers, and provider backfill guarantees.
+5. Contractual permission to store normalized rows, display them in this dashboard, and retain source URLs/documents.
+6. Contractual permission, or prohibition, for redistribution to other users/deployments.
+7. Permission, or prohibition, for raw provider payload storage. If not granted, store only normalized fields plus provenance.
+8. Source provenance guarantees, especially when `SourceUrl`, attachments, or document references are empty.
+9. Symbol mapping rules between provider identifiers such as FiinGroup `OrganCode`, VNStocks ticker fields if applicable, and SSI symbols, including renamed, delisted, and transferred securities.
+10. Event type coverage for cash dividends, stock dividends, bonus shares, rights issues, stock splits, meetings, listing changes, corrections/cancellations, and unknown/other events.
+11. Event date semantics for announcement/publication, ex-date, record date, payment/execution date, effective date, provider-created time, and provider-updated time.
+12. Privacy and security constraints for credentials, account identifiers, audit logs, provider documents, and any user-supplied manual files.
+13. A sanitized one-ticker fixture covering cash dividend, stock dividend/bonus, rights issue, correction/cancellation, duplicate handling, source URL/document availability, and missing optional dates.
+14. A written enablement proof showing the provider returns normalized `events`, with legacy `items` derived by the service/API and never maintained as a divergent provider list.
 
 No production FiinGroup call is authorized until those gates pass.
 

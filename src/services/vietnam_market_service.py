@@ -3321,7 +3321,12 @@ class VietnamMarketService:
 
         payload = dict(payload or {})
         status = normalize_provider_status(payload.get("status"))
-        events = [dict(item) for item in (payload.get("events") or payload.get("items") or []) if isinstance(item, dict)]
+        raw_events = payload.get("events")
+        if not isinstance(raw_events, list):
+            # Legacy provider-contract compatibility only. New adapters must
+            # return canonical ``events``; public ``items`` is derived below.
+            raw_events = payload.get("items")
+        events = [dict(item) for item in (raw_events or []) if isinstance(item, dict)]
         diagnostics = payload.get("diagnostics") if isinstance(payload.get("diagnostics"), dict) else {}
         diagnostics = {
             "provider": sanitize_corporate_actions_text(diagnostics.get("provider") or payload.get("provider") or "unknown", max_length=80),

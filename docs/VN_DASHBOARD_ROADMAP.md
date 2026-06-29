@@ -1045,6 +1045,18 @@ Result:
 * Updated dashboard rendering so the corporate-actions card shows an unavailable/disabled future-module state rather than implying verified absence of events.
 * Did not implement VNStocks, FiinGroup, scraping, external fallback runtime, fake events, FC Trading, WebSocket/SSE product behavior, or any change to `latest_price`.
 
+### Phase 5.0C - Corporate Actions Contract Hardening and Offline Test Hygiene
+
+Status: completed on 2026-06-29.
+
+Result:
+
+* Hardened the corporate-actions alias contract so `events` is canonical and legacy `items` is derived from it across service, API schema, and dashboard rendering.
+* Added deterministic coverage for divergent provider/schema input so `items` cannot drift from `events`.
+* Tightened the future provider qualification checklist for entitlement, terms, pricing, SLA, rate limits, symbol mapping, event/date semantics, source documents, raw payload storage, and privacy/security constraints.
+* Documented unrelated LiteLLM remote pricing refresh as offline TestClient import noise when the full FastAPI app is imported for a stock-only smoke; deterministic tests should use the existing LiteLLM stub instead of changing production startup semantics.
+* Did not implement VNStocks, FiinGroup, external provider runtime, fallback providers, scraping, fake events, or changes to SSI `latest_price` ownership.
+
 ### Phase 5.1A - Corporate Actions and Dividends Provider
 
 Goal:

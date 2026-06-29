@@ -217,10 +217,13 @@ Phase 5.0A is documentation-only and adds no runtime tests. Phase 5.0B adds `tes
 - Source, source URL/document, and import/provider provenance are retained.
 - Diagnostics contain only provider, request domain, status, row count, failure class, and fetch time.
 - Tokens, auth headers, account IDs, credentials, and raw provider payloads are absent.
-- Public schema compatibility keeps both `events` and legacy `items` list fields.
+- Public schema compatibility keeps both `events` and legacy `items` list fields, with `events` canonical and `items` derived from `events`.
+- Divergent provider or schema input cannot make public `items` differ from `events`.
 - A future manual import must reject rows without ticker, event type, source provenance, and at least one usable event date.
 
 Live provider tests remain out of deterministic CI. They require an approved commercial entitlement and sanitized fixtures.
+
+Offline TestClient note: importing the full FastAPI app may import unrelated LLM modules because the v1 router registers all endpoint groups. If LiteLLM tries to refresh remote model pricing during a stock-only smoke in a network-blocked environment, treat it as unrelated app-import noise unless the stock/corporate-actions route fails. Deterministic tests that need app import can use the existing `tests.litellm_stub.ensure_litellm_stub()` helper rather than changing production startup behavior.
 
 ## Local VN Dashboard Smoke Harness
 

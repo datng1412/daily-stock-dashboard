@@ -318,7 +318,8 @@ Common params:
 Response rules:
 
 - Corporate actions remain disabled, not configured, unavailable, or not implemented until a verified structured source exists.
-- Missing event lists return `events=[]` and the backward-compatible alias `items=[]`.
+- Missing event lists return canonical `events=[]` and the backward-compatible alias `items=[]`.
+- `items` is compatibility-only and is derived from `events`; clients should read `events` first.
 - The response includes sanitized `source`, `provider`, and `diagnostics` fields for the provider contract state.
 - Normalized rows may include event dates, dividend/rights/split values, source URLs/documents, provider event IDs, and missing-field metadata when a future authorized provider supplies them.
 - Do not infer dividends, rights, splits, or adjustment events from price/reference gaps.

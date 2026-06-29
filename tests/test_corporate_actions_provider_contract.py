@@ -17,6 +17,49 @@ class ExplodingCorporateActionsProvider:
         )
 
 
+class DivergentItemsCorporateActionsProvider:
+    provider_name = "fixture"
+
+    def fetch_corporate_actions(self, tickers, *, months_back):
+        del tickers, months_back
+        return {
+            "market": "VN",
+            "status": "ok",
+            "source": "CorporateActionsProvider",
+            "provider": self.provider_name,
+            "last_checked_at": "2026-06-29T00:00:00+00:00",
+            "requested_tickers": ["FPT"],
+            "months_back": 6,
+            "events": [
+                {
+                    "ticker": "FPT",
+                    "event_type": "cash_dividend",
+                    "status": "upcoming",
+                    "announcement_date": "2026-06-01",
+                    "source": "fixture",
+                    "provider_event_id": "canonical-event",
+                }
+            ],
+            "items": [
+                {
+                    "ticker": "HPG",
+                    "event_type": "meeting",
+                    "status": "past",
+                    "source": "fixture",
+                    "provider_event_id": "legacy-item",
+                }
+            ],
+            "diagnostics": {
+                "provider": self.provider_name,
+                "request_domain": "corporate_actions",
+                "status": "ok",
+                "row_count": 1,
+                "failure_class": "ok",
+                "last_checked_at": "2026-06-29T00:00:00+00:00",
+            },
+        }
+
+
 def _service(**config_overrides) -> VietnamMarketService:
     return VietnamMarketService(
         config=VietnamDashboardConfig(
@@ -90,6 +133,22 @@ def test_provider_failure_is_sanitized_and_optional():
     assert "Corporate actions provider failed; SSI daily data remains independent." == payload["error_detail"]
 
 
+def test_service_derives_legacy_items_from_canonical_events_when_provider_diverges():
+    service = _service(
+        corporate_actions_provider_enabled=True,
+        corporate_actions_provider="manual",
+    )
+    service._corporate_actions_provider = DivergentItemsCorporateActionsProvider()
+
+    payload = service.build_corporate_actions(["FPT"], months_back=6)
+
+    assert payload["status"] == "ok"
+    assert payload["events"] == payload["items"]
+    assert payload["events"][0]["provider_event_id"] == "canonical-event"
+    assert "legacy-item" not in str(payload)
+    assert payload["diagnostics"]["row_count"] == 1
+
+
 def test_normalized_event_contract_preserves_provenance_and_missing_fields():
     row = CorporateActionEvent(
         ticker="fpt",
@@ -136,3 +195,34 @@ def test_api_schema_accepts_events_and_legacy_items_alias_together():
     assert response.events == []
     assert response.items == []
     assert response.diagnostics["provider"] == "disabled"
+
+
+def test_api_schema_derives_legacy_items_from_canonical_events():
+    response = VietnamCorporateActionsResponse(
+        status="ok",
+        source="CorporateActionsProvider",
+        provider="fixture",
+        requested_tickers=["FPT"],
+        months_back=6,
+        events=[
+            {
+                "ticker": "FPT",
+                "event_type": "cash_dividend",
+                "status": "upcoming",
+                "source": "fixture",
+                "provider_event_id": "canonical-event",
+            }
+        ],
+        items=[
+            {
+                "ticker": "HPG",
+                "event_type": "meeting",
+                "status": "past",
+                "source": "fixture",
+                "provider_event_id": "legacy-item",
+            }
+        ],
+    )
+
+    assert response.items == response.events
+    assert response.events[0].provider_event_id == "canonical-event"
