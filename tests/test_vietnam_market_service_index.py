@@ -300,6 +300,7 @@ def test_daily_index_resolves_ssi_identifiers_and_classifies_dates_and_missing_f
     assert payload["diagnostics"]["per_index"]["VNINDEX"]["selected_identifier"] == "VNINDEX_ID"
     assert "token" not in str(payload["diagnostics"]).lower()
     assert payload["fallback_used"] is False
+    assert fetcher.index_list_calls == [{"market": "HOSE", "force_refresh": True}]
 
 
 def test_daily_index_unavailable_does_not_break_watchlist_or_latest_price():

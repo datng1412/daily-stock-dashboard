@@ -54,6 +54,7 @@ SSI_CHUNK_MAX_DAYS = 29
 SSI_PAGE_SIZE = 1000
 SSI_MAX_PAGES = 20
 DEFAULT_INTRADAY_RATE_LIMIT_COOLDOWN_SECONDS = 60
+DEFAULT_INDEX_REQUEST_DELAY_SECONDS = 1.15
 
 
 def _endpoint_attempt_reason(
@@ -212,6 +213,7 @@ def _classify_provider_failure(
     error = str(error_type or "").strip().lower()
     status_code = _safe_int(http_status)
     provider_code = _safe_int(code)
+    provider_code_text = str(code or "").strip().lower()
     reason_text = str(reason or "").strip().lower()
 
     if reason_text == MISSING_CREDENTIALS_REASON.lower():
@@ -222,6 +224,14 @@ def _classify_provider_failure(
         return "network_error"
     if error == "invalid_json":
         return "parse_failed"
+    if any(marker in provider_code_text for marker in ("auth", "token", "credential")):
+        return "auth_failed"
+    if any(marker in provider_code_text for marker in ("permission", "forbidden", "denied")):
+        return "permission_denied"
+    if any(marker in provider_code_text for marker in ("rate", "throttle", "too_many")):
+        return "rate_limited"
+    if any(marker in provider_code_text for marker in ("request_null", "bad_request", "invalid_param", "parameter")):
+        return "bad_request_params"
 
     effective_code = provider_code if provider_code is not None else status_code
     if effective_code == 429:
@@ -415,6 +425,44 @@ def _extract_rows(payload: Any) -> List[Dict[str, Any]]:
     return [payload] if payload else []
 
 
+def _extract_index_component_rows(payload: Any, requested_index: str) -> List[Dict[str, Any]]:
+    """Flatten SSI's nested IndexComponent envelope for one exact index only."""
+    if isinstance(payload, dict) and payload.get("status") == "unavailable":
+        return []
+    normalized_requested = str(requested_index or "").strip().upper()
+    components: List[Dict[str, Any]] = []
+    for row in _extract_rows(payload):
+        nested = _first_value(row, "IndexComponent", "IndexComponents", "Components", "components")
+        outer_index = _first_value(
+            row,
+            "IndexID",
+            "IndexId",
+            "IndexCode",
+            "indexID",
+            "indexId",
+            "indexCode",
+            "index_code",
+        )
+        normalized_outer = str(outer_index or "").strip().upper()
+        if isinstance(nested, list):
+            if not normalized_outer or normalized_outer != normalized_requested:
+                continue
+            outer_exchange = _first_value(row, "Exchange", "Market", "exchange", "market")
+            for component in nested:
+                if not isinstance(component, dict):
+                    continue
+                flattened = dict(component)
+                flattened.setdefault("IndexCode", normalized_outer)
+                if outer_exchange not in (None, ""):
+                    flattened.setdefault("Exchange", outer_exchange)
+                components.append(flattened)
+            continue
+        if normalized_outer and normalized_outer != normalized_requested:
+            continue
+        components.append(row)
+    return components
+
+
 def _pick_ci(payload: Any, *keys: str) -> Any:
     """Return a dictionary value by key using case-insensitive matching."""
     if not isinstance(payload, dict):
@@ -452,22 +500,32 @@ def _has_required_field(row: Dict[str, Any], fields: Tuple[str, ...]) -> bool:
     return any(row.get(field) not in (None, "", [], {}) for field in fields)
 
 
-def _has_ssi_error(payload: Any) -> bool:
+def _ssi_error_record(payload: Any) -> Optional[Dict[str, Any]]:
     if not isinstance(payload, dict):
-        return False
-    status = str(_pick_ci(payload, "status", "Status") or "").strip().lower()
-    message = str(_pick_ci(payload, "message", "Message") or "").strip().lower()
-    success = _pick_ci(payload, "success", "Success")
-    code = str(_pick_ci(payload, "code", "Code", "errorCode", "ErrorCode", "error_code") or "").strip()
-    if status in {"error", "failed", "fail", "unavailable"}:
-        return True
-    if status and status not in {"success", "ok", "0", "200"}:
-        return True
-    if isinstance(success, bool) and not success:
-        return True
-    if code and code not in {"0", "200", "OK", "ok"} and (message or status):
-        return True
-    return False
+        return None
+    candidates = [payload]
+    for key in ("data", "Data", "result", "Result"):
+        nested = payload.get(key)
+        if isinstance(nested, dict):
+            candidates.append(nested)
+    for candidate in candidates:
+        status = str(_pick_ci(candidate, "status", "Status") or "").strip().lower()
+        message = str(_pick_ci(candidate, "message", "Message") or "").strip().lower()
+        success = _pick_ci(candidate, "success", "Success")
+        code = str(_pick_ci(candidate, "code", "Code", "errorCode", "ErrorCode", "error_code") or "").strip()
+        if status in {"error", "failed", "fail", "unavailable"}:
+            return candidate
+        if status and status not in {"success", "ok", "0", "200"}:
+            return candidate
+        if isinstance(success, bool) and not success:
+            return candidate
+        if code and code not in {"0", "200", "OK", "ok"} and (message or status):
+            return candidate
+    return None
+
+
+def _has_ssi_error(payload: Any) -> bool:
+    return _ssi_error_record(payload) is not None
 
 
 def _token_from_payload(payload: Any) -> Optional[str]:
@@ -547,6 +605,7 @@ class SsiFastConnectFetcher:
         monotonic_clock: Optional[Callable[[], float]] = None,
         utcnow: Optional[Callable[[], datetime]] = None,
         request_delay_seconds: float = 0,
+        index_request_delay_seconds: float = DEFAULT_INDEX_REQUEST_DELAY_SECONDS,
         session: Optional[requests.Session] = None,
         config: Any = None,
     ) -> None:
@@ -736,10 +795,12 @@ class SsiFastConnectFetcher:
         )
         self.session = session or requests.Session()
         self.request_delay_seconds = max(0.0, float(request_delay_seconds or 0))
+        self.index_request_delay_seconds = max(0.0, float(index_request_delay_seconds or 0))
         self._monotonic_clock = monotonic_clock or time.monotonic
         self._utcnow = utcnow or (lambda: datetime.now(timezone.utc))
         self._access_token: Optional[str] = None
         self._token_expires_at: float = 0
+        self._last_index_request_at: Optional[float] = None
         self._cache: Dict[Tuple[str, Tuple[Tuple[str, Any], ...]], _CacheEntry] = {}
 
     def _build_official_streaming_realtime_client(self) -> SsiRealtimeStreamClient:
@@ -1481,17 +1542,17 @@ class SsiFastConnectFetcher:
     ) -> Dict[str, Any]:
         normalized_index = index_code.strip().upper()
         params: Dict[str, Any] = {
-            "indexID": normalized_index,
+            "indexCode": normalized_index,
             "pageIndex": 1,
             "pageSize": 1000,
         }
         if market:
             params["market"] = market.strip().upper()
-        common_params = {key: value for key, value in params.items() if key != "indexID"}
+        common_params = {key: value for key, value in params.items() if key != "indexCode"}
         variants = [
-            {**common_params, "indexCode": normalized_index},
-            {**common_params, "IndexId": normalized_index},
+            {**common_params, "indexID": normalized_index},
             {**common_params, "IndexCode": normalized_index},
+            {**common_params, "IndexId": normalized_index},
             self._alternate_param_case(params),
         ]
         payload = self._cached_normalized(
@@ -1504,6 +1565,10 @@ class SsiFastConnectFetcher:
             required_any=("symbol",),
             retry_unavailable_variants=True,
             force_refresh=force_refresh,
+            row_extractor=lambda provider_payload: _extract_index_component_rows(
+                provider_payload,
+                normalized_index,
+            ),
         )
         return self._empty_as_unavailable(payload)
 
@@ -1622,6 +1687,14 @@ class SsiFastConnectFetcher:
         if token_result.get("status") != "ok":
             return token_result
 
+        if endpoint in {"IndexList", "DailyIndex", "IndexComponents"}:
+            now = self._monotonic_clock()
+            if self._last_index_request_at is not None and self.index_request_delay_seconds > 0:
+                remaining = self.index_request_delay_seconds - (now - self._last_index_request_at)
+                if remaining > 0:
+                    time.sleep(remaining)
+            self._last_index_request_at = self._monotonic_clock()
+
         headers = {"Authorization": f"Bearer {self._access_token}"}
         try:
             response = self.session.get(
@@ -1674,15 +1747,16 @@ class SsiFastConnectFetcher:
                 "error_type": "invalid_json",
                 "failure_class": "parse_failed",
             }
-        if _has_ssi_error(payload):
+        error_record = _ssi_error_record(payload)
+        if error_record is not None:
             result = {
                 **_unavailable(REQUEST_FAILED_REASON),
                 "endpoint": endpoint,
                 "http_status": http_status,
                 "error_type": "ssi_error",
             }
-            if isinstance(payload, dict):
-                code = _pick_ci(payload, "code", "errorCode", "status", "Status")
+            if isinstance(error_record, dict):
+                code = _pick_ci(error_record, "code", "errorCode", "status", "Status")
                 if code is not None:
                     result["code"] = str(code)[:80]
             result["failure_class"] = _classify_provider_failure(
@@ -1705,6 +1779,7 @@ class SsiFastConnectFetcher:
         required_any: Tuple[str, ...] = (),
         retry_unavailable_variants: bool = False,
         force_refresh: bool = False,
+        row_extractor: Optional[Callable[[Any], List[Dict[str, Any]]]] = None,
     ) -> Dict[str, Any]:
         cache_key = (endpoint, tuple(sorted((params or {}).items())))
         if self.cache_ttl_seconds > 0 and not force_refresh:
@@ -1717,7 +1792,8 @@ class SsiFastConnectFetcher:
         if first_unavailable and not retry_unavailable_variants:
             return payload
 
-        rows = [] if first_unavailable else [mapper(row) for row in _extract_rows(payload)]
+        extract_rows = row_extractor or _extract_rows
+        rows = [] if first_unavailable else [mapper(row) for row in extract_rows(payload)]
         rows = [row for row in rows if row and _has_required_field(row, required_any)]
         if not rows:
             for variant_params in param_variants or []:
@@ -1726,7 +1802,7 @@ class SsiFastConnectFetcher:
                 variant_payload = self._request(endpoint, params=variant_params)
                 if isinstance(variant_payload, dict) and variant_payload.get("status") == "unavailable":
                     continue
-                rows = [mapper(row) for row in _extract_rows(variant_payload)]
+                rows = [mapper(row) for row in extract_rows(variant_payload)]
                 rows = [row for row in rows if row and _has_required_field(row, required_any)]
                 if rows:
                     break
@@ -2233,10 +2309,22 @@ class SsiFastConnectFetcher:
         }
 
     def _map_daily_index(self, row: Dict[str, Any], index_code: str) -> Dict[str, Any]:
+        index_value = _to_float(
+            _first_value(
+                row,
+                "IndexValue",
+                "Index",
+                "Close",
+                "CloseIndex",
+                "indexValue",
+                "index_value",
+                "close",
+            )
+        )
         return {
             "date": _parse_date(_first_value(row, "TradingDate", "Tradingdate", "Date", "date", "trading_date", "time")),
             "index_code": str(_first_value(row, "IndexId", "IndexID", "IndexCode", "indexId", "indexID", "indexCode", "index_code", "code") or index_code).upper(),
-            "index_value": _to_float(_first_value(row, "IndexValue", "Index", "Close", "CloseIndex", "indexValue", "index_value", "close")),
+            "index_value": index_value if index_value is not None and index_value > 0 else None,
             "change": _to_float(_first_value(row, "Change", "IndexChange", "ChangeValue", "change", "indexChange", "changeValue")),
             "change_pct": _to_float(_first_value(row, "RatioChange", "ChangePct", "ChangePercent", "PercentChange", "ratioChange", "changePct", "change_pct", "percentChange")),
             "total_volume": _to_int(_first_value(row, "TotalVol", "TotalMatchVol", "TotalVolume", "Volume", "totalVol", "totalMatchVol", "totalVolume", "total_volume", "volume")),

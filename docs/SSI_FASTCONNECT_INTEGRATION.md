@@ -607,13 +607,27 @@ python scripts\ssi_fastconnect_smoke.py --probe
 
 Probe mode tests both documented FC Data base URL shapes and prints only endpoint names, base URL labels, parameter keys, HTTP status, top-level response keys, status/message metadata, counts, and row keys. The normal smoke path validates full-year chunked DailyStockPrice and DailyIndex counts and prints chunk counts plus first/last dates. It prints only safe status and row counts. It does not print tokens, credentials, headers, or full provider bodies.
 
+Phase 4.4B index identifier discovery is a separate manual-only probe:
+
+```powershell
+python scripts\probe_ssi_index_capability.py --market HOSE --candidates VN30,VNINDEX --days 7,29
+```
+
+It requests IndexList sequentially without a market, with `HOSE`, and with `HNX`; derives at most 10 exact/name-matched candidates from normalized provider rows; tests at most two recent windows capped at 29 days; and tests at most two component market variants per candidate. Output is limited to normalized IndexList metadata and whitelisted status/count/date/failure summaries. It does not print raw responses, messages, credentials, tokens, headers, or account data, and it is not part of application startup or default audit/smoke execution.
+
 ## Known limitations / operational notes
 
 * SSI metadata coverage may be limited. A live metadata row can be `status=ok` and `quality_status=partial` while only returning symbol, exchange, market, and source; optional name, industry, sector, issuer, type, lot-size, listed-shares, and listed-date fields may remain null. This does not invalidate SSI DailyOhlc or DailyStockPrice.
 * Phase 4.4A live IndexList smoke with `market=HOSE` returned 10 rows spanning HNX and HOSE, included `VN30`, and did not include an exact `VNINDEX`. Treat this as provider evidence: the request market is not a strict response filter, and missing identifiers must remain unavailable.
 * Phase 4.4A live DailyIndex smoke returned no usable VNINDEX/VN30 rows after exact identifier handling. VN30 IndexComponents also remained cleanly unavailable. These optional failures did not affect FPT/HPG/SSI DailyOhlc watchlist rows.
+* Phase 4.4B supersedes the Phase 4.4A availability finding for VN30. Bounded live discovery on 2026-06-29 proved that DailyIndex uses `indexID=VN30`: it returned 5 rows in the 7-day window and 22 rows in the 29-day window, latest date 2026-06-29. `indexCode=VN30` remained unavailable for DailyIndex.
+* Because the no-market IndexList request remained unavailable, the daily-index service performs its prerequisite exact-identifier lookup with the verified `market=HOSE` request. This is only a discovery request hint: returned identifiers remain authoritative, cross-market rows remain possible, and missing exact identifiers are not guessed.
+* SSI index REST requests are paced at a 1.15-second interval within one fetcher. Live service diagnostics showed that an immediate DailyIndex call after IndexList was classified `rate_limited`; the narrow interval applies only to IndexList, DailyIndex, and IndexComponents and also spaces their chunks/parameter variants.
+* The live 2026-06-29 VN30 DailyIndex row returned `IndexValue=0` while change and liquidity fields were populated. The mapper treats non-positive index levels as missing, so the optional row remains partial with `index_value=null` instead of presenting zero as a real market level.
+* Phase 4.4B proved that IndexComponents has the inverse parameter shape and a nested response: `indexCode=VN30` returned an exact outer VN30 row containing 30 `IndexComponent` members, while `indexID=VN30` returned mismatched HNX outer rows. The fetcher sends `indexCode` first to avoid rate-limiting the working shape behind a failed request, then flattens nested `StockSymbol` members only after exact outer-index matching. It therefore never substitutes HNX constituents for VN30.
+* IndexComponents returned the same exact VN30 count with market omitted and with `market=HOSE`; do not interpret that as proof that market filtering is strict. IndexList with `HOSE` and `HNX` also returned the same 10 cross-market rows, and IndexList without a market remained unavailable.
 * Live IndexList validation works in the current SSI environment, but `market=HOSE` can still return cross-market-looking index codes such as `HNX30`, `HNXINDEX`, and `HNXUPCOMINDEX`; use SSI-returned rows instead of assuming the request market filter is strict.
-* Live IndexComponents validation for `VN30`, with and without `market=HOSE`, returned a clean unavailable state in the current SSI environment. This may be endpoint permission, endpoint path, SSI data availability, or undocumented parameter shape. Do not hardcode VN30 members or fallback to Mozyfin/KBS.
+* VN30 components are now live-verified only through the exact SSI nested response. Continue to return `components=[]` when an exact outer index row or usable nested members are absent. Do not hardcode members or fallback to Mozyfin/KBS.
 * Quote fields are not currently a reliable REST latest-price source. Watchlist payloads can have `quote_cache=missing`, `quote=null`, `quote_price_date=null`, and `quote_price_raw_field=null`; `latest_price` uses SSI DailyOhlc close when SSI daily rows are available.
 * DailyStockPrice and DailyIndex require <=29/30-day request windows. Provider chunking is available for smoke/debug/internal validation, but broad automatic UI requests should be avoided unless deliberately designed.
 * Local market-data DB storage is deferred. Current mode remains SSI live API plus backend cache/TTL.

@@ -105,11 +105,54 @@ def _fetcher(session=None, **kwargs):
         "timeout_seconds": 3,
         "cache_ttl_seconds": 0,
         "token_ttl_seconds": 900,
+        "index_request_delay_seconds": 0,
         "session": session or _FakeSession(post_items=[_token_response()]),
         "config": SimpleNamespace(),
     }
     defaults.update(kwargs)
     return SsiFastConnectFetcher(**defaults)
+
+
+def test_index_requests_use_narrow_provider_safety_interval(monkeypatch):
+    session = _FakeSession(
+        post_items=[_token_response()],
+        get_items=[
+            _FakeResponse(payload={"data": []}),
+            _FakeResponse(payload={"data": []}),
+        ],
+    )
+    sleeps = []
+    monkeypatch.setattr(
+        "data_provider.ssi_fastconnect_fetcher.time.sleep",
+        lambda seconds: sleeps.append(seconds),
+    )
+    fetcher = _fetcher(
+        session=session,
+        index_request_delay_seconds=1.15,
+        monotonic_clock=lambda: 100.0,
+    )
+
+    fetcher._request("IndexList", params={"market": "HOSE"})
+    fetcher._request("DailyIndex", params={"indexID": "VN30"})
+
+    assert sleeps == [pytest.approx(1.15)]
+
+
+def test_daily_index_zero_level_is_missing_not_a_real_index_value():
+    fetcher = _fetcher()
+
+    row = fetcher._map_daily_index(
+        {
+            "TradingDate": "2026-06-29",
+            "IndexID": "VN30",
+            "IndexValue": "0",
+            "RatioChange": "-0.03",
+        },
+        "VN30",
+    )
+
+    assert row["index_value"] is None
+    assert row["change_pct"] == -0.03
 
 
 def test_provider_disabled_returns_unavailable_cleanly():
@@ -1600,10 +1643,10 @@ def test_index_components_maps_component_rows_safely():
         },
     ]
     _, _, kwargs = session.calls[-1]
-    assert kwargs["params"] == {"indexID": "VN30", "pageIndex": 1, "pageSize": 1000}
+    assert kwargs["params"] == {"indexCode": "VN30", "pageIndex": 1, "pageSize": 1000}
 
 
-def test_index_components_retries_index_code_variant_when_first_shape_has_no_rows():
+def test_index_components_retries_index_id_variant_when_primary_shape_has_no_rows():
     session = _FakeSession(
         post_items=[_token_response()],
         get_items=[
@@ -1617,8 +1660,8 @@ def test_index_components_retries_index_code_variant_when_first_shape_has_no_row
 
     assert payload["status"] == "ok"
     assert payload["rows"][0]["symbol"] == "FPT"
-    assert session.calls[1][2]["params"] == {"indexID": "VN30", "pageIndex": 1, "pageSize": 1000}
-    assert session.calls[2][2]["params"] == {"pageIndex": 1, "pageSize": 1000, "indexCode": "VN30"}
+    assert session.calls[1][2]["params"] == {"indexCode": "VN30", "pageIndex": 1, "pageSize": 1000}
+    assert session.calls[2][2]["params"] == {"pageIndex": 1, "pageSize": 1000, "indexID": "VN30"}
 
 
 def test_index_components_retries_variant_after_provider_error_shape():
@@ -1635,7 +1678,7 @@ def test_index_components_retries_variant_after_provider_error_shape():
 
     assert payload["status"] == "ok"
     assert payload["rows"][0]["symbol"] == "FPT"
-    assert session.calls[2][2]["params"] == {"pageIndex": 1, "pageSize": 1000, "indexCode": "VN30"}
+    assert session.calls[2][2]["params"] == {"pageIndex": 1, "pageSize": 1000, "indexID": "VN30"}
 
 
 def test_index_metadata_status_message_only_body_returns_clean_unavailable():
@@ -1679,6 +1722,104 @@ def test_index_components_status_message_only_body_returns_clean_unavailable():
     assert payload["count"] == 0
 
 
+def test_index_components_flattens_exact_nested_provider_envelope():
+    nested_payload = {
+        "status": "Success",
+        "data": [
+            {
+                "IndexCode": "VN30",
+                "IndexName": "VN30",
+                "Exchange": "HOSE",
+                "TotalSymbolNo": "2",
+                "IndexComponent": [
+                    {"StockSymbol": "FPT", "Isin": "VN000000FPT1"},
+                    {"StockSymbol": "HPG", "Isin": "VN000000HPG4"},
+                ],
+            }
+        ],
+    }
+    session = _FakeSession(
+        post_items=[_token_response()],
+        get_items=[_FakeResponse(payload=nested_payload)],
+    )
+    fetcher = _fetcher(session=session)
+
+    payload = fetcher.get_index_components("VN30", market="HOSE")
+
+    assert payload["status"] == "ok"
+    assert payload["count"] == 2
+    assert [row["symbol"] for row in payload["rows"]] == ["FPT", "HPG"]
+    assert all(row["index_code"] == "VN30" for row in payload["rows"])
+
+
+def test_index_components_discards_nested_rows_for_other_indices():
+    nested_payload = {
+        "status": "Success",
+        "data": [
+            {
+                "IndexCode": "HNX30",
+                "IndexComponent": [{"StockSymbol": "PVS"}],
+            }
+        ],
+    }
+    session = _FakeSession(
+        post_items=[_token_response()],
+        get_items=[_FakeResponse(payload=nested_payload) for _ in range(5)],
+    )
+    fetcher = _fetcher(session=session)
+
+    payload = fetcher.get_index_components("VN30", market="HOSE")
+
+    assert payload["status"] == "unavailable"
+    assert payload["rows"] == []
+    assert payload["count"] == 0
+    assert "PVS" not in str(payload)
+
+
+def test_index_component_extractor_does_not_map_failure_code_as_symbol():
+    from data_provider.ssi_fastconnect_fetcher import _extract_index_component_rows
+
+    rows = _extract_index_component_rows(
+        {
+            "status": "unavailable",
+            "code": "RATE_LIMIT",
+            "failure_class": "rate_limited",
+        },
+        "VN30",
+    )
+
+    assert rows == []
+
+
+def test_index_components_uses_verified_index_code_parameter_for_nested_exact_match():
+    matched_payload = {
+        "status": "Success",
+        "data": [
+            {
+                "IndexCode": "VN30",
+                "Exchange": "HOSE",
+                "IndexComponent": [
+                    {"StockSymbol": "FPT"},
+                    {"StockSymbol": "HPG"},
+                ],
+            }
+        ],
+    }
+    session = _FakeSession(
+        post_items=[_token_response()],
+        get_items=[_FakeResponse(payload=matched_payload)],
+    )
+    fetcher = _fetcher(session=session)
+
+    payload = fetcher.get_index_components("VN30", market="HOSE")
+
+    assert payload["status"] == "ok"
+    assert [row["symbol"] for row in payload["rows"]] == ["FPT", "HPG"]
+    get_calls = [call for call in session.calls if call[0] == "GET"]
+    assert get_calls[0][2]["params"]["indexCode"] == "VN30"
+    assert len(get_calls) == 1
+
+
 @pytest.mark.parametrize(
     ("payload", "expected_code"),
     [
@@ -1686,6 +1827,7 @@ def test_index_components_status_message_only_body_returns_clean_unavailable():
         ({"Status": "Failed", "Message": "bad params"}, "Failed"),
         ({"code": "E001", "message": "bad params"}, "E001"),
         ({"errorCode": "E002", "message": "bad params"}, "E002"),
+        ({"data": {"Code": "REQUEST_NULL", "Message": "request is invalid"}}, "REQUEST_NULL"),
     ],
 )
 def test_parse_response_handles_ssi_error_code_casing_without_name_error(payload, expected_code):
@@ -1700,6 +1842,19 @@ def test_parse_response_handles_ssi_error_code_casing_without_name_error(payload
     assert parsed["error_type"] == "ssi_error"
     assert parsed["code"] == expected_code
     assert SECRET_TOKEN not in str(parsed)
+
+
+def test_nested_request_null_is_classified_as_bad_request_params():
+    fetcher = _fetcher(session=_FakeSession())
+
+    parsed = fetcher._parse_response(
+        _FakeResponse(payload={"data": {"Code": "REQUEST_NULL", "Message": "request is invalid"}}),
+        endpoint="IndexList",
+    )
+
+    assert parsed["status"] == "unavailable"
+    assert parsed["code"] == "REQUEST_NULL"
+    assert parsed["failure_class"] == "bad_request_params"
 
 
 def test_index_components_provider_error_body_returns_clean_unavailable_without_name_error():

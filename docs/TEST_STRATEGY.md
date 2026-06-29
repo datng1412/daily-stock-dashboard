@@ -98,8 +98,9 @@ Add focused tests when implementing Data Quality Summary:
 - Company price source decision is reflected consistently in API and UI.
 - SSI profile metadata maps industry/sector aliases through `symbol_metadata`, watchlist rows, and company profile only when provider data exists.
 - SSI metadata tests cover complete, partial, same-SSI fallback, unavailable, and wrong/missing-symbol rows; assert sanitized diagnostics and unchanged DailyOhlc `latest_price`/DailyStockPrice enrichment.
-- SSI index components resolve provider-owned identifiers from IndexList, keep the public requested code stable, and expose sanitized diagnostics for unavailable component rows.
-- Index capability tests cover IndexList cross-market rows, exact identifier resolution, DailyIndex partial/null/zero/date alignment, component rows, unavailable empty lists, no hardcoded VN30 members, and unchanged DailyOhlc `latest_price`.
+- SSI index components resolve provider-owned identifiers from IndexList, keep the public requested code stable, flatten exact nested `IndexComponent`/`StockSymbol` rows, reject mismatched outer indices, and expose sanitized diagnostics for unavailable component rows.
+- Index capability tests cover IndexList cross-market rows, exact identifier resolution, DailyIndex partial/null/zero/date alignment, `indexID` versus `indexCode` behavior, flat and nested component rows, unavailable empty lists, no hardcoded VN30 members, and unchanged DailyOhlc `latest_price`.
+- `tests/test_ssi_index_capability_probe.py` covers provider-derived candidate generation, exact/no-guess matching, hard candidate/date/market budgets, endpoint-specific result classification, error-row rejection, whitelisted output, secret omission, and sequential execution. Importing the script does not start a probe.
 - DailyStockPrice tests cover reference/limits, matched and put-through volume/value, foreign volume/value, adjusted close, zero-versus-null behavior, matched/mismatched/missing dates, unavailable enrichment, sanitized diagnostics, and unchanged SSI DailyOhlc `latest_price`.
 - Frontend tests assert shares/VND units, explicit SSI DailyStockPrice source labels, concise date-mismatch caveats, hidden null optional metrics, retained daily rows/chart, and isolated realtime refresh behavior.
 

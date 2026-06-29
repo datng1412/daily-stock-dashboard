@@ -3362,7 +3362,7 @@ class VietnamMarketService:
         ).isoformat()
 
         index_list_payload = self.build_index_list(
-            None,
+            "HOSE",
             force_refresh=force_refresh,
         )
         results = [

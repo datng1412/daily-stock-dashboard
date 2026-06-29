@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [fix] Parse exact SSI nested IndexComponents rows and use the verified indexCode parameter variant without hardcoded constituents or fallback providers.
+- [improvement] Add a bounded manual SSI index identifier probe with secret-safe IndexList, DailyIndex, and IndexComponents classifications.
 - [new feature] Add optional SSI DailyIndex dashboard context with exact IndexList resolution, sanitized diagnostics, and non-fatal unavailable IndexComponents states.
 - [fix] Harden SSI profile metadata with exact-symbol selection, explicit completeness, sanitized diagnostics, and null-safe dashboard/company states without changing daily price ownership.
 - [improvement] Detect SSI IntradayOhlc actual cadence and expose conservative cadence status while preserving daily SSI price ownership.

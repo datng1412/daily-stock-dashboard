@@ -884,6 +884,29 @@ Result:
 * Targeted validation passed: 111 backend tests, 7 legacy-file index compatibility tests, and 151 frontend tests, plus Python compilation, TypeScript, ESLint, and production Vite build. The normal npm launcher remained blocked by Windows profile `EPERM`; equivalent local entry points passed.
 * A full `tests/test_mozyfin_vn_adapter.py` run still has 28 unrelated failures in Mozyfin-era expectations and stale stubs (legacy source labels, fallback/cache behavior, and old intraday signatures). All seven index-focused tests in that file pass; migrating the remaining legacy tests is outside Phase 4.4A.
 
+### Phase 4.4B - SSI Index Identifier / Parameter Discovery
+
+Status: completed on 2026-06-29.
+
+Goal:
+
+Resolve the Phase 4.4A DailyIndex and IndexComponents uncertainty with bounded, provider-derived identifier and parameter probes.
+
+Result:
+
+* Added the manual-only `scripts/probe_ssi_index_capability.py`. It runs sequentially, reads only the existing SSI configuration, prints normalized whitelisted summaries, and is not imported by startup, request handlers, or the normal audit.
+* The default hard budget is three IndexList requests (no market, `HOSE`, `HNX`), at most 10 IndexList-derived candidates, at most two recent date windows capped at 29 days, at most two component market variants per candidate, and a 1.15-second inter-request delay.
+* Live IndexList requests with `HOSE` and `HNX` each returned the same 10 cross-market HNX/HOSE rows. Exact `VN30` was present; exact `VNINDEX` and a verified HOSE broad-index alias were absent. The no-market request remained unavailable, so the daily-index service now resolves through the verified market-qualified `HOSE` request while still requiring an exact returned identifier. No missing identifier was invented.
+* Live DailyIndex discovery proved that `indexID=VN30` returns usable rows: 5 rows for 2026-06-23 through 2026-06-29 and 22 rows for 2026-06-01 through 2026-06-29, latest date 2026-06-29. The same windows with `indexCode=VN30` remained unavailable. Production already uses `indexID`; only the prerequisite IndexList call needed the verified market-qualified parameter.
+* Live IndexComponents discovery exposed a nested provider envelope: each outer index row contains an `IndexComponent` list whose members use `StockSymbol`. `indexID=VN30` returned only mismatched HNX outer rows, so exact filtering correctly produced zero VN30 members. `indexCode=VN30`, with market omitted or `HOSE`, returned an exact VN30 outer row and 30 nested members.
+* The provider now sends the live-verified `indexCode` shape first and flattens nested component rows only when the outer SSI index identifier exactly matches the request. This avoids an unnecessary `indexID` request that could cause the working retry to be rate-limited. It never reuses HNX members for VN30 and never hardcodes constituents.
+* IndexList, DailyIndex, and IndexComponents requests from one fetcher are spaced by a narrow 1.15-second provider-safety interval. This prevents the required IndexList lookup from immediately rate-limiting DailyIndex and spaces chunk/variant requests without affecting daily stock, intraday, realtime, metadata, or trade-tape paths.
+* The live latest VN30 row carried a provider `IndexValue` of zero despite non-zero change/liquidity fields. Because a zero index level is not a usable market level, normalization now exposes it as null and marks `index_value` missing/partial rather than rendering a fake zero.
+* SSI error parsing now recognizes direct nested error records and safely classifies observed request-null-style codes as bad request parameters without exposing provider messages or payload bodies.
+* Public endpoints and fields are unchanged. DailyIndex and IndexComponents remain optional and empty-list-safe when unavailable. `latest_price` remains SSI DailyOhlc; DailyStockPrice, intraday, realtime, metadata, and trade-tape behavior are unchanged.
+* Final live API smoke returned IndexList `ok` with 10 rows, DailyIndex `partial` with one VN30 row and unavailable VNINDEX, and IndexComponents `ok` with 30 exact VN30 members. The VN30 row was dated 2026-06-29 and exposed the non-positive provider level as null/partial. FPT/HPG/SSI watchlist rows remained `ok`, `latest_price_source=SSI DailyOhlc`, and `fallback_used=false`.
+* Targeted validation passed 127 tests across the index probe, SSI fetcher, index service, no-Mozyfin, realtime, DailyStockPrice, and profile metadata suites. Requested Python compilation passed. No frontend files or public API fields changed, so frontend tests/build and browser smoke were not required.
+
 ### Phase 5.0A - External Provider Contract Design
 
 Goal:
