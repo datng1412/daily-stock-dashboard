@@ -51,7 +51,7 @@ This roadmap is the source of truth for Vietnam dashboard provider ownership. SS
 | DailyOhlc | SSI FastConnect Data REST | Implemented and wired for daily data/chart | Use for daily OHLCV, chart candles, and internal indicators |
 | IntradayOhlc | SSI FastConnect Data REST | Implemented and wired for watchlist/company intraday pulse | Use for compact intraday candles; keep separate from daily close and SSI realtime |
 | DailyStockPrice | SSI FastConnect Data REST | Implemented and wired for selected-ticker enrichment | Use for reference, ceiling/floor, adjusted close if provided, matched volume/value, put-through volume/value, and foreign buy/sell/net volume/value |
-| DailyIndex | SSI FastConnect Data REST | Implemented provider method with chunking; dashboard consumption is next | Use for daily index value, change, breadth, and liquidity |
+| DailyIndex | SSI FastConnect Data REST | Implemented provider/service/API/dashboard context with 29-day chunking | Use only for optional source-labeled index value, change, breadth, and liquidity |
 | Realtime snapshot | SSI FastConnect Data streaming | Provider, service, API, and UI contract added; buffered `X`, `X-QUOTE`, and `X-TRADE` parser covered; config-disabled background manager/cache skeleton added; official-client adapter added behind disabled runtime flag | Keep unavailable and separate from daily close, intraday, and official daily OHLCV until the background adapter safely populates current rows |
 | Trade tape | SSI FastConnect Data streaming or future verified trade contract | Provider, service, API, and UI contract added; live list/history semantics need confirmation | Keep separate from latest-trade stream messages and official daily OHLCV |
 | Legacy realtime snapshot/trade tape | KBS | Disabled by default; only available behind explicit legacy flags | Do not silently fallback from SSI to KBS |
@@ -848,6 +848,8 @@ Result:
 
 ### Phase 4.4A - Index Data Capability
 
+Status: completed on 2026-06-29.
+
 Goal:
 
 Verify index and component capability from existing SSI contracts.
@@ -868,6 +870,19 @@ Acceptance criteria:
 
 * Index domains have explicit source, cadence, freshness, and status classification.
 * Unavailable components remain `[]` with concise unavailable state and diagnostics.
+
+Result:
+
+* Added `/api/v1/stocks/vn/daily-index` for bounded recent `VNINDEX,VN30` context. It returns only latest real SSI rows, explicit source/status/date/date-match, field coverage, missing fields, and sanitized diagnostics.
+* IndexList is authoritative for DailyIndex and IndexComponents identifiers. If SSI does not return an exact requested code/id, the dependent request remains unavailable and is not sent with a guessed identifier.
+* IndexList preserves SSI-returned cross-market rows even when a market filter was requested and exposes returned markets under diagnostics.
+* IndexComponents remains empty-list-safe. No VN30 constituents are hardcoded and no fallback provider is used.
+* The dashboard renders a separate optional market-index section. Real DailyIndex values and real component counts render when present; unavailable index data does not clear watchlist rows, selected ticker, chart, or live sections.
+* `latest_price` remains SSI DailyOhlc. DailyStockPrice, intraday, realtime, metadata, and company-page behavior are unchanged.
+* Current live smoke returned IndexList `status=ok` with 10 rows across HNX/HOSE. The response included `VN30` but no exact `VNINDEX`; DailyIndex returned no usable VNINDEX/VN30 rows, and VN30 IndexComponents remained unavailable. No guessed rows or membership were emitted.
+* Watchlist smoke returned FPT/HPG/SSI as usable with `latest_price_source=SSI DailyOhlc` and `fallback_used=false`. Browser smoke kept six rows, selected FPT, chart, and realtime controls visible while showing concise DailyIndex/IndexComponents unavailable copy.
+* Targeted validation passed: 111 backend tests, 7 legacy-file index compatibility tests, and 151 frontend tests, plus Python compilation, TypeScript, ESLint, and production Vite build. The normal npm launcher remained blocked by Windows profile `EPERM`; equivalent local entry points passed.
+* A full `tests/test_mozyfin_vn_adapter.py` run still has 28 unrelated failures in Mozyfin-era expectations and stale stubs (legacy source labels, fallback/cache behavior, and old intraday signatures). All seven index-focused tests in that file pass; migrating the remaining legacy tests is outside Phase 4.4A.
 
 ### Phase 5.0A - External Provider Contract Design
 

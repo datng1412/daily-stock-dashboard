@@ -76,6 +76,7 @@ SSI_INTRADAY_SOURCE = "SSI IntradayOhlc"
 SSI_REALTIME_SOURCE = "SSI realtime contract"
 SSI_TRADE_TAPE_SOURCE = "SSI trade-tape contract"
 SSI_INDEX_LIST_SOURCE = "SSI IndexList"
+SSI_DAILY_INDEX_SOURCE = "SSI DailyIndex"
 SSI_INDEX_COMPONENTS_SOURCE = "SSI IndexComponents"
 SSI_UNAVAILABLE_REASON = "SSI FastConnect unavailable"
 VN_INTRADAY_WARNING = "SSI IntradayOhlc candle data is not a realtime matched quote."
@@ -474,6 +475,44 @@ SYMBOL_METADATA_FIELDS = (
     "lot_size",
     "listed_shares",
     "listed_date",
+)
+
+INDEX_LIST_FIELDS = (
+    "index_id",
+    "index_code",
+    "index_name",
+    "exchange",
+    "market",
+)
+
+DAILY_INDEX_FIELDS = (
+    "index_code",
+    "date",
+    "index_value",
+    "change",
+    "change_pct",
+    "total_volume",
+    "total_value",
+    "matched_volume",
+    "matched_value",
+    "put_through_volume",
+    "put_through_value",
+    "advances",
+    "unchanged",
+    "declines",
+    "ceiling",
+    "floor",
+    "trading_session",
+    "exchange",
+)
+
+INDEX_COMPONENT_FIELDS = (
+    "index_code",
+    "symbol",
+    "exchange",
+    "market",
+    "weight",
+    "name",
 )
 
 
@@ -3140,30 +3179,320 @@ class VietnamMarketService:
         limit: int = 260,
         from_date: Optional[str] = None,
         to_date: Optional[str] = None,
+        reference_date: Optional[str] = None,
+        force_refresh: bool = False,
+        index_list_payload: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """Return strict SSI daily index rows for future market breadth cards."""
+        """Return strict SSI DailyIndex rows for one IndexList-confirmed identifier."""
         normalized_index = str(index_code or "VNINDEX").strip().upper()
-        payload = self._get_ssi_fetcher().get_daily_index(
+        provider_index, public_index, diagnostics = self._resolve_ssi_index_identifier(
             normalized_index,
+            None,
+            force_refresh=force_refresh,
+            index_list_payload=index_list_payload,
+        )
+        diagnostics.update(
+            {
+                "endpoint": "DailyIndex",
+                "requested_index_code": normalized_index,
+                "selected_identifier": provider_index,
+                "from_date": _valid_date_string(from_date),
+                "to_date": _valid_date_string(to_date),
+            }
+        )
+        if not provider_index:
+            diagnostics.update(
+                {
+                    "normalized_row_count": 0,
+                    "selected_row_date": None,
+                    "failure_class": "identifier_unavailable",
+                }
+            )
+            return {
+                "status": "unavailable",
+                "quality_status": "unavailable",
+                "source": SSI_DAILY_INDEX_SOURCE,
+                "reason": "SSI index identifier unavailable.",
+                "index_code": public_index,
+                "date": None,
+                "date_match": "unavailable",
+                "rows": [],
+                "count": 0,
+                "missing_fields": list(DAILY_INDEX_FIELDS),
+                "field_coverage": {field: False for field in DAILY_INDEX_FIELDS},
+                "fallback_used": False,
+                "diagnostics": diagnostics,
+            }
+
+        refresh_kwargs = {"force_refresh": True} if force_refresh else {}
+        payload = self._get_ssi_fetcher().get_daily_index(
+            provider_index,
             from_date=from_date,
             to_date=to_date,
             limit=limit,
+            **refresh_kwargs,
         )
-        if payload.get("status") != "ok":
+        provider_rows = payload.get("rows") if isinstance(payload, dict) else None
+        if payload.get("status") != "ok" or not isinstance(provider_rows, list) or not provider_rows:
+            diagnostics.update(
+                {
+                    "normalized_row_count": 0,
+                    "selected_row_date": None,
+                    "failure_class": (
+                        str(payload.get("failure_class"))
+                        if isinstance(payload, dict) and payload.get("failure_class")
+                        else "empty_result"
+                        if payload.get("status") == "ok"
+                        else "provider_unavailable"
+                    ),
+                }
+            )
             return {
                 "status": "unavailable",
-                "source": VN_SOURCE_SSI,
+                "quality_status": "unavailable",
+                "source": SSI_DAILY_INDEX_SOURCE,
                 "reason": self._safe_provider_reason(payload),
-                "index_code": normalized_index,
+                "index_code": public_index,
+                "date": None,
+                "date_match": "unavailable",
                 "rows": [],
+                "count": 0,
+                "missing_fields": list(DAILY_INDEX_FIELDS),
+                "field_coverage": {field: False for field in DAILY_INDEX_FIELDS},
+                "fallback_used": False,
+                "diagnostics": diagnostics,
             }
-        return payload
 
-    def build_index_list(self, market: Optional[str] = None) -> Dict[str, Any]:
+        rows: List[Dict[str, Any]] = []
+        for row in provider_rows:
+            if not isinstance(row, dict):
+                continue
+            normalized_row = dict(row)
+            normalized_row["index_code"] = public_index
+            normalized_row["source"] = SSI_DAILY_INDEX_SOURCE
+            rows.append(normalized_row)
+        if not rows:
+            diagnostics.update(
+                {
+                    "normalized_row_count": 0,
+                    "selected_row_date": None,
+                    "failure_class": "empty_result",
+                }
+            )
+            return {
+                "status": "unavailable",
+                "quality_status": "unavailable",
+                "source": SSI_DAILY_INDEX_SOURCE,
+                "reason": SSI_UNAVAILABLE_REASON,
+                "index_code": public_index,
+                "date": None,
+                "date_match": "unavailable",
+                "rows": [],
+                "count": 0,
+                "missing_fields": list(DAILY_INDEX_FIELDS),
+                "field_coverage": {field: False for field in DAILY_INDEX_FIELDS},
+                "fallback_used": False,
+                "diagnostics": diagnostics,
+            }
+
+        latest = rows[-1]
+        selected_date = _valid_date_string(latest.get("date"))
+        normalized_reference_date = _valid_date_string(reference_date)
+        date_match = _date_match_status(normalized_reference_date, selected_date)
+        field_coverage = {
+            field: latest.get(field) not in (None, "")
+            for field in DAILY_INDEX_FIELDS
+        }
+        missing_fields = [
+            field
+            for field, available in field_coverage.items()
+            if not available
+        ]
+        diagnostics.update(
+            {
+                "normalized_row_count": len(rows),
+                "selected_row_date": selected_date,
+                "field_coverage": field_coverage,
+                "missing_fields": missing_fields,
+                "date_match": date_match,
+                "chunks_used": payload.get("chunks_used"),
+                "pages_used": payload.get("pages_used"),
+            }
+        )
+        return {
+            "status": "ok",
+            "quality_status": "complete" if not missing_fields and date_match != "mismatched" else "partial",
+            "source": SSI_DAILY_INDEX_SOURCE,
+            "index_code": public_index,
+            "date": selected_date,
+            "date_match": date_match,
+            "rows": rows,
+            "count": len(rows),
+            "missing_fields": missing_fields,
+            "field_coverage": field_coverage,
+            "fallback_used": False,
+            "diagnostics": diagnostics,
+        }
+
+    def build_daily_indexes(
+        self,
+        index_codes: Iterable[str],
+        *,
+        limit: int = 40,
+        from_date: Optional[str] = None,
+        to_date: Optional[str] = None,
+        force_refresh: bool = False,
+    ) -> Dict[str, Any]:
+        """Return the latest real SSI DailyIndex row for each requested index."""
+        normalized_codes = list(
+            dict.fromkeys(
+                code
+                for code in (
+                    self._normalize_index_value(value)
+                    for value in index_codes
+                )
+                if code
+            )
+        )[:10]
+        if not normalized_codes:
+            normalized_codes = ["VNINDEX", "VN30"]
+        normalized_to_date = _valid_date_string(to_date) or datetime.now(VN_TIMEZONE).date().isoformat()
+        normalized_from_date = _valid_date_string(from_date) or (
+            datetime.now(VN_TIMEZONE).date() - timedelta(days=45)
+        ).isoformat()
+
+        index_list_payload = self.build_index_list(
+            None,
+            force_refresh=force_refresh,
+        )
+        results = [
+            self.build_daily_index(
+                code,
+                limit=limit,
+                from_date=normalized_from_date,
+                to_date=normalized_to_date,
+                force_refresh=force_refresh,
+                index_list_payload=index_list_payload,
+            )
+            for code in normalized_codes
+        ]
+        rows: List[Dict[str, Any]] = []
+        for result in results:
+            result_rows = result.get("rows") if isinstance(result, dict) else None
+            if result.get("status") != "ok" or not isinstance(result_rows, list) or not result_rows:
+                continue
+            latest = dict(result_rows[-1])
+            latest["status"] = "ok"
+            latest["quality_status"] = result.get("quality_status")
+            latest["missing_fields"] = list(result.get("missing_fields") or [])
+            latest["field_coverage"] = dict(result.get("field_coverage") or {})
+            rows.append(latest)
+
+        latest_date = max(
+            (
+                date_text
+                for date_text in (_valid_date_string(row.get("date")) for row in rows)
+                if date_text
+            ),
+            default=None,
+        )
+        for row in rows:
+            row["date_match"] = _date_match_status(latest_date, _valid_date_string(row.get("date")))
+            if row["date_match"] == "mismatched":
+                row["quality_status"] = "partial"
+
+        successful_codes = {
+            str(row.get("index_code") or "").upper()
+            for row in rows
+        }
+        status_by_index = {
+            code: next(
+                (
+                    str(result.get("status") or "unavailable")
+                    for result in results
+                    if str(result.get("index_code") or "").upper() == code
+                ),
+                "unavailable",
+            )
+            for code in normalized_codes
+        }
+        overall_status = (
+            "ok"
+            if len(successful_codes) == len(normalized_codes)
+            else "partial"
+            if successful_codes
+            else "unavailable"
+        )
+        return {
+            "status": overall_status,
+            "source": SSI_DAILY_INDEX_SOURCE,
+            "reason": None if rows else "SSI daily index unavailable.",
+            "requested_index_codes": normalized_codes,
+            "latest_date": latest_date,
+            "rows": rows,
+            "count": len(rows),
+            "fallback_used": False,
+            "diagnostics": {
+                "endpoint": "DailyIndex",
+                "requested_index_codes": normalized_codes,
+                "from_date": normalized_from_date,
+                "to_date": normalized_to_date,
+                "normalized_row_count": len(rows),
+                "failure_class": None if rows else "no_usable_rows",
+                "selected_row_dates": {
+                    str(row.get("index_code")): row.get("date")
+                    for row in rows
+                },
+                "index_statuses": status_by_index,
+                "per_index": {
+                    str(result.get("index_code") or normalized_codes[index]): dict(
+                        result.get("diagnostics") or {}
+                    )
+                    for index, result in enumerate(results)
+                },
+            },
+        }
+
+    @staticmethod
+    def _index_row_quality(
+        row: Dict[str, Any],
+        fields: Tuple[str, ...],
+    ) -> Tuple[Dict[str, bool], List[str]]:
+        field_coverage = {
+            field: row.get(field) not in (None, "")
+            for field in fields
+        }
+        missing_fields = [
+            field
+            for field, available in field_coverage.items()
+            if not available
+        ]
+        return field_coverage, missing_fields
+
+    def build_index_list(
+        self,
+        market: Optional[str] = None,
+        *,
+        force_refresh: bool = False,
+    ) -> Dict[str, Any]:
         """Return strict SSI index identifiers for index-aware dashboard work."""
         normalized_market = str(market or "").strip().upper() or None
-        payload = self._get_ssi_fetcher().get_index_list(normalized_market)
-        if payload.get("status") != "ok":
+        refresh_kwargs = {"force_refresh": True} if force_refresh else {}
+        payload = self._get_ssi_fetcher().get_index_list(normalized_market, **refresh_kwargs)
+        provider_rows = payload.get("rows") if isinstance(payload, dict) else None
+        diagnostics = {
+            "endpoint": "IndexList",
+            "requested_market": normalized_market,
+            "normalized_row_count": len(provider_rows) if isinstance(provider_rows, list) else 0,
+        }
+        if payload.get("status") != "ok" or not isinstance(provider_rows, list) or not provider_rows:
+            diagnostics["failure_class"] = (
+                str(payload.get("failure_class"))
+                if isinstance(payload, dict) and payload.get("failure_class")
+                else "empty_result"
+                if payload.get("status") == "ok"
+                else "provider_unavailable"
+            )
             return {
                 "status": "unavailable",
                 "source": SSI_INDEX_LIST_SOURCE,
@@ -3172,13 +3501,34 @@ class VietnamMarketService:
                 "rows": [],
                 "count": 0,
                 "fallback_used": False,
+                "diagnostics": diagnostics,
             }
+        rows: List[Dict[str, Any]] = []
+        for row in provider_rows:
+            if not isinstance(row, dict):
+                continue
+            normalized_row = dict(row)
+            normalized_row["source"] = SSI_INDEX_LIST_SOURCE
+            coverage, missing = self._index_row_quality(normalized_row, INDEX_LIST_FIELDS)
+            normalized_row["field_coverage"] = coverage
+            normalized_row["missing_fields"] = missing
+            rows.append(normalized_row)
+        diagnostics["normalized_row_count"] = len(rows)
+        diagnostics["returned_markets"] = sorted(
+            {
+                str(row.get("market") or row.get("exchange")).upper()
+                for row in rows
+                if row.get("market") or row.get("exchange")
+            }
+        )
         return {
-            **payload,
+            "status": "ok",
             "source": SSI_INDEX_LIST_SOURCE,
+            "market": normalized_market,
             "fallback_used": False,
-            "rows": payload.get("rows") or [],
-            "count": len(payload.get("rows") or []),
+            "rows": rows,
+            "count": len(rows),
+            "diagnostics": diagnostics,
         }
 
     @staticmethod
@@ -3190,12 +3540,16 @@ class VietnamMarketService:
         self,
         index_code: str,
         market: Optional[str],
-    ) -> Tuple[str, str, Dict[str, Any]]:
+        *,
+        force_refresh: bool = False,
+        index_list_payload: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[Optional[str], str, Dict[str, Any]]:
         normalized_index = self._normalize_index_value(index_code) or ""
         diagnostics: Dict[str, Any] = {
             "requested_index_code": normalized_index,
-            "provider_index_identifier": normalized_index,
-            "index_identifier_source": "request",
+            "provider_index_identifier": None,
+            "index_identifier_source": None,
+            "resolution_status": "unavailable",
             "index_list_status": None,
             "index_list_rows": 0,
         }
@@ -3204,13 +3558,19 @@ class VietnamMarketService:
         if not callable(get_index_list):
             diagnostics["index_list_status"] = "unavailable"
             diagnostics["index_list_reason"] = "SSI IndexList method unavailable."
-            return normalized_index, normalized_index, diagnostics
-        payload = get_index_list(market)
+            diagnostics["failure_class"] = "index_list_method_unavailable"
+            return None, normalized_index, diagnostics
+        if index_list_payload is None:
+            refresh_kwargs = {"force_refresh": True} if force_refresh else {}
+            payload = get_index_list(market, **refresh_kwargs)
+        else:
+            payload = index_list_payload
         diagnostics["index_list_status"] = payload.get("status")
         rows = payload.get("rows") if isinstance(payload, dict) else None
         if not isinstance(rows, list):
             diagnostics["index_list_reason"] = self._safe_provider_reason(payload)
-            return normalized_index, normalized_index, diagnostics
+            diagnostics["failure_class"] = "index_list_unavailable"
+            return None, normalized_index, diagnostics
         diagnostics["index_list_rows"] = len(rows)
         for row in rows:
             if not isinstance(row, dict):
@@ -3225,26 +3585,79 @@ class VietnamMarketService:
                         "provider_index_identifier": provider_identifier,
                         "resolved_index_code": public_index_code,
                         "index_identifier_source": "IndexList",
+                        "resolution_status": "resolved",
                     }
                 )
                 return provider_identifier, public_index_code, diagnostics
         if payload.get("status") != "ok":
             diagnostics["index_list_reason"] = self._safe_provider_reason(payload)
-        return normalized_index, normalized_index, diagnostics
+            diagnostics["failure_class"] = "index_list_unavailable"
+        else:
+            diagnostics["failure_class"] = "identifier_not_found"
+        return None, normalized_index, diagnostics
 
-    def build_index_components(self, index_code: str, market: Optional[str] = None) -> Dict[str, Any]:
+    def build_index_components(
+        self,
+        index_code: str,
+        market: Optional[str] = None,
+        *,
+        force_refresh: bool = False,
+    ) -> Dict[str, Any]:
         """Return strict SSI index component rows for a discovered index code."""
         normalized_index = str(index_code or "").strip().upper()
         normalized_market = str(market or "").strip().upper() or None
-        provider_index, public_index, diagnostics = self._resolve_ssi_index_identifier(normalized_index, normalized_market)
-        payload = self._get_ssi_fetcher().get_index_components(provider_index, market=normalized_market)
+        provider_index, public_index, diagnostics = self._resolve_ssi_index_identifier(
+            normalized_index,
+            normalized_market,
+            force_refresh=force_refresh,
+        )
+        diagnostics.update(
+            {
+                "endpoint": "IndexComponents",
+                "requested_market": normalized_market,
+                "selected_identifier": provider_index,
+            }
+        )
+        if not provider_index:
+            diagnostics.update(
+                {
+                    "index_components_status": "unavailable",
+                    "normalized_row_count": 0,
+                }
+            )
+            return {
+                "status": "unavailable",
+                "source": SSI_INDEX_COMPONENTS_SOURCE,
+                "reason": "SSI index identifier unavailable.",
+                "index_code": public_index,
+                "market": normalized_market,
+                "rows": [],
+                "count": 0,
+                "fallback_used": False,
+                "diagnostics": diagnostics,
+            }
+        refresh_kwargs = {"force_refresh": True} if force_refresh else {}
+        payload = self._get_ssi_fetcher().get_index_components(
+            provider_index,
+            market=normalized_market,
+            **refresh_kwargs,
+        )
+        provider_rows = payload.get("rows") if isinstance(payload, dict) else None
         diagnostics.update(
             {
                 "index_components_status": payload.get("status"),
                 "index_components_reason": self._safe_provider_reason(payload) if payload.get("status") != "ok" else None,
+                "normalized_row_count": len(provider_rows) if isinstance(provider_rows, list) else 0,
             }
         )
-        if payload.get("status") != "ok":
+        if payload.get("status") != "ok" or not isinstance(provider_rows, list) or not provider_rows:
+            diagnostics["failure_class"] = (
+                str(payload.get("failure_class"))
+                if isinstance(payload, dict) and payload.get("failure_class")
+                else "empty_result"
+                if payload.get("status") == "ok"
+                else "provider_unavailable"
+            )
             return {
                 "status": "unavailable",
                 "source": SSI_INDEX_COMPONENTS_SOURCE,
@@ -3257,19 +3670,34 @@ class VietnamMarketService:
                 "diagnostics": diagnostics,
             }
         rows = []
-        for row in payload.get("rows") or []:
+        for row in provider_rows:
             if not isinstance(row, dict):
                 continue
             normalized_row_index = self._normalize_index_value(row.get("index_code"))
             row_payload = dict(row)
             if not normalized_row_index or normalized_row_index == provider_index:
                 row_payload["index_code"] = public_index
+            row_payload["source"] = SSI_INDEX_COMPONENTS_SOURCE
+            coverage, missing = self._index_row_quality(row_payload, INDEX_COMPONENT_FIELDS)
+            row_payload["field_coverage"] = coverage
+            row_payload["missing_fields"] = missing
             rows.append(row_payload)
+        aggregate_coverage = {
+            field: all(row.get(field) not in (None, "") for row in rows)
+            for field in INDEX_COMPONENT_FIELDS
+        }
+        diagnostics["field_coverage"] = aggregate_coverage
+        diagnostics["missing_fields"] = [
+            field
+            for field, available in aggregate_coverage.items()
+            if not available
+        ]
         return {
-            **payload,
+            "status": "ok",
             "source": SSI_INDEX_COMPONENTS_SOURCE,
             "fallback_used": False,
             "index_code": public_index,
+            "market": normalized_market,
             "rows": rows,
             "count": len(rows),
             "diagnostics": diagnostics,

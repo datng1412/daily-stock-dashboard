@@ -123,7 +123,15 @@ class _StubSsiFetcher:
         self.daily_index = daily_index or {"status": "unavailable", "source": "SSI", "reason": "SSI FastConnect disabled"}
         self.securities = securities or {"status": "unavailable", "source": "SSI", "reason": "SSI FastConnect disabled"}
         self.securities_details = securities_details or {"status": "unavailable", "source": "SSI", "reason": "SSI FastConnect disabled"}
-        self.index_list = index_list or {"status": "unavailable", "source": "SSI", "reason": "SSI FastConnect disabled"}
+        self.index_list = index_list or {
+            "status": "ok",
+            "source": "SSI",
+            "rows": [
+                {"index_id": "VNINDEX", "index_code": "VNINDEX", "source": "SSI"},
+                {"index_id": "VN30", "index_code": "VN30", "source": "SSI"},
+            ],
+            "count": 2,
+        }
         self.index_components = index_components or {"status": "unavailable", "source": "SSI", "reason": "SSI FastConnect disabled"}
         self.daily_ohlcv_calls = 0
         self.daily_stock_price_calls = 0
@@ -156,7 +164,7 @@ class _StubSsiFetcher:
         )
         return self.daily_stock_price
 
-    def get_daily_index(self, index_code, from_date=None, to_date=None, limit=260):
+    def get_daily_index(self, index_code, from_date=None, to_date=None, limit=260, **kwargs):
         self.daily_index_calls += 1
         self.daily_index_args.append(
             {
@@ -168,12 +176,12 @@ class _StubSsiFetcher:
         )
         return self.daily_index
 
-    def get_index_list(self, market=None):
+    def get_index_list(self, market=None, **kwargs):
         self.index_list_calls += 1
         self.index_list_args.append({"market": market})
         return self.index_list
 
-    def get_index_components(self, index_code, market=None):
+    def get_index_components(self, index_code, market=None, **kwargs):
         self.index_components_calls += 1
         self.index_components_args.append({"index_code": index_code, "market": market})
         return self.index_components
@@ -978,13 +986,13 @@ def test_daily_index_unavailable_state_remains_clean(monkeypatch):
 
     payload = service.build_daily_index("VN30", from_date="2026-01-01", to_date="2026-06-17", limit=1000)
 
-    assert payload == {
-        "status": "unavailable",
-        "source": "SSI",
-        "reason": "SSI FastConnect request failed",
-        "index_code": "VN30",
-        "rows": [],
-    }
+    assert payload["status"] == "unavailable"
+    assert payload["source"] == "SSI DailyIndex"
+    assert payload["index_code"] == "VN30"
+    assert payload["rows"] == []
+    assert payload["count"] == 0
+    assert payload["fallback_used"] is False
+    assert payload["diagnostics"]["endpoint"] == "DailyIndex"
 
 
 def test_index_list_service_uses_strict_ssi_without_mozyfin_fallback(monkeypatch):
@@ -1140,17 +1148,18 @@ def test_index_components_unavailable_state_remains_clean(monkeypatch):
     assert payload["rows"] == []
     assert payload["count"] == 0
     assert payload["fallback_used"] is False
-    assert payload["diagnostics"]["index_identifier_source"] == "request"
+    assert payload["diagnostics"]["index_identifier_source"] == "IndexList"
     assert manager.daily_calls == 0
 
 
 def test_vietnam_index_endpoints_preserve_ssi_fields(monkeypatch, tmp_path):
     class StubVietnamMarketService:
-        def build_index_list(self, market=None):
+        def build_index_list(self, market=None, force_refresh=False):
             assert market == "HOSE"
+            assert force_refresh is False
             return {
                 "status": "ok",
-                "source": "SSI",
+                "source": "SSI IndexList",
                 "market": "HOSE",
                 "fallback_used": False,
                 "rows": [
@@ -1166,12 +1175,36 @@ def test_vietnam_index_endpoints_preserve_ssi_fields(monkeypatch, tmp_path):
                 "count": 1,
             }
 
-        def build_index_components(self, index_code, market=None):
+        def build_daily_indexes(self, index_codes, **kwargs):
+            assert index_codes == ["VNINDEX", "VN30"]
+            assert kwargs["force_refresh"] is False
+            return {
+                "status": "partial",
+                "source": "SSI DailyIndex",
+                "requested_index_codes": index_codes,
+                "latest_date": "2026-06-17",
+                "rows": [
+                    {
+                        "status": "ok",
+                        "quality_status": "partial",
+                        "index_code": "VN30",
+                        "date": "2026-06-17",
+                        "date_match": "matched",
+                        "index_value": 1300.0,
+                        "source": "SSI DailyIndex",
+                    }
+                ],
+                "count": 1,
+                "fallback_used": False,
+            }
+
+        def build_index_components(self, index_code, market=None, force_refresh=False):
             assert index_code == "VN30"
             assert market == "HOSE"
+            assert force_refresh is False
             return {
                 "status": "ok",
-                "source": "SSI",
+                "source": "SSI IndexComponents",
                 "index_code": "VN30",
                 "market": "HOSE",
                 "fallback_used": False,
@@ -1193,17 +1226,22 @@ def test_vietnam_index_endpoints_preserve_ssi_fields(monkeypatch, tmp_path):
     client = TestClient(create_app(static_dir=tmp_path / "static"))
 
     index_list = client.get("/api/v1/stocks/vn/index-list?market=HOSE").json()
+    daily_index = client.get("/api/v1/stocks/vn/daily-index?index_codes=VNINDEX,VN30").json()
     components = client.get("/api/v1/stocks/vn/index-components?index_code=VN30&market=HOSE").json()
     components_alias = client.get("/api/v1/stocks/vn/index-components?index=VN30&market=HOSE").json()
 
-    assert index_list["source"] == "SSI"
+    assert index_list["source"] == "SSI IndexList"
     assert index_list["fallback_used"] is False
     assert index_list["rows"][0]["index_name"] == "VN30 Index"
-    assert components["source"] == "SSI"
+    assert daily_index["status"] == "partial"
+    assert daily_index["source"] == "SSI DailyIndex"
+    assert daily_index["rows"][0]["index_value"] == 1300.0
+    assert daily_index["rows"][0]["date_match"] == "matched"
+    assert components["source"] == "SSI IndexComponents"
     assert components["fallback_used"] is False
     assert components["rows"][0]["symbol"] == "FPT"
     assert components["rows"][0]["weight"] == 7.25
-    assert components_alias["source"] == "SSI"
+    assert components_alias["source"] == "SSI IndexComponents"
     assert components_alias["rows"][0]["symbol"] == "FPT"
 
 

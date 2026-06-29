@@ -707,6 +707,8 @@ export type VietnamIndexInfo = {
   exchange?: string | null;
   market?: string | null;
   source?: string | null;
+  missingFields?: string[];
+  fieldCoverage?: Record<string, boolean>;
 };
 
 export type VietnamIndexListResponse = {
@@ -717,6 +719,46 @@ export type VietnamIndexListResponse = {
   rows: VietnamIndexInfo[];
   count: number;
   fallbackUsed?: boolean;
+  diagnostics?: Record<string, unknown>;
+};
+
+export type VietnamDailyIndexRow = {
+  status: 'ok' | string;
+  qualityStatus?: 'complete' | 'partial' | string | null;
+  indexCode: string;
+  date?: string | null;
+  dateMatch?: 'matched' | 'mismatched' | 'unknown' | string;
+  indexValue?: number | null;
+  change?: number | null;
+  changePct?: number | null;
+  totalVolume?: number | null;
+  totalValue?: number | null;
+  matchedVolume?: number | null;
+  matchedValue?: number | null;
+  putThroughVolume?: number | null;
+  putThroughValue?: number | null;
+  advances?: number | null;
+  unchanged?: number | null;
+  declines?: number | null;
+  ceiling?: number | null;
+  floor?: number | null;
+  tradingSession?: string | null;
+  exchange?: string | null;
+  source: string;
+  missingFields?: string[];
+  fieldCoverage?: Record<string, boolean>;
+};
+
+export type VietnamDailyIndexResponse = {
+  status: 'ok' | 'partial' | 'unavailable' | string;
+  source: string;
+  reason?: string | null;
+  requestedIndexCodes: string[];
+  latestDate?: string | null;
+  rows: VietnamDailyIndexRow[];
+  count: number;
+  fallbackUsed?: boolean;
+  diagnostics?: Record<string, unknown>;
 };
 
 export type VietnamIndexComponent = {
@@ -727,6 +769,8 @@ export type VietnamIndexComponent = {
   weight?: number | null;
   name?: string | null;
   source?: string | null;
+  missingFields?: string[];
+  fieldCoverage?: Record<string, boolean>;
 };
 
 export type VietnamIndexComponentsResponse = {
@@ -738,6 +782,7 @@ export type VietnamIndexComponentsResponse = {
   rows: VietnamIndexComponent[];
   count: number;
   fallbackUsed?: boolean;
+  diagnostics?: Record<string, unknown>;
 };
 
 export type VietnamCorporateActionEvent = {
@@ -925,6 +970,15 @@ export const stocksApi = {
     });
     const { toCamelCase } = await import('./utils');
     return toCamelCase<VietnamIndexListResponse>(response.data);
+  },
+
+  async getVietnamDailyIndex(indexCodes = ['VNINDEX', 'VN30']): Promise<VietnamDailyIndexResponse> {
+    const response = await apiClient.get('/api/v1/stocks/vn/daily-index', {
+      params: { index_codes: indexCodes.join(',') },
+      timeout: 30000,
+    });
+    const { toCamelCase } = await import('./utils');
+    return toCamelCase<VietnamDailyIndexResponse>(response.data);
   },
 
   async getVietnamIndexComponents(indexCode = 'VN30', market?: string): Promise<VietnamIndexComponentsResponse> {

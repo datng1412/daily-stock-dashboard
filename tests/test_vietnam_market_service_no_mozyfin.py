@@ -172,6 +172,32 @@ class FakeSsiFetcher:
     def get_securities(self, **kwargs):
         return self.get_securities_details(symbol="FPT")
 
+    def get_index_list(self, market=None, **kwargs):
+        return {
+            "status": "ok",
+            "source": "SSI",
+            "market": market,
+            "rows": [
+                {
+                    "index_id": "VNINDEX",
+                    "index_code": "VNINDEX",
+                    "index_name": "VN Index",
+                    "exchange": "HOSE",
+                    "market": "HOSE",
+                    "source": "SSI",
+                },
+                {
+                    "index_id": "VN30",
+                    "index_code": "VN30",
+                    "index_name": "VN30 Index",
+                    "exchange": "HOSE",
+                    "market": "HOSE",
+                    "source": "SSI",
+                },
+            ],
+            "count": 2,
+        }
+
     def get_index_components(self, index_code: str, market=None):
         return {
             "status": "ok",

@@ -215,6 +215,7 @@ Rules:
 | Latest foreign flow | SSI DailyStockPrice | Use latest matched-date row when available |
 | Foreign 5D/20D flow | Future enhancement | Compute only from matched-date historical DailyStockPrice rows |
 | Index list | SSI IndexList | Use SSI-returned index codes and identifiers |
+| Daily index | SSI DailyIndex | Optional index value/change/liquidity/breadth rows only after exact IndexList resolution |
 | Index components | SSI IndexComponents | Resolve through SSI IndexList identifiers; use only when SSI returns rows |
 | Symbol metadata | SSI SecuritiesDetails, then SSI Securities fallback | Optional fields remain null; metadata availability/quality never changes daily validity |
 | Intraday candles | SSI IntradayOhlc | Strict source; no fallback |
@@ -227,6 +228,18 @@ Rules:
 | KBS | Legacy optional only | Disabled by default |
 
 Compatibility aliases must stay within the same source owner. Do not use SSI DailyStockPrice close to overwrite `latest_price`, do not use DailyOhlc volume to fill matched volume, and do not use realtime, trade-tape, Mozyfin, or KBS values to fill daily fields.
+
+## Index Data Contract
+
+Index data is optional and independent of watchlist/company daily validity:
+
+* IndexList unavailable: `rows=[]`, `status=unavailable`.
+* DailyIndex unavailable: `rows=[]`, `status=unavailable`.
+* IndexComponents unavailable: `rows=[]`, `status=unavailable`.
+* Missing optional index fields remain `null`; provider zero values remain zero.
+* DailyIndex `date_match` compares requested indexes with the newest DailyIndex date in the same response. It does not assert exchange-session finality.
+* Exact SSI IndexList identifiers are required before DailyIndex or IndexComponents requests. Missing identifiers are unavailable, not guessed.
+* Diagnostics may include endpoint, requested market/code, selected identifier, normalized row count, selected date, field coverage, missing fields, and failure class. Raw provider payloads and authentication data are excluded.
 
 ## Symbol Metadata Contract
 

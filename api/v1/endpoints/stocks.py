@@ -29,6 +29,7 @@ from api.v1.schemas.stocks import (
     VietnamChartResponse,
     VietnamCompanyResearchResponse,
     VietnamCorporateActionsResponse,
+    VietnamDailyIndexResponse,
     VietnamIndexComponentsResponse,
     VietnamIndexListResponse,
     VietnamObservabilityResponse,
@@ -517,15 +518,51 @@ def get_vietnam_chart(
 )
 def get_vietnam_index_list(
     market: Optional[str] = Query(None, description="Optional market/exchange filter such as HOSE, HNX, or UPCOM"),
+    force_refresh: bool = Query(False, description="Bypass the process-local SSI IndexList cache."),
 ) -> VietnamIndexListResponse:
     try:
-        payload = VietnamMarketService().build_index_list(market=market)
+        payload = VietnamMarketService().build_index_list(market=market, force_refresh=force_refresh)
         return VietnamIndexListResponse(**payload)
     except Exception as e:
         logger.error("Vietnam index list failed: %s", e, exc_info=True)
         raise HTTPException(
             status_code=500,
             detail={"error": "vn_index_list_failed", "message": str(e)},
+        )
+
+
+@router.get(
+    "/vn/daily-index",
+    response_model=VietnamDailyIndexResponse,
+    summary="Vietnam SSI daily index context",
+    description="Return latest SSI DailyIndex rows for IndexList-confirmed Vietnam index identifiers.",
+)
+def get_vietnam_daily_index(
+    index_codes: str = Query("VNINDEX,VN30", description="Comma-separated SSI index codes to resolve through IndexList."),
+    from_date: Optional[str] = Query(None, description="Optional inclusive date in YYYY-MM-DD format."),
+    to_date: Optional[str] = Query(None, description="Optional inclusive date in YYYY-MM-DD format."),
+    limit: int = Query(40, ge=1, le=260, description="Maximum provider rows retained per requested index."),
+    force_refresh: bool = Query(False, description="Bypass process-local SSI IndexList and DailyIndex caches."),
+) -> VietnamDailyIndexResponse:
+    try:
+        requested_codes = [
+            value.strip().upper()
+            for value in index_codes.split(",")
+            if value.strip()
+        ]
+        payload = VietnamMarketService().build_daily_indexes(
+            requested_codes,
+            limit=limit,
+            from_date=from_date,
+            to_date=to_date,
+            force_refresh=force_refresh,
+        )
+        return VietnamDailyIndexResponse(**payload)
+    except Exception as e:
+        logger.error("Vietnam daily index failed: %s", e, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={"error": "vn_daily_index_failed", "message": str(e)},
         )
 
 
@@ -539,6 +576,7 @@ def get_vietnam_index_components(
     index_code: Optional[str] = Query(None, description="SSI index code returned by /vn/index-list, for example VN30"),
     index_alias: Optional[str] = Query(None, alias="index", include_in_schema=False),
     market: Optional[str] = Query(None, description="Optional market/exchange filter such as HOSE, HNX, or UPCOM"),
+    force_refresh: bool = Query(False, description="Bypass process-local SSI IndexList and IndexComponents caches."),
 ) -> VietnamIndexComponentsResponse:
     try:
         requested_index = index_code or index_alias
@@ -547,7 +585,11 @@ def get_vietnam_index_components(
                 status_code=422,
                 detail={"error": "missing_index_code", "message": "index_code is required."},
             )
-        payload = VietnamMarketService().build_index_components(index_code=requested_index, market=market)
+        payload = VietnamMarketService().build_index_components(
+            index_code=requested_index,
+            market=market,
+            force_refresh=force_refresh,
+        )
         return VietnamIndexComponentsResponse(**payload)
     except HTTPException:
         raise

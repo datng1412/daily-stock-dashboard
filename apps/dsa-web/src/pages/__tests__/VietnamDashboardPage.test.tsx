@@ -4,6 +4,7 @@ import {
   stocksApi,
   type VietnamChartResponse,
   type VietnamCorporateActionsResponse,
+  type VietnamDailyIndexResponse,
   type VietnamIndexComponentsResponse,
   type VietnamIndexListResponse,
   type VietnamObservabilityResponse,
@@ -25,6 +26,7 @@ vi.mock('../../api/stocks', () => ({
     getVietnamObservability: vi.fn(),
     getVietnamChart: vi.fn(),
     getVietnamIndexList: vi.fn(),
+    getVietnamDailyIndex: vi.fn(),
     getVietnamIndexComponents: vi.fn(),
   },
 }));
@@ -361,6 +363,7 @@ const mockedGetVietnamCorporateActions = vi.mocked(stocksApi.getVietnamCorporate
 const mockedGetVietnamObservability = vi.mocked(stocksApi.getVietnamObservability);
 const mockedGetVietnamChart = vi.mocked(stocksApi.getVietnamChart);
 const mockedGetVietnamIndexList = vi.mocked(stocksApi.getVietnamIndexList);
+const mockedGetVietnamDailyIndex = vi.mocked(stocksApi.getVietnamDailyIndex);
 const mockedGetVietnamIndexComponents = vi.mocked(stocksApi.getVietnamIndexComponents);
 
 const makeIndexListResponse = (overrides: Partial<VietnamIndexListResponse> = {}): VietnamIndexListResponse => ({
@@ -385,6 +388,50 @@ const makeIndexComponentsResponse = (
   indexCode: 'VN30',
   rows: [],
   count: 0,
+  fallbackUsed: false,
+  ...overrides,
+});
+
+const makeDailyIndexResponse = (
+  overrides: Partial<VietnamDailyIndexResponse> = {},
+): VietnamDailyIndexResponse => ({
+  status: 'ok',
+  source: 'SSI DailyIndex',
+  requestedIndexCodes: ['VNINDEX', 'VN30'],
+  latestDate: '2026-06-10',
+  rows: [
+    {
+      status: 'ok',
+      qualityStatus: 'partial',
+      indexCode: 'VNINDEX',
+      date: '2026-06-10',
+      dateMatch: 'matched',
+      indexValue: 1325.5,
+      change: 5.25,
+      changePct: 0.4,
+      totalVolume: 123456789,
+      advances: 210,
+      unchanged: 60,
+      declines: 175,
+      source: 'SSI DailyIndex',
+      missingFields: [],
+      fieldCoverage: { indexValue: true, advances: true, declines: true },
+    },
+    {
+      status: 'ok',
+      qualityStatus: 'partial',
+      indexCode: 'VN30',
+      date: '2026-06-10',
+      dateMatch: 'matched',
+      indexValue: 1450.75,
+      change: null,
+      changePct: null,
+      source: 'SSI DailyIndex',
+      missingFields: ['change', 'change_pct'],
+      fieldCoverage: { indexValue: true, change: false, changePct: false },
+    },
+  ],
+  count: 2,
   fallbackUsed: false,
   ...overrides,
 });
@@ -749,6 +796,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     mockedGetVietnamObservability.mockReset();
     mockedGetVietnamChart.mockReset();
     mockedGetVietnamIndexList.mockReset();
+    mockedGetVietnamDailyIndex.mockReset();
     mockedGetVietnamIndexComponents.mockReset();
     mockedGetVietnamMarketPhase.mockReset();
     mockedGetVietnamMarketPhase.mockReturnValue(makeMarketPhase());
@@ -759,6 +807,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     mockedGetVietnamObservability.mockImplementation(async () => makeObservabilityResponse());
     mockedGetVietnamChart.mockImplementation(async (symbol, range = '6M') => makeChartResponse(symbol, range));
     mockedGetVietnamIndexList.mockImplementation(async () => makeIndexListResponse());
+    mockedGetVietnamDailyIndex.mockImplementation(async () => makeDailyIndexResponse());
     mockedGetVietnamIndexComponents.mockImplementation(async () => makeIndexComponentsResponse());
   });
 
@@ -1063,6 +1112,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     await waitFor(() => expect(mockedGetVietnamRealtimeTrades).toHaveBeenCalledWith('FPT', 100));
     await waitFor(() => expect(mockedGetVietnamCorporateActions).toHaveBeenCalledWith(['FPT'], 6));
     await waitFor(() => expect(mockedGetVietnamIndexList).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mockedGetVietnamDailyIndex).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(mockedGetVietnamIndexComponents).toHaveBeenCalledTimes(1));
 
     const callCounts = {
@@ -1071,6 +1121,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
       tradeTape: mockedGetVietnamRealtimeTrades.mock.calls.length,
       corporateActions: mockedGetVietnamCorporateActions.mock.calls.length,
       indexList: mockedGetVietnamIndexList.mock.calls.length,
+      dailyIndex: mockedGetVietnamDailyIndex.mock.calls.length,
       indexComponents: mockedGetVietnamIndexComponents.mock.calls.length,
     };
     expect(dataReadinessStrip().getByRole('heading', { name: 'Data readiness' })).toBeInTheDocument();
@@ -1079,6 +1130,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(mockedGetVietnamRealtimeTrades).toHaveBeenCalledTimes(callCounts.tradeTape);
     expect(mockedGetVietnamCorporateActions).toHaveBeenCalledTimes(callCounts.corporateActions);
     expect(mockedGetVietnamIndexList).toHaveBeenCalledTimes(callCounts.indexList);
+    expect(mockedGetVietnamDailyIndex).toHaveBeenCalledTimes(callCounts.dailyIndex);
     expect(mockedGetVietnamIndexComponents).toHaveBeenCalledTimes(callCounts.indexComponents);
   });
 
@@ -1281,9 +1333,11 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
     await waitFor(() => expect(mockedGetVietnamIndexList).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mockedGetVietnamDailyIndex).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(mockedGetVietnamIndexComponents).toHaveBeenCalledTimes(1));
     const watchlistCalls = mockedGetVietnamWatchlist.mock.calls.length;
     const indexListCalls = mockedGetVietnamIndexList.mock.calls.length;
+    const dailyIndexCalls = mockedGetVietnamDailyIndex.mock.calls.length;
     const indexComponentCalls = mockedGetVietnamIndexComponents.mock.calls.length;
 
     fireEvent.click(screen.getByRole('button', { name: 'Consumer' }));
@@ -1291,6 +1345,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith([...presetTickers.Consumer], false));
     expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistCalls + 1);
     expect(mockedGetVietnamIndexList).toHaveBeenCalledTimes(indexListCalls);
+    expect(mockedGetVietnamDailyIndex).toHaveBeenCalledTimes(dailyIndexCalls);
     expect(mockedGetVietnamIndexComponents).toHaveBeenCalledTimes(indexComponentCalls);
   });
 
@@ -1653,6 +1708,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     mockedGetVietnamRealtimeTrades.mockRejectedValue(new Error('trade tape unavailable'));
     mockedGetVietnamCorporateActions.mockRejectedValue(new Error('corporate actions unavailable'));
     mockedGetVietnamIndexList.mockRejectedValue(new Error('index list unavailable'));
+    mockedGetVietnamDailyIndex.mockRejectedValue(new Error('daily index unavailable'));
     mockedGetVietnamIndexComponents.mockRejectedValue(new Error('index components unavailable'));
 
     render(<VietnamDashboardPage />);
@@ -2472,16 +2528,77 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     expect(await screen.findByText('SSI index coverage')).toBeInTheDocument();
     expect(mockedGetVietnamIndexList).toHaveBeenCalledWith('HOSE');
+    expect(mockedGetVietnamDailyIndex).toHaveBeenCalledWith(['VNINDEX', 'VN30']);
     expect(mockedGetVietnamIndexComponents).toHaveBeenCalledWith('VN30');
     expect(screen.getByText('IndexList source/status/count')).toBeInTheDocument();
+    expect(screen.getByText('DailyIndex source/status/count')).toBeInTheDocument();
     expect(screen.getByText('VN30 components source/status/count')).toBeInTheDocument();
     expect(screen.getAllByText('VN30').length).toBeGreaterThan(0);
-    expect(screen.getByText('VNINDEX')).toBeInTheDocument();
+    expect(screen.getAllByText('VNINDEX').length).toBeGreaterThan(0);
     expect(screen.getByText('HNX30')).toBeInTheDocument();
     expect(screen.getByText('VN30 components unavailable from SSI.')).toBeInTheDocument();
 
     const indicatorTable = within(screen.getByRole('heading', { name: 'Indicator table' }).closest('section') as HTMLElement);
     expect(indicatorTable.getByTestId('indicator-row-FPT')).not.toHaveTextContent('Unavailable');
+  });
+
+  it('renders real SSI DailyIndex context without blending ticker price sources', async () => {
+    render(<VietnamDashboardPage />);
+
+    const context = within(await screen.findByTestId('index-context'));
+    expect(context.getByRole('heading', { name: 'Market index context' })).toBeInTheDocument();
+    expect(context.getByRole('heading', { name: 'VNINDEX' })).toBeInTheDocument();
+    expect(context.getByRole('heading', { name: 'VN30' })).toBeInTheDocument();
+    expect(context.getAllByText('SSI DailyIndex')).toHaveLength(2);
+    expect(context.getAllByText('matched')).toHaveLength(2);
+    expect(context.getByText('1,326')).toBeInTheDocument();
+    expect(context.getByText('Change +5.25')).toBeInTheDocument();
+    expect(context.getByText('+0.4%')).toBeInTheDocument();
+    expect(context.getByText('Breadth: advancing 210 · declining 175 · unchanged 60')).toBeInTheDocument();
+    expect(context.getByText(/Ticker daily prices remain sourced from SSI DailyOhlc/)).toBeInTheDocument();
+    expect(selectedTickerHeader().getByText('Daily source: SSI DailyOhlc')).toBeInTheDocument();
+  });
+
+  it('keeps watchlist, selected ticker, and chart when SSI index data is unavailable', async () => {
+    mockedGetVietnamDailyIndex.mockResolvedValue(makeDailyIndexResponse({
+      status: 'unavailable',
+      reason: 'SSI daily index unavailable.',
+      latestDate: null,
+      rows: [],
+      count: 0,
+    }));
+    mockedGetVietnamIndexComponents.mockResolvedValue(makeIndexComponentsResponse());
+
+    render(<VietnamDashboardPage />);
+
+    const context = within(await screen.findByTestId('index-context'));
+    expect(context.getByText('SSI daily index unavailable.')).toBeInTheDocument();
+    expect(context.getByText('SSI index components unavailable.')).toBeInTheDocument();
+    expect(screen.getByTestId('indicator-row-FPT')).toBeInTheDocument();
+    expect(selectedTickerHeader().getByRole('heading', { name: 'FPT' })).toBeInTheDocument();
+    expect(await screen.findByTestId('inspect-chart-card')).toBeInTheDocument();
+    expect(context.queryByText('FPT')).not.toBeInTheDocument();
+    expect(context.queryByText('ACB')).not.toBeInTheDocument();
+  });
+
+  it('shows VN30 component count only when SSI returns real component rows', async () => {
+    mockedGetVietnamIndexComponents.mockResolvedValue(makeIndexComponentsResponse({
+      status: 'ok',
+      source: 'SSI IndexComponents',
+      rows: [
+        { indexCode: 'VN30', symbol: 'FPT', source: 'SSI IndexComponents' },
+        { indexCode: 'VN30', symbol: 'ACB', source: 'SSI IndexComponents' },
+      ],
+      count: 2,
+    }));
+
+    render(<VietnamDashboardPage />);
+
+    const context = within(await screen.findByTestId('index-context'));
+    expect(context.getByText('2 VN30 component rows returned by SSI IndexComponents.')).toBeInTheDocument();
+    expect(context.queryByText('SSI index components unavailable.')).not.toBeInTheDocument();
+    expect(context.queryByText('FPT')).not.toBeInTheDocument();
+    expect(context.queryByText('ACB')).not.toBeInTheDocument();
   });
 
   it('keeps selected ticker news visible when quote and metadata are limited', async () => {

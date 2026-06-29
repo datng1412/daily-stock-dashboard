@@ -7,6 +7,7 @@ import {
   type VietnamChartResponse,
   type VietnamCorporateActionEvent,
   type VietnamCorporateActionsResponse,
+  type VietnamDailyIndexResponse,
   type VietnamIndexComponentsResponse,
   type VietnamIndexListResponse,
   type VietnamObservabilityResponse,
@@ -1462,10 +1463,11 @@ const WatchCard: React.FC<{ item: VietnamWatchItem; realtimeQuote?: VietnamRealt
 };
 
 const IndexCoveragePanel: React.FC<{
+  dailyIndex?: VietnamDailyIndexResponse | null;
   indexList?: VietnamIndexListResponse | null;
   indexComponents?: VietnamIndexComponentsResponse | null;
   error?: string | null;
-}> = ({ indexList, indexComponents, error }) => {
+}> = ({ dailyIndex, indexList, indexComponents, error }) => {
   const sampleCodes = (indexList?.rows ?? [])
     .map((row) => row.indexCode)
     .filter((code): code is string => Boolean(code))
@@ -1480,15 +1482,15 @@ const IndexCoveragePanel: React.FC<{
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <p className="text-sm font-semibold text-foreground">SSI index coverage</p>
-          <p className="mt-1">SSI IndexList and IndexComponents diagnostics. No alternate provider fallback is used for index data.</p>
+          <p className="mt-1">SSI IndexList, DailyIndex, and IndexComponents diagnostics. No alternate provider fallback is used for index data.</p>
         </div>
         <Badge variant="default">SSI</Badge>
       </div>
-      <div className="mt-3 grid gap-3 md:grid-cols-2">
+      <div className="mt-3 grid gap-3 md:grid-cols-3">
         <div className="rounded-lg bg-card/60 p-3">
           <dt className="text-xs text-secondary-text">IndexList source/status/count</dt>
           <dd className="mt-1 font-medium text-foreground">
-            {indexList?.source ?? 'SSI'} / {listStatus} / {formatNumber(indexList?.count ?? indexList?.rows?.length ?? 0)}
+            {indexList?.source ?? 'SSI IndexList'} / {listStatus} / {formatNumber(indexList?.count ?? indexList?.rows?.length ?? 0)}
           </dd>
           <dd className="mt-2 flex flex-wrap gap-1">
             {sampleCodes.length ? sampleCodes.map((code) => (
@@ -1499,9 +1501,18 @@ const IndexCoveragePanel: React.FC<{
           </dd>
         </div>
         <div className="rounded-lg bg-card/60 p-3">
+          <dt className="text-xs text-secondary-text">DailyIndex source/status/count</dt>
+          <dd className="mt-1 font-medium text-foreground">
+            {dailyIndex?.source ?? 'SSI DailyIndex'} / {dailyIndex?.status ?? (error ? 'unavailable' : 'loading')} / {formatNumber(dailyIndex?.count ?? dailyIndex?.rows?.length ?? 0)}
+          </dd>
+          <dd className="mt-2">
+            {dailyIndex?.latestDate ? `Latest row date ${dailyIndex.latestDate}` : 'Daily index rows unavailable'}
+          </dd>
+        </div>
+        <div className="rounded-lg bg-card/60 p-3">
           <dt className="text-xs text-secondary-text">VN30 components source/status/count</dt>
           <dd className="mt-1 font-medium text-foreground">
-            {indexComponents?.source ?? 'SSI'} / {componentStatus} / {formatNumber(componentCount)}
+            {indexComponents?.source ?? 'SSI IndexComponents'} / {componentStatus} / {formatNumber(componentCount)}
           </dd>
           <dd className="mt-2">
             {componentUnavailable
@@ -1515,9 +1526,81 @@ const IndexCoveragePanel: React.FC<{
   );
 };
 
+const IndexContextPanel: React.FC<{
+  dailyIndex?: VietnamDailyIndexResponse | null;
+  indexComponents?: VietnamIndexComponentsResponse | null;
+}> = ({ dailyIndex, indexComponents }) => {
+  const rows = dailyIndex?.status === 'ok' || dailyIndex?.status === 'partial'
+    ? dailyIndex.rows.filter((row) => row.status === 'ok' && hasDisplayValue(row.indexValue))
+    : [];
+  const componentCount = indexComponents?.status === 'ok'
+    ? indexComponents.rows.length
+    : 0;
+
+  return (
+    <section className="rounded-lg border border-border/70 bg-card p-4" data-testid="index-context">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-base font-semibold text-foreground">Market index context</h2>
+          <p className="mt-1 text-xs text-secondary-text">Optional SSI index data. Ticker daily prices remain sourced from SSI DailyOhlc.</p>
+        </div>
+        <Badge variant={rows.length ? 'success' : dailyIndex ? 'warning' : 'default'}>
+          {rows.length ? dailyIndex?.status ?? 'ok' : dailyIndex ? 'unavailable' : 'loading'}
+        </Badge>
+      </div>
+      {rows.length ? (
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          {rows.map((row) => (
+            <article key={row.indexCode} className="rounded-lg border border-border/60 bg-elevated/30 p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="font-semibold text-foreground">{row.indexCode}</h3>
+                <div className="flex flex-wrap gap-1">
+                  <Badge variant="default">{row.source || 'SSI DailyIndex'}</Badge>
+                  <Badge variant={row.dateMatch === 'matched' ? 'success' : 'warning'}>
+                    {row.dateMatch || 'unknown date'}
+                  </Badge>
+                </div>
+              </div>
+              <p className="mt-2 text-xl font-semibold text-foreground">{formatNumber(row.indexValue)}</p>
+              <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-secondary-text">
+                {hasDisplayValue(row.change) ? <span>Change {formatSignedNumber(row.change, 2)}</span> : null}
+                {hasDisplayValue(row.changePct) ? <span>{formatSignedNumber(row.changePct, 2)}%</span> : null}
+                {row.date ? <span>Date {row.date}</span> : null}
+              </div>
+              {hasDisplayValue(row.advances) || hasDisplayValue(row.declines) || hasDisplayValue(row.unchanged) ? (
+                <p className="mt-2 text-xs text-secondary-text">
+                  Breadth: {[
+                    hasDisplayValue(row.advances) ? `advancing ${formatNumber(row.advances)}` : null,
+                    hasDisplayValue(row.declines) ? `declining ${formatNumber(row.declines)}` : null,
+                    hasDisplayValue(row.unchanged) ? `unchanged ${formatNumber(row.unchanged)}` : null,
+                  ].filter(Boolean).join(' · ')}
+                </p>
+              ) : null}
+            </article>
+          ))}
+        </div>
+      ) : dailyIndex ? (
+        <p className="mt-3 text-sm text-secondary-text">SSI daily index unavailable.</p>
+      ) : (
+        <p className="mt-3 text-sm text-secondary-text">Loading SSI daily index context...</p>
+      )}
+      <div className="mt-3 border-t border-border/60 pt-3 text-xs text-secondary-text">
+        {componentCount > 0 ? (
+          <span>{formatNumber(componentCount)} VN30 component rows returned by SSI IndexComponents.</span>
+        ) : indexComponents ? (
+          <span>SSI index components unavailable.</span>
+        ) : (
+          <span>Loading SSI index components...</span>
+        )}
+      </div>
+    </section>
+  );
+};
+
 const DataStatusPanel: React.FC<{
   data?: VietnamWatchlistResponse | null;
   selectedItem?: VietnamWatchItem | null;
+  dailyIndex?: VietnamDailyIndexResponse | null;
   indexList?: VietnamIndexListResponse | null;
   indexComponents?: VietnamIndexComponentsResponse | null;
   indexCoverageError?: string | null;
@@ -1538,6 +1621,7 @@ const DataStatusPanel: React.FC<{
 }> = ({
   data,
   selectedItem,
+  dailyIndex,
   indexList,
   indexComponents,
   indexCoverageError,
@@ -1633,6 +1717,7 @@ const DataStatusPanel: React.FC<{
         </div>
       ) : null}
       <IndexCoveragePanel
+        dailyIndex={dailyIndex}
         indexList={indexList}
         indexComponents={indexComponents}
         error={indexCoverageError}
@@ -3975,6 +4060,7 @@ const VietnamDashboardPage: React.FC = () => {
   const [corporateActions, setCorporateActions] = useState<VietnamCorporateActionsResponse | null>(null);
   const [corporateActionsLoading, setCorporateActionsLoading] = useState(false);
   const [corporateActionsError, setCorporateActionsError] = useState<string | null>(null);
+  const [dailyIndex, setDailyIndex] = useState<VietnamDailyIndexResponse | null>(null);
   const [indexList, setIndexList] = useState<VietnamIndexListResponse | null>(null);
   const [indexComponents, setIndexComponents] = useState<VietnamIndexComponentsResponse | null>(null);
   const [indexCoverageError, setIndexCoverageError] = useState<string | null>(null);
@@ -4159,8 +4245,9 @@ const VietnamDashboardPage: React.FC = () => {
 
   const loadIndexCoverage = useCallback(async () => {
     setIndexCoverageError(null);
-    const [listResult, componentResult] = await Promise.allSettled([
+    const [listResult, dailyResult, componentResult] = await Promise.allSettled([
       stocksApi.getVietnamIndexList('HOSE'),
+      stocksApi.getVietnamDailyIndex(['VNINDEX', 'VN30']),
       stocksApi.getVietnamIndexComponents('VN30'),
     ]);
 
@@ -4169,9 +4256,24 @@ const VietnamDashboardPage: React.FC = () => {
     } else {
       setIndexList({
         status: 'unavailable',
-        source: 'SSI',
+        source: 'SSI IndexList',
         reason: 'IndexList unavailable',
         market: 'HOSE',
+        rows: [],
+        count: 0,
+        fallbackUsed: false,
+      });
+    }
+
+    if (dailyResult.status === 'fulfilled') {
+      setDailyIndex(dailyResult.value);
+    } else {
+      setDailyIndex({
+        status: 'unavailable',
+        source: 'SSI DailyIndex',
+        reason: 'SSI daily index unavailable.',
+        requestedIndexCodes: ['VNINDEX', 'VN30'],
+        latestDate: null,
         rows: [],
         count: 0,
         fallbackUsed: false,
@@ -4183,7 +4285,7 @@ const VietnamDashboardPage: React.FC = () => {
     } else {
       setIndexComponents({
         status: 'unavailable',
-        source: 'SSI',
+        source: 'SSI IndexComponents',
         reason: 'IndexComponents unavailable',
         indexCode: 'VN30',
         rows: [],
@@ -4192,7 +4294,7 @@ const VietnamDashboardPage: React.FC = () => {
       });
     }
 
-    if (listResult.status === 'rejected' || componentResult.status === 'rejected') {
+    if (listResult.status === 'rejected' || dailyResult.status === 'rejected' || componentResult.status === 'rejected') {
       setIndexCoverageError('SSI index coverage request unavailable.');
     }
   }, []);
@@ -4611,6 +4713,11 @@ const VietnamDashboardPage: React.FC = () => {
         marketPhase={marketPhase}
       />
 
+      <IndexContextPanel
+        dailyIndex={dailyIndex}
+        indexComponents={indexComponents}
+      />
+
       {isUpdatingWatchlist || (hasCommittedData && error) ? (
         <div
           className={cn(
@@ -4948,6 +5055,7 @@ const VietnamDashboardPage: React.FC = () => {
           <DataStatusPanel
             data={data}
             selectedItem={selectedItem}
+            dailyIndex={dailyIndex}
             indexList={indexList}
             indexComponents={indexComponents}
             indexCoverageError={indexCoverageError}

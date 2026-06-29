@@ -115,6 +115,22 @@ Response rules:
 - Missing candles return `[]`.
 - Chart unavailability should not be filled from realtime, intraday, Mozyfin, or KBS data.
 
+## Vietnam index endpoints
+
+### `GET /api/v1/stocks/vn/index-list`
+
+Returns SSI IndexList `rows` with `index_id`, `index_code`, `index_name`, `exchange`, `market`, `source`, `missing_fields`, and `field_coverage`. The response includes `status`, `source`, `count`, `fallback_used=false`, and sanitized `diagnostics`. SSI-returned rows remain authoritative even when the requested market filter is not strict.
+
+### `GET /api/v1/stocks/vn/daily-index`
+
+Accepts comma-separated `index_codes` (default `VNINDEX,VN30`), optional `from_date`/`to_date`, bounded `limit`, and `force_refresh`. Each returned latest row may include index value, change/percent, volume/value, matched/put-through fields, breadth counts, session, exchange, date/date-match, source, missing fields, and field coverage.
+
+Unavailable indexes do not produce placeholder rows. Overall status is `ok`, `partial`, or `unavailable`; `rows=[]` when no requested index has usable SSI data.
+
+### `GET /api/v1/stocks/vn/index-components`
+
+Requires an index code confirmed by SSI IndexList. Returns real SSI component rows and count when available; otherwise `status=unavailable` and `rows=[]`. Missing optional name/weight/exchange fields remain null. The endpoint never supplies hardcoded VN30 membership or another-provider fallback.
+
 ## `GET /api/v1/stocks/vn/company/{ticker}`
 
 Purpose:

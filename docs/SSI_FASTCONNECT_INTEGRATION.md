@@ -75,7 +75,7 @@ External providers are still required for BCTC/KQKD, financial statements, finan
 | IndexList | SSI FastConnect Data REST | Implemented and exposed through backend API | Discover official index identifiers before DailyIndex calls |
 | DailyOhlc | SSI FastConnect Data REST | Implemented and wired | Use for watchlist daily close, chart candles, and internal MA/RSI/Bollinger calculations |
 | IntradayOhlc | SSI FastConnect Data REST | Implemented and wired for compact intraday pulse | Use as strict VN intraday candle source; do not treat as realtime matched quote |
-| DailyIndex | SSI FastConnect Data REST | Implemented with 29-day chunking | Use for daily index value/change/breadth/liquidity when wired |
+| DailyIndex | SSI FastConnect Data REST | Implemented with 29-day chunking and wired to optional dashboard context | Use only after exact IndexList identifier resolution |
 | DailyStockPrice | SSI FastConnect Data REST | Implemented and wired | Use for reference, ceiling/floor, adjusted close, matched, put-through, and foreign flow |
 | Realtime snapshot | SSI FastConnect Data streaming | Provider/service/API/UI contract added; parser coverage for buffered `X`, `X-QUOTE`, and `X-TRADE`; config-disabled background manager/cache skeleton added; official client adapter is available only behind `SSI_STREAMING_REALTIME_ENABLED=true`; FastAPI startup can start a process-local manager only when `SSI_STREAMING_REALTIME_BOOTSTRAP_SYMBOLS` is non-empty; default channel template is `X:{symbol}` | Show SSI unavailable until the backend lifecycle cache safely populates current rows; no request-handler streaming and no KBS fallback |
 | Trade tape | SSI FastConnect Data streaming or future verified trade contract | Provider/service/API/UI contract added; live history/list semantics still need confirmation | Keep separate from realtime latest-trade messages and official daily OHLCV |
@@ -92,6 +92,7 @@ External providers are still required for BCTC/KQKD, financial statements, finan
 | DailyOhlc | `GET /Market/DailyOhlc` | OK | Canonical dashboard `latest_price` currently uses this close. Also owns chart candles and internal indicators. |
 | DailyStockPrice | `GET /Market/DailyStockPrice` | OK, investigation pending | Owns reference, ceiling/floor, matched/put-through, adjusted close if provided, and latest foreign-flow fields. Latest smoke found same-day DailyOhlc versus DailyStockPrice close/volume mismatch for FPT on `2026-06-22`. |
 | IndexList | `GET /Market/IndexList` | OK | Use SSI-returned index codes instead of hardcoded assumptions. |
+| DailyIndex | `GET /Market/DailyIndex` | Clean unavailable in Phase 4.4A live smoke for requested VNINDEX/VN30 context | Requires exact IndexList resolution and returns no placeholder row when SSI has no usable data. |
 | IndexComponents | `GET /Market/IndexComponents` | Clean unavailable when provider request fails | Provider/service/API coverage exists, but live component rows remain unconfirmed in the current SSI environment. |
 | IntradayOhlc | `GET /Market/IntradayOhlc` | Contract exists; returned rows may be stale/mismatched or provider-throttled | Freshness must be validated against SSI DailyOhlc date before rendering intraday metrics; failures expose only sanitized diagnostics. |
 | Realtime snapshot | SSI FastConnect streaming data types `X`, `X-QUOTE`, `X-TRADE` | Parser covered; config-disabled manager/cache skeleton exists; official client adapter is config-gated; FastAPI startup bootstrap is config-gated and symbol-list gated | Phase 4.0C verified the route/service/fetcher wiring and config gate. Phase 4.0C-2 found no supported SSI REST realtime endpoint, SDK method, enum, or hidden repo contract. Phase 4.0C-3 confirmed the realtime direction is streaming. Phase 4.0C-5 added a request-safe cache read path that stays disabled by default. Phase 4.0C-6 added a lazy official-client adapter. Phase 4.0C-7E changed the default channel to the live-verified no-space form `X:{symbol}`; spaced forms are retained only for diagnostics/custom overrides. Phase 4.0C-8 added FastAPI lifecycle bootstrap that starts the process-local manager only when `SSI_STREAMING_REALTIME_ENABLED=true` and explicit bootstrap symbols are configured. Phase 4.0C-9 makes the realtime endpoint bypass the generic backend response cache so fresh process-local stream-cache rows can surface immediately. Previous candidate names `RealtimeQuote`, `RealtimePrice`, `RealtimeSnapshot`, and `SecuritiesRealtime` are discovery evidence only and are no longer probed at runtime. The dashboard must not claim realtime is live unless `realtime_snapshot` is non-null and `realtime_status.status = ok`. |
@@ -488,15 +489,16 @@ SSI range limits:
 
 Strict DailyIndex behavior:
 
-* `VN_INDEX_DATA_PROVIDER=ssi` enables SSI DailyIndex fetches for future market breadth work.
+* `VN_INDEX_DATA_PROVIDER=ssi` enables SSI DailyIndex fetches for optional index context.
 * If SSI DailyIndex is unavailable, index data returns unavailable.
-* No dashboard card consumes SSI DailyIndex yet.
+* `/api/v1/stocks/vn/daily-index` requests a bounded recent window and returns only latest usable rows for requested indexes.
+* DailyIndex and IndexComponents are not called when IndexList cannot confirm the requested identifier.
 
 Strict index metadata behavior:
 
-* `/api/v1/stocks/vn/index-list` exposes SSI IndexList rows with `source=SSI` and `fallback_used=false`.
+* `/api/v1/stocks/vn/index-list` exposes SSI IndexList rows with `source=SSI IndexList`, field coverage, sanitized diagnostics, and `fallback_used=false`.
 * `/api/v1/stocks/vn/index-components?index_code=...` exposes SSI IndexComponents rows when SSI returns them, or a clean unavailable state when SSI returns no meaningful component rows.
-* The web dashboard calls both endpoints for compact diagnostics and keeps the section visible even when VN30 components are unavailable from SSI.
+* The web dashboard calls IndexList, DailyIndex, and IndexComponents independently and keeps optional index context visible when one source is unavailable.
 * IndexComponents requests use `indexID`, `pageIndex=1`, and `pageSize=1000`, and retry safe same-provider parameter variants only when SSI returns no meaningful rows.
 * Status/message-only SSI responses are not counted as index component rows.
 * SSI provider error/status payloads for IndexComponents are parsed with case-insensitive `code`, `errorCode`, `status`, and `Status` handling and must become sanitized unavailable responses, not backend 500s.
@@ -545,11 +547,11 @@ Company research current behavior:
 
 `DailyStockPrice` rows normalize reference, ceiling, floor, OHLC, adjusted close, matched volume/value, put-through volume/value, total volume/value, and foreign buy/sell/net volume/value fields. Mapping is tolerant of common SSI field variants such as `TradingDate`, `RefPrice`, `ReferencePrice`, `BasicPrice`, `Ceiling`, `Floor`, `MatchedVolume`, `PutThroughValue`, `ForeignBuyVol`, `ForeignSellVol`, and `BuyForeignQuantity`/`SellForeignQuantity`.
 
-`DailyIndex` rows normalize index value, change, change percent, total volume/value, matched volume/value, put-through volume/value, breadth fields, trading session, and exchange when present.
+`DailyIndex` rows normalize index value, change, change percent, total volume/value, matched volume/value, put-through volume/value, breadth fields, trading session, and exchange when present. Public rows add exact IndexList-resolved codes, source, date alignment, missing fields, and field coverage.
 
 `IndexList` rows normalize `index_id`, `index_code`, `index_name`, `exchange`, `market`, and `source`.
 
-`IndexComponents` rows normalize `index_code`, `symbol`, `exchange`, `market`, `weight`, `name`, and `source` when SSI returns component rows. The service first checks `IndexList` for a provider-owned identifier matching the requested code, then calls `IndexComponents` with that identifier. Responses include sanitized diagnostics for the requested index, provider identifier, identifier source, provider status, and reason. Missing optional component fields remain null.
+`IndexComponents` rows normalize `index_code`, `symbol`, `exchange`, `market`, `weight`, `name`, and `source` when SSI returns component rows. The service first requires an exact `IndexList` match, then calls `IndexComponents` with that identifier. Missing identifiers and empty/provider-failed responses remain unavailable with `rows=[]`. Responses include sanitized diagnostics for the requested index, selected identifier, identifier source, row count, field coverage, and failure class. Missing optional component fields remain null.
 
 `Securities` and `SecuritiesDetails` rows normalize symbol metadata such as symbol, exchange, market, security type, names, industry, sector, issuer, lot size, listed shares, and listed date when present. Aliases are limited to field names already observed in provider fixtures/tests; absent fields remain null.
 
@@ -608,6 +610,8 @@ Probe mode tests both documented FC Data base URL shapes and prints only endpoin
 ## Known limitations / operational notes
 
 * SSI metadata coverage may be limited. A live metadata row can be `status=ok` and `quality_status=partial` while only returning symbol, exchange, market, and source; optional name, industry, sector, issuer, type, lot-size, listed-shares, and listed-date fields may remain null. This does not invalidate SSI DailyOhlc or DailyStockPrice.
+* Phase 4.4A live IndexList smoke with `market=HOSE` returned 10 rows spanning HNX and HOSE, included `VN30`, and did not include an exact `VNINDEX`. Treat this as provider evidence: the request market is not a strict response filter, and missing identifiers must remain unavailable.
+* Phase 4.4A live DailyIndex smoke returned no usable VNINDEX/VN30 rows after exact identifier handling. VN30 IndexComponents also remained cleanly unavailable. These optional failures did not affect FPT/HPG/SSI DailyOhlc watchlist rows.
 * Live IndexList validation works in the current SSI environment, but `market=HOSE` can still return cross-market-looking index codes such as `HNX30`, `HNXINDEX`, and `HNXUPCOMINDEX`; use SSI-returned rows instead of assuming the request market filter is strict.
 * Live IndexComponents validation for `VN30`, with and without `market=HOSE`, returned a clean unavailable state in the current SSI environment. This may be endpoint permission, endpoint path, SSI data availability, or undocumented parameter shape. Do not hardcode VN30 members or fallback to Mozyfin/KBS.
 * Quote fields are not currently a reliable REST latest-price source. Watchlist payloads can have `quote_cache=missing`, `quote=null`, `quote_price_date=null`, and `quote_price_raw_field=null`; `latest_price` uses SSI DailyOhlc close when SSI daily rows are available.

@@ -1003,6 +1003,7 @@ class SsiFastConnectFetcher:
         from_date: Optional[str] = None,
         to_date: Optional[str] = None,
         limit: int = 260,
+        force_refresh: bool = False,
     ) -> Dict[str, Any]:
         normalized_index = index_code.strip().upper()
         params = {"indexID": normalized_index}
@@ -1017,6 +1018,7 @@ class SsiFastConnectFetcher:
             required_any=("date", "index_value", "change", "change_pct", "total_volume", "total_value"),
             base_param_variants=[self._alternate_param_case(params)],
             dedupe_fields=("index_code", "date"),
+            force_refresh=force_refresh,
         )
 
     def get_intraday_ohlcv(
@@ -1457,7 +1459,7 @@ class SsiFastConnectFetcher:
             "count": len(trades),
         }
 
-    def get_index_list(self, market: Optional[str] = None) -> Dict[str, Any]:
+    def get_index_list(self, market: Optional[str] = None, force_refresh: bool = False) -> Dict[str, Any]:
         params = {"market": market.strip().upper()} if market else {}
         payload = self._cached_normalized(
             "IndexList",
@@ -1467,10 +1469,16 @@ class SsiFastConnectFetcher:
             extra={"market": params.get("market")},
             param_variants=[self._alternate_param_case(params)] if params else None,
             required_any=("index_id", "index_code"),
+            force_refresh=force_refresh,
         )
         return self._empty_as_unavailable(payload)
 
-    def get_index_components(self, index_code: str, market: Optional[str] = None) -> Dict[str, Any]:
+    def get_index_components(
+        self,
+        index_code: str,
+        market: Optional[str] = None,
+        force_refresh: bool = False,
+    ) -> Dict[str, Any]:
         normalized_index = index_code.strip().upper()
         params: Dict[str, Any] = {
             "indexID": normalized_index,
@@ -1495,6 +1503,7 @@ class SsiFastConnectFetcher:
             param_variants=variants,
             required_any=("symbol",),
             retry_unavailable_variants=True,
+            force_refresh=force_refresh,
         )
         return self._empty_as_unavailable(payload)
 
@@ -1695,9 +1704,10 @@ class SsiFastConnectFetcher:
         param_variants: Optional[List[Dict[str, Any]]] = None,
         required_any: Tuple[str, ...] = (),
         retry_unavailable_variants: bool = False,
+        force_refresh: bool = False,
     ) -> Dict[str, Any]:
         cache_key = (endpoint, tuple(sorted((params or {}).items())))
-        if self.cache_ttl_seconds > 0:
+        if self.cache_ttl_seconds > 0 and not force_refresh:
             entry = self._cache.get(cache_key)
             if entry and entry.expires_at > time.time():
                 return dict(entry.value)
@@ -1919,6 +1929,7 @@ class SsiFastConnectFetcher:
         base_param_variants: Optional[List[Dict[str, Any]]] = None,
         required_any: Tuple[str, ...] = (),
         dedupe_fields: Tuple[str, ...] = ("date",),
+        force_refresh: bool = False,
     ) -> Dict[str, Any]:
         windows = build_ssi_date_windows(from_date, to_date)
         cache_params = {
@@ -1929,7 +1940,7 @@ class SsiFastConnectFetcher:
             "chunked": True,
         }
         cache_key = (endpoint, tuple(sorted(cache_params.items())))
-        if self.cache_ttl_seconds > 0:
+        if self.cache_ttl_seconds > 0 and not force_refresh:
             entry = self._cache.get(cache_key)
             if entry and entry.expires_at > time.time():
                 return dict(entry.value)

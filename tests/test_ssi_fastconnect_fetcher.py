@@ -1526,6 +1526,26 @@ def test_index_list_maps_index_codes_safely():
     assert kwargs["params"] == {"market": "HOSE"}
 
 
+def test_index_force_refresh_bypasses_only_the_matching_provider_cache():
+    session = _FakeSession(
+        post_items=[_token_response()],
+        get_items=[
+            _FakeResponse(payload={"Data": [{"IndexID": "VN30", "IndexCode": "VN30"}]}),
+            _FakeResponse(payload={"Data": [{"IndexID": "VN100", "IndexCode": "VN100"}]}),
+        ],
+    )
+    fetcher = _fetcher(session=session, cache_ttl_seconds=300)
+
+    first = fetcher.get_index_list("HOSE")
+    cached = fetcher.get_index_list("HOSE")
+    refreshed = fetcher.get_index_list("HOSE", force_refresh=True)
+
+    assert first["rows"][0]["index_code"] == "VN30"
+    assert cached["rows"][0]["index_code"] == "VN30"
+    assert refreshed["rows"][0]["index_code"] == "VN100"
+    assert _get_call_count(session) == 2
+
+
 def test_index_components_maps_component_rows_safely():
     session = _FakeSession(
         post_items=[_token_response()],

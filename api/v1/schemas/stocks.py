@@ -349,6 +349,8 @@ class VietnamIndexInfo(BaseModel):
     exchange: Optional[str] = None
     market: Optional[str] = None
     source: Optional[str] = None
+    missing_fields: List[str] = Field(default_factory=list)
+    field_coverage: Dict[str, bool] = Field(default_factory=dict)
 
 
 class VietnamIndexListResponse(BaseModel):
@@ -361,6 +363,50 @@ class VietnamIndexListResponse(BaseModel):
     rows: List[VietnamIndexInfo] = Field(default_factory=list)
     count: int = 0
     fallback_used: bool = False
+    diagnostics: Dict[str, Any] = Field(default_factory=dict)
+
+
+class VietnamDailyIndexRow(BaseModel):
+    """Latest normalized SSI DailyIndex row for one confirmed index identifier."""
+
+    status: str = "ok"
+    quality_status: Optional[str] = None
+    index_code: str
+    date: Optional[str] = None
+    date_match: str = "unknown"
+    index_value: Optional[float] = None
+    change: Optional[float] = None
+    change_pct: Optional[float] = None
+    total_volume: Optional[int] = None
+    total_value: Optional[float] = None
+    matched_volume: Optional[int] = None
+    matched_value: Optional[float] = None
+    put_through_volume: Optional[int] = None
+    put_through_value: Optional[float] = None
+    advances: Optional[int] = None
+    unchanged: Optional[int] = None
+    declines: Optional[int] = None
+    ceiling: Optional[int] = None
+    floor: Optional[int] = None
+    trading_session: Optional[str] = None
+    exchange: Optional[str] = None
+    source: str = "SSI DailyIndex"
+    missing_fields: List[str] = Field(default_factory=list)
+    field_coverage: Dict[str, bool] = Field(default_factory=dict)
+
+
+class VietnamDailyIndexResponse(BaseModel):
+    """Optional SSI DailyIndex context for requested IndexList-confirmed indexes."""
+
+    status: str = "unavailable"
+    source: str = "SSI DailyIndex"
+    reason: Optional[str] = None
+    requested_index_codes: List[str] = Field(default_factory=list)
+    latest_date: Optional[str] = None
+    rows: List[VietnamDailyIndexRow] = Field(default_factory=list)
+    count: int = 0
+    fallback_used: bool = False
+    diagnostics: Dict[str, Any] = Field(default_factory=dict)
 
 
 class VietnamIndexComponent(BaseModel):
@@ -373,6 +419,8 @@ class VietnamIndexComponent(BaseModel):
     weight: Optional[float] = None
     name: Optional[str] = None
     source: Optional[str] = None
+    missing_fields: List[str] = Field(default_factory=list)
+    field_coverage: Dict[str, bool] = Field(default_factory=dict)
 
 
 class VietnamIndexComponentsResponse(BaseModel):

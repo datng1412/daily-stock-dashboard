@@ -111,6 +111,19 @@ Conventions:
 | `profile.lot_size` / `profile.listed_shares` | Trading lot and listed share count | SSI Securities/SecuritiesDetails | shares | yes | no | Company profile/details | Zero is preserved; missing is null. |
 | `profile.listed_date` | SSI listing date | SSI Securities/SecuritiesDetails | date/text | yes | no | Company profile/details | No date inference. |
 
+## Index Fields
+
+| Field | Meaning | Source | Unit | Nullable | Canonical | UI placement | Known caveat |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `index_list.rows[].index_id` / `index_code` | SSI-owned identifier and public code | SSI IndexList | text | one required | yes for dependent index requests | Diagnostics/index discovery | Requested market filters may return cross-market rows. |
+| `daily_index.rows[].index_value` | Daily index level | SSI DailyIndex | index points | yes | yes for optional index context | Market index context | Never substitutes for ticker `latest_price`. |
+| `daily_index.rows[].change` / `change_pct` | Provider daily point and percent change | SSI DailyIndex | points / percent | yes | no | Market index context | Hide when absent; do not derive one from the other. |
+| `daily_index.rows[].total_volume` / `total_value` | Provider daily index market volume/value | SSI DailyIndex | shares / VND | yes | no | Optional index detail | Do not mix with ticker volume or DailyStockPrice matched values. |
+| `daily_index.rows[].advances` / `declines` / `unchanged` | Provider-returned market breadth counts | SSI DailyIndex | count | yes | no | Optional index context | Show only when SSI returns real counts; never infer from watchlist rows. |
+| `daily_index.rows[].date_match` | Alignment with newest DailyIndex date in the response | Service-derived | classification | no | no | Index freshness note/diagnostics | `matched`, `mismatched`, or `unknown`; not exchange-session finality. |
+| `index_components.rows[]` | Real SSI index membership rows | SSI IndexComponents | list | no | no | Optional count/diagnostics | Empty when unavailable; no hardcoded VN30 members. |
+| Index `missing_fields` / `field_coverage` | Explicit optional-field availability | Service-derived from SSI rows | list/object | no | no | Diagnostics | Missing stays null; zero stays zero. |
+
 ## Current Decision Points
 
 - Company shared daily fields: company `latest_price`, `daily_close`, daily OHLCV open/high/low/close/volume, and daily value align with the watchlist SSI DailyOhlc fields. Company reference, limits, foreign flow, matched/put-through, and adjusted-close values remain SSI DailyStockPrice-specific.
@@ -127,7 +140,7 @@ Conventions:
 - `SSI IntradayOhlc`: intraday candles and derived intraday pulse.
 - `SSI realtime contract`: optional FastConnect streaming realtime snapshot contract; live support is not confirmed by this label or by parser/cache/adapter test presence.
 - `SSI trade-tape contract`: optional trade-tape contract; live support is not confirmed by this label.
-- `SSI IndexList` / `SSI IndexComponents`: index metadata and component rows.
+- `SSI IndexList` / `SSI DailyIndex` / `SSI IndexComponents`: index identifiers, daily index context, and component rows.
 - `disabled`: intentionally disabled public sections, including current VN news status.
 - `NewsProvider future`: future VN news domain; not implemented today.
 - `external provider future`: future financials/corporate-action domains; not implemented today.
