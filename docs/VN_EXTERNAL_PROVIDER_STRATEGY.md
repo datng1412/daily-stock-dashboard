@@ -15,6 +15,17 @@ The current application contract remains unchanged:
 * Missing objects remain `null`; missing lists remain `[]`.
 * No corporate action, dividend, news, financial, macro, metadata, or index value may be inferred or fabricated.
 
+## Phase 4.5A SSI-First Candidate Boundary
+
+Phase 4.5A completes the SSI capability audit before any external implementation. For this phase, VNStocks and FiinGroup are recorded only as future external candidates:
+
+| Provider | Phase 4.5A classification | Verification state | Runtime use |
+| --- | --- | --- | --- |
+| VNStocks | `candidate_external_provider` | `needs_verification` for auth, rate limits, timestamp semantics, price/data semantics, storage/display rights, redistribution rights, and ticker coverage | None; do not call, scrape, configure, or fallback to VNStocks |
+| FiinGroup API Datafeed | `candidate_external_provider` | `needs_verification` for commercial entitlement, auth, rate limits, timestamp semantics, price/data semantics, storage/display rights, redistribution rights, and contracted exchange coverage | None; do not call, configure, or fallback to FiinGroup until a later qualification phase passes |
+
+This boundary does not invalidate the Phase 5.0A provider-selection work below; it only records that no external provider is authorized or implemented during the SSI-first Phase 4.5A pass.
+
 ## Phase 5.0A Decision
 
 ### Implement next

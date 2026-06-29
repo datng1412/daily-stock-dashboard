@@ -292,8 +292,8 @@ Null/empty rules:
 
 Current known caveats from handoff snapshots:
 
-- VN30 components can be unavailable in the current SSI environment.
-- The UI should show a concise unavailable state, not hardcoded members.
+- Phase 4.4B proved exact VN30 component rows through SSI `indexCode=VN30`; those rows are usable only when SSI returns an exact provider row and real nested members.
+- Any missing identifier, mismatched outer index, empty nested list, or provider failure still returns `rows=[]` with concise unavailable state and no hardcoded members.
 
 Future changes:
 

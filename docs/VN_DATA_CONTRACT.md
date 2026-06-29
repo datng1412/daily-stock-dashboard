@@ -267,7 +267,7 @@ Sanitized `daily_stock_price.diagnostics` may include endpoint name, requested s
 
 ## External Provider Boundary
 
-Phase 5.0A does not add a live external provider or change public fields. Corporate actions are the first selected domain for provider qualification, but they remain `not_implemented` or `unavailable` until the access and legal gates in `docs/VN_EXTERNAL_PROVIDER_STRATEGY.md` pass.
+Phase 4.5A/5.0A do not add a live external provider or change public fields. Corporate actions are the first selected domain for provider qualification, but they remain `not_implemented` or `unavailable` until the access and legal gates in `docs/VN_EXTERNAL_PROVIDER_STRATEGY.md` pass. VNStocks and FiinGroup are candidate external providers only, both `needs_verification`; they are not runtime sources, fallback providers, or implementation sources in the current contract.
 
 External provider rules:
 

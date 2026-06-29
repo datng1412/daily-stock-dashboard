@@ -47,7 +47,7 @@ This roadmap is the source of truth for Vietnam dashboard provider ownership. SS
 | Securities | SSI FastConnect Data REST | Implemented and wired as same-provider metadata fallback | Use for symbol metadata |
 | SecuritiesDetails | SSI FastConnect Data REST | Implemented and wired | Use for exchange, security type, listed info, issuer/name, lot size, listed shares, and listed date if available |
 | IndexList | SSI FastConnect Data REST | Implemented and exposed through backend API | Discover official index identifiers instead of hardcoded assumptions |
-| IndexComponents | SSI FastConnect Data REST | Provider, service, and API coverage added; live availability needs SSI endpoint/permission confirmation | Use for index membership and VN30 diagnostics only when SSI returns rows |
+| IndexComponents | SSI FastConnect Data REST | Provider, service, API, and VN30 live discovery coverage added | Use for index membership and VN30 diagnostics only when SSI returns exact real rows |
 | DailyOhlc | SSI FastConnect Data REST | Implemented and wired for daily data/chart | Use for daily OHLCV, chart candles, and internal indicators |
 | IntradayOhlc | SSI FastConnect Data REST | Implemented and wired for watchlist/company intraday pulse | Use for compact intraday candles; keep separate from daily close and SSI realtime |
 | DailyStockPrice | SSI FastConnect Data REST | Implemented and wired for selected-ticker enrichment | Use for reference, ceiling/floor, adjusted close if provided, matched volume/value, put-through volume/value, and foreign buy/sell/net volume/value |
@@ -84,7 +84,7 @@ If SSI-owned data is unavailable, show unavailable. Do not silently fallback.
 * DailyStockPrice works but requires 29-day provider-level chunking because SSI rejects broad ranges.
 * DailyIndex works but requires 29-day provider-level chunking because SSI rejects broad ranges.
 * IndexList is exposed through `/api/v1/stocks/vn/index-list` and should be used to discover SSI-returned index codes.
-* IndexComponents is exposed through `/api/v1/stocks/vn/index-components?index_code=...`, but the current local SSI environment returned a clean unavailable state for `VN30`; do not hardcode components or fallback to another provider.
+* IndexComponents is exposed through `/api/v1/stocks/vn/index-components?index_code=...`. Phase 4.4B live discovery proved exact VN30 nested component rows through `indexCode=VN30`, while missing identifiers or empty/provider-failed responses still return `rows=[]`; do not hardcode components or fallback to another provider.
 * SSI IntradayOhlc is implemented for the watchlist/company intraday pulse through the same SSI auth/cache path. If SSI returns no candles, stale rows, malformed rows, provider code `429`, or the endpoint is disabled, expose a clean SSI `disabled`/`unavailable` intraday status and keep daily rows OK.
 * Phase 4.0B fixed the IntradayOhlc paging bug by using internal `pageSize=1000`, sorting provider rows, and applying the public candle limit afterward. Phase 4.0B-2 added sanitized failure classification for current live failures; the observed FPT failure was SSI provider code `429` with HTTP 200, classified as `rate_limited`. Phase 4.0B-3 added a symbol/timeframe-scoped cooldown after IntradayOhlc rate-limit signals so repeat requests return unavailable without hitting SSI.
 * `/api/v1/stocks/vn/chart` should be SSI-backed and should return SSI source metadata.
@@ -99,6 +99,7 @@ If SSI-owned data is unavailable, show unavailable. Do not silently fallback.
 * Phase 4.0C-7E changed the default SSI streaming channel template to the live-verified no-space form `X:{symbol}`. Old spaced forms are preserved only for explicit overrides and diagnostics.
 * Phase 4.0C-8 added a FastAPI startup/shutdown bootstrap for the SSI streaming realtime manager. It runs only when `SSI_STREAMING_REALTIME_ENABLED=true` and `SSI_STREAMING_REALTIME_BOOTSTRAP_SYMBOLS` is a small explicit symbol list. Request handlers still only read cache/status and do not start streams or subscribe dynamically.
 * Phase 4.0C-10B release-gate validation confirmed disabled and enabled SSI realtime modes keep daily watchlist rows on `SSI DailyOhlc`, keep optional realtime separate, stop polling while the tab is hidden, and shut down the lifecycle with `SIGINT` without traceback or secret-like log output. Local `npm.cmd` remained blocked by the Windows host-profile `EPERM` issue, so web validation used direct local Vite/Vitest entry points. In the disabled-mode headless browser smoke, the chart card was attached with 125 SSI daily points but its bounding box stayed hidden; the enabled-mode smoke rendered the chart card visibly.
+* Phase 4.5A completed an SSI-first capability audit before any external provider implementation. Current classification: DailyOhlc and DailyStockPrice are `strong`; IndexList, exact VN30 IndexComponents, and supported market metadata are `usable`; DailyIndex and IntradayOhlc are `partial`; true trade-tape history is `unavailable_parameter_unknown`; realtime snapshot is `optional_live_dependent`; `VNINDEX` remains unresolved; fundamentals, statements, ratios, corporate actions, dividends/rights/splits, news, and macro are `external_provider_required`.
 * SSI realtime/trade-tape live endpoint names and entitlements may return unavailable. Unavailable states should include sanitized diagnostics without tokens, credentials, auth headers, or raw provider bodies.
 * Dashboard provider-status UI must keep core daily SSI availability separate from optional SSI realtime, SSI trade tape, SSI index components, and disabled news states. A `Partial` dashboard status can mean optional sections are unavailable; it must not imply daily SSI data failed when daily rows are OK.
 * KBS legacy realtime/trade-tape paths are disabled by default and require explicit legacy flags.
@@ -463,7 +464,7 @@ Each next task must answer:
 * Is it fresh?
 * Which source owns it?
 * Which exact fields are safe to display?
-* What should remain unavailable, disabled, or future-provider only?
+* What should remain unavailable, disabled, or external-provider-required?
 
 Phase 4.0A adds the local capability audit and matrix. Additional table-filter polish, saved filter views, further selected-ticker copy polish, broader dashboard layout changes, chart UX polish, and new visual badges are paused. They are deferred, not cancelled, until the data-capability matrix and priority data fixes are complete.
 
@@ -477,10 +478,10 @@ Phase 4.0A adds the local capability audit and matrix. Additional table-filter p
 6. Trade tape.
 7. Index and index components.
 8. Profile and securities metadata.
-9. News future provider.
-10. Financials future provider.
-11. Corporate actions and dividends future provider.
-12. Macro and events future provider.
+9. News external provider.
+10. Financials external provider.
+11. Corporate actions and dividends external provider.
+12. Macro and events external provider.
 
 This ordering does not claim availability. Every domain must be classified from evidence before implementation relies on it.
 
@@ -591,13 +592,16 @@ Scope:
 * Add local audit script `scripts/audit_vn_data_capability.ps1`.
 * Build SSI/data-capability matrix `docs/SSI_DATA_CAPABILITY_MATRIX.md`.
 * Inspect domain presence, source ownership, freshness, row coverage, and safe display fields.
-* Classify each domain as:
-  * reliable
-  * partial
-  * unavailable
-  * disabled
-  * future-provider
-  * unknown-needs-verification
+* Classify each domain using the current Phase 4.5A vocabulary:
+  * `strong`
+  * `usable`
+  * `partial`
+  * `optional_live_dependent`
+  * `unavailable_parameter_unknown`
+  * `unavailable_permission_or_entitlement`
+  * `external_provider_required`
+  * `not_implemented`
+  * `deferred`
 * Keep audit output secret-safe.
 * Make no production behavior, API contract, provider-call, or UI change.
 * Require future UI/data work to consult the matrix before adding fields.
@@ -608,7 +612,7 @@ Acceptance criteria:
 * The audit script consumes existing app endpoints only.
 * Evidence distinguishes data absence from request failure.
 * Optional unavailable domains are reported without making the audit fail when the audit request succeeds.
-* Future-provider domains are reported explicitly as future-provider or disabled.
+* External-provider-required domains are reported explicitly as external-provider-required, not implemented, or disabled.
 * Phase 4.0B through Phase 4.4A can use the matrix to choose scoped reliability work.
 
 ### Phase 4.0B - Intraday Root-Cause and Implementation
@@ -879,7 +883,7 @@ Result:
 * IndexComponents remains empty-list-safe. No VN30 constituents are hardcoded and no fallback provider is used.
 * The dashboard renders a separate optional market-index section. Real DailyIndex values and real component counts render when present; unavailable index data does not clear watchlist rows, selected ticker, chart, or live sections.
 * `latest_price` remains SSI DailyOhlc. DailyStockPrice, intraday, realtime, metadata, and company-page behavior are unchanged.
-* Current live smoke returned IndexList `status=ok` with 10 rows across HNX/HOSE. The response included `VN30` but no exact `VNINDEX`; DailyIndex returned no usable VNINDEX/VN30 rows, and VN30 IndexComponents remained unavailable. No guessed rows or membership were emitted.
+* Phase 4.4A live smoke returned IndexList `status=ok` with 10 rows across HNX/HOSE. The response included `VN30` but no exact `VNINDEX`; DailyIndex returned no usable VNINDEX/VN30 rows, and VN30 IndexComponents remained unavailable. Phase 4.4B superseded the VN30 availability finding with exact DailyIndex and IndexComponents discovery; no guessed rows or membership were emitted.
 * Watchlist smoke returned FPT/HPG/SSI as usable with `latest_price_source=SSI DailyOhlc` and `fallback_used=false`. Browser smoke kept six rows, selected FPT, chart, and realtime controls visible while showing concise DailyIndex/IndexComponents unavailable copy.
 * Targeted validation passed: 111 backend tests, 7 legacy-file index compatibility tests, and 151 frontend tests, plus Python compilation, TypeScript, ESLint, and production Vite build. The normal npm launcher remained blocked by Windows profile `EPERM`; equivalent local entry points passed.
 * A full `tests/test_mozyfin_vn_adapter.py` run still has 28 unrelated failures in Mozyfin-era expectations and stale stubs (legacy source labels, fallback/cache behavior, and old intraday signatures). All seven index-focused tests in that file pass; migrating the remaining legacy tests is outside Phase 4.4A.
@@ -907,13 +911,38 @@ Result:
 * Final live API smoke returned IndexList `ok` with 10 rows, DailyIndex `partial` with one VN30 row and unavailable VNINDEX, and IndexComponents `ok` with 30 exact VN30 members. The VN30 row was dated 2026-06-29 and exposed the non-positive provider level as null/partial. FPT/HPG/SSI watchlist rows remained `ok`, `latest_price_source=SSI DailyOhlc`, and `fallback_used=false`.
 * Targeted validation passed 127 tests across the index probe, SSI fetcher, index service, no-Mozyfin, realtime, DailyStockPrice, and profile metadata suites. Requested Python compilation passed. No frontend files or public API fields changed, so frontend tests/build and browser smoke were not required.
 
+### Phase 4.5A - SSI Remaining Capability Completion Before External Providers
+
+Status: completed on 2026-06-29.
+
+Goal:
+
+Audit the remaining SSI FastConnect market-data capability surface before implementing VNStocks, FiinGroup, or any other external provider.
+
+Result:
+
+* Updated `docs/SSI_DATA_CAPABILITY_MATRIX.md` to use the Phase 4.5A status vocabulary: `strong`, `usable`, `partial`, `optional_live_dependent`, `unavailable_parameter_unknown`, `unavailable_permission_or_entitlement`, `external_provider_required`, `not_implemented`, and `deferred`.
+* Confirmed current strong SSI-owned domains: DailyOhlc for canonical daily OHLCV/chart/`latest_price`, and DailyStockPrice for reference/limits, matched/put-through, adjusted-close when present, and latest foreign-flow enrichment.
+* Confirmed current usable SSI-owned domains: IndexList, exact VN30 IndexComponents, and supported market metadata from Securities/SecuritiesDetails when provider rows contain fields.
+* Confirmed current partial SSI-owned domains: DailyIndex because VN30 rows exist but the latest provider level can be invalid/non-positive and `VNINDEX` is still unresolved; IntradayOhlc because freshness/rate-limit/current-row coverage remains variable.
+* Confirmed true trade-tape history is `unavailable_parameter_unknown`: `X-TRADE` is latest-trade stream context, not verified historical trade tape, and REST trade-history parameters/permissions are not proven.
+* Confirmed realtime snapshot remains `optional_live_dependent`: parser/cache/adapter/lifecycle infrastructure exists, but public realtime rows require explicitly enabled streaming runtime, configured bootstrap symbols, a running manager, and fresh cache rows.
+* Confirmed external-provider-required gaps under current repo evidence: fundamentals, financial statements, ratios, corporate actions, dividends, rights, splits, news, macro, and explicit source-labeled VNINDEX fallback if SSI remains unresolved.
+* VNStocks and FiinGroup are candidate external providers only. No runtime provider, fallback path, scraping, provider config, credentials, API schema, frontend behavior, or `latest_price` semantics changed in this phase.
+
+Exit criteria:
+
+* Remaining SSI gaps are separated from external-provider gaps in `docs/SSI_DATA_CAPABILITY_MATRIX.md`.
+* Existing stale index wording is corrected so VN30 IndexComponents are described as SSI-usable only when exact provider rows are returned.
+* Phase 5 implementation remains gated behind separate provider qualification; external providers must not overwrite SSI-owned fields.
+
 ### Phase 5.0A - External Provider Contract Design
 
 Status: completed on 2026-06-29.
 
 Goal:
 
-Select the next missing VN data domain and provider strategy without mixing external ownership into SSI market data.
+Select the next missing VN data domain and provider strategy after the SSI-first capability audit, without mixing external ownership into SSI market data.
 
 Result:
 
@@ -1163,7 +1192,7 @@ Live IndexList validation with `market=HOSE` returned `status=ok`, `source=SSI`,
 
 The same live check showed that `market=HOSE` can still return cross-market-looking index codes such as `HNX30`, `HNXINDEX`, `HNXUPCOMINDEX`, `VN100`, `VN30`, and sector/style indexes. Treat the returned SSI rows as the authority, but do not assume the request market filter is strict.
 
-Live IndexComponents validation for `VN30`, with and without `market=HOSE`, returned a clean unavailable SSI state in the current environment. This may be endpoint permission, endpoint path, SSI data availability, or undocumented parameter shape. Do not hardcode VN30 components and do not use Mozyfin/KBS fallback for SSI-owned index membership. Keep the UI and diagnostics tolerant of unavailable component rows.
+Phase 4.4B superseded the earlier unavailable VN30 IndexComponents finding. Live discovery proved that `indexCode=VN30`, with market omitted or `market=HOSE`, can return an exact outer VN30 row with 30 nested members. Missing identifiers, mismatched outer rows, empty nested lists, or provider failures must still return `rows=[]`. Do not hardcode VN30 components and do not use Mozyfin/KBS fallback for SSI-owned index membership. Keep the UI and diagnostics tolerant of unavailable component rows.
 
 Audit blocker fixed before the current SSI milestone: SSI `IndexComponents` provider error/status payloads must parse case-insensitive fields such as `code`, `errorCode`, `status`, and `Status` into a clean SSI unavailable response. They must not raise backend 500s from parser helper errors.
 
@@ -1704,7 +1733,7 @@ Status: provider, service, API, and mocked parser coverage added in the current 
 * Added compact dashboard diagnostics for SSI index coverage so IndexList identifier resolution, provider identifier, and VN30 component availability are visible.
 * Avoid hardcoded index assumptions; use SSI-returned index identifiers from IndexList before calling IndexComponents.
 * Live IndexList works in the current SSI environment.
-* Live IndexComponents for `VN30` currently returns clean unavailable; verify SSI endpoint permission/path/parameter shape before relying on component rows.
+* Phase 4.4B live discovery proved exact SSI VN30 IndexComponents rows through `indexCode=VN30`; continue verifying any other index before relying on component rows.
 
 ### Implemented note - Vietnam Company Research Terminal shell
 

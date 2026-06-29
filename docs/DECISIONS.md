@@ -89,6 +89,23 @@ Operational rule:
 - Financial statements, ratios, metadata fallback, news, macro, and external VNINDEX remain deferred in the order recorded in `docs/VN_EXTERNAL_PROVIDER_STRATEGY.md`.
 - The existing portfolio subsystem remains user-owned and separate from external VN market-data provider selection.
 
+## VN SSI-First Completion Before External Runtime
+
+Decision: complete and document remaining SSI FastConnect capability before implementing VNStocks, FiinGroup, or another external provider runtime.
+
+Rationale:
+
+- SSI already owns the dashboard's supported VN market-data fields and should remain the first source for any SSI-supported domain.
+- Remaining missing domains need a clean separation between SSI partial/unknown gaps and true external-provider-required gaps.
+- External providers must not silently overwrite SSI-owned daily, DailyStockPrice, intraday, realtime, index, or metadata fields.
+
+Operational rule:
+
+- Treat `docs/SSI_DATA_CAPABILITY_MATRIX.md` as the current SSI capability classification before adding VN data fields.
+- Keep DailyOhlc and DailyStockPrice behavior unchanged unless a separate source-ownership decision is made.
+- VNStocks and FiinGroup are candidate external providers only until a later qualification phase verifies access, rate limits, timestamp/data semantics, storage/display rights, and redistribution rights.
+- Do not add external fallback providers, scrape public pages, infer events from price gaps, or fake index/news/financial/macro data.
+
 ## SSI Realtime And Trade Tape Semantics
 
 Decision: SSI realtime snapshot and SSI trade tape are separate optional live contracts, not replacements for SSI DailyOhlc close.

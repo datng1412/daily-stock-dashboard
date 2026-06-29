@@ -165,14 +165,15 @@ The capability audit checks:
 
 - Whether each priority data domain returns usable fields.
 - Source ownership, row coverage, timestamps, cadence, and freshness.
-- Which exact fields are reliable, partial, unavailable, disabled, future-provider, or unknown-needs-verification.
+- Which exact fields are `strong`, `usable`, `partial`, `optional_live_dependent`, `unavailable_parameter_unknown`, `unavailable_permission_or_entitlement`, `external_provider_required`, `not_implemented`, or `deferred`.
 - Whether available rows are safe to use in later contract or UI tasks.
 
 Audit outcome rules:
 
 - An optional unavailable data domain should be reported as unavailable and should not fail the audit when the audit request itself succeeds.
 - A disabled domain should be reported as disabled.
-- News, financials, corporate actions, dividends, macro, and other unselected external domains should be reported as future-provider or disabled.
+- News, financial statements, ratios, corporate actions, dividends/rights/splits, macro, and other non-SSI domains should be reported as `external_provider_required`, `not_implemented`, or disabled according to the public contract.
+- VNStocks and FiinGroup should appear only as candidate external providers with `needs_verification` until a later qualification phase passes.
 - Request, authentication, parsing, or audit-script failures should remain distinguishable from a valid unavailable-domain result.
 - Audit output must remain secret-safe and must not print credentials, tokens, auth headers, account IDs, or full raw provider payloads.
 - Capability evidence should guide later reliability and contract/status tasks before UI rendering work.

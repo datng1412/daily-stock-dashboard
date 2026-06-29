@@ -71,7 +71,7 @@ External providers are still required for BCTC/KQKD, financial statements, finan
 | AccessToken | SSI FastConnect Data REST | Implemented | Authenticate with env/secret-manager credentials only |
 | Securities | SSI FastConnect Data REST | Implemented and wired as same-provider metadata fallback | Use for symbol metadata when SecuritiesDetails does not return a usable row |
 | SecuritiesDetails | SSI FastConnect Data REST | Implemented and wired | Use for exchange, security type, listed info, and issuer/name fields |
-| IndexComponents | SSI FastConnect Data REST | Provider/service/API coverage added; live availability needs SSI endpoint/permission confirmation | Use for index membership only when SSI returns component rows |
+| IndexComponents | SSI FastConnect Data REST | Provider/service/API coverage plus exact VN30 live discovery added | Use for index membership only when SSI returns exact component rows |
 | IndexList | SSI FastConnect Data REST | Implemented and exposed through backend API | Discover official index identifiers before DailyIndex calls |
 | DailyOhlc | SSI FastConnect Data REST | Implemented and wired | Use for watchlist daily close, chart candles, and internal MA/RSI/Bollinger calculations |
 | IntradayOhlc | SSI FastConnect Data REST | Implemented and wired for compact intraday pulse | Use as strict VN intraday candle source; do not treat as realtime matched quote |
@@ -92,8 +92,8 @@ External providers are still required for BCTC/KQKD, financial statements, finan
 | DailyOhlc | `GET /Market/DailyOhlc` | OK | Canonical dashboard `latest_price` currently uses this close. Also owns chart candles and internal indicators. |
 | DailyStockPrice | `GET /Market/DailyStockPrice` | OK, investigation pending | Owns reference, ceiling/floor, matched/put-through, adjusted close if provided, and latest foreign-flow fields. Latest smoke found same-day DailyOhlc versus DailyStockPrice close/volume mismatch for FPT on `2026-06-22`. |
 | IndexList | `GET /Market/IndexList` | OK | Use SSI-returned index codes instead of hardcoded assumptions. |
-| DailyIndex | `GET /Market/DailyIndex` | Clean unavailable in Phase 4.4A live smoke for requested VNINDEX/VN30 context | Requires exact IndexList resolution and returns no placeholder row when SSI has no usable data. |
-| IndexComponents | `GET /Market/IndexComponents` | Clean unavailable when provider request fails | Provider/service/API coverage exists, but live component rows remain unconfirmed in the current SSI environment. |
+| DailyIndex | `GET /Market/DailyIndex` | Partial: `indexID=VN30` returns rows, while exact `VNINDEX` remains unresolved and non-positive index levels are null | Requires exact IndexList resolution and returns no placeholder row when SSI has no usable data. |
+| IndexComponents | `GET /Market/IndexComponents` | Usable for exact VN30 nested rows; unavailable cases remain `rows=[]` | Phase 4.4B proved `indexCode=VN30` returns an exact VN30 outer row with 30 nested members. Missing identifiers, mismatched outer rows, empty nested lists, or provider failures remain unavailable without hardcoded members. |
 | IntradayOhlc | `GET /Market/IntradayOhlc` | Contract exists; returned rows may be stale/mismatched or provider-throttled | Freshness must be validated against SSI DailyOhlc date before rendering intraday metrics; failures expose only sanitized diagnostics. |
 | Realtime snapshot | SSI FastConnect streaming data types `X`, `X-QUOTE`, `X-TRADE` | Parser covered; config-disabled manager/cache skeleton exists; official client adapter is config-gated; FastAPI startup bootstrap is config-gated and symbol-list gated | Phase 4.0C verified the route/service/fetcher wiring and config gate. Phase 4.0C-2 found no supported SSI REST realtime endpoint, SDK method, enum, or hidden repo contract. Phase 4.0C-3 confirmed the realtime direction is streaming. Phase 4.0C-5 added a request-safe cache read path that stays disabled by default. Phase 4.0C-6 added a lazy official-client adapter. Phase 4.0C-7E changed the default channel to the live-verified no-space form `X:{symbol}`; spaced forms are retained only for diagnostics/custom overrides. Phase 4.0C-8 added FastAPI lifecycle bootstrap that starts the process-local manager only when `SSI_STREAMING_REALTIME_ENABLED=true` and explicit bootstrap symbols are configured. Phase 4.0C-9 makes the realtime endpoint bypass the generic backend response cache so fresh process-local stream-cache rows can surface immediately. Previous candidate names `RealtimeQuote`, `RealtimePrice`, `RealtimeSnapshot`, and `SecuritiesRealtime` are discovery evidence only and are no longer probed at runtime. The dashboard must not claim realtime is live unless `realtime_snapshot` is non-null and `realtime_status.status = ok`. |
 | Trade tape | SSI trade-tape endpoint candidates | Contract exists; currently unavailable/404 in latest smoke | Not confirmed live. Desired unavailable contract is `trade_tape=[]` plus `trade_tape_status`, with endpoint/http details in diagnostics. |
@@ -499,7 +499,7 @@ Strict index metadata behavior:
 * `/api/v1/stocks/vn/index-list` exposes SSI IndexList rows with `source=SSI IndexList`, field coverage, sanitized diagnostics, and `fallback_used=false`.
 * `/api/v1/stocks/vn/index-components?index_code=...` exposes SSI IndexComponents rows when SSI returns them, or a clean unavailable state when SSI returns no meaningful component rows.
 * The web dashboard calls IndexList, DailyIndex, and IndexComponents independently and keeps optional index context visible when one source is unavailable.
-* IndexComponents requests use `indexID`, `pageIndex=1`, and `pageSize=1000`, and retry safe same-provider parameter variants only when SSI returns no meaningful rows.
+* IndexComponents requests use `indexCode`, `pageIndex=1`, and `pageSize=1000` first, and retry safe same-provider parameter variants only when SSI returns no meaningful rows.
 * Status/message-only SSI responses are not counted as index component rows.
 * SSI provider error/status payloads for IndexComponents are parsed with case-insensitive `code`, `errorCode`, `status`, and `Status` handling and must become sanitized unavailable responses, not backend 500s.
 * Mozyfin and KBS are not used as fallback providers for SSI-owned index list, index component, or daily index data.
@@ -656,7 +656,7 @@ It requests IndexList sequentially without a market, with `HOSE`, and with `HNX`
 * No UI source switcher or comparison card exists.
 * No provider comparison endpoint exists in this strict-default phase.
 * SSI streaming/protocol hardening remains a later phase; this phase wires the dashboard contract, disabled background manager/cache skeleton, and safe unavailable states.
-* IndexComponents provider/service/API coverage exists, but live component rows remain unconfirmed under the current SSI environment.
+* Exact VN30 IndexComponents rows are live-verified through `indexCode=VN30`; any missing, mismatched, empty, or provider-failed component response still returns `rows=[]`.
 * Fundamentals, corporate actions, dividends, rights, splits, and macro data require external providers.
 * FC Trading remains out of scope.
 
@@ -672,6 +672,7 @@ The full VN product phase plan is in `docs/VN_DASHBOARD_ROADMAP.md`. SSI-depende
 | Phase 3 - Progressive Dashboard Workspace | Same SSI-backed watchlist/company snapshot contract | Keep daily scan first; add readiness states, selected ticker progressive disclosure, request orchestration, local filters, and chart UX without changing SSI ownership. |
 | Phase 4.0 - SSI Realtime and Trade-Tape Investigation | Realtime/trade-tape endpoint candidates and entitlements | Confirm endpoint names, permissions, row shapes, error classes, and backoff; do not claim live support until data exists with status `ok`. |
 | Phase 4.1 - Intraday Cadence Clarity | IntradayOhlc returned candle spacing and status metadata | Detect actual returned cadence and label stale/unavailable intraday clearly. |
+| Phase 4.5A - SSI Remaining Capability Completion | All current SSI FastConnect market-data endpoints and optional live contracts | Keep SSI-owned domains first, separate partial/unknown SSI gaps from external-provider-required domains, and do not implement VNStocks/FiinGroup runtime. |
 | Phase 5.0 - External Provider Architecture | None; external domains are not SSI-owned market data | Define separate NewsProvider, FundamentalsProvider, CorporateActionsProvider, and MacroProvider contracts before implementation. |
 | Phase 5.1 - NewsProvider | None; news is not SSI-owned | Keep news disabled until a separate provider exists. |
 | Phase 5.2 - Corporate Actions and Dividends | None unless SSI exposes explicit structured sources later | Use only explicit structured event sources; do not infer events from market-data gaps. |

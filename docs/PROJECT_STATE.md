@@ -32,6 +32,7 @@ This document gives Codex and other agents enough context to resume project work
 - SSI FastConnect is the strict primary VN market-data provider for supported fields.
 - SSI owns daily OHLCV, chart candles, DailyStockPrice, reference/ceiling/floor, latest foreign-flow row, index list, index components when available, symbol metadata when available, intraday candles, realtime snapshot contract, and trade-tape contract.
 - `latest_price` currently uses SSI DailyOhlc close as the canonical dashboard price when SSI daily rows are available.
+- Phase 4.5A completed the SSI-first remaining capability audit. DailyOhlc and DailyStockPrice are `strong`; IndexList, exact VN30 IndexComponents, and supported market metadata are `usable`; DailyIndex and IntradayOhlc are `partial`; true trade-tape history is `unavailable_parameter_unknown`; realtime snapshot is `optional_live_dependent`; unsupported fundamentals, statements, ratios, corporate actions, dividends/rights/splits, news, and macro are `external_provider_required`.
 - Mozyfin is disabled for VN dashboard runtime. Do not use it for news, social, OHLCV, chart, reference, foreign flow, index, metadata, intraday, realtime, trade tape, or fallback behavior.
 - KBS is legacy optional only and disabled by default. It must require explicit legacy flags before any diagnostic use and must not silently replace SSI-owned data.
 - VN news is disabled until a separate NewsProvider is implemented.
@@ -43,6 +44,7 @@ This document gives Codex and other agents enough context to resume project work
 ## External Provider State
 
 - Phase 5.0A selected corporate actions/dividends/rights/splits as the first external VN domain to qualify.
+- Phase 4.5A records VNStocks and FiinGroup as `candidate_external_provider` with `needs_verification` only; neither provider is authorized, configured, called, or used as fallback.
 - FiinGroup API Datafeed is the preferred automated candidate only after commercial access, rate-limit, storage, display, and redistribution terms are verified in writing.
 - Provenance-required manual import is the fallback strategy; public VSDC/HOSE/HNX/SSC/company pages must not be scraped without explicit approval and verified terms.
 - No external provider, credential, configuration, endpoint, or runtime behavior is enabled yet.
