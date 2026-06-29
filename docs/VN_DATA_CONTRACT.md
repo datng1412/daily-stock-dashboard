@@ -265,6 +265,20 @@ Date alignment is exposed through `daily_stock_price.date`, `daily_stock_price.d
 
 Sanitized `daily_stock_price.diagnostics` may include endpoint name, requested symbol/date range, normalized row count, selected row date, DailyOhlc date, date match, missing fields, field coverage, and failure class. It must not include raw provider payloads, credentials, tokens, auth headers, account identifiers, or raw auth responses.
 
+## External Provider Boundary
+
+Phase 5.0A does not add a live external provider or change public fields. Corporate actions are the first selected domain for provider qualification, but they remain `not_implemented` or `unavailable` until the access and legal gates in `docs/VN_EXTERNAL_PROVIDER_STRATEGY.md` pass.
+
+External provider rules:
+
+* External rows must carry their own provider/source labels and provenance.
+* External providers must not overwrite SSI-owned daily, DailyStockPrice, intraday, realtime, index, or metadata fields silently.
+* External-provider failure must preserve valid SSI watchlist/company data.
+* Disabled or not-implemented list domains return `[]`; missing objects return `null`.
+* Public disclosure pages are not an automation contract and must not be scraped without explicit approval and verified terms.
+* A future metadata fallback may fill only SSI-null fields under explicit per-field priority and source rules.
+* A future external VNINDEX value must be explicitly labeled as external and must never be presented as SSI.
+
 ## UI Rendering Rules
 
 ### Daily Data

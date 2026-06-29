@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [documentation] Select corporate actions as the first external VN provider domain and record provider, legal, scoring, and fallback gates.
 - [fix] Parse exact SSI nested IndexComponents rows and use the verified indexCode parameter variant without hardcoded constituents or fallback providers.
 - [improvement] Add a bounded manual SSI index identifier probe with secret-safe IndexList, DailyIndex, and IndexComponents classifications.
 - [new feature] Add optional SSI DailyIndex dashboard context with exact IndexList resolution, sanitized diagnostics, and non-fatal unavailable IndexComponents states.

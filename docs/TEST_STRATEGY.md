@@ -200,6 +200,24 @@ Check:
 - No Mozyfin/KBS normal fallback.
 - No endpoint dumps in primary UI.
 
+## Phase 5 External Provider Contract Tests
+
+Phase 5.0A is documentation-only and adds no runtime tests. When Phase 5.0B adds a `CorporateActionsProvider` boundary or import proof, deterministic tests must cover:
+
+- Provider disabled by default.
+- `not_implemented`/`disabled` and provider failure return `events=[]`.
+- Provider failure does not alter or remove valid SSI daily watchlist/company rows.
+- No provider is invoked as a silent SSI fallback.
+- Event dates remain distinct: announcement, ex-date, record date, and payment/execution date.
+- Missing optional values remain null; zero is not substituted for missing ratios or cash amounts.
+- Corrections/cancellations and duplicate provider event IDs are deterministic.
+- Source, source URL/document, and import/provider provenance are retained.
+- Diagnostics contain only provider, request domain, status, row count, failure class, and fetch time.
+- Tokens, auth headers, account IDs, credentials, and raw provider payloads are absent.
+- Manual import rejects rows without ticker, event type, source provenance, and at least one usable event date.
+
+Live provider tests remain out of deterministic CI. They require an approved commercial entitlement and sanitized fixtures.
+
 ## Local VN Dashboard Smoke Harness
 
 Run this after Phase 2+ VN dashboard changes when a local backend is already running:

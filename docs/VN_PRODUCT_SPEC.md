@@ -377,15 +377,19 @@ Verify VNINDEX, VN30, and index-component capability when existing SSI contracts
 
 ### Phase 5.0A - External Provider Contract Design
 
-Define NewsProvider, FundamentalsProvider, CorporateActionsProvider, and MacroProvider as separate contracts. Keep them separate from SSI market data.
+Select external domains and providers without changing SSI ownership. Corporate actions are first; FiinGroup is the preferred automated candidate only after commercial/legal verification, with provenance-required manual import as fallback. See `docs/VN_EXTERNAL_PROVIDER_STRATEGY.md`.
 
-### Phase 5.1A - NewsProvider Implementation
+### Phase 5.0B - CorporateActionsProvider Qualification
 
-Add sourced watchlist/company news when a provider is selected. Until then, keep `news = []` and `news_status.status = disabled`.
+Verify entitlement, auth, limits, provenance, correction semantics, and storage/display/redistribution rights. Prove a thin disabled-by-default contract with a sanitized licensed or manual fixture.
 
-### Phase 5.2A - Corporate Actions and Dividends Provider
+### Phase 5.1A - Corporate Actions and Dividends Provider
 
 Add verified event data only. Do not infer dividends or corporate actions from price gaps.
+
+### Phase 5.2A And Later - Financials, Metadata, Ratios, News, Macro, External Index
+
+Implement in the order recorded in `docs/VN_EXTERNAL_PROVIDER_STRATEGY.md`. Keep news disabled with `news = []` until its own provider and legal gates pass.
 
 ### Phase 6.0A - Backend Performance and Caching After Data Reliability
 

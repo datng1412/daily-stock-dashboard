@@ -909,30 +909,100 @@ Result:
 
 ### Phase 5.0A - External Provider Contract Design
 
+Status: completed on 2026-06-29.
+
 Goal:
 
-Define future provider contracts without mixing external domains into SSI market data.
+Select the next missing VN data domain and provider strategy without mixing external ownership into SSI market data.
 
-Provider contracts:
+Result:
 
-* `NewsProvider`.
-* `FundamentalsProvider`.
-* `CorporateActionsProvider`.
-* `MacroProvider`.
+* Added `docs/VN_EXTERNAL_PROVIDER_STRATEGY.md` with a scored domain matrix, candidate provider/source matrix, verified official sources, unresolved facts, legal gates, implementation order, and next-phase entry criteria.
+* Selected corporate actions/dividends/rights/splits as the first external domain because they affect price interpretation and event correctness.
+* Selected FiinGroup API Datafeed as the preferred automated candidate only after written commercial entitlement and storage/display/redistribution approval. Public documentation verifies structured event, issuance, company, news, financial, ratio, macro, and HOSE index schemas; authentication, production URL, pricing, rate limits, SLA, historical depth, and rights remain `needs_verification`.
+* Selected provenance-required manual import as the fallback corporate-actions strategy. VSDC public notices verify rich event content, but public pages are not an automation license and must not be scraped.
+* Verified HNX official RSS and commercial information packages as later candidates. Cross-exchange coverage and retention/display/redistribution rights remain unresolved.
+* Deferred financial statements, ratios, metadata fallback, news, macro, and explicit external VNINDEX in that order. Existing user-owned portfolio accounts/manual entries/CSV import are a separate implemented subsystem; broker integration is not a missing market-data provider.
+* No provider interface, credentials, config, endpoint, schema, backend behavior, or frontend behavior changed. Future blocks remain `disabled`, `not_implemented`, or `unavailable` with null/empty contracts.
+* SSI ownership is unchanged: `latest_price` remains SSI DailyOhlc, and external providers may not overwrite SSI-owned fields or break daily rows.
+
+### Phase 5.0B - CorporateActionsProvider Qualification and Contract Proof
+
+Goal:
+
+Resolve the access/legal gate and prove one bounded corporate-action contract before production integration.
+
+Scope:
+
+* Obtain FiinGroup entitlement, auth, endpoint, rate-limit, correction, provenance, storage, display, and redistribution answers.
+* Define a thin `CorporateActionsProvider` response with separate announcement, ex, record, and payment/execution dates.
+* Use one sanitized licensed fixture, or a provenance-required manual fixture if commercial access is not approved.
+* Cover cash dividends, stock dividends/bonus, rights, splits, corrections/cancellations, and missing optional dates.
 
 Rules:
 
-* Future providers must document auth, rate limits, timestamp semantics, source provenance, and data semantics before code changes.
-* Future provider failures must not block SSI daily scan data.
-* Do not infer external-domain facts from price gaps.
-* Do not reintroduce Mozyfin/KBS as normal VN runtime fallbacks.
+* No live adapter until written access and legal gates pass.
+* No scraping VSDC, HOSE, HNX, SSC, company pages, or undocumented endpoints.
+* No raw provider payload, credential, token, or commercial account data in fixtures.
+* Provider failures return `events=[]` and do not affect SSI daily data.
 
 Acceptance criteria:
 
-* Provider contracts are explicit before implementation.
-* Future modules remain `disabled`, `not_implemented`, or `unavailable` until real provider rows exist.
+* Provider/source decision is written and evidence-backed.
+* Contract tests prove null/empty, provenance, correction, duplicate, and SSI-isolation behavior.
+* Adapter remains disabled by default until a live proof is explicitly approved.
 
-### Phase 5.1A - NewsProvider Implementation
+### Phase 5.1A - Corporate Actions and Dividends Provider
+
+Goal:
+
+Add verified event rows only after Phase 5.0B passes.
+
+Scope:
+
+* Dividends.
+* Bonus/stock dividends.
+* Rights.
+* Splits.
+* Event history and corrections.
+
+Rules:
+
+* Keep source URL/document provenance.
+* Do not infer events from price/reference gaps.
+* Do not mutate SSI DailyOhlc or claim adjusted-price correctness.
+
+Acceptance criteria:
+
+* Real event rows are source/date labeled.
+* Unavailable data remains `events=[]`.
+* No external failure changes SSI daily rows.
+
+### Phase 5.2A - Financial Statements Provider
+
+Goal:
+
+Add raw, period-aware financial statements through the approved commercial provider boundary.
+
+Rules:
+
+* Distinguish consolidated/separate reports, company type, period length, report date, audit state, units, and restatements.
+* Keep raw statements separate from provider ratios and local derivations.
+* Missing financials do not affect market-data status.
+
+### Phase 5.3A - Metadata Fallback and Financial Ratios
+
+Goal:
+
+Fill SSI-null metadata fields under explicit per-field source priority, then add separately labeled provider ratios.
+
+Rules:
+
+* Never silently overwrite SSI metadata.
+* Do not compute ratios from incomplete statements unless a separate derivation contract is approved.
+* Keep provider methodology and calculation date visible.
+
+### Phase 5.4A - NewsProvider Implementation
 
 Goal:
 
@@ -956,32 +1026,22 @@ Acceptance criteria:
 * When implemented, news is source-labeled and matched transparently.
 * No fake news items.
 
-### Phase 5.2A - Corporate Actions and Dividends Provider
+### Phase 5.5A - Macro and Explicit External Index Context
 
 Goal:
 
-Add verified event data only.
-
-Scope:
-
-* Dividends.
-* Rights.
-* Splits.
-* Event history.
-* Corporate-action source coverage.
+Add a small approved macro series set and, only if licensed, an explicit external VNINDEX fallback.
 
 Rules:
 
-* Use only explicit structured sources.
-* Do not infer dividends or corporate actions from price gaps.
-* Do not mutate raw OHLCV close.
-* Keep unavailable placeholders until provider semantics are validated.
+* Review each series owner, API key, revision cadence, units, display notice, and redistribution term separately.
+* External VNINDEX must be explicitly source-labeled and must never be presented as SSI.
+* Keep macro context neutral and separate from trading advice.
 
 Acceptance criteria:
 
-* Corporate-action status remains unavailable until explicit event source exists.
-* Event rows are source-labeled and date-labeled.
-* No adjusted-close inference.
+* No generic unrestricted macro or index feed is assumed.
+* Missing macro/index context does not affect SSI daily rows.
 
 ### Phase 6.0A - Backend Performance and Caching After Data Reliability
 
@@ -1690,9 +1750,9 @@ Status: Phase 4.0C-8 added backend lifecycle startup/shutdown for the process-lo
 
 ### Priority 5 - External fundamentals, corporate actions, and news
 
-* Investigate an external BCTC/KQKD provider.
-* Investigate a corporate actions source.
-* Investigate a separate NewsProvider; do not rely on Mozyfin free-tier news/social APIs.
+* Qualify corporate actions first using the Phase 5.0B access/legal gate.
+* Evaluate an external BCTC/KQKD provider after corporate actions.
+* Evaluate a separate NewsProvider after financial/company data; do not rely on Mozyfin free-tier news/social APIs.
 
 ### Deferred - Local DB market-data store
 

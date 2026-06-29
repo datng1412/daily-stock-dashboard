@@ -1,6 +1,6 @@
 # Project State
 
-Last updated: 2026-06-22
+Last updated: 2026-06-29
 
 ## Purpose
 
@@ -22,6 +22,7 @@ This document gives Codex and other agents enough context to resume project work
 - Vietnam market phase utilities: `apps/dsa-web/src/utils/vietnamMarketPhase.ts`
 - VN roadmap: `docs/VN_DASHBOARD_ROADMAP.md`
 - SSI integration notes: `docs/SSI_FASTCONNECT_INTEGRATION.md`
+- VN external provider strategy: `docs/VN_EXTERNAL_PROVIDER_STRATEGY.md`
 - Future provider reference docs:
   - `docs/resources/realtime-data/`
   - `docs/resources/news-sources/`
@@ -38,6 +39,15 @@ This document gives Codex and other agents enough context to resume project work
 - The `/vietnam` page is served by the built frontend through the FastAPI backend when running `python main.py --webui-only` or `python main.py --serve-only`.
 - The dashboard uses neutral condition labels only and must not add trading instruction wording.
 - Docs under `docs/resources/` are for future evaluation only and must not be treated as approved providers without explicit approval.
+
+## External Provider State
+
+- Phase 5.0A selected corporate actions/dividends/rights/splits as the first external VN domain to qualify.
+- FiinGroup API Datafeed is the preferred automated candidate only after commercial access, rate-limit, storage, display, and redistribution terms are verified in writing.
+- Provenance-required manual import is the fallback strategy; public VSDC/HOSE/HNX/SSC/company pages must not be scraped without explicit approval and verified terms.
+- No external provider, credential, configuration, endpoint, or runtime behavior is enabled yet.
+- Financial statements, metadata fallback, ratios, news, macro, and explicit external VNINDEX remain deferred in the order recorded in `docs/VN_EXTERNAL_PROVIDER_STRATEGY.md`.
+- The existing portfolio subsystem is user-owned and separate from VN external market-data provider selection.
 
 ## Data Semantics
 

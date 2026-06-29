@@ -1,6 +1,6 @@
 # Decisions
 
-Last updated: 2026-06-24
+Last updated: 2026-06-29
 
 This file records current product and engineering decisions that should not be re-litigated without explicit user direction.
 
@@ -39,7 +39,7 @@ Operational rule:
 - Phase 4.0A adds a local capability audit and data-domain matrix without production behavior changes.
 - Phase 4.0B verifies SSI realtime/trade-tape endpoints, permissions, payloads, and statuses; live support must not be claimed until usable rows exist with status `ok`.
 - Phase 4.1A through Phase 4.4A verify intraday freshness, DailyStockPrice enrichment, profile metadata, and index capability.
-- Phase 5.0A through Phase 5.2A require separate explicit provider contracts before news, financials, corporate actions, dividends, or macro implementation.
+- Phase 5.0A selects the external-domain order; Phase 5.0B qualifies corporate-action access and legal terms; Phase 5.1A and later implement separate provider contracts only after their gates pass.
 - Phase 6.0A backend performance/caching work requires measured rate-limit or latency evidence after data reliability work.
 - Phase 7.0 packaging work cleans runbooks, startup scripts, validation checklists, and deprecated docs without changing provider semantics.
 
@@ -70,6 +70,24 @@ Operational rule:
 - Resource docs must not trigger implementation, new API calls, scraping, or dashboard behavior changes by themselves.
 - Any future provider implementation must first summarize auth, rate limits, timestamp semantics, and data/price semantics.
 - Future news should use a separate NewsProvider contract, not Mozyfin free-tier news/social paths or scraping.
+
+## VN External Provider Priority
+
+Decision: corporate actions/dividends are the first external VN data domain to qualify after SSI-owned market data.
+
+Rationale:
+
+- Corporate actions affect price interpretation, event markers, dividend context, and trust.
+- The current dashboard correctly refuses to infer dividends, rights, splits, or adjustment events from price gaps.
+- Official-source review found structured commercial event APIs and detailed official notices, but did not establish public automation or redistribution rights.
+
+Operational rule:
+
+- The preferred automated candidate is FiinGroup API Datafeed only after written entitlement, authentication, rate-limit, storage, display, and redistribution terms are verified.
+- If commercial access is not approved, the fallback is provenance-required manual import through a separate `CorporateActionsProvider`; public portals must not be scraped.
+- Until the gate passes, corporate actions remain `not_implemented` or `unavailable` with `events=[]`.
+- Financial statements, ratios, metadata fallback, news, macro, and external VNINDEX remain deferred in the order recorded in `docs/VN_EXTERNAL_PROVIDER_STRATEGY.md`.
+- The existing portfolio subsystem remains user-owned and separate from external VN market-data provider selection.
 
 ## SSI Realtime And Trade Tape Semantics
 
