@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [improvement] Make unavailable VN30 components retryable and replace comma-separated custom watchlists with a loaded-symbol search, multi-select chips, and bounded apply flow.
 - [improvement] Make the VN30 dashboard filter use SSI IndexComponents rows when available, suppress duplicate filter requests, and expose row-level partial-data reasons without changing DailyOhlc latest-price ownership.
 - [improvement] Add reason-aware VN intraday, realtime, and trade-tape availability diagnostics without changing DailyOhlc latest-price ownership or adding fallback providers.
 - [fix] Harden the corporate-actions contract so canonical `events` always drives the legacy `items` alias across service, schema, and dashboard rendering.

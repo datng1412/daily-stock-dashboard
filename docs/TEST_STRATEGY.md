@@ -131,7 +131,7 @@ Add or update frontend tests for:
 - Null metadata rows are hidden; profile partial is visible.
 - Profile unavailable keeps valid daily and DailyStockPrice sections visible and does not synthesize company names or metadata rows.
 - Optional index context renders real SSI DailyIndex rows/counts only; index failures preserve watchlist rows, selected ticker, chart, realtime polling, and hidden-tab behavior.
-- VN30 dashboard filter tests should prove the filter uses SSI IndexComponents rows when available, does not fall back to hardcoded VN30 constituents when SSI components are unavailable, suppresses repeated preset/custom clicks while a filter request is pending, and keeps previous rows visible.
+- VN30 dashboard filter tests should prove the filter uses SSI IndexComponents rows when available, does not fall back to hardcoded VN30 constituents when SSI components are unavailable, exposes a retry action after unavailable/error responses, disables VN30 only while its component request is pending, suppresses repeated preset/custom clicks, ignores stale VN30 component intents, and keeps previous rows visible.
 
 ## Future Progressive Loading Tests Needed
 
@@ -141,8 +141,8 @@ Add focused frontend tests when implementing Phase 3.2 through Phase 3.4 request
 - First load and refresh use distinct UI states.
 - Refresh uses user-facing `Updating...` or equivalent concise copy instead of blanking the table.
 - Sorting and filtering do not call the watchlist endpoint.
-- Typing in the custom watchlist input does not call the watchlist endpoint.
-- Saving a custom watchlist without applying does not call the watchlist endpoint.
+- Searching loaded custom-picker options does not call the watchlist endpoint.
+- Custom-picker tests cover symbol/name search, multi-select chips, duplicate prevention, individual removal, bounded uppercase apply, explicit exact-symbol `Validate on apply`, pending apply suppression, and local saved-symbol restoration.
 - Optional live failure does not erase daily table rows, daily chart data, or DailyStockPrice fields.
 - Watchlist table tests should verify missing numeric cells expose reason titles/ARIA labels and realtime badges distinguish disabled, not bootstrapped, cache miss, idle, and stale states when backend status fields provide those reasons.
 - Diagnostics expansion does not trigger new provider calls unless a future task explicitly designs that behavior.

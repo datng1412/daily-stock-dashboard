@@ -1001,6 +1001,19 @@ Result:
 * Improved the watchlist table with compact reason titles/ARIA labels for missing cells and `Partial`/`Unavailable`/realtime badges, including realtime disabled, not bootstrapped, cache miss, idle, and stale states when available.
 * Preserved SSI source ownership: no hardcoded VN30 provider output, no fake values, no external provider runtime, no fallback provider, and `latest_price` remains SSI DailyOhlc.
 
+### Phase 4.6C - Watchlist Filter Picker and VN30 Retry UX
+
+Status: completed on 2026-06-29; live SSI/browser smoke not required for this frontend state-flow phase.
+
+Result:
+
+* Removed the VN30 disabled dead-end. Unknown component state remains actionable, loading temporarily disables the VN30 action, and unavailable/error responses expose a retry affordance while current watchlist rows remain visible.
+* VN30 retry reuses an in-flight component request, normalizes and deduplicates only real SSI IndexComponents symbols, and uses a filter-intent sequence so an older component response cannot overwrite a newer preset/custom selection.
+* Replaced the comma-separated custom input with a bounded search and multi-select picker. Options are derived from loaded SSI VN30 components, current response rows, and saved custom symbols; selected symbols render as removable chips.
+* Exact syntactically valid symbols outside loaded options require an explicit `Validate on apply` selection. The existing complete-watchlist response check keeps the prior snapshot if the backend does not return every requested row.
+* Custom apply saves normalized uppercase unique symbols locally only after a successful response, disables picker controls while pending, suppresses duplicate apply clicks, and keeps previous rows visible.
+* No public API/schema fields changed. SSI ownership, watchlist counters, row-level reason codes, and `latest_price_source=SSI DailyOhlc` remain unchanged.
+
 ### Phase 5.0A - External Provider Contract Design
 
 Status: completed on 2026-06-29.
