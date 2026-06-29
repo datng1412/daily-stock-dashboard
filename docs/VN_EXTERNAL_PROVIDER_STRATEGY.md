@@ -8,7 +8,7 @@ This document records the Phase 5.0A decision for Vietnam data domains that SSI 
 
 The current application contract remains unchanged:
 
-* SSI owns daily OHLCV, DailyStockPrice enrichment, intraday candles, optional realtime, IndexList, DailyIndex where valid, IndexComponents, and SSI-returned metadata.
+* SSI owns daily OHLCV, DailyStockPrice enrichment including bounded recent foreign-flow history, intraday candles, optional realtime, IndexList, DailyIndex where valid, IndexComponents, and SSI-returned metadata.
 * External providers must use separate source labels and must not overwrite SSI-owned fields.
 * `latest_price` remains SSI DailyOhlc close when SSI daily rows exist.
 * External-provider failures must not break SSI daily rows.

@@ -2752,8 +2752,10 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(detail.getByText('Vs reference')).toBeInTheDocument();
     expect(within(detail.getByText('Vs reference').closest('div') as HTMLElement).getByText('+1 / +1.01%')).toBeInTheDocument();
     expect(detail.getByText('Adjusted close is shown only when SSI provides it. Corporate actions are not inferred from reference or adjusted prices.')).toBeInTheDocument();
-    expect(detail.queryByText('Foreign net 5D')).not.toBeInTheDocument();
-    expect(detail.queryByText('Foreign net 20D')).not.toBeInTheDocument();
+    expect(detail.getByText('Foreign net 5D')).toBeInTheDocument();
+    expect(detail.getByText('Foreign net 20D')).toBeInTheDocument();
+    expect(within(detail.getByText('Foreign net 5D').closest('div') as HTMLElement).getByText('15')).toBeInTheDocument();
+    expect(within(detail.getByText('Foreign net 20D').closest('div') as HTMLElement).getByText('30')).toBeInTheDocument();
     expect(detail.queryByText('Need 5 foreign rows')).not.toBeInTheDocument();
     expect(detail.queryByText('Need 20 foreign rows')).not.toBeInTheDocument();
     expect(detail.getByRole('heading', { name: 'Corporate actions' })).toBeInTheDocument();

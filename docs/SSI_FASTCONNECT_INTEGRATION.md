@@ -76,7 +76,7 @@ External providers are still required for BCTC/KQKD, financial statements, finan
 | DailyOhlc | SSI FastConnect Data REST | Implemented and wired | Use for watchlist daily close, chart candles, and internal MA/RSI/Bollinger calculations |
 | IntradayOhlc | SSI FastConnect Data REST | Implemented and wired for compact intraday pulse | Use as strict VN intraday candle source; do not treat as realtime matched quote |
 | DailyIndex | SSI FastConnect Data REST | Implemented with 29-day chunking and wired to optional dashboard context | Use only after exact IndexList identifier resolution |
-| DailyStockPrice | SSI FastConnect Data REST | Implemented and wired | Use for reference, ceiling/floor, adjusted close, matched, put-through, and foreign flow |
+| DailyStockPrice | SSI FastConnect Data REST | Implemented and wired | Use for reference, ceiling/floor, adjusted close, matched, put-through, latest foreign flow, and bounded recent 5D/20D foreign net volume when enough rows exist |
 | Realtime snapshot | SSI FastConnect Data streaming | Provider/service/API/UI contract added; parser coverage for buffered `X`, `X-QUOTE`, and `X-TRADE`; config-disabled background manager/cache skeleton added; official client adapter is available only behind `SSI_STREAMING_REALTIME_ENABLED=true`; FastAPI startup can start a process-local manager only when `SSI_STREAMING_REALTIME_BOOTSTRAP_SYMBOLS` is non-empty; default channel template is `X:{symbol}` | Show SSI unavailable until the backend lifecycle cache safely populates current rows; no request-handler streaming and no KBS fallback |
 | Trade tape | SSI FastConnect Data streaming or future verified trade contract | Provider/service/API/UI contract added; live history/list semantics still need confirmation | Keep separate from realtime latest-trade messages and official daily OHLCV |
 | Realtime best bid/ask, matched data, foreign room, index stream, realtime bars/OHLC | SSI streaming/protocol hardening later | Parser/cache skeleton exists only for realtime quote/trade snapshot messages; live official stream is not connected | Keep semantics explicit and unavailable until SSI behavior is proven stable |
@@ -90,7 +90,7 @@ External providers are still required for BCTC/KQKD, financial statements, finan
 | Feature | SSI source/endpoint | Current status | Notes |
 | --- | --- | --- | --- |
 | DailyOhlc | `GET /Market/DailyOhlc` | OK | Canonical dashboard `latest_price` currently uses this close. Also owns chart candles and internal indicators. |
-| DailyStockPrice | `GET /Market/DailyStockPrice` | OK, investigation pending | Owns reference, ceiling/floor, matched/put-through, adjusted close if provided, and latest foreign-flow fields. Latest smoke found same-day DailyOhlc versus DailyStockPrice close/volume mismatch for FPT on `2026-06-22`. |
+| DailyStockPrice | `GET /Market/DailyStockPrice` | OK | Owns reference, ceiling/floor, matched/put-through, adjusted close if provided, latest foreign-flow fields, and bounded latest-available 5D/20D foreign net volume indicators from the existing per-symbol recent window. Latest smoke found same-day DailyOhlc versus DailyStockPrice close/volume mismatch for FPT on `2026-06-22`. |
 | IndexList | `GET /Market/IndexList` | OK | Use SSI-returned index codes instead of hardcoded assumptions. |
 | DailyIndex | `GET /Market/DailyIndex` | Partial: `indexID=VN30` returns rows, while exact `VNINDEX` remains unresolved and non-positive index levels are null | Requires exact IndexList resolution and returns no placeholder row when SSI has no usable data. |
 | IndexComponents | `GET /Market/IndexComponents` | Usable for exact VN30 nested rows; unavailable cases remain `rows=[]` | Phase 4.4B proved `indexCode=VN30` returns an exact VN30 outer row with 30 nested members. Missing identifiers, mismatched outer rows, empty nested lists, or provider failures remain unavailable without hardcoded members. |
@@ -447,12 +447,13 @@ Strict DailyStockPrice behavior:
 * Source labels are explicit through `reference_source` and `foreign_flow_source`.
 * The selected ticker detail surfaces SSI reference, ceiling/floor, foreign net volume/value, matched volume/value, put-through volume/value, and adjusted close when present.
 * Successful watchlist enrichments set `daily_stock_price.status` to `ok` and expose the same values as optional `ssi_*` convenience fields for UI compatibility.
-* Legacy Mozyfin foreign-history caveats such as stale foreign date and insufficient 5D/20D foreign rows are suppressed when SSI DailyStockPrice is available.
+* The service preserves up to 20 recent per-symbol DailyStockPrice foreign-flow rows from the same bounded request used for latest enrichment. It computes `indicators.foreign_net_5d_latest_available` and `indicators.foreign_net_20d_latest_available` only from returned `foreign_net_volume` rows; insufficient history stays null with `foreign_net_history_count`.
+* Legacy Mozyfin foreign-history caveats are not used for SSI ownership. SSI history is DailyStockPrice-only, row-count bounded, and non-fatal.
 * Normalized rows are publicly labeled `SSI DailyStockPrice`; the generic provider label `SSI` is not used for the enrichment block.
 * `quality_status`, `date_match`, `staleness_reason`, `missing_fields`, `field_coverage`, present-value-only `units`, and sanitized diagnostics make partial or mismatched enrichment explicit without changing DailyOhlc validity.
 * Date match is `matched`, `mismatched`, `unknown`, or `unavailable`. A mismatched or missing date never changes canonical `latest_price`, which remains SSI DailyOhlc close.
 * Volume fields use shares and value/price fields use VND. Missing fields stay null; SSI-provided zero remains zero.
-* Diagnostics are allowlisted to endpoint, symbol/date range, row count, selected date, DailyOhlc date, match state, coverage, and failure class. Raw payloads and authentication/account values are excluded.
+* Diagnostics are allowlisted to endpoint, symbol/date range, row count, selected date, DailyOhlc date, match state, foreign-history row counts/date span/status, coverage, and failure class. Raw payloads and authentication/account values are excluded.
 
 Strict IntradayOhlc behavior:
 
@@ -485,7 +486,7 @@ SSI range limits:
 * Chunked DailyIndex windows use `indexID`, `Fromdate`, `Todate`, `pageIndex=1`, and `pageSize=1000`.
 * Chunked responses are normalized, status/message-only bodies are filtered, duplicate dates are removed, and rows are returned in ascending chronological order.
 * Pagination is bounded by `totalRecord`, empty pages, and a safe max-page guard.
-* Selected ticker quick facts request only a recent 29-day DailyStockPrice window; the local smoke script opts into pacing when validating full-year chunked counts.
+* Selected ticker quick facts request only a recent 29-day DailyStockPrice window; the service reuses those rows for bounded 5D/20D foreign-flow summaries. The local smoke script opts into pacing when validating full-year chunked counts.
 
 Strict DailyIndex behavior:
 
@@ -629,7 +630,7 @@ It requests IndexList sequentially without a market, with `HOSE`, and with `HNX`
 * Live IndexList validation works in the current SSI environment, but `market=HOSE` can still return cross-market-looking index codes such as `HNX30`, `HNXINDEX`, and `HNXUPCOMINDEX`; use SSI-returned rows instead of assuming the request market filter is strict.
 * VN30 components are now live-verified only through the exact SSI nested response. Continue to return `components=[]` when an exact outer index row or usable nested members are absent. Do not hardcode members or fallback to Mozyfin/KBS.
 * Quote fields are not currently a reliable REST latest-price source. Watchlist payloads can have `quote_cache=missing`, `quote=null`, `quote_price_date=null`, and `quote_price_raw_field=null`; `latest_price` uses SSI DailyOhlc close when SSI daily rows are available.
-* DailyStockPrice and DailyIndex require <=29/30-day request windows. Provider chunking is available for smoke/debug/internal validation, but broad automatic UI requests should be avoided unless deliberately designed.
+* DailyStockPrice and DailyIndex require <=29/30-day request windows. Provider chunking is available for smoke/debug/internal validation, but broad automatic UI requests should be avoided unless deliberately designed. Phase 4.5B did not add broad market scans; it reuses the existing selected-ticker/watchlist per-symbol recent window.
 * Local market-data DB storage is deferred. Current mode remains SSI live API plus backend cache/TTL.
 * SSI IntradayOhlc is implemented for compact dashboard/company pulse, but live availability still depends on SSI endpoint permission and response shape. If unavailable, show the SSI intraday state without fallback.
 * SSI IntradayOhlc live rows may be stale relative to SSI DailyOhlc or have a different cadence than the requested dashboard timeframe. Keep daily rows OK, mark stale intraday unavailable, and surface the sanitized date/granularity diagnostics.
@@ -642,7 +643,7 @@ It requests IndexList sequentially without a market, with `HOSE`, and with `HNX`
 * Keep DailyOhlc and DailyStockPrice labels separate: daily close/chart candles come from SSI DailyOhlc; reference/limits/foreign/matched/put-through fields come from SSI DailyStockPrice.
 * Keep primary cache labels scoped to SSI DailyOhlc. Quote/news/intraday/realtime cache or availability issues should remain in diagnostics or caveats so they do not imply official daily market data is unavailable.
 * Latest smoke found a same-date FPT mismatch on `2026-06-22`: SSI DailyOhlc/dashboard close fields were `70,700`, while SSI DailyStockPrice close/adjusted close were `70,800`; DailyOhlc volume was `3,642,400`, while DailyStockPrice matched volume was `3,643,500`. Keep SSI DailyOhlc as canonical `latest_price` until canonical source and final/provisional semantics are explicitly designed.
-* Trade-tape unavailable contract still needs cleanup if responses expose a wrapper object with `trades: []`. Desired public contract is `trade_tape=[]`, `trade_tape_status={status:"unavailable", source:"SSI"}`, and detailed endpoint/http diagnostics under a diagnostics block.
+* Trade-tape public data remains `trade_tape=[]` unless a verified REST list/history source returns rows. `X-TRADE` streaming messages are latest-trade snapshot context only and must not be treated as historical tape rows.
 * Realtime and trade-tape unavailable messages should be short and user-safe. Streaming manager/cache state and sanitized provider error summaries should move to diagnostics.
 * REST realtime candidate probing is disabled; do not reintroduce repeated speculative realtime endpoint probes.
 

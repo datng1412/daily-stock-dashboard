@@ -49,8 +49,9 @@ Conventions:
 | `foreign_buy_value` | Latest foreign buy value | SSI DailyStockPrice | VND | yes | source-specific | Foreign flow | Render only when present. |
 | `foreign_sell_value` | Latest foreign sell value | SSI DailyStockPrice | VND | yes | source-specific | Foreign flow | Render only when present. |
 | `foreign_net_value` | Latest foreign net value | SSI DailyStockPrice | VND | yes | source-specific | Foreign flow | Null is not zero. |
-| `foreign_net_5d` | Five-session net foreign flow | Future DailyStockPrice history | VND or shares, depending field | yes | no | Data Quality Summary/Foreign flow | Use `insufficient_history` when rows are not enough. |
-| `foreign_net_20d` | Twenty-session net foreign flow | Future DailyStockPrice history | VND or shares, depending field | yes | no | Foreign flow | Compute only from matched-date historical rows. |
+| `foreign_net_5d_latest_available` | Five returned-row net foreign volume summary | SSI DailyStockPrice recent rows | shares | yes | no | Selected ticker foreign flow | Computed only from returned `foreign_net_volume` rows; null when fewer than 5 usable rows exist. |
+| `foreign_net_20d_latest_available` | Twenty returned-row net foreign volume summary | SSI DailyStockPrice recent rows | shares | yes | no | Selected ticker foreign flow | Computed only from returned `foreign_net_volume` rows; null when fewer than 20 usable rows exist. |
+| `foreign_net_history_count` | Count of recent DailyStockPrice rows with usable foreign net volume | SSI DailyStockPrice recent rows | rows | no | no | Selected ticker foreign flow/diagnostics | Counts provider-returned rows, not an exchange trading calendar. |
 
 ## Data Quality Summary Field
 

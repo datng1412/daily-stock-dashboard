@@ -87,6 +87,7 @@ Implemented contract notes:
 - Intraday unavailable status may include sanitized diagnostics such as `failure_class`, `endpoint=IntradayOhlc`, HTTP status, provider code, requested timeframe, internal page size, public limit, usable row count, date match, and cadence status.
 - DailyOhlc and DailyStockPrice can disagree on same ticker/date.
 - `daily_stock_price` exposes `status`, `quality_status`, `source=SSI DailyStockPrice`, `date`, `date_match`, `staleness_reason`, normalized enrichment fields, `missing_fields`, value-specific `units`, and sanitized diagnostics.
+- `indicators.foreign_net_5d_latest_available`, `indicators.foreign_net_20d_latest_available`, `indicators.foreign_net_latest_available_date`, and `indicators.foreign_net_history_count` are populated from the same bounded per-symbol DailyStockPrice recent window when enough returned `foreign_net_volume` rows exist.
 - Top-level compatibility fields are `daily_stock_price_date`, `daily_stock_price_date_match`, and `daily_stock_price_staleness_reason`. A mismatch never changes `latest_price` or the daily row status.
 
 Future changes:

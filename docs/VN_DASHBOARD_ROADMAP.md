@@ -99,7 +99,7 @@ If SSI-owned data is unavailable, show unavailable. Do not silently fallback.
 * Phase 4.0C-7E changed the default SSI streaming channel template to the live-verified no-space form `X:{symbol}`. Old spaced forms are preserved only for explicit overrides and diagnostics.
 * Phase 4.0C-8 added a FastAPI startup/shutdown bootstrap for the SSI streaming realtime manager. It runs only when `SSI_STREAMING_REALTIME_ENABLED=true` and `SSI_STREAMING_REALTIME_BOOTSTRAP_SYMBOLS` is a small explicit symbol list. Request handlers still only read cache/status and do not start streams or subscribe dynamically.
 * Phase 4.0C-10B release-gate validation confirmed disabled and enabled SSI realtime modes keep daily watchlist rows on `SSI DailyOhlc`, keep optional realtime separate, stop polling while the tab is hidden, and shut down the lifecycle with `SIGINT` without traceback or secret-like log output. Local `npm.cmd` remained blocked by the Windows host-profile `EPERM` issue, so web validation used direct local Vite/Vitest entry points. In the disabled-mode headless browser smoke, the chart card was attached with 125 SSI daily points but its bounding box stayed hidden; the enabled-mode smoke rendered the chart card visibly.
-* Phase 4.5A completed an SSI-first capability audit before any external provider implementation. Current classification: DailyOhlc and DailyStockPrice are `strong`; IndexList, exact VN30 IndexComponents, and supported market metadata are `usable`; DailyIndex and IntradayOhlc are `partial`; true trade-tape history is `unavailable_parameter_unknown`; realtime snapshot is `optional_live_dependent`; `VNINDEX` remains unresolved; fundamentals, statements, ratios, corporate actions, dividends/rights/splits, news, and macro are `external_provider_required`.
+* Phase 4.5B implemented bounded SSI DailyStockPrice historical foreign-flow summaries from the existing per-symbol recent window. Current classification: DailyOhlc and DailyStockPrice are `strong`; IndexList, exact VN30 IndexComponents, and supported market metadata are `usable`; DailyIndex and IntradayOhlc are `partial`; true trade-tape history is `unavailable_parameter_unknown`; realtime snapshot is `optional_live_dependent`; `VNINDEX` remains unresolved; fundamentals, statements, ratios, corporate actions, dividends/rights/splits, news, and macro are `external_provider_required`.
 * SSI realtime/trade-tape live endpoint names and entitlements may return unavailable. Unavailable states should include sanitized diagnostics without tokens, credentials, auth headers, or raw provider bodies.
 * Dashboard provider-status UI must keep core daily SSI availability separate from optional SSI realtime, SSI trade tape, SSI index components, and disabled news states. A `Partial` dashboard status can mean optional sections are unavailable; it must not imply daily SSI data failed when daily rows are OK.
 * KBS legacy realtime/trade-tape paths are disabled by default and require explicit legacy flags.
@@ -936,6 +936,30 @@ Exit criteria:
 * Existing stale index wording is corrected so VN30 IndexComponents are described as SSI-usable only when exact provider rows are returned.
 * Phase 5 implementation remains gated behind separate provider qualification; external providers must not overwrite SSI-owned fields.
 
+### Phase 4.5B - SSI Remaining Partial Data Implementation
+
+Status: completed on 2026-06-29.
+
+Goal:
+
+Make remaining SSI-owned partial data more available where the current repository has enough evidence to do so safely, without implementing VNStocks, FiinGroup, external fallback, fake data, or changed daily-price ownership.
+
+Result:
+
+* Implemented bounded DailyStockPrice historical foreign-flow enrichment by preserving up to 20 recent rows from the same per-symbol recent-window request already used for latest DailyStockPrice enrichment.
+* Populated `indicators.foreign_net_5d_latest_available`, `indicators.foreign_net_20d_latest_available`, `indicators.foreign_net_latest_available_date`, and `indicators.foreign_net_history_count` from SSI `foreign_net_volume` rows in shares. Short history remains null/partial; explicit SSI zero values remain zero.
+* Added selected-ticker visibility for real 5D/20D foreign net summaries without changing broad layout, realtime polling, DailyOhlc ownership, or unavailable-state semantics.
+* Left `final_close_status` conservative. The current SSI DailyOhlc/DailyStockPrice service path does not expose an explicit final/session confirmation field, so daily finality remains `unknown` instead of a heuristic final state.
+* Left DailyIndex VN30 level semantics unchanged. The parser already handles known level aliases and normalizes non-positive provider levels to null; no evidence-backed correction was identified.
+* Left VNINDEX unresolved. Production still requires an exact SSI IndexList row and does not guess a broad HOSE identifier.
+* Confirmed true historical trade tape remains unproven. `X-TRADE` is latest-trade stream context for realtime snapshots, not historical trade-tape rows.
+
+Exit criteria:
+
+* Watchlist rows remain stable and `latest_price_source=SSI DailyOhlc`.
+* DailyStockPrice 5D/20D history uses only bounded per-symbol SSI rows and does not add broad full-market scans.
+* No external provider runtime, fallback provider, VNStocks, FiinGroup, scraping, fake rows, WebSocket/SSE, FC Trading/order/account APIs, or commit/push is introduced.
+
 ### Phase 5.0A - External Provider Contract Design
 
 Status: completed on 2026-06-29.
@@ -1138,7 +1162,7 @@ Acceptance criteria:
 ### P2 - data enrichment
 
 * Revalidate SSI Securities/SecuritiesDetails aliases only when a sanitized live row-key audit provides new provider evidence. Phase 4.3A intentionally leaves unsupported optional metadata null.
-* Add SSI DailyStockPrice foreign-flow history if available. Current response can have latest foreign net only and `foreign_net_history_count=1`, so `foreign_net_5d` and `foreign_net_20d` remain null. Compute 5D/20D only from matched-date historical DailyStockPrice rows; otherwise expose an insufficient-history state instead of silent nulls.
+* Completed in Phase 4.5B: SSI DailyStockPrice foreign-flow history now preserves up to 20 recent returned rows per symbol and populates latest-available 5D/20D foreign net volume summaries when enough `foreign_net_volume` rows exist. Future work should only add durable caching or wider history if measured latency/rate-limit evidence justifies it.
 * Clean quote metadata semantics. Current responses can have `quote_date` while `quote_price_date` and `quote_price_raw_field` are null/unreliable. Distinguish quote metadata from actual price source.
 * Improve `final_close_status`. Current response can say `final_close_status=unknown` and warn the daily candle may still be in progress. Desired follow-up: use VN trading calendar/session time when possible, expose `in_progress`/`provisional` during session, and use `final` or `unknown_after_close` after session if SSI does not confirm finality.
 
@@ -1250,14 +1274,12 @@ Observed live watchlist payload can also include `candle_status = unknown`, `pri
 
 ### Foreign rolling history is separate from latest SSI foreign flow
 
-Observed live watchlist payload can include null rolling fields:
+Watchlist payloads can still include null legacy rolling fields:
 
 * `foreign_net_5d`
 * `foreign_net_20d`
-* `foreign_net_5d_latest_available`
-* `foreign_net_20d_latest_available`
 
-Latest matched-date foreign buy/sell/net volume/value can still be present and valid from SSI DailyStockPrice. Rolling 5D/20D foreign flow requires historical foreign-flow rows and should be handled as a separate enhancement if needed.
+Phase 4.5B populates `foreign_net_5d_latest_available`, `foreign_net_20d_latest_available`, `foreign_net_latest_available_date`, and `foreign_net_history_count` from recent SSI DailyStockPrice `foreign_net_volume` rows when enough rows are returned. Latest matched-date foreign buy/sell/net volume/value remains separate and valid from SSI DailyStockPrice.
 
 ### DailyOhlc vs DailyStockPrice consistency
 

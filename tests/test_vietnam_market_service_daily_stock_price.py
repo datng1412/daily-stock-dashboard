@@ -54,6 +54,7 @@ class FakeSsiFetcher:
             "source": "SSI",
             "rows": [_full_daily_stock_price_row()],
         }
+        self.daily_stock_price_calls = []
 
     def get_daily_ohlcv(self, symbol: str, **kwargs):
         start = date(2026, 6, 1)
@@ -73,6 +74,7 @@ class FakeSsiFetcher:
         return {"status": "ok", "source": "SSI", "rows": rows}
 
     def get_daily_stock_price(self, symbol: str, **kwargs):
+        self.daily_stock_price_calls.append({"symbol": symbol, "kwargs": dict(kwargs)})
         return self.daily_stock_price_payload
 
     def get_securities_details(self, **kwargs):
@@ -161,6 +163,66 @@ def test_daily_stock_price_full_enrichment_is_source_labeled_unit_safe_and_align
     assert enrichment["diagnostics"]["daily_ohlc_date"] == "2026-06-30"
     assert "token" not in str(enrichment["diagnostics"]).lower()
     assert "authorization" not in str(enrichment["diagnostics"]).lower()
+
+
+def test_daily_stock_price_history_populates_latest_available_foreign_flow_windows():
+    rows = [
+        _full_daily_stock_price_row(
+            date=(date(2026, 6, 11) + timedelta(days=index)).isoformat(),
+            foreign_buy_volume=100_000 + index,
+            foreign_sell_volume=100_000,
+            foreign_net_volume=index + 1,
+        )
+        for index in range(20)
+    ]
+    fetcher = FakeSsiFetcher({"status": "ok", "source": "SSI", "rows": rows})
+    item = _watch_item(fetcher)
+    indicators = item["indicators"]
+    diagnostics = item["daily_stock_price"]["diagnostics"]
+
+    assert item["latest_price_source"] == "SSI DailyOhlc"
+    assert item["daily_stock_price"]["date"] == "2026-06-30"
+    assert item["daily_stock_price"]["foreign_net_volume"] == 20.0
+    assert item["foreign"]["net"] == 20.0
+    assert indicators["foreign_net_5d_latest_available"] == 90.0
+    assert indicators["foreign_net_20d_latest_available"] == 210.0
+    assert indicators["foreign_net_latest_available_date"] == "2026-06-30"
+    assert indicators["foreign_net_history_count"] == 20
+    assert diagnostics["foreign_history_row_count"] == 20
+    assert diagnostics["foreign_history_net_row_count"] == 20
+    assert diagnostics["foreign_history_date_start"] == "2026-06-11"
+    assert diagnostics["foreign_history_date_end"] == "2026-06-30"
+    assert diagnostics["foreign_history_status"] == "ok"
+    assert len(fetcher.daily_stock_price_calls) == 1
+    assert fetcher.daily_stock_price_calls[0]["symbol"] == "FPT"
+    assert fetcher.daily_stock_price_calls[0]["kwargs"]["market"] == "HOSE"
+    assert fetcher.daily_stock_price_calls[0]["kwargs"]["limit"] == 260
+    assert fetcher.daily_stock_price_calls[0]["kwargs"]["from_date"]
+    assert fetcher.daily_stock_price_calls[0]["kwargs"]["to_date"]
+
+
+def test_daily_stock_price_history_partial_preserves_explicit_zero_foreign_net():
+    rows = [
+        _full_daily_stock_price_row(date="2026-06-27", foreign_net_volume=10),
+        _full_daily_stock_price_row(date="2026-06-28", foreign_net_volume=-5),
+        _full_daily_stock_price_row(date="2026-06-29", foreign_net_volume=0),
+        _full_daily_stock_price_row(date="2026-06-30", foreign_net_volume=0),
+    ]
+    item = _watch_item(
+        FakeSsiFetcher({"status": "ok", "source": "SSI", "rows": rows})
+    )
+    indicators = item["indicators"]
+    diagnostics = item["daily_stock_price"]["diagnostics"]
+
+    assert item["daily_stock_price"]["foreign_net_volume"] == 0.0
+    assert item["foreign"]["net"] == 0.0
+    assert item["foreign"]["signal"] == "neutral_or_unavailable"
+    assert indicators["foreign_net_5d_latest_available"] is None
+    assert indicators["foreign_net_20d_latest_available"] is None
+    assert indicators["foreign_net_latest_available_date"] == "2026-06-30"
+    assert indicators["foreign_net_history_count"] == 4
+    assert diagnostics["foreign_history_net_row_count"] == 4
+    assert diagnostics["foreign_history_status"] == "partial"
 
 
 def test_daily_stock_price_date_mismatch_is_partial_without_changing_daily_price():

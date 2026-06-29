@@ -32,7 +32,7 @@ This document gives Codex and other agents enough context to resume project work
 - SSI FastConnect is the strict primary VN market-data provider for supported fields.
 - SSI owns daily OHLCV, chart candles, DailyStockPrice, reference/ceiling/floor, latest foreign-flow row, index list, index components when available, symbol metadata when available, intraday candles, realtime snapshot contract, and trade-tape contract.
 - `latest_price` currently uses SSI DailyOhlc close as the canonical dashboard price when SSI daily rows are available.
-- Phase 4.5A completed the SSI-first remaining capability audit. DailyOhlc and DailyStockPrice are `strong`; IndexList, exact VN30 IndexComponents, and supported market metadata are `usable`; DailyIndex and IntradayOhlc are `partial`; true trade-tape history is `unavailable_parameter_unknown`; realtime snapshot is `optional_live_dependent`; unsupported fundamentals, statements, ratios, corporate actions, dividends/rights/splits, news, and macro are `external_provider_required`.
+- Phase 4.5B completed bounded SSI DailyStockPrice historical foreign-flow enrichment. DailyOhlc and DailyStockPrice are `strong`; IndexList, exact VN30 IndexComponents, and supported market metadata are `usable`; DailyIndex and IntradayOhlc are `partial`; true trade-tape history is `unavailable_parameter_unknown`; realtime snapshot is `optional_live_dependent`; unsupported fundamentals, statements, ratios, corporate actions, dividends/rights/splits, news, and macro are `external_provider_required`.
 - Mozyfin is disabled for VN dashboard runtime. Do not use it for news, social, OHLCV, chart, reference, foreign flow, index, metadata, intraday, realtime, trade tape, or fallback behavior.
 - KBS is legacy optional only and disabled by default. It must require explicit legacy flags before any diagnostic use and must not silently replace SSI-owned data.
 - VN news is disabled until a separate NewsProvider is implemented.
@@ -54,7 +54,7 @@ This document gives Codex and other agents enough context to resume project work
 ## Data Semantics
 
 - Daily close and chart candles come from SSI DailyOhlc.
-- Reference, ceiling/floor, adjusted close if provided, matched volume/value, put-through volume/value, and latest foreign buy/sell/net volume/value come from SSI DailyStockPrice.
+- Reference, ceiling/floor, adjusted close if provided, matched volume/value, put-through volume/value, latest foreign buy/sell/net volume/value, and bounded recent 5D/20D foreign net volume summaries come from SSI DailyStockPrice.
 - Internal MA/RSI/Bollinger indicators are derived from SSI DailyOhlc data.
 - SSI IntradayOhlc is a compact intraday candle source. It is not a realtime matched quote and is separate from official daily close.
 - SSI realtime snapshot is a separate realtime contract. It must not overwrite `latest_price` or SSI DailyOhlc close.
@@ -83,7 +83,7 @@ Vietnam cache TTLs are process-local and should be interpreted per source block:
 | Data type | Current behavior |
 | --- | --- |
 | SSI DailyOhlc | Backend cache/TTL, strict source for daily rows and chart |
-| SSI DailyStockPrice | Recent-window fetch for quick facts; chunking exists for wider validation |
+| SSI DailyStockPrice | Recent-window fetch for quick facts and bounded 5D/20D foreign-flow summaries; chunking exists for wider validation |
 | SSI IntradayOhlc | Backend cache/TTL; unavailable/stale states should not affect daily row validity |
 | SSI realtime snapshot | Separate realtime contract; unavailable state should not affect daily row validity |
 | SSI trade tape | Separate trade-tape contract; unavailable state should not affect daily row validity |

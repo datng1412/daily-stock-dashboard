@@ -1100,6 +1100,63 @@ def _foreign_history_sum(history: Optional[List[Dict[str, Any]]], window: int) -
     return _safe_float(sum(_safe_float(row.get("net")) or 0 for row in ordered_rows[:window]))
 
 
+def _normalize_ssi_daily_stock_price_foreign_history(
+    rows: Optional[Iterable[Dict[str, Any]]],
+    *,
+    limit: int = FOREIGN_HISTORY_LIMIT,
+) -> List[Dict[str, Any]]:
+    """Return bounded SSI DailyStockPrice foreign-flow rows for indicator windows."""
+    history: List[Dict[str, Any]] = []
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        row_date = _valid_date_string(row.get("date"))
+        if not row_date:
+            continue
+        buy_volume = _safe_float(row.get("foreign_buy_volume"))
+        sell_volume = _safe_float(row.get("foreign_sell_volume"))
+        net_volume = _safe_float(row.get("foreign_net_volume"))
+        buy_value = _safe_float(row.get("foreign_buy_value"))
+        sell_value = _safe_float(row.get("foreign_sell_value"))
+        net_value = _safe_float(row.get("foreign_net_value"))
+        if not any(
+            value is not None
+            for value in (
+                buy_volume,
+                sell_volume,
+                net_volume,
+                buy_value,
+                sell_value,
+                net_value,
+            )
+        ):
+            continue
+        history.append(
+            {
+                "buy": buy_volume,
+                "sell": sell_volume,
+                "net": net_volume,
+                "buy_value": buy_value,
+                "sell_value": sell_value,
+                "net_value": net_value,
+                "date": row_date,
+                "net_unit": "shares"
+                if any(value is not None for value in (buy_volume, sell_volume, net_volume))
+                else None,
+                "value_unit": "VND"
+                if any(value is not None for value in (buy_value, sell_value, net_value))
+                else None,
+                "buy_raw_field": "foreign_buy_volume" if buy_volume is not None else None,
+                "sell_raw_field": "foreign_sell_volume" if sell_volume is not None else None,
+                "net_raw_field": "foreign_net_volume" if net_volume is not None else None,
+            }
+        )
+    history.sort(key=lambda item: item.get("date") or "")
+    if limit and len(history) > limit:
+        return history[-limit:]
+    return history
+
+
 def calculate_foreign_history_summary(history: Optional[List[Dict[str, Any]]]) -> Dict[str, Any]:
     """Calculate latest-available foreign flow sums from quote history rows."""
     valid_rows = [row for row in (history or []) if _safe_float(row.get("net")) is not None]
@@ -2569,14 +2626,14 @@ class VietnamMarketService:
     def _latest_ssi_daily_stock_price(
         self,
         symbol: str,
-    ) -> Tuple[Optional[Dict[str, Any]], Optional[str], Dict[str, Any]]:
+    ) -> Tuple[Optional[Dict[str, Any]], Optional[str], Dict[str, Any], List[Dict[str, Any]]]:
         if self.config.daily_stock_price_provider != VN_PROVIDER_SSI:
             return None, None, {
                 "endpoint": "DailyStockPrice",
                 "symbol": symbol,
                 "normalized_row_count": 0,
                 "failure_class": "disabled",
-            }
+            }, []
         to_date = datetime.now(VN_TIMEZONE).date()
         from_date = to_date - timedelta(days=28)
         diagnostics = {
@@ -2596,15 +2653,50 @@ class VietnamMarketService:
         )
         if payload.get("status") != "ok":
             diagnostics["failure_class"] = str(payload.get("failure_class") or "provider_unavailable")
-            return None, self._safe_provider_reason(payload, SSI_UNAVAILABLE_REASON), diagnostics
+            return None, self._safe_provider_reason(payload, SSI_UNAVAILABLE_REASON), diagnostics, []
         rows = payload.get("rows") or []
         diagnostics["normalized_row_count"] = len(rows) if isinstance(rows, list) else 0
-        if not rows:
+        provider_rows = [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
+        if not provider_rows:
             diagnostics["failure_class"] = "empty_result"
-            return None, SSI_UNAVAILABLE_REASON, diagnostics
-        selected = rows[-1]
+            return None, SSI_UNAVAILABLE_REASON, diagnostics, []
+        dated_rows = sorted(
+            (
+                row
+                for row in provider_rows
+                if _valid_date_string(row.get("date"))
+            ),
+            key=lambda row: _valid_date_string(row.get("date")) or "",
+        )
+        selected = dated_rows[-1] if dated_rows else provider_rows[-1]
+        foreign_history = _normalize_ssi_daily_stock_price_foreign_history(provider_rows)
+        history_dates = [
+            date_text
+            for date_text in (_valid_date_string(row.get("date")) for row in foreign_history)
+            if date_text
+        ]
+        history_net_row_count = sum(
+            1
+            for row in foreign_history
+            if _safe_float(row.get("net")) is not None
+        )
         diagnostics["selected_latest_row_date"] = _valid_date_string(selected.get("date"))
-        return selected, None, diagnostics
+        diagnostics.update(
+            {
+                "foreign_history_row_count": len(foreign_history),
+                "foreign_history_net_row_count": history_net_row_count,
+                "foreign_history_date_start": history_dates[0] if history_dates else None,
+                "foreign_history_date_end": history_dates[-1] if history_dates else None,
+                "foreign_history_status": (
+                    "ok"
+                    if history_net_row_count >= FOREIGN_HISTORY_LIMIT
+                    else "partial"
+                    if history_net_row_count
+                    else "unavailable"
+                ),
+            }
+        )
+        return selected, None, diagnostics, foreign_history
 
     @staticmethod
     def _normalize_ssi_daily_stock_price_enrichment(
@@ -2908,6 +3000,7 @@ class VietnamMarketService:
         limit_state: Dict[str, Any],
         foreign: Dict[str, Any],
         foreign_history: List[Dict[str, Any]],
+        daily_stock_price_history: Optional[List[Dict[str, Any]]] = None,
     ) -> Tuple[Dict[str, Any], Dict[str, Any], List[Dict[str, Any]]]:
         enriched_limit = dict(limit_state)
         for source_key, target_key in (
@@ -2977,12 +3070,23 @@ class VietnamMarketService:
             "buy": enriched_foreign.get("buy"),
             "sell": enriched_foreign.get("sell"),
             "net": enriched_foreign.get("net"),
+            "buy_value": enriched_foreign.get("buy_value"),
+            "sell_value": enriched_foreign.get("sell_value"),
+            "net_value": enriched_foreign.get("net_value"),
             "date": enriched_foreign.get("date"),
             "net_unit": "shares",
+            "value_unit": "VND" if enriched_foreign.get("value_unit") else None,
             "buy_raw_field": "foreign_buy_volume",
             "sell_raw_field": "foreign_sell_volume",
+            "net_raw_field": "foreign_net_volume",
         }
-        enriched_history = [history_row] if history_row.get("date") else foreign_history
+        enriched_history = (
+            list(daily_stock_price_history[-FOREIGN_HISTORY_LIMIT:])
+            if daily_stock_price_history
+            else [history_row]
+            if history_row.get("date")
+            else foreign_history
+        )
         enriched_limit["ssi_symbol"] = symbol
         return enriched_limit, enriched_foreign, enriched_history
 
@@ -4168,6 +4272,7 @@ class VietnamMarketService:
             ssi_daily_stock_price,
             ssi_daily_stock_price_reason,
             ssi_daily_stock_price_diagnostics,
+            ssi_daily_stock_price_history,
         ) = self._latest_ssi_daily_stock_price(symbol)
         if ssi_daily_stock_price:
             ssi_daily_stock_price = self._normalize_ssi_daily_stock_price_enrichment(
@@ -4181,6 +4286,7 @@ class VietnamMarketService:
                 limit_state,
                 foreign,
                 foreign_history,
+                ssi_daily_stock_price_history,
             )
             reference_source = SSI_DAILY_STOCK_PRICE_SOURCE
             foreign_flow_source = SSI_DAILY_STOCK_PRICE_SOURCE

@@ -213,7 +213,7 @@ Rules:
 | Matched volume/value | SSI DailyStockPrice | Use when available |
 | Put-through volume/value | SSI DailyStockPrice | Use when available |
 | Latest foreign flow | SSI DailyStockPrice | Use latest matched-date row when available |
-| Foreign 5D/20D flow | Future enhancement | Compute only from matched-date historical DailyStockPrice rows |
+| Foreign 5D/20D flow | SSI DailyStockPrice | Compute only from returned recent DailyStockPrice `foreign_net_volume` rows; null when history is insufficient |
 | Index list | SSI IndexList | Use SSI-returned index codes and identifiers |
 | Daily index | SSI DailyIndex | Optional index value/change/liquidity/breadth rows only after exact IndexList resolution |
 | Index components | SSI IndexComponents | Resolve through SSI IndexList identifiers; use only when SSI returns rows |
@@ -263,7 +263,9 @@ Date alignment is exposed through `daily_stock_price.date`, `daily_stock_price.d
 
 `missing_fields` and `field_coverage` describe normalized enrichment completeness. `units` includes only fields whose values exist, so units metadata is not evidence that a null field is available. Price/value fields use VND; volume fields use shares. Zero returned by SSI remains zero, while missing values remain null.
 
-Sanitized `daily_stock_price.diagnostics` may include endpoint name, requested symbol/date range, normalized row count, selected row date, DailyOhlc date, date match, missing fields, field coverage, and failure class. It must not include raw provider payloads, credentials, tokens, auth headers, account identifiers, or raw auth responses.
+The watchlist indicators expose bounded recent foreign-flow summaries as `foreign_net_5d_latest_available`, `foreign_net_20d_latest_available`, `foreign_net_latest_available_date`, and `foreign_net_history_count`. These values are derived only from the existing per-symbol recent DailyStockPrice rows and `foreign_net_volume` in shares. They stay null when fewer than the required 5 or 20 returned rows have usable net volume; they do not mix value and volume units.
+
+Sanitized `daily_stock_price.diagnostics` may include endpoint name, requested symbol/date range, normalized row count, selected row date, DailyOhlc date, date match, DailyStockPrice foreign-history row counts/date span/status, missing fields, field coverage, and failure class. It must not include raw provider payloads, credentials, tokens, auth headers, account identifiers, or raw auth responses.
 
 ## External Provider Boundary
 
@@ -337,7 +339,7 @@ Cache errors and provider unavailable states are separate concepts. A provider 4
 ### P2
 
 * Future selected-ticker/source-coverage work: add aliases only after sanitized SSI row-key evidence; unsupported metadata stays null.
-* Future DailyStockPrice history or caching work: add historical SSI DailyStockPrice foreign-flow support if available.
+* Future DailyStockPrice history or caching work: consider durable caching only if measured latency/rate-limit evidence requires it. The current contract already supports bounded in-memory latest-available 5D/20D foreign net volume from recent SSI DailyStockPrice rows.
 * Phase 1 and Phase 2: clean quote metadata semantics when quote is disabled or unreliable.
 * Phase 1: improve `final_close_status` using VN session/calendar rules.
 

@@ -38,7 +38,7 @@ Operational rule:
 - Additional table-filter polish, saved filter views, selected-ticker copy polish, layout changes, chart UX polish, and new visual badges are deferred until priority data capability and reliability work is complete.
 - Phase 4.0A adds a local capability audit and data-domain matrix without production behavior changes.
 - Phase 4.0B verifies SSI realtime/trade-tape endpoints, permissions, payloads, and statuses; live support must not be claimed until usable rows exist with status `ok`.
-- Phase 4.1A through Phase 4.4A verify intraday freshness, DailyStockPrice enrichment, profile metadata, and index capability.
+- Phase 4.1A through Phase 4.5B verify intraday freshness, DailyStockPrice enrichment/history, profile metadata, index capability, and remaining SSI partial-data boundaries.
 - Phase 5.0A selects the external-domain order; Phase 5.0B qualifies corporate-action access and legal terms; Phase 5.1A and later implement separate provider contracts only after their gates pass.
 - Phase 6.0A backend performance/caching work requires measured rate-limit or latency evidence after data reliability work.
 - Phase 7.0 packaging work cleans runbooks, startup scripts, validation checklists, and deprecated docs without changing provider semantics.
@@ -55,7 +55,7 @@ Rationale:
 
 Operational rule:
 
-- SSI owns VN daily OHLCV, chart candles, DailyStockPrice/reference/ceiling/floor, latest foreign-flow row, index list, index components when available, symbol metadata when available, intraday candles, realtime snapshot contract, and trade-tape contract.
+- SSI owns VN daily OHLCV, chart candles, DailyStockPrice/reference/ceiling/floor, latest foreign-flow row, bounded recent DailyStockPrice foreign-flow history, index list, index components when available, symbol metadata when available, intraday candles, realtime snapshot contract, and trade-tape contract.
 - `latest_price` uses SSI DailyOhlc close as the canonical dashboard price when SSI daily rows are available.
 - Mozyfin is disabled for VN runtime and must not be used as fallback for SSI-owned fields.
 - KBS is legacy optional only, disabled by default, and must require explicit legacy flags before diagnostic use.
@@ -140,7 +140,7 @@ Implication:
 
 - During trading hours, the latest daily candle may still be in progress.
 - After market close, it may represent final close, but finality still depends on source metadata.
-- DailyStockPrice supplies reference/limits, matched/put-through, and latest foreign-flow fields unless a future decision explicitly changes canonical close behavior.
+- DailyStockPrice supplies reference/limits, matched/put-through, latest foreign-flow fields, and bounded recent foreign-flow summaries unless a future decision explicitly changes canonical close behavior.
 
 ## Intraday Semantics
 

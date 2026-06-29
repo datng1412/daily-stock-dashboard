@@ -3412,6 +3412,10 @@ const StockDetailView: React.FC<{
   const ssiDailySource = !rawSsiDailySource || rawSsiDailySource === 'SSI' ? 'SSI DailyStockPrice' : rawSsiDailySource;
   const ssiDailyQualityStatus = ssiDailyStockPrice.qualityStatus ?? ssiDailyStatus;
   const ssiDailyDateMatch = ssiDailyStockPrice.dateMatch ?? item.dailyStockPriceDateMatch ?? 'unknown';
+  const hasForeignNetHistory = (
+    hasDisplayValue(foreignNet5dLatestAvailable) ||
+    hasDisplayValue(foreignNet20dLatestAvailable)
+  );
   const ssiDailyRows = [
     { label: 'Reference price', value: `${formatPrice(ssiReferencePrice)} VND`, show: hasDisplayValue(ssiReferencePrice) },
     { label: 'Ceiling price / floor price', value: `${formatPrice(ssiCeilingPrice)} / ${formatPrice(ssiFloorPrice)} VND`, show: hasDisplayValue(ssiCeilingPrice) && hasDisplayValue(ssiFloorPrice) },
@@ -3551,7 +3555,7 @@ const StockDetailView: React.FC<{
               <dd className={cn('mt-1 font-medium text-foreground', row.tone)}>{row.value}</dd>
             </div>
           ))}
-          {!hasSsiDailyStockPrice ? (
+          {hasForeignNetHistory || !hasSsiDailyStockPrice ? (
             <>
               <div className="rounded-lg bg-card/60 p-3">
                 <dt className="text-xs text-secondary-text">Foreign net 5D</dt>

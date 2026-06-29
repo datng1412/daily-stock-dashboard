@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [improvement] Populate bounded SSI DailyStockPrice 5D/20D foreign net volume summaries from recent per-symbol rows without changing DailyOhlc latest-price ownership or adding external providers.
 - [documentation] Complete the SSI-first remaining capability audit before external providers and classify SSI, unknown, and external-required VN data domains.
 - [documentation] Select corporate actions as the first external VN provider domain and record provider, legal, scoring, and fallback gates.
 - [fix] Parse exact SSI nested IndexComponents rows and use the verified indexCode parameter variant without hardcoded constituents or fallback providers.
