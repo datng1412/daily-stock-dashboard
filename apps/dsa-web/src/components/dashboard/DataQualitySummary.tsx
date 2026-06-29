@@ -90,14 +90,67 @@ const formatIssueCopy = (issue: VietnamDataQualityIssue) => {
       return { title: 'Adjusted price status unknown.', detail: null };
     case 'intraday_stale_or_mismatched':
       return { title: 'SSI intraday unavailable for the latest daily date.', detail: null };
+    case 'intraday_cadence_mismatch':
+      return {
+        title: 'SSI intraday cadence differs from the requested timeframe.',
+        detail: [
+          safeString(fields.requestedTimeframe) ? `requested ${safeString(fields.requestedTimeframe)}` : null,
+          safeString(fields.actualGranularity) ? `actual ${safeString(fields.actualGranularity)}` : null,
+          safeString(fields.cadenceStatus),
+        ].filter(Boolean).join(' | '),
+      };
+    case 'intraday_unavailable_rate_limited':
+      return { title: 'SSI intraday rate-limited by provider.', detail: null };
+    case 'intraday_unavailable_date_mismatch':
+      return { title: 'SSI intraday latest candle date differs from daily date.', detail: null };
+    case 'intraday_unavailable_no_rows':
+      return { title: 'SSI intraday returned no usable candles.', detail: null };
+    case 'intraday_unavailable_provider_error':
+      return { title: 'SSI intraday provider unavailable.', detail: null };
+    case 'intraday_unavailable_unknown':
+      return { title: 'SSI intraday unavailable; reason unknown.', detail: null };
     case 'intraday_unavailable':
       return { title: 'SSI intraday unavailable.', detail: null };
     case 'intraday_disabled':
       return { title: 'SSI intraday disabled.', detail: null };
+    case 'realtime_config_disabled':
+      return { title: 'SSI realtime streaming disabled.', detail: null };
+    case 'realtime_not_started':
+      return { title: 'SSI realtime manager not started.', detail: null };
+    case 'realtime_bootstrap_symbols_empty':
+      return { title: 'SSI realtime bootstrap symbols empty.', detail: null };
+    case 'realtime_ticker_not_bootstrapped':
+      return { title: 'Ticker not in SSI realtime bootstrap list.', detail: null };
+    case 'realtime_running_idle':
+      return { title: 'SSI realtime stream running idle.', detail: null };
+    case 'realtime_cache_empty':
+      return { title: 'SSI realtime cache empty for this ticker.', detail: null };
+    case 'realtime_cache_stale':
+      return { title: 'SSI realtime cache stale.', detail: null };
+    case 'realtime_connection_error':
+      return { title: 'SSI realtime connection unavailable.', detail: null };
+    case 'realtime_auth_or_entitlement_failure':
+      return { title: 'SSI realtime auth or entitlement failed.', detail: null };
+    case 'realtime_network_or_tls_failure':
+      return { title: 'SSI realtime network or TLS issue.', detail: null };
+    case 'realtime_rate_limited':
+      return { title: 'SSI realtime rate-limited by provider.', detail: null };
+    case 'realtime_unknown':
+      return { title: 'SSI realtime unavailable; reason unknown.', detail: null };
     case 'realtime_unavailable':
       return { title: 'SSI realtime unavailable.', detail: null };
     case 'realtime_disabled':
       return { title: 'SSI realtime disabled.', detail: null };
+    case 'trade_tape_latest_trade_stream_only':
+      return { title: 'Historical trade tape unavailable; X-TRADE is latest-trade stream only.', detail: null };
+    case 'trade_tape_unavailable_no_rows':
+      return { title: 'SSI trade tape returned no trade rows.', detail: null };
+    case 'trade_tape_unavailable_provider_error':
+      return { title: 'SSI trade tape provider unavailable.', detail: null };
+    case 'trade_tape_unavailable_unknown':
+      return { title: 'SSI trade tape unavailable; reason unknown.', detail: null };
+    case 'trade_tape_not_implemented':
+      return { title: 'Historical trade tape not proven by current SSI evidence.', detail: null };
     case 'trade_tape_unavailable':
       return { title: 'SSI trade tape unavailable.', detail: null };
     case 'trade_tape_disabled':

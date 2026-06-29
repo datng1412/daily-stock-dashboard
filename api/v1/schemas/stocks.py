@@ -736,6 +736,9 @@ class VietnamRealtimeResponse(BaseModel):
     error: Optional[str] = None
     error_detail: Optional[str] = None
     raw_error: Optional[str] = None
+    reason_code: Optional[str] = None
+    classification: Optional[str] = None
+    status_message: Optional[str] = None
     requested_tickers: List[str] = Field(default_factory=list)
     quotes: List[VietnamRealtimeQuote] = Field(default_factory=list)
     cache: Dict[str, Any] = Field(default_factory=dict)
@@ -771,6 +774,9 @@ class VietnamRealtimeTradesResponse(BaseModel):
     error: Optional[str] = None
     error_detail: Optional[str] = None
     raw_error: Optional[str] = None
+    reason_code: Optional[str] = None
+    classification: Optional[str] = None
+    status_message: Optional[str] = None
     trades: List[VietnamRealtimeTrade] = Field(default_factory=list)
     note: Optional[str] = None
     cache: Dict[str, Any] = Field(default_factory=dict)

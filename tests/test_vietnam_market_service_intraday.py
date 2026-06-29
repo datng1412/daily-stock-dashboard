@@ -233,6 +233,8 @@ def test_ssi_intraday_date_mismatch_is_unavailable_without_downgrading_daily_row
     assert item["intraday_status"]["daily_price_date"] == "2026-06-30"
     assert item["intraday_status"]["date_match"] == "mismatched"
     assert item["intraday_status"]["failure_class"] == "stale_or_date_mismatched"
+    assert item["intraday_status"]["reason_code"] == "unavailable_date_mismatch"
+    assert item["intraday_status"]["classification"] == "unavailable_date_mismatch"
     assert item["intraday_status"]["diagnostics"]["failure_class"] == "stale_or_date_mismatched"
     assert item["intraday_requested_timeframe"] == "1h"
     assert item["intraday_actual_granularity"] == "1m"
@@ -297,11 +299,14 @@ def test_ssi_intraday_detects_provider_returned_minute_granularity():
     assert item["intraday_status"]["intraday_granularity"] == "1m"
     assert item["intraday_status"]["intraday_actual_granularity"] == "1m"
     assert item["intraday_status"]["intraday_cadence_status"] == "different_from_requested"
+    assert item["intraday_status"]["reason_code"] == "cadence_mismatch"
     assert item["intraday_pulse"]["intraday_granularity"] == "1m"
     assert item["intraday_pulse"]["intraday_actual_granularity"] == "1m"
     assert item["intraday_pulse"]["intraday_cadence_status"] == "different_from_requested"
     assert item["intraday_pulse"]["latest_intraday_close"] == 133.0
     assert item["intraday_pulse"]["intraday_change"] == 0.5
+    assert item["data_quality_summary"]["checks"]["intraday"] == "partial"
+    assert any(issue["code"] == "intraday_cadence_mismatch" for issue in item["data_quality_summary"]["issues"])
     assert not any("1H" in detail["reason"] for detail in item["intraday_details"])
 
 
@@ -410,6 +415,7 @@ def test_ssi_intraday_failure_does_not_downgrade_daily_row():
     assert item["intraday_status"]["status"] == "unavailable"
     assert item["intraday_status"]["message"] == "SSI FastConnect request failed"
     assert item["intraday_status"]["failure_class"] == "rate_limited"
+    assert item["intraday_status"]["reason_code"] == "unavailable_rate_limited"
     assert item["intraday_status"]["diagnostics"]["failure_class"] == "rate_limited"
     assert item["intraday_status"]["diagnostics"]["endpoint"] == "IntradayOhlc"
     assert item["intraday_status"]["diagnostics"]["provider_code"] == "429"
@@ -439,6 +445,7 @@ def test_ssi_intraday_empty_rows_are_optional_and_do_not_fake_daily_data():
     assert item["daily_stock_price"]["status"] == "ok"
     assert item["intraday_status"]["status"] == "unavailable"
     assert item["intraday_status"]["message"] == "SSI IntradayOhlc returned no candles."
+    assert item["intraday_status"]["reason_code"] == "unavailable_no_rows"
     assert item["intraday_cadence_status"] == "unavailable"
     assert item["intraday_candles"] == []
     assert item["intraday_pulse"] is None

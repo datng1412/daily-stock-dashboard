@@ -1104,6 +1104,83 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(screen.queryByText('SSI unavailable')).not.toBeInTheDocument();
   });
 
+  it('shows specific optional live availability reasons without hiding daily rows', async () => {
+    const response = makeResponse(defaultTickers);
+    response.watchlist = response.watchlist.map((item) => ({
+      ...item,
+      intradayStatus: {
+        status: 'unavailable',
+        source: 'SSI IntradayOhlc',
+        message: 'SSI IntradayOhlc returned no usable candles.',
+        reasonCode: 'unavailable_no_rows',
+      },
+      intradayCandles: [],
+      intradayPulse: null,
+      realtimeStatus: {
+        status: 'unavailable',
+        source: 'SSI realtime contract',
+        message: 'SSI stream is running but no recent tick is cached for this ticker.',
+        reasonCode: 'running_idle',
+        runtimeStatus: 'running_idle',
+        cacheStatus: 'empty',
+      },
+      realtimeSnapshot: null,
+      tradeTapeStatus: {
+        status: 'unavailable',
+        source: 'SSI trade-tape contract',
+        message: 'Historical SSI trade tape is unavailable; X-TRADE is latest-trade stream context only.',
+        reasonCode: 'latest_trade_stream_only',
+      },
+      tradeTape: [],
+      dataQualitySummary: {
+        ...item.dataQualitySummary,
+        issues: [
+          { code: 'intraday_unavailable_no_rows', severity: 'info', message: 'SSI IntradayOhlc returned no usable candles.' },
+          { code: 'realtime_running_idle', severity: 'info', message: 'SSI stream is running but no recent tick is cached for this ticker.' },
+          { code: 'trade_tape_latest_trade_stream_only', severity: 'info', message: 'Historical SSI trade tape is unavailable; X-TRADE is latest-trade stream context only.' },
+        ],
+        checks: {
+          ...item.dataQualitySummary?.checks,
+          intraday: 'unavailable',
+          realtime: 'unavailable',
+          tradeTape: 'unavailable',
+        },
+      },
+    }));
+    mockedGetVietnamWatchlist.mockResolvedValue(response);
+    mockedGetVietnamRealtimeQuotes.mockImplementation(async (tickers) => ({
+      ...makeRealtimeResponse(tickers, { unavailable: true }),
+      statusMessage: 'SSI stream is running but no recent tick is cached for this ticker.',
+      reasonCode: 'running_idle',
+      quotes: [],
+    }));
+    mockedGetVietnamRealtimeTrades.mockImplementation(async (symbol) => ({
+      ...makeTradesResponse(symbol),
+      status: 'unavailable',
+      statusMessage: 'Historical SSI trade tape is unavailable; X-TRADE is latest-trade stream context only.',
+      reasonCode: 'latest_trade_stream_only',
+      error: null,
+      errorDetail: null,
+      rawError: null,
+      trades: [],
+    }));
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledWith(defaultTickers));
+
+    expect(screen.getByTestId('indicator-row-FPT')).toBeInTheDocument();
+    expect(selectedTickerHeader().getByText('Daily close')).toBeInTheDocument();
+
+    const detail = within(screen.getByText('Stock detail').closest('section') as HTMLElement);
+    expect(detail.getByText('SSI IntradayOhlc returned no usable candles.')).toBeInTheDocument();
+    expect(detail.getByText('SSI stream is running but no recent tick is cached for this ticker. Daily SSI data is still available.')).toBeInTheDocument();
+    expect(detail.getByText('Historical trade tape is unavailable. X-TRADE is latest-trade stream context only.')).toBeInTheDocument();
+    expect(detail.queryByText(/attempted endpoints|HTTP status|raw provider/i)).not.toBeInTheDocument();
+    expect(detail.queryByText('Realtime price')).not.toBeInTheDocument();
+    expect(detail.queryByRole('table')).not.toBeInTheDocument();
+  });
+
   it('does not add API calls for the data readiness strip', async () => {
     render(<VietnamDashboardPage />);
 
@@ -1357,7 +1434,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(screen.getAllByText(/Daily close/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/SSI realtime/i).length).toBeGreaterThan(0);
     expect(await screen.findByRole('heading', { name: 'Trade tape' })).toBeInTheDocument();
-    expect(screen.getByText('Trade tape may not include auction/ATC prints.')).toBeInTheDocument();
+    expect(screen.getByText('Historical trade tape is separate from X-TRADE latest-trade stream context.')).toBeInTheDocument();
     expect(screen.getByText('SSI realtime snapshot; may differ from trade tape')).toBeInTheDocument();
     expect(screen.getAllByText(/OHLCV close 100/).length).toBeGreaterThan(0);
     expect(screen.getAllByText('101.5').length).toBeGreaterThan(0);
@@ -1845,7 +1922,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(header.queryByText(/RealtimeQuote|TradeTape|HTTP status|attempted endpoints/i)).not.toBeInTheDocument();
 
     const detail = within(screen.getByText('Stock detail').closest('section') as HTMLElement);
-    expect(detail.getByText('SSI intraday unavailable.')).toBeInTheDocument();
+    expect(detail.getByText('SSI intraday unavailable for the latest daily date.')).toBeInTheDocument();
     expect(detail.getByText('SSI realtime unavailable. Daily SSI data is still available.')).toBeInTheDocument();
     expect(detail.getByText('SSI trade tape unavailable.')).toBeInTheDocument();
     expect(detail.queryByText('Intraday close')).not.toBeInTheDocument();
@@ -2719,7 +2796,6 @@ describe('VietnamDashboardPage watchlist loading', () => {
     render(<VietnamDashboardPage />);
 
     expect((await screen.findAllByText('SSI IntradayOhlc latest candle date does not match latest daily trading date.')).length).toBeGreaterThan(0);
-    expect(screen.getByText('SSI intraday unavailable.')).toBeInTheDocument();
     expect(screen.getAllByText(/Returned cadence differs from requested 1h: 1m/).length).toBeGreaterThan(0);
     expect(screen.queryByText('1H intraday')).not.toBeInTheDocument();
     expect(screen.queryByText('2026-06-12 / 2026-06-19')).not.toBeInTheDocument();

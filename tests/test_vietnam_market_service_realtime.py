@@ -198,6 +198,7 @@ def test_ssi_realtime_failure_is_separate_from_daily_row():
     assert item["realtime_status"]["status"] == "unavailable"
     assert item["realtime_snapshot"] is None
     assert item["realtime_status"]["message"] == "SSI realtime unavailable."
+    assert item["realtime_status"]["reason_code"] == "unknown"
     assert "RealtimeQuote" not in item["realtime_status"]["message"]
     assert item["realtime_status"]["diagnostics"]["provider_message"] == REALTIME_STREAMING_NOT_IMPLEMENTED_REASON
 
@@ -278,9 +279,72 @@ def test_ssi_trade_tape_failure_is_separate_from_daily_row():
     assert item["trade_tape_source"] == "SSI trade-tape contract"
     assert item["trade_tape"] == []
     assert item["trade_tape_status"]["status"] == "unavailable"
-    assert item["trade_tape_status"]["message"] == "SSI trade tape unavailable."
+    assert item["trade_tape_status"]["message"] == "Historical SSI trade tape is unavailable; X-TRADE is latest-trade stream context only."
+    assert item["trade_tape_status"]["reason_code"] == "latest_trade_stream_only"
     assert "TradeTape" not in item["trade_tape_status"]["message"]
     assert "TradeTape" in item["trade_tape_status"]["diagnostics"]["provider_message"]
+
+
+def test_ssi_realtime_running_idle_reason_is_exposed_without_daily_downgrade():
+    fetcher = FakeSsiFetcher(
+        realtime_payload={
+            "status": "unavailable",
+            "source": "SSI",
+            "reason": "SSI streaming realtime cache empty.",
+            "streaming_status": "cache_empty",
+            "cache_status": "empty",
+            "manager_state": "running",
+            "requested_tickers": ["FPT"],
+            "quotes": [],
+            "diagnostics": {
+                "runtime_status": "running_idle",
+                "streaming_status": "cache_empty",
+                "cache_status": "empty",
+                "manager_state": "running",
+                "bootstrap_symbols": ["FPT", "HPG", "SSI"],
+            },
+        }
+    )
+
+    item = _service(fetcher).build_watchlist(["FPT"], force_refresh=True)["watchlist"][0]
+    summary = item["data_quality_summary"]
+
+    assert item["status"] == "ok"
+    assert item["latest_price_source"] == "SSI DailyOhlc"
+    assert item["realtime_snapshot"] is None
+    assert item["realtime_status"]["status"] == "unavailable"
+    assert item["realtime_status"]["reason_code"] == "running_idle"
+    assert item["realtime_status"]["message"] == "SSI stream is running but no recent tick is cached for this ticker."
+    assert summary["checks"]["daily_ohlc"] == "ok"
+    assert any(issue["code"] == "realtime_running_idle" for issue in summary["issues"])
+
+
+def test_ssi_realtime_ticker_not_bootstrapped_reason_is_exposed():
+    fetcher = FakeSsiFetcher(
+        realtime_payload={
+            "status": "unavailable",
+            "source": "SSI",
+            "reason": "SSI streaming realtime cache empty.",
+            "streaming_status": "cache_empty",
+            "cache_status": "empty",
+            "manager_state": "running",
+            "requested_tickers": ["FPT"],
+            "quotes": [],
+            "diagnostics": {
+                "runtime_status": "running",
+                "streaming_status": "cache_empty",
+                "cache_status": "empty",
+                "manager_state": "running",
+                "bootstrap_symbols": ["HPG", "SSI"],
+            },
+        }
+    )
+
+    item = _service(fetcher).build_watchlist(["FPT"], force_refresh=True)["watchlist"][0]
+
+    assert item["status"] == "ok"
+    assert item["realtime_status"]["reason_code"] == "ticker_not_bootstrapped"
+    assert item["realtime_status"]["message"] == "Ticker is not in the configured SSI realtime bootstrap list."
 
 
 def test_realtime_and_trade_tape_can_be_disabled_without_kbs_fallback():

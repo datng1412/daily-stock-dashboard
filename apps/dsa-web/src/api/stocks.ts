@@ -251,6 +251,8 @@ export type VietnamWatchItem = {
     status?: string | null;
     source?: string | null;
     message?: string | null;
+    reasonCode?: string | null;
+    classification?: string | null;
     count?: number | null;
     ticker?: string | null;
     intradayLatestDate?: string | null;
@@ -271,6 +273,12 @@ export type VietnamWatchItem = {
     status?: string | null;
     source?: string | null;
     message?: string | null;
+    reasonCode?: string | null;
+    classification?: string | null;
+    streamingStatus?: string | null;
+    runtimeStatus?: string | null;
+    managerState?: string | null;
+    cacheStatus?: string | null;
     diagnostics?: Record<string, unknown> | null;
   };
   tradeTapeSource?: string | null;
@@ -279,6 +287,8 @@ export type VietnamWatchItem = {
     status?: string | null;
     source?: string | null;
     message?: string | null;
+    reasonCode?: string | null;
+    classification?: string | null;
     count?: number | null;
     fetchedAt?: string | null;
     diagnostics?: Record<string, unknown> | null;
@@ -444,9 +454,18 @@ export type VietnamRealtimeResponse = {
   error?: string | null;
   errorDetail?: string | null;
   rawError?: string | null;
+  reasonCode?: string | null;
+  classification?: string | null;
+  statusMessage?: string | null;
   requestedTickers: string[];
   quotes: VietnamRealtimeQuote[];
   cache: Record<string, unknown>;
+  diagnostics?: Record<string, unknown>;
+  streamingStatus?: string | null;
+  managerState?: string | null;
+  runtimeStatus?: string | null;
+  cacheStatus?: string | null;
+  parsedStreamingRows?: number | null;
 };
 
 export type VietnamRealtimeTrade = {
@@ -469,6 +488,9 @@ export type VietnamRealtimeTradesResponse = {
   error?: string | null;
   errorDetail?: string | null;
   rawError?: string | null;
+  reasonCode?: string | null;
+  classification?: string | null;
+  statusMessage?: string | null;
   trades: VietnamRealtimeTrade[];
   note?: string | null;
   cache: Record<string, unknown>;

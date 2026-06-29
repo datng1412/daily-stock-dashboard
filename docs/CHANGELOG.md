@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [improvement] Add reason-aware VN intraday, realtime, and trade-tape availability diagnostics without changing DailyOhlc latest-price ownership or adding fallback providers.
 - [fix] Harden the corporate-actions contract so canonical `events` always drives the legacy `items` alias across service, schema, and dashboard rendering.
 - [new feature] Add a disabled-by-default CorporateActionsProvider contract proof with normalized event fields, empty-list behavior, and sanitized diagnostics.
 - [test] Add deterministic corporate-actions provider contract tests for disabled, not-configured, failure-sanitization, normalized event, and schema compatibility behavior.

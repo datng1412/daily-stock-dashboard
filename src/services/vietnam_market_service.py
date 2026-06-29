@@ -545,6 +545,186 @@ def _status_diagnostics(reason: Optional[str]) -> Dict[str, Any]:
     return {"provider_message": str(reason)}
 
 
+def _lower_text(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def _diagnostic_value(diagnostics: Dict[str, Any], *keys: str) -> Optional[Any]:
+    for key in keys:
+        if key in diagnostics and diagnostics.get(key) not in (None, ""):
+            return diagnostics.get(key)
+    return None
+
+
+def _status_block_value(block: Dict[str, Any], key: str) -> Any:
+    if key in block and block.get(key) not in (None, ""):
+        return block.get(key)
+    diagnostics = block.get("diagnostics")
+    if isinstance(diagnostics, dict) and diagnostics.get(key) not in (None, ""):
+        return diagnostics.get(key)
+    return None
+
+
+def _classify_intraday_reason(
+    *,
+    status: str,
+    reason: Optional[str],
+    diagnostics: Optional[Dict[str, Any]] = None,
+) -> str:
+    diagnostics = dict(diagnostics or {})
+    normalized_status = _lower_text(status)
+    reason_text = _lower_text(reason)
+    failure_class = _lower_text(_diagnostic_value(diagnostics, "failure_class"))
+    date_match = _lower_text(_diagnostic_value(diagnostics, "date_match"))
+    cadence_status = _lower_text(_diagnostic_value(diagnostics, "intraday_cadence_status"))
+
+    if normalized_status == "ok":
+        if cadence_status in {"different_from_requested", "irregular"}:
+            return "cadence_mismatch"
+        return "ok"
+    if normalized_status == "disabled":
+        return "disabled"
+    if failure_class == "rate_limited" or _lower_text(_diagnostic_value(diagnostics, "provider_code")) == "429":
+        return "unavailable_rate_limited"
+    if date_match == "mismatched" or failure_class == "stale_or_date_mismatched":
+        return "unavailable_date_mismatch"
+    if failure_class in {"empty_response", "empty_result"} or "no candles" in reason_text or "no rows" in reason_text:
+        return "unavailable_no_rows"
+    if failure_class in {"timeout", "network_error", "request_error", "provider_error", "auth_failed"}:
+        return "unavailable_provider_error"
+    if normalized_status == "unavailable":
+        return "unavailable_provider_error" if failure_class else "unavailable_unknown"
+    return "unknown"
+
+
+def _status_message_from_reason(
+    *,
+    section: str,
+    status: str,
+    reason_code: str,
+    fallback: str,
+) -> str:
+    if section == "intraday":
+        messages = {
+            "ok": "SSI IntradayOhlc ready.",
+            "cadence_mismatch": "SSI IntradayOhlc cadence differs from the requested timeframe.",
+            "disabled": VN_INTRADAY_DISABLED_REASON,
+            "unavailable_rate_limited": "SSI IntradayOhlc rate-limited by provider.",
+            "unavailable_date_mismatch": "SSI IntradayOhlc latest candle date does not match latest daily trading date.",
+            "unavailable_no_rows": "SSI IntradayOhlc returned no usable candles.",
+            "unavailable_provider_error": "SSI IntradayOhlc provider unavailable.",
+            "unavailable_unknown": VN_INTRADAY_UNAVAILABLE_REASON,
+        }
+    elif section == "realtime":
+        messages = {
+            "cache_hit": "SSI realtime snapshot ready.",
+            "disabled": VN_REALTIME_DISABLED_REASON,
+            "config_disabled": "SSI streaming realtime manager disabled.",
+            "not_started": "SSI streaming realtime manager not started.",
+            "bootstrap_symbols_empty": "SSI streaming realtime bootstrap symbols empty.",
+            "ticker_not_bootstrapped": "Ticker is not in the configured SSI realtime bootstrap list.",
+            "running_idle": "SSI stream is running but no recent tick is cached for this ticker.",
+            "cache_empty": "SSI realtime stream cache is empty for this ticker.",
+            "cache_stale": "SSI realtime stream cache is stale for this ticker.",
+            "connection_error": "SSI realtime connection unavailable.",
+            "auth_or_entitlement_failure": "SSI realtime authentication or entitlement failed.",
+            "network_or_tls_failure": "SSI realtime network or TLS connection failed.",
+            "rate_limited": "SSI realtime provider rate-limited the request.",
+            "unknown": VN_REALTIME_UNAVAILABLE_REASON,
+        }
+    else:
+        messages = {
+            "historical_trade_tape_supported": "SSI historical trade tape ready.",
+            "latest_trade_stream_only": "Historical SSI trade tape is unavailable; X-TRADE is latest-trade stream context only.",
+            "disabled": VN_TRADE_TAPE_DISABLED_REASON,
+            "unavailable_no_rows": "SSI trade tape returned no trade rows.",
+            "unavailable_provider_error": "SSI trade tape provider unavailable.",
+            "unavailable_unknown": VN_TRADE_TAPE_UNAVAILABLE_REASON,
+            "not_implemented": "Historical SSI trade tape is not proven by current SSI evidence.",
+        }
+    if reason_code in messages:
+        return messages[reason_code]
+    if status == "disabled":
+        return messages.get("disabled", fallback)
+    return fallback
+
+
+def _classify_realtime_reason(
+    *,
+    status: str,
+    reason: Optional[str],
+    diagnostics: Optional[Dict[str, Any]] = None,
+    symbol: Optional[str] = None,
+) -> str:
+    diagnostics = dict(diagnostics or {})
+    normalized_status = _lower_text(status)
+    reason_text = _lower_text(reason)
+    streaming_status = _lower_text(_diagnostic_value(diagnostics, "streaming_status"))
+    cache_status = _lower_text(_diagnostic_value(diagnostics, "cache_status"))
+    manager_state = _lower_text(_diagnostic_value(diagnostics, "manager_state"))
+    runtime_status = _lower_text(_diagnostic_value(diagnostics, "runtime_status"))
+    latest_error = _lower_text(_diagnostic_value(diagnostics, "latest_error", "provider_message"))
+
+    if normalized_status == "ok":
+        return "cache_hit"
+    if normalized_status == "disabled" or streaming_status == "disabled":
+        return "config_disabled"
+    if streaming_status == "bootstrap_symbols_empty" or cache_status == "bootstrap_symbols_empty":
+        return "bootstrap_symbols_empty"
+    if manager_state and manager_state != "running":
+        return "not_started" if manager_state in {"stopped", "starting"} else "connection_error"
+    if runtime_status == "not_started" or streaming_status == "manager_not_started" or cache_status == "not_started":
+        return "not_started"
+
+    bootstrap_symbols = {
+        str(item or "").strip().upper()
+        for item in diagnostics.get("bootstrap_symbols", []) or []
+        if str(item or "").strip()
+    }
+    requested_symbol = str(symbol or "").strip().upper()
+    if requested_symbol and bootstrap_symbols and requested_symbol not in bootstrap_symbols:
+        return "ticker_not_bootstrapped"
+    if runtime_status == "running_idle":
+        return "running_idle"
+    if streaming_status in {"cache_stale"} or cache_status == "stale":
+        return "cache_stale"
+    if streaming_status == "cache_empty" or cache_status == "empty":
+        return "cache_empty"
+    if "not implemented" in latest_error or "not implemented" in reason_text:
+        return "unknown"
+    if "entitlement" in latest_error or "permission" in latest_error or "401" in latest_error or "403" in latest_error:
+        return "auth_or_entitlement_failure"
+    if "rate" in latest_error and "limit" in latest_error:
+        return "rate_limited"
+    if "tls" in latest_error or "ssl" in latest_error or "network" in latest_error or "connection" in latest_error:
+        return "network_or_tls_failure"
+    if "configuration incomplete" in reason_text or "package unavailable" in reason_text:
+        return "connection_error"
+    return "unknown"
+
+
+def _classify_trade_tape_reason(
+    *,
+    status: str,
+    reason: Optional[str],
+) -> str:
+    normalized_status = _lower_text(status)
+    reason_text = _lower_text(reason)
+    if normalized_status == "ok":
+        return "historical_trade_tape_supported"
+    if normalized_status == "disabled":
+        return "disabled"
+    if "no trade rows" in reason_text:
+        return "unavailable_no_rows"
+    if "tradetape" in reason_text or "matchedtrades" in reason_text or "securitiestrades" in reason_text:
+        return "latest_trade_stream_only"
+    if normalized_status == "not_implemented":
+        return "not_implemented"
+    if normalized_status == "unavailable":
+        return "unavailable_unknown"
+    return "unknown"
+
+
 INTRADAY_DIAGNOSTIC_KEYS = {
     "failure_class",
     "endpoint",
@@ -644,6 +824,9 @@ def build_vietnam_data_quality_summary(row: Dict[str, Any]) -> Dict[str, Any]:
     intraday_status = _status_from_block(row.get("intraday_status"))
     realtime_status = _status_from_block(row.get("realtime_status"))
     trade_tape_status = _status_from_block(row.get("trade_tape_status"))
+    intraday_block = row.get("intraday_status") if isinstance(row.get("intraday_status"), dict) else {}
+    realtime_block = row.get("realtime_status") if isinstance(row.get("realtime_status"), dict) else {}
+    trade_tape_block = row.get("trade_tape_status") if isinstance(row.get("trade_tape_status"), dict) else {}
     news_status = _status_from_block(row.get("news_status"), default="disabled")
     final_close_status = str(row.get("final_close_status") or "unknown")
     adjusted_price_status = str(row.get("adjusted_price_status") or row.get("price_adjustment_status") or "unknown")
@@ -671,7 +854,44 @@ def build_vietnam_data_quality_summary(row: Dict[str, Any]) -> Dict[str, Any]:
     )
     daily_stock_price_missing_fields = list(daily_stock_price.get("missing_fields") or [])
     date_match = str(row.get("date_match") or "")
-    intraday_check = "stale" if intraday_status == "unavailable" and date_match == "mismatched" else intraday_status
+    intraday_reason_code = str(
+        intraday_block.get("reason_code")
+        or intraday_block.get("classification")
+        or _classify_intraday_reason(
+            status=intraday_status,
+            reason=intraday_block.get("message"),
+            diagnostics=intraday_block.get("diagnostics") if isinstance(intraday_block.get("diagnostics"), dict) else intraday_block,
+        )
+    )
+    intraday_cadence_status = str(
+        row.get("intraday_cadence_status")
+        or intraday_block.get("intraday_cadence_status")
+        or ""
+    )
+    if intraday_status == "unavailable" and (date_match == "mismatched" or intraday_reason_code == "unavailable_date_mismatch"):
+        intraday_check = "stale"
+    elif intraday_status == "ok" and intraday_cadence_status in {"different_from_requested", "irregular"}:
+        intraday_check = "partial"
+    else:
+        intraday_check = intraday_status
+    realtime_reason_code = str(
+        realtime_block.get("reason_code")
+        or realtime_block.get("classification")
+        or _classify_realtime_reason(
+            status=realtime_status,
+            reason=realtime_block.get("message"),
+            diagnostics=realtime_block.get("diagnostics") if isinstance(realtime_block.get("diagnostics"), dict) else realtime_block,
+            symbol=row.get("ticker"),
+        )
+    )
+    trade_tape_reason_code = str(
+        trade_tape_block.get("reason_code")
+        or trade_tape_block.get("classification")
+        or _classify_trade_tape_reason(
+            status=trade_tape_status,
+            reason=trade_tape_block.get("message"),
+        )
+    )
 
     metadata = row.get("symbol_metadata") if isinstance(row.get("symbol_metadata"), dict) else {}
     metadata_status = str(metadata.get("status") or "unavailable")
@@ -767,34 +987,83 @@ def build_vietnam_data_quality_summary(row: Dict[str, Any]) -> Dict[str, Any]:
                     "intraday_latest_date": row.get("intraday_latest_date"),
                     "daily_price_date": row.get("daily_price_date") or daily_date,
                     "date_match": row.get("date_match"),
+                    "reason_code": intraday_reason_code,
+                },
+            }
+        )
+    elif intraday_check == "partial" and intraday_reason_code == "cadence_mismatch":
+        issues.append(
+            {
+                "code": "intraday_cadence_mismatch",
+                "severity": "info",
+                "message": "SSI IntradayOhlc cadence differs from the requested timeframe.",
+                "fields": {
+                    "status": intraday_check,
+                    "reason_code": intraday_reason_code,
+                    "requested_timeframe": row.get("intraday_requested_timeframe") or row.get("intraday_timeframe"),
+                    "actual_granularity": row.get("intraday_actual_granularity") or row.get("intraday_granularity"),
+                    "cadence_status": intraday_cadence_status,
                 },
             }
         )
     elif intraday_check in {"unavailable", "disabled"}:
+        issue_code = "intraday_disabled" if intraday_check == "disabled" else f"intraday_{intraday_reason_code}"
         issues.append(
             {
-                "code": f"intraday_{intraday_check}",
+                "code": issue_code,
                 "severity": "info",
-                "message": f"SSI intraday is {intraday_check}.",
-                "fields": {"status": intraday_check},
+                "message": _status_message_from_reason(
+                    section="intraday",
+                    status=intraday_check,
+                    reason_code=intraday_reason_code,
+                    fallback=f"SSI intraday is {intraday_check}.",
+                ),
+                "fields": {
+                    "status": intraday_check,
+                    "reason_code": intraday_reason_code,
+                    "failure_class": intraday_block.get("failure_class"),
+                    "cadence_status": intraday_cadence_status or None,
+                    "intraday_latest_date": row.get("intraday_latest_date"),
+                    "daily_price_date": row.get("daily_price_date") or daily_date,
+                },
             }
         )
     if realtime_status in {"unavailable", "disabled"}:
+        realtime_fields = {
+            "status": realtime_status,
+            "reason_code": realtime_reason_code,
+            "streaming_status": _status_block_value(realtime_block, "streaming_status"),
+            "runtime_status": _status_block_value(realtime_block, "runtime_status"),
+            "cache_status": _status_block_value(realtime_block, "cache_status"),
+        }
         issues.append(
             {
-                "code": f"realtime_{realtime_status}",
+                "code": "realtime_disabled" if realtime_status == "disabled" else f"realtime_{realtime_reason_code}",
                 "severity": "info",
-                "message": f"SSI realtime is {realtime_status}.",
-                "fields": {"status": realtime_status},
+                "message": _status_message_from_reason(
+                    section="realtime",
+                    status=realtime_status,
+                    reason_code=realtime_reason_code,
+                    fallback=f"SSI realtime is {realtime_status}.",
+                ),
+                "fields": {key: value for key, value in realtime_fields.items() if value not in (None, "")},
             }
         )
     if trade_tape_status in {"unavailable", "disabled"}:
         issues.append(
             {
-                "code": f"trade_tape_{trade_tape_status}",
+                "code": "trade_tape_disabled" if trade_tape_status == "disabled" else f"trade_tape_{trade_tape_reason_code}",
                 "severity": "info",
-                "message": f"SSI trade tape is {trade_tape_status}.",
-                "fields": {"status": trade_tape_status},
+                "message": _status_message_from_reason(
+                    section="trade_tape",
+                    status=trade_tape_status,
+                    reason_code=trade_tape_reason_code,
+                    fallback=f"SSI trade tape is {trade_tape_status}.",
+                ),
+                "fields": {
+                    "status": trade_tape_status,
+                    "reason_code": trade_tape_reason_code,
+                },
             }
         )
     if profile_status == "partial":
@@ -2114,6 +2383,11 @@ class VietnamMarketService:
         pulse["intraday_cadence_status"] = granularity["intraday_cadence_status"]
         details = derive_intraday_details(candles, pulse)
         labels = [detail["label"] for detail in details]
+        reason_code = _classify_intraday_reason(
+            status="ok",
+            reason=None,
+            diagnostics=granularity,
+        )
         return {
             "intraday_timeframe": intraday_timeframe,
             "intraday_requested_timeframe": intraday_timeframe,
@@ -2132,6 +2406,8 @@ class VietnamMarketService:
                 "status": "ok",
                 "source": SSI_INTRADAY_SOURCE,
                 "message": None,
+                "reason_code": reason_code,
+                "classification": reason_code,
                 "count": len(candles),
                 "ticker": symbol,
                 "intraday_latest_date": intraday_latest_date,
@@ -2174,11 +2450,17 @@ class VietnamMarketService:
             "status": status,
             "source": SSI_INTRADAY_SOURCE,
             "message": reason_text,
+            "reason_code": _classify_intraday_reason(
+                status=status,
+                reason=reason_text,
+                diagnostics=diagnostics,
+            ),
             "intraday_requested_timeframe": intraday_timeframe,
             "intraday_actual_granularity": intraday_granularity,
             "intraday_actual_granularity_seconds": intraday_granularity_seconds,
             "intraday_cadence_status": intraday_cadence_status,
         }
+        status_payload["classification"] = status_payload["reason_code"]
         status_payload.update(diagnostics)
         if diagnostics:
             status_payload["diagnostics"] = dict(diagnostics)
@@ -2415,6 +2697,8 @@ class VietnamMarketService:
                 "status": "disabled",
                 "source": None,
                 "message": VN_REALTIME_DISABLED_REASON,
+                "reason_code": "disabled",
+                "classification": "disabled",
                 "ticker": symbol,
             },
         }
@@ -2428,6 +2712,8 @@ class VietnamMarketService:
                 "status": "disabled",
                 "source": None,
                 "message": VN_TRADE_TAPE_DISABLED_REASON,
+                "reason_code": "disabled",
+                "classification": "disabled",
                 "ticker": symbol,
             },
         }
@@ -2442,17 +2728,33 @@ class VietnamMarketService:
     ) -> Dict[str, Any]:
         reason_text = reason or VN_REALTIME_UNAVAILABLE_REASON
         public_status = _public_live_status(status)
-        status_payload = {
-            "status": public_status,
-            "source": SSI_REALTIME_SOURCE,
-            "message": VN_REALTIME_UNAVAILABLE_REASON,
-            "ticker": symbol,
-        }
         safe_diagnostics = _status_diagnostics(reason_text if reason_text != VN_REALTIME_UNAVAILABLE_REASON else None)
         if diagnostics:
             safe_diagnostics.update(diagnostics)
+        reason_code = _classify_realtime_reason(
+            status=public_status,
+            reason=reason_text,
+            diagnostics=safe_diagnostics,
+            symbol=symbol,
+        )
+        status_payload = {
+            "status": public_status,
+            "source": SSI_REALTIME_SOURCE,
+            "message": _status_message_from_reason(
+                section="realtime",
+                status=public_status,
+                reason_code=reason_code,
+                fallback=VN_REALTIME_UNAVAILABLE_REASON,
+            ),
+            "ticker": symbol,
+        }
         if safe_diagnostics:
             status_payload["diagnostics"] = safe_diagnostics
+        status_payload["reason_code"] = reason_code
+        status_payload["classification"] = reason_code
+        for key in ("streaming_status", "runtime_status", "manager_state", "cache_status"):
+            if key in safe_diagnostics:
+                status_payload[key] = safe_diagnostics.get(key)
         return {
             "realtime_source": SSI_REALTIME_SOURCE,
             "realtime_snapshot": None,
@@ -2471,9 +2773,17 @@ class VietnamMarketService:
         status_payload = {
             "status": public_status,
             "source": SSI_TRADE_TAPE_SOURCE,
-            "message": VN_TRADE_TAPE_UNAVAILABLE_REASON,
+            "message": _status_message_from_reason(
+                section="trade_tape",
+                status=public_status,
+                reason_code=_classify_trade_tape_reason(status=public_status, reason=reason_text),
+                fallback=VN_TRADE_TAPE_UNAVAILABLE_REASON,
+            ),
             "ticker": symbol,
         }
+        reason_code = _classify_trade_tape_reason(status=public_status, reason=reason_text)
+        status_payload["reason_code"] = reason_code
+        status_payload["classification"] = reason_code
         diagnostics = _status_diagnostics(reason_text if reason_text != VN_TRADE_TAPE_UNAVAILABLE_REASON else None)
         if diagnostics:
             status_payload["diagnostics"] = diagnostics
@@ -2585,6 +2895,8 @@ class VietnamMarketService:
                         "status": "ok",
                         "source": SSI_REALTIME_SOURCE,
                         "message": None,
+                        "reason_code": "cache_hit",
+                        "classification": "cache_hit",
                         "ticker": symbol,
                         "diagnostics": payload.get("diagnostics") or {},
                     },
@@ -2617,6 +2929,8 @@ class VietnamMarketService:
                         "status": "ok",
                         "source": SSI_TRADE_TAPE_SOURCE,
                         "message": None,
+                        "reason_code": "historical_trade_tape_supported",
+                        "classification": "historical_trade_tape_supported",
                         "ticker": symbol,
                         "count": len(trades),
                         "fetched_at": _utc_now().isoformat(),
@@ -4004,6 +4318,9 @@ class VietnamMarketService:
                 "status": "unavailable",
                 "error": "No symbol requested",
                 "error_detail": "No Vietnam ticker was requested.",
+                "reason_code": "unknown",
+                "classification": "unknown",
+                "status_message": "No Vietnam ticker was requested.",
                 "requested_tickers": [],
                 "quotes": [],
                 "cache": {"cache_status": "unavailable"},
@@ -4016,6 +4333,9 @@ class VietnamMarketService:
                 "status": "disabled",
                 "error": None,
                 "error_detail": VN_REALTIME_DISABLED_REASON,
+                "reason_code": "disabled",
+                "classification": "disabled",
+                "status_message": VN_REALTIME_DISABLED_REASON,
                 "requested_tickers": tickers,
                 "quotes": [],
                 "cache": {"cache_status": "disabled"},
@@ -4033,6 +4353,9 @@ class VietnamMarketService:
                 "status": "unavailable",
                 "error": SSI_STREAMING_REALTIME_DISABLED_REASON,
                 "error_detail": SSI_STREAMING_REALTIME_DISABLED_REASON,
+                "reason_code": "config_disabled",
+                "classification": "config_disabled",
+                "status_message": "SSI streaming realtime manager disabled.",
                 "requested_tickers": tickers,
                 "quotes": [],
                 "cache": {"cache_status": "disabled"},
@@ -4093,6 +4416,20 @@ class VietnamMarketService:
             response["error"] = VN_REALTIME_UNAVAILABLE_REASON
             response["error_detail"] = VN_REALTIME_UNAVAILABLE_REASON
             response["cache"]["streaming_cache_status"] = "unavailable"
+        response_reason_code = _classify_realtime_reason(
+            status=str(response.get("status") or status or "unavailable"),
+            reason=str(response.get("error_detail") or response.get("error") or payload.get("reason") or ""),
+            diagnostics=diagnostics,
+            symbol=tickers[0] if len(tickers) == 1 else None,
+        )
+        response["reason_code"] = response_reason_code
+        response["classification"] = response_reason_code
+        response["status_message"] = _status_message_from_reason(
+            section="realtime",
+            status=str(response.get("status") or "unavailable"),
+            reason_code=response_reason_code,
+            fallback=VN_REALTIME_UNAVAILABLE_REASON,
+        )
         return response
 
     def build_trade_tape(
@@ -4112,6 +4449,9 @@ class VietnamMarketService:
                 "status": "unavailable",
                 "error": "No symbol requested",
                 "error_detail": "No Vietnam ticker was requested.",
+                "reason_code": "unknown",
+                "classification": "unknown",
+                "status_message": "No Vietnam ticker was requested.",
                 "trades": [],
                 "note": "SSI trade tape is separate from official daily OHLCV.",
                 "cache": {"cache_status": "unavailable"},
@@ -4125,6 +4465,9 @@ class VietnamMarketService:
                 "status": "disabled",
                 "error": None,
                 "error_detail": VN_TRADE_TAPE_DISABLED_REASON,
+                "reason_code": "disabled",
+                "classification": "disabled",
+                "status_message": VN_TRADE_TAPE_DISABLED_REASON,
                 "trades": [],
                 "note": "SSI trade tape is disabled.",
                 "cache": {"cache_status": "disabled"},
@@ -4170,6 +4513,18 @@ class VietnamMarketService:
             response["status"] = "unavailable"
             response["error"] = VN_TRADE_TAPE_UNAVAILABLE_REASON
             response["error_detail"] = str(result["error"])
+        response_reason_code = _classify_trade_tape_reason(
+            status=str(response.get("status") or status or "unavailable"),
+            reason=str(response.get("error_detail") or response.get("error") or payload.get("reason") or ""),
+        )
+        response["reason_code"] = response_reason_code
+        response["classification"] = response_reason_code
+        response["status_message"] = _status_message_from_reason(
+            section="trade_tape",
+            status=str(response.get("status") or "unavailable"),
+            reason_code=response_reason_code,
+            fallback=VN_TRADE_TAPE_UNAVAILABLE_REASON,
+        )
         return response
 
     def _build_symbol(

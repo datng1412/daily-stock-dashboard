@@ -79,6 +79,7 @@ When SSI IntradayOhlc is usable:
 
 ```text
 intraday_status.status = ok
+intraday_status.reason_code = ok or cadence_mismatch
 intraday_source = SSI IntradayOhlc
 intraday_requested_timeframe = request hint, for example 1h
 intraday_actual_granularity = detected provider-returned cadence, for example 1m or 1h
@@ -92,6 +93,7 @@ When intraday is unavailable, stale, disabled, or date-mismatched:
 
 ```text
 intraday_status.status = unavailable or disabled
+intraday_status.reason_code = disabled, unavailable_no_rows, unavailable_date_mismatch, unavailable_rate_limited, unavailable_provider_error, unavailable_unknown, or unknown
 intraday_source = SSI IntradayOhlc
 intraday_cadence_status = unavailable or unknown
 intraday_candles = []
@@ -108,6 +110,7 @@ When SSI realtime snapshot is usable:
 
 ```text
 realtime_status.status = ok
+realtime_status.reason_code = cache_hit
 realtime_snapshot = { ... }
 ```
 
@@ -115,6 +118,7 @@ When no usable SSI realtime snapshot exists:
 
 ```text
 realtime_status.status = unavailable or disabled
+realtime_status.reason_code = disabled, config_disabled, not_started, bootstrap_symbols_empty, ticker_not_bootstrapped, running_idle, cache_empty, cache_stale, connection_error, auth_or_entitlement_failure, network_or_tls_failure, rate_limited, or unknown
 realtime_snapshot = null
 ```
 
@@ -124,6 +128,8 @@ SSI realtime is streaming-backed. The service may read from a background manager
 
 `GET /api/v1/stocks/vn/realtime` bypasses the generic VN response cache so each poll can reflect the latest process-local streaming cache. The streaming cache remains authoritative for freshness through optional fields such as `age_seconds`, `is_stale`, `stale_reason`, `cached_at`, and `cache_ttl_seconds`. Frontend polling for this endpoint is separate from watchlist, company, chart, and trade-tape refresh. Unexpected realtime request errors should fail open as a normal optional unavailable realtime response, not as a daily dashboard failure.
 
+`GET /api/v1/stocks/vn/realtime` also exposes compatible top-level `reason_code`, `classification`, and `status_message` fields. These fields classify the optional realtime state only; they must not replace `latest_price` and must not mark DailyOhlc or DailyStockPrice unavailable.
+
 Sanitized realtime diagnostics may include `runtime_status`, `manager_state`, `bootstrap_status`, `channels`, `bootstrap_symbols`, `bootstrap_rejected_symbols`, `messages_observed`, `parser_rows_observed`, `last_message_at`, `latest_error`, `last_error_at`, `idle_timeout_seconds`, `is_idle`, `idle_since`, `reconnect_enabled`, `reconnect_attempt_count`, `last_reconnect_at`, `next_reconnect_at`, `reconnect_backoff_seconds`, `last_reconnect_reason`, and `last_reconnect_error`. `runtime_status=running_idle` is an optional realtime runtime state only; it must not mark DailyOhlc or DailyStockPrice unavailable.
 
 ### Trade Tape
@@ -132,6 +138,7 @@ When SSI trade tape has usable rows:
 
 ```text
 trade_tape_status.status = ok
+trade_tape_status.reason_code = historical_trade_tape_supported
 trade_tape = [ ... ]
 ```
 
@@ -139,10 +146,11 @@ When no trade rows exist:
 
 ```text
 trade_tape_status.status = unavailable or disabled
+trade_tape_status.reason_code = disabled, latest_trade_stream_only, unavailable_no_rows, unavailable_provider_error, unavailable_unknown, not_implemented, or unknown
 trade_tape = []
 ```
 
-The watchlist public contract is a list for `trade_tape`. Company detail keeps a nested `trade_tape.trades` list because the company page groups block status and rows together.
+The watchlist public contract is a list for `trade_tape`. Company detail keeps a nested `trade_tape.trades` list because the company page groups block status and rows together. `X-TRADE` streaming messages are latest-trade stream context only; they are not historical trade-tape/time-and-sales rows. `GET /api/v1/stocks/vn/realtime/trades` exposes compatible top-level `reason_code`, `classification`, and `status_message` fields for the optional trade-tape state.
 
 ### Diagnostics
 

@@ -1077,10 +1077,32 @@ const realtimeIssueSummary = (realtimeError?: string | null, tradesError?: strin
   return null;
 };
 
+const LIVE_STATUS_DIAGNOSTIC_PATTERN = /(attempted endpoint|endpoint|http(?:\s*status)?\s*\d|http status|raw provider|raw error|token|authorization|access token|account)/i;
+
+const safeLiveStatusString = (value: unknown) => {
+  if (typeof value !== 'string') return null;
+  const text = value.trim();
+  if (!text || LIVE_STATUS_DIAGNOSTIC_PATTERN.test(text)) return null;
+  return text;
+};
+
 type DiagnosticRow = {
   section: string;
   label: string;
   value: string;
+};
+
+type OptionalLiveStatusBlock = {
+  status?: string | null;
+  source?: string | null;
+  message?: string | null;
+  reasonCode?: string | null;
+  classification?: string | null;
+  streamingStatus?: string | null;
+  runtimeStatus?: string | null;
+  managerState?: string | null;
+  cacheStatus?: string | null;
+  diagnostics?: Record<string, unknown> | null;
 };
 
 const diagnosticLabel = (key: string) => {
@@ -1131,6 +1153,72 @@ const liveStatusDiagnosticRows = (
     }))
     .filter((row): row is DiagnosticRow => Boolean(row.value))
 );
+
+const optionalStatusDiagnosticValue = (block: OptionalLiveStatusBlock | null | undefined, key: string): string | null => {
+  const direct = (block as Record<string, unknown> | null | undefined)?.[key];
+  const nested = block?.diagnostics?.[key];
+  return safeLiveStatusString((direct ?? nested) as unknown);
+};
+
+const optionalLiveReasonCode = (block?: OptionalLiveStatusBlock | null) => (
+  safeLiveStatusString(block?.reasonCode)
+  ?? safeLiveStatusString(block?.classification)
+  ?? optionalStatusDiagnosticValue(block, 'reasonCode')
+  ?? optionalStatusDiagnosticValue(block, 'reason_code')
+);
+
+const optionalLiveMessage = (block?: OptionalLiveStatusBlock | null) => safeLiveStatusString(block?.message);
+
+const optionalLiveStatusText = (
+  section: 'intraday' | 'realtime' | 'tradeTape',
+  block?: OptionalLiveStatusBlock | null,
+) => {
+  const status = normalizedStatus(block?.status);
+  const reasonCode = optionalLiveReasonCode(block);
+  const copyByReason: Record<string, string> = {
+    cadence_mismatch: 'SSI IntradayOhlc cadence differs from the requested timeframe.',
+    unavailable_rate_limited: 'SSI IntradayOhlc is rate-limited by the provider.',
+    unavailable_date_mismatch: 'SSI IntradayOhlc latest candle date does not match the latest daily trading date.',
+    unavailable_no_rows: section === 'tradeTape'
+      ? 'SSI trade tape returned no trade rows.'
+      : 'SSI IntradayOhlc returned no usable candles.',
+    unavailable_provider_error: section === 'tradeTape'
+      ? 'SSI trade tape provider unavailable.'
+      : 'SSI IntradayOhlc provider unavailable.',
+    config_disabled: 'SSI streaming realtime manager disabled.',
+    disabled: section === 'intraday'
+      ? 'SSI IntradayOhlc is disabled.'
+      : section === 'realtime'
+        ? 'SSI realtime is disabled.'
+        : 'SSI trade tape is disabled.',
+    not_started: 'SSI streaming realtime manager not started.',
+    bootstrap_symbols_empty: 'SSI streaming realtime bootstrap symbols empty.',
+    ticker_not_bootstrapped: 'Ticker is not in the configured SSI realtime bootstrap list.',
+    running_idle: 'SSI stream is running but no recent tick is cached for this ticker.',
+    cache_empty: 'SSI realtime stream cache is empty for this ticker.',
+    cache_stale: 'SSI realtime stream cache is stale; realtime is event-driven and may stop updating outside active ticks.',
+    connection_error: 'SSI realtime connection unavailable.',
+    auth_or_entitlement_failure: 'SSI realtime authentication or entitlement failed.',
+    network_or_tls_failure: 'SSI realtime network or TLS connection failed.',
+    rate_limited: 'SSI realtime provider rate-limited the request.',
+    latest_trade_stream_only: 'Historical trade tape is unavailable. X-TRADE is latest-trade stream context only.',
+    not_implemented: section === 'tradeTape'
+      ? 'Historical trade tape is not proven by current SSI evidence.'
+      : 'This optional live section is not implemented.',
+  };
+  if (reasonCode && copyByReason[reasonCode]) return copyByReason[reasonCode];
+  const safeMessage = optionalLiveMessage(block);
+  if (safeMessage) return safeMessage;
+  if (status === 'disabled') return copyByReason.disabled;
+  if (section === 'realtime') return 'SSI realtime unavailable. Daily SSI data is still available.';
+  if (section === 'tradeTape') return 'SSI trade tape unavailable.';
+  return 'SSI intraday unavailable.';
+};
+
+const realtimeUnavailableStatusText = (block?: OptionalLiveStatusBlock | null) => {
+  const text = optionalLiveStatusText('realtime', block);
+  return /daily SSI data is still available/i.test(text) ? text : `${text} Daily SSI data is still available.`;
+};
 
 const realtimeStatusBadgeText = (status?: string | null) => (
   status === 'unavailable' || status === 'error' ? 'SSI realtime unavailable' : 'SSI realtime'
@@ -3340,8 +3428,11 @@ const StockDetailView: React.FC<{
   const hasRealtimeSnapshot = hasRealtimeSnapshotData(realtimeQuote);
   const hasCurrentIntraday = hasCurrentIntradayData(item);
   const hasTradeTape = hasTradeTapeData(realtimeTrades);
+  const intradayReasonCode = optionalLiveReasonCode(item.intradayStatus);
   const intradaySectionState: SectionState = hasCurrentIntraday
-    ? 'Ready'
+    ? intradayReasonCode === 'cadence_mismatch' || ['different_from_requested', 'irregular'].includes(intradayCadenceStatus(item) ?? '')
+      ? 'Partial'
+      : 'Ready'
     : item.intradayStatus?.status === 'disabled'
       ? 'Disabled'
       : 'Unavailable';
@@ -3836,7 +3927,7 @@ const StockDetailView: React.FC<{
           </div>
         </dl>
         ) : (
-          <p className="mt-3 text-sm text-secondary-text">SSI intraday unavailable.</p>
+          <p className="mt-3 text-sm text-secondary-text">{optionalLiveStatusText('intraday', item.intradayStatus)}</p>
         )}
         {hasCurrentIntraday ? (
         <div className="mt-3 flex flex-wrap gap-1">
@@ -3895,7 +3986,7 @@ const StockDetailView: React.FC<{
           </div>
         </dl>
         ) : (
-          <p className="mt-3 text-sm text-secondary-text">SSI realtime unavailable. Daily SSI data is still available.</p>
+          <p className="mt-3 text-sm text-secondary-text">{realtimeUnavailableStatusText(item.realtimeStatus)}</p>
         )}
         {hasRealtimeSnapshot ? (
         <p className="mt-3 text-xs text-secondary-text">
@@ -3920,11 +4011,11 @@ const StockDetailView: React.FC<{
           </div>
         </div>
         <p className="mt-2 text-xs text-secondary-text">
-          Trade tape may not include auction/ATC prints.
+          Historical trade tape is separate from X-TRADE latest-trade stream context.
         </p>
         {tradesError || (!tradesLoading && !hasTradeTape) ? (
           <div className="mt-3 rounded-lg border border-warning/20 bg-warning/10 p-2 text-xs text-warning">
-            SSI trade tape unavailable.
+            {optionalLiveStatusText('tradeTape', item.tradeTapeStatus)}
           </div>
         ) : null}
         {hasTradeTape ? (
@@ -4175,7 +4266,7 @@ const VietnamDashboardPage: React.FC = () => {
         ));
       }
       setLastRealtimeSnapshotRefreshAt(new Date().toISOString());
-      setRealtimeError(response.status === 'ok' ? null : realtimeErrorMessage(response.error) ?? 'SSI realtime unavailable');
+      setRealtimeError(response.status === 'ok' ? null : realtimeErrorMessage(response.statusMessage ?? response.error) ?? 'SSI realtime unavailable');
       if (response.status !== 'ok') {
         setLastRealtimeErrorAt(new Date().toISOString());
       }
@@ -4207,7 +4298,7 @@ const VietnamDashboardPage: React.FC = () => {
       if (symbol !== selectedTickerRef.current) return;
       setRealtimeTrades(response.trades);
       setLastTradeTapeRefreshAt(new Date().toISOString());
-      setTradesError(response.status === 'ok' ? null : realtimeErrorMessage(response.error) ?? 'Trade tape unavailable');
+      setTradesError(response.status === 'ok' ? null : realtimeErrorMessage(response.statusMessage ?? response.error) ?? 'Trade tape unavailable');
       if (response.status !== 'ok') {
         setLastRealtimeErrorAt(new Date().toISOString());
       }
