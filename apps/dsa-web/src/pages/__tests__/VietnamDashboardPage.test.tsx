@@ -1241,103 +1241,113 @@ describe('VietnamDashboardPage watchlist loading', () => {
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
 
     expect(screen.getByRole('button', { name: 'Custom' })).toBeInTheDocument();
-    expect(screen.getByLabelText('Custom watchlist')).toHaveAttribute('placeholder', 'FPT, VPB, ACB');
-    expect(screen.getByRole('button', { name: 'Apply custom' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Save custom' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Clear custom' })).toBeInTheDocument();
-    expect(screen.getByText('Saved locally in this browser.')).toBeInTheDocument();
+    expect(screen.getByLabelText('Custom watchlist picker')).toHaveAttribute('placeholder', 'Search ticker...');
+    expect(screen.getByRole('button', { name: 'Apply custom watchlist' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Clear' })).toBeDisabled();
+    expect(screen.getByText('No custom tickers selected.')).toBeInTheDocument();
   });
 
-  it('typing in custom watchlist input does not call the watchlist endpoint', async () => {
+  it('searches loaded ticker options by symbol and company name without calling the watchlist endpoint', async () => {
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
     const watchlistCalls = mockedGetVietnamWatchlist.mock.calls.length;
 
-    fireEvent.change(screen.getByLabelText('Custom watchlist'), { target: { value: 'fpt, vpb, acb' } });
+    fireEvent.change(screen.getByLabelText('Custom watchlist picker'), { target: { value: 'fpt listed' } });
 
     expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistCalls);
+    expect(screen.getByRole('option', { name: /FPT/ })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /VPB/ })).not.toBeInTheDocument();
   });
 
-  it('normalizes lowercase custom input and removes duplicates preserving order', async () => {
+  it('adds and removes multi-select ticker chips without duplicates', async () => {
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
 
-    fireEvent.change(screen.getByLabelText('Custom watchlist'), { target: { value: 'fpt; vpb\nfpt acb' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Apply custom' }));
+    fireEvent.change(screen.getByLabelText('Custom watchlist picker'), { target: { value: 'fpt' } });
+    fireEvent.click(screen.getByRole('option', { name: /FPT/ }));
+    expect(screen.getByRole('button', { name: 'Remove FPT' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /FPT/ })).not.toBeInTheDocument();
 
-    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(['FPT', 'VPB', 'ACB'], false));
-    expect(screen.getByLabelText('Custom watchlist')).toHaveValue('FPT, VPB, ACB');
-    expect(screen.getByText('Duplicate tickers removed.')).toBeInTheDocument();
-    expect(selectedTickerHeader().getByRole('heading', { name: 'FPT' })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Custom watchlist picker'), { target: { value: 'vpb' } });
+    fireEvent.click(screen.getByRole('option', { name: /VPB/ }));
+    expect(screen.getByRole('button', { name: 'Remove VPB' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove FPT' }));
+    expect(screen.queryByRole('button', { name: 'Remove FPT' })).not.toBeInTheDocument();
   });
 
-  it('shows invalid custom tickers and does not apply them', async () => {
+  it('does not silently accept an invalid typed ticker', async () => {
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
     const watchlistCalls = mockedGetVietnamWatchlist.mock.calls.length;
 
-    fireEvent.change(screen.getByLabelText('Custom watchlist'), { target: { value: 'FPT, @@@, ACB' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Apply custom' }));
+    fireEvent.change(screen.getByLabelText('Custom watchlist picker'), { target: { value: '@@@' } });
 
-    expect(screen.getByText('Invalid tickers: @@@')).toBeInTheDocument();
+    expect(screen.getByText(/No loaded ticker match/)).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /Add @@@/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Apply custom watchlist' })).toBeDisabled();
     expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistCalls);
-    expect(selectedTickerHeader().getByRole('heading', { name: 'FPT' })).toBeInTheDocument();
   });
 
-  it('shows empty custom list validation and does not apply', async () => {
+  it('requires explicit selection before applying an exact typed ticker candidate', async () => {
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
     const watchlistCalls = mockedGetVietnamWatchlist.mock.calls.length;
 
-    fireEvent.change(screen.getByLabelText('Custom watchlist'), { target: { value: ' , ; \n ' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Apply custom' }));
+    fireEvent.change(screen.getByLabelText('Custom watchlist picker'), { target: { value: 'xyz' } });
+    expect(screen.getByRole('option', { name: /Add XYZ.*Validate on apply/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Apply custom watchlist' })).toBeDisabled();
 
-    expect(screen.getByText('Custom watchlist is empty.')).toBeInTheDocument();
     expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistCalls);
   });
 
-  it('applies custom watchlist through the expected watchlist request and selects first when needed', async () => {
+  it('applies normalized unique picker selections and selects the first ticker when needed', async () => {
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
 
-    fireEvent.change(screen.getByLabelText('Custom watchlist'), { target: { value: 'vpb acb' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Apply custom' }));
+    fireEvent.change(screen.getByLabelText('Custom watchlist picker'), { target: { value: 'vpb' } });
+    fireEvent.click(screen.getByRole('option', { name: /VPB/ }));
+    fireEvent.change(screen.getByLabelText('Custom watchlist picker'), { target: { value: 'acb' } });
+    fireEvent.click(screen.getByRole('option', { name: /ACB/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Apply custom watchlist' }));
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(['VPB', 'ACB'], false));
     expect(selectedTickerHeader().getByRole('heading', { name: 'VPB' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Custom' })).toHaveAttribute('aria-pressed', 'true');
+    expect(JSON.parse(localStorage.getItem(customWatchlistStorageKey) ?? '[]')).toEqual(['VPB', 'ACB']);
   });
 
-  it('saving custom writes localStorage without calling the watchlist endpoint', async () => {
+  it('suppresses repeated custom apply clicks while keeping previous rows visible', async () => {
+    let resolveCustom: ((response: VietnamWatchlistResponse) => void) | undefined;
+    mockedGetVietnamWatchlist
+      .mockResolvedValueOnce(makeResponse(defaultTickers))
+      .mockImplementationOnce(() => new Promise<VietnamWatchlistResponse>((resolve) => {
+        resolveCustom = resolve;
+      }));
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
-    const watchlistCalls = mockedGetVietnamWatchlist.mock.calls.length;
+    fireEvent.change(screen.getByLabelText('Custom watchlist picker'), { target: { value: 'vpb' } });
+    fireEvent.click(screen.getByRole('option', { name: /VPB/ }));
+    const applyButton = screen.getByRole('button', { name: 'Apply custom watchlist' });
+    fireEvent.click(applyButton);
+    fireEvent.click(applyButton);
 
-    fireEvent.change(screen.getByLabelText('Custom watchlist'), { target: { value: 'fpt vpb acb' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save custom' }));
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole('button', { name: 'Apply custom watchlist' })).toBeDisabled();
+    expect(screen.getByLabelText('Custom watchlist picker')).toBeDisabled();
+    expect(screen.getByText('Loading custom watchlist filter; previous rows stay visible.')).toBeInTheDocument();
+    expect(screen.getByTestId('indicator-row-FPT')).toBeInTheDocument();
 
-    expect(JSON.parse(localStorage.getItem(customWatchlistStorageKey) ?? '[]')).toEqual(['FPT', 'VPB', 'ACB']);
-    expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistCalls);
-  });
-
-  it('keeps only the first 30 custom tickers', async () => {
-    const manyTickers = Array.from({ length: 32 }, (_, index) => `T${String(index + 1).padStart(2, '0')}`);
-    render(<VietnamDashboardPage />);
-
-    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
-
-    fireEvent.change(screen.getByLabelText('Custom watchlist'), { target: { value: manyTickers.join(' ') } });
-    fireEvent.click(screen.getByRole('button', { name: 'Apply custom' }));
-
-    const expectedTickers = manyTickers.slice(0, 30);
-    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(expectedTickers, false));
-    expect(screen.getByText('Only first 30 tickers kept.')).toBeInTheDocument();
+    await act(async () => {
+      resolveCustom?.(makeResponse(['VPB']));
+    });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Custom' })).toHaveAttribute('aria-pressed', 'true'));
   });
 
   it('loads saved custom watchlist and uses it from the Custom preset', async () => {
@@ -1346,7 +1356,8 @@ describe('VietnamDashboardPage watchlist loading', () => {
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
-    expect(screen.getByLabelText('Custom watchlist')).toHaveValue('GMD, SCS');
+    expect(screen.getByRole('button', { name: 'Remove GMD' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Remove SCS' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Custom' }));
 
@@ -1354,7 +1365,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(selectedTickerHeader().getByRole('heading', { name: 'GMD' })).toBeInTheDocument();
   });
 
-  it('clear custom removes localStorage and clears the custom input without reloading watchlist', async () => {
+  it('clear removes saved picker selections without reloading the active watchlist', async () => {
     localStorage.setItem(customWatchlistStorageKey, JSON.stringify(['FPT', 'VPB']));
 
     render(<VietnamDashboardPage />);
@@ -1362,10 +1373,10 @@ describe('VietnamDashboardPage watchlist loading', () => {
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
     const watchlistCalls = mockedGetVietnamWatchlist.mock.calls.length;
 
-    fireEvent.click(screen.getByRole('button', { name: 'Clear custom' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
 
     expect(localStorage.getItem(customWatchlistStorageKey)).toBeNull();
-    expect(screen.getByLabelText('Custom watchlist')).toHaveValue('');
+    expect(screen.getByText('No custom tickers selected.')).toBeInTheDocument();
     expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistCalls);
   });
 
@@ -1376,7 +1387,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     const presetGroup = within(screen.getByRole('group', { name: 'Preset groups' }));
     for (const presetName of Object.keys(presetTickers)) {
-      expect(presetGroup.getByRole('button', { name: presetName })).toBeInTheDocument();
+      expect(presetGroup.getByRole('button', { name: presetName === 'VN30' ? /VN30/ : presetName })).toBeInTheDocument();
     }
   });
 
@@ -1411,18 +1422,80 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(screen.getByRole('button', { name: 'VN30' })).toHaveAttribute('aria-pressed', 'true');
   });
 
-  it('does not apply VN30 from a hardcoded list when SSI IndexComponents is unavailable', async () => {
+  it('keeps VN30 retry enabled when SSI IndexComponents is unavailable and never applies hardcoded rows', async () => {
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+    await waitFor(() => expect(mockedGetVietnamIndexComponents).toHaveBeenCalledTimes(1));
 
     const watchlistCalls = mockedGetVietnamWatchlist.mock.calls.length;
-    const vn30Button = screen.getByRole('button', { name: 'VN30' });
-    expect(vn30Button).toBeDisabled();
+    const vn30Button = screen.getByRole('button', { name: 'Retry VN30' });
+    expect(vn30Button).not.toBeDisabled();
     expect(vn30Button).toHaveAttribute('aria-pressed', 'false');
     fireEvent.click(vn30Button);
 
+    await waitFor(() => expect(mockedGetVietnamIndexComponents).toHaveBeenCalledTimes(2));
     expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistCalls);
+    expect(screen.getAllByText(/SSI VN30 components are unavailable/).length).toBeGreaterThan(0);
+    expect(screen.getByTestId('indicator-row-FPT')).toBeInTheDocument();
+  });
+
+  it('shows loading and disables only VN30 while a component retry is pending', async () => {
+    let resolveRetry: ((response: VietnamIndexComponentsResponse) => void) | undefined;
+    mockedGetVietnamIndexComponents
+      .mockResolvedValueOnce(makeIndexComponentsResponse())
+      .mockImplementationOnce(() => new Promise<VietnamIndexComponentsResponse>((resolve) => {
+        resolveRetry = resolve;
+      }));
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Retry VN30' })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Retry VN30' }));
+
+    expect(await screen.findByRole('button', { name: 'Loading VN30...' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Banks' })).not.toBeDisabled();
+    expect(screen.getByText('Loading SSI VN30 components; current rows stay visible.')).toBeInTheDocument();
+    expect(screen.getByTestId('indicator-row-FPT')).toBeInTheDocument();
+
+    await act(async () => {
+      resolveRetry?.(makeVn30ComponentsResponse());
+    });
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith([...presetTickers.VN30], false));
+  });
+
+  it('retries unavailable VN30 components and applies only the returned SSI symbols', async () => {
+    mockedGetVietnamIndexComponents
+      .mockResolvedValueOnce(makeIndexComponentsResponse())
+      .mockResolvedValueOnce(makeVn30ComponentsResponse(['ssi', 'fpt', 'SSI']));
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Retry VN30' })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Retry VN30' }));
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(['SSI', 'FPT'], false));
+    expect(screen.getByRole('button', { name: 'VN30' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('does not let an older VN30 retry overwrite a newer preset intent', async () => {
+    let resolveRetry: ((response: VietnamIndexComponentsResponse) => void) | undefined;
+    mockedGetVietnamIndexComponents
+      .mockResolvedValueOnce(makeIndexComponentsResponse())
+      .mockImplementationOnce(() => new Promise<VietnamIndexComponentsResponse>((resolve) => {
+        resolveRetry = resolve;
+      }));
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Retry VN30' })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Retry VN30' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Banks' }));
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith([...presetTickers.Banks], false));
+
+    await act(async () => {
+      resolveRetry?.(makeVn30ComponentsResponse());
+    });
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Banks' })).toHaveAttribute('aria-pressed', 'true'));
+    expect(mockedGetVietnamWatchlist).not.toHaveBeenCalledWith([...presetTickers.VN30], false);
   });
 
   it('falls back to the first preset ticker when the selected ticker is absent', async () => {
@@ -1701,8 +1774,11 @@ describe('VietnamDashboardPage watchlist loading', () => {
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
     clickTickerRow('ACB');
 
-    fireEvent.change(screen.getByLabelText('Custom watchlist'), { target: { value: 'vpb acb' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Apply custom' }));
+    fireEvent.change(screen.getByLabelText('Custom watchlist picker'), { target: { value: 'vpb' } });
+    fireEvent.click(screen.getByRole('option', { name: /VPB/ }));
+    fireEvent.change(screen.getByLabelText('Custom watchlist picker'), { target: { value: 'acb' } });
+    fireEvent.click(screen.getByRole('option', { name: /ACB/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Apply custom watchlist' }));
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(['VPB', 'ACB'], false));
     expect(screen.getAllByText('Updating...').length).toBeGreaterThan(0);
@@ -2421,14 +2497,15 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(indicatorRowOrder()).toEqual(['SCS', 'VPB']);
   });
 
-  it('reset filters restores rows without clearing preset, active watchlist, custom input, selected ticker, or calling the API', async () => {
+  it('reset filters restores rows without clearing preset, active watchlist, custom picker, selected ticker, or calling the API', async () => {
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
     fireEvent.click(screen.getByRole('button', { name: 'Banks' }));
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith([...presetTickers.Banks], false));
     clickTickerRow('ACB');
-    fireEvent.change(screen.getByLabelText('Custom watchlist'), { target: { value: 'FPT, VPB, ACB' } });
+    fireEvent.change(screen.getByLabelText('Custom watchlist picker'), { target: { value: 'fpt' } });
+    fireEvent.click(screen.getByRole('option', { name: /FPT/ }));
     const watchlistCalls = mockedGetVietnamWatchlist.mock.calls.length;
 
     fireEvent.change(indicatorFilters().getByLabelText('Search ticker'), { target: { value: 'VCB' } });
@@ -2438,7 +2515,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     expect(indicatorRowOrder()).toEqual([...presetTickers.Banks]);
     expect(screen.getByRole('button', { name: 'Banks' })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByLabelText('Custom watchlist')).toHaveValue('FPT, VPB, ACB');
+    expect(screen.getByRole('button', { name: 'Remove FPT' })).toBeInTheDocument();
     expect(selectedTickerHeader().getByRole('heading', { name: 'ACB' })).toBeInTheDocument();
     expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistCalls);
   });
@@ -4478,15 +4555,15 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistCalls);
   });
 
-  it('rejects invalid tickers without issuing another watchlist request', async () => {
+  it('does not offer invalid exact tickers or issue another watchlist request', async () => {
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(1));
 
-    fireEvent.change(screen.getByLabelText('Custom watchlist'), { target: { value: 'FPT @@@ ACB' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Apply custom' }));
+    fireEvent.change(screen.getByLabelText('Custom watchlist picker'), { target: { value: 'FPT @@@ ACB' } });
 
-    expect(await screen.findByText('Invalid tickers: @@@')).toBeInTheDocument();
+    expect(await screen.findByText(/No loaded ticker match/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Apply custom watchlist' })).toBeDisabled();
     expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(1);
   });
 

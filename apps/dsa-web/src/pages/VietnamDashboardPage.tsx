@@ -1,6 +1,6 @@
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, Banknote, DatabaseZap, Loader2, Maximize2, RefreshCw, RotateCcw, ShieldAlert, X } from 'lucide-react';
+import { Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, Banknote, DatabaseZap, Loader2, Maximize2, RefreshCw, RotateCcw, Search, ShieldAlert, X } from 'lucide-react';
 import {
   stocksApi,
   type VietnamChartPoint,
@@ -76,8 +76,13 @@ interface WatchlistCommitIntent {
   presetId: VietnamDashboardActivePresetId;
   selectedTicker: string | null;
   customWatchlist?: string[];
-  customWatchlistInput?: string;
   customNotice?: string | null;
+}
+
+interface CustomTickerOption {
+  ticker: string;
+  name: string | null;
+  source: 'SSI IndexComponents' | 'Current watchlist' | 'Saved custom';
 }
 
 const WATCHLIST_SCAN_ORDER: WatchlistScanLabel[] = ['Strong', 'Improving', 'Neutral', 'Weakening', 'Risk elevated', 'Data unavailable'];
@@ -959,14 +964,16 @@ const getDashboardPresetTickers = (presetId: VietnamDashboardPresetId) => {
 
 const getVn30ComponentTickers = (indexComponents?: VietnamIndexComponentsResponse | null) => {
   if (indexComponents?.status !== 'ok' || !indexComponents.rows.length) return null;
-  return normalizeVietnamWatchlist(
-    indexComponents.rows
-      .map((row) => row.symbol)
-      .filter((symbol): symbol is string => Boolean(symbol)),
-  );
+  const seen = new Set<string>();
+  const tickers = indexComponents.rows
+    .map((row) => normalizeVietnamTicker(row.symbol ?? ''))
+    .filter((ticker) => {
+      if (!/^[A-Z0-9]{2,10}$/.test(ticker) || seen.has(ticker)) return false;
+      seen.add(ticker);
+      return true;
+    });
+  return normalizeVietnamWatchlist(tickers);
 };
-
-const formatCustomWatchlistInput = (tickers: string[]) => tickers.join(', ');
 
 const parseCustomWatchlistInput = (value: string) => {
   const rawTokens = value
@@ -4237,8 +4244,9 @@ const VietnamDashboardPage: React.FC = () => {
   const [watchlist, setWatchlist] = useState<string[]>(DEFAULT_WATCHLIST);
   const [activePresetId, setActivePresetId] = useState<VietnamDashboardActivePresetId>('my');
   const [pendingPresetId, setPendingPresetId] = useState<VietnamDashboardActivePresetId | null>(null);
-  const [customWatchlistInput, setCustomWatchlistInput] = useState(() => formatCustomWatchlistInput(initialCustomWatchlist));
   const [customWatchlist, setCustomWatchlist] = useState<string[]>(initialCustomWatchlist);
+  const [customPickerTickers, setCustomPickerTickers] = useState<string[]>(initialCustomWatchlist);
+  const [customTickerQuery, setCustomTickerQuery] = useState('');
   const [watchlistError, setWatchlistError] = useState<string | null>(null);
   const [customNotice, setCustomNotice] = useState<string | null>(initialCustomWatchlist.length ? 'Saved locally in this browser.' : null);
   const [data, setData] = useState<VietnamWatchlistResponse | null>(null);
@@ -4254,6 +4262,7 @@ const VietnamDashboardPage: React.FC = () => {
   const [dailyIndex, setDailyIndex] = useState<VietnamDailyIndexResponse | null>(null);
   const [indexList, setIndexList] = useState<VietnamIndexListResponse | null>(null);
   const [indexComponents, setIndexComponents] = useState<VietnamIndexComponentsResponse | null>(null);
+  const [vn30ComponentsLoading, setVn30ComponentsLoading] = useState(false);
   const [indexCoverageError, setIndexCoverageError] = useState<string | null>(null);
   const [lastRealtimeSnapshotRefreshAt, setLastRealtimeSnapshotRefreshAt] = useState<string | null>(null);
   const [lastTradeTapeRefreshAt, setLastTradeTapeRefreshAt] = useState<string | null>(null);
@@ -4299,6 +4308,8 @@ const VietnamDashboardPage: React.FC = () => {
   const selectedTickerRef = useRef(selectedTicker);
   selectedTickerRef.current = selectedTicker;
   const requestIdRef = useRef(0);
+  const filterIntentIdRef = useRef(0);
+  const vn30ComponentsPromiseRef = useRef<Promise<VietnamIndexComponentsResponse> | null>(null);
   const initialWatchlistLoadStartedRef = useRef(false);
   const realtimeRequestIdRef = useRef(0);
   const tradesRequestIdRef = useRef(0);
@@ -4317,6 +4328,7 @@ const VietnamDashboardPage: React.FC = () => {
     realtimeRequestIdRef.current += 1;
     tradesRequestIdRef.current += 1;
     corporateActionsRequestIdRef.current += 1;
+    filterIntentIdRef.current += 1;
   }, []);
 
   const loadObservability = useCallback(async () => {
@@ -4438,12 +4450,51 @@ const VietnamDashboardPage: React.FC = () => {
     }
   }, []);
 
+  const loadVn30Components = useCallback(() => {
+    if (vn30ComponentsPromiseRef.current) {
+      return vn30ComponentsPromiseRef.current;
+    }
+
+    setVn30ComponentsLoading(true);
+    const request = stocksApi.getVietnamIndexComponents('VN30')
+      .then((response) => {
+        if (!unmountedRef.current) {
+          setIndexComponents(response);
+        }
+        return response;
+      })
+      .catch(() => {
+        const unavailableResponse: VietnamIndexComponentsResponse = {
+          status: 'unavailable',
+          source: 'SSI IndexComponents',
+          reason: 'IndexComponents unavailable',
+          indexCode: 'VN30',
+          rows: [],
+          count: 0,
+          fallbackUsed: false,
+        };
+        if (!unmountedRef.current) {
+          setIndexComponents(unavailableResponse);
+          setIndexCoverageError('SSI VN30 components request unavailable.');
+        }
+        return unavailableResponse;
+      })
+      .finally(() => {
+        vn30ComponentsPromiseRef.current = null;
+        if (!unmountedRef.current) {
+          setVn30ComponentsLoading(false);
+        }
+      });
+    vn30ComponentsPromiseRef.current = request;
+    return request;
+  }, []);
+
   const loadIndexCoverage = useCallback(async () => {
     setIndexCoverageError(null);
     const [listResult, dailyResult, componentResult] = await Promise.allSettled([
       stocksApi.getVietnamIndexList('HOSE'),
       stocksApi.getVietnamDailyIndex(['VNINDEX', 'VN30']),
-      stocksApi.getVietnamIndexComponents('VN30'),
+      loadVn30Components(),
     ]);
 
     if (listResult.status === 'fulfilled') {
@@ -4475,24 +4526,10 @@ const VietnamDashboardPage: React.FC = () => {
       });
     }
 
-    if (componentResult.status === 'fulfilled') {
-      setIndexComponents(componentResult.value);
-    } else {
-      setIndexComponents({
-        status: 'unavailable',
-        source: 'SSI IndexComponents',
-        reason: 'IndexComponents unavailable',
-        indexCode: 'VN30',
-        rows: [],
-        count: 0,
-        fallbackUsed: false,
-      });
-    }
-
     if (listResult.status === 'rejected' || dailyResult.status === 'rejected' || componentResult.status === 'rejected') {
       setIndexCoverageError('SSI index coverage request unavailable.');
     }
-  }, []);
+  }, [loadVn30Components]);
 
   const refreshRealtimeSnapshots = useCallback(async (tickersOverride?: string[]) => {
     const targetTickers = tickersOverride ?? logicalWatchlistRef.current;
@@ -4571,11 +4608,10 @@ const VietnamDashboardPage: React.FC = () => {
         setSelectedTicker(commitIntent.selectedTicker);
         if (commitIntent.customWatchlist) {
           setCustomWatchlist(commitIntent.customWatchlist);
-        }
-        if (commitIntent.customWatchlistInput !== undefined) {
-          setCustomWatchlistInput(commitIntent.customWatchlistInput);
-        }
-        if (commitIntent.customNotice !== undefined) {
+          setCustomPickerTickers(commitIntent.customWatchlist);
+          const saved = writeCustomWatchlist(commitIntent.customWatchlist);
+          setCustomNotice(saved ? (commitIntent.customNotice ?? 'Applied and saved locally in this browser.') : 'Applied for this session only.');
+        } else if (commitIntent.customNotice !== undefined) {
           setCustomNotice(commitIntent.customNotice);
         }
       }
@@ -4600,37 +4636,58 @@ const VietnamDashboardPage: React.FC = () => {
 
   const handlePresetSelect = useCallback((presetId: VietnamDashboardPresetId) => {
     if (pendingPresetIdRef.current) return;
-    if (activePresetIdRef.current === presetId) return;
-    const presetTickers = presetId === 'vn30'
-      ? getVn30ComponentTickers(indexComponents)
-      : getDashboardPresetTickers(presetId);
-    if (!presetTickers) {
-      setWatchlistError(
-        presetId === 'vn30'
-          ? 'VN30 components are unavailable from SSI IndexComponents; keeping the current watchlist.'
-          : 'Preset list is unavailable.',
-      );
+    const availableVn30Tickers = presetId === 'vn30' ? getVn30ComponentTickers(indexComponents) : null;
+    if (activePresetIdRef.current === presetId && (presetId !== 'vn30' || availableVn30Tickers)) return;
+    const intentId = filterIntentIdRef.current + 1;
+    filterIntentIdRef.current = intentId;
+
+    const applyPreset = (presetTickers: string[]) => {
+      if (intentId !== filterIntentIdRef.current || unmountedRef.current) return;
+      const nextSelectedTicker = selectedTickerRef.current && presetTickers.includes(selectedTickerRef.current) ? selectedTickerRef.current : presetTickers[0] ?? null;
+      setWatchlistError(null);
+      void load(false, 'manual', presetTickers, {
+        tickers: presetTickers,
+        presetId,
+        selectedTicker: nextSelectedTicker,
+      });
+    };
+
+    if (presetId !== 'vn30') {
+      const presetTickers = getDashboardPresetTickers(presetId);
+      if (!presetTickers) {
+        setWatchlistError('Preset list is unavailable.');
+        return;
+      }
+      applyPreset(presetTickers);
       return;
     }
-    const nextSelectedTicker = selectedTickerRef.current && presetTickers.includes(selectedTickerRef.current) ? selectedTickerRef.current : presetTickers[0] ?? null;
-    setWatchlistError(null);
-    void load(false, 'manual', presetTickers, {
-      tickers: presetTickers,
-      presetId,
-      selectedTicker: nextSelectedTicker,
-    });
-  }, [indexComponents, load]);
 
-  const applyCustomTickers = useCallback((tickers: string[], successNotice = 'Saved locally in this browser.') => {
+    if (availableVn30Tickers) {
+      applyPreset(availableVn30Tickers);
+      return;
+    }
+
+    setWatchlistError(null);
+    void loadVn30Components().then((response) => {
+      if (intentId !== filterIntentIdRef.current || unmountedRef.current) return;
+      const retryTickers = getVn30ComponentTickers(response);
+      if (!retryTickers) {
+        setWatchlistError('SSI VN30 components are unavailable. Current rows were kept; select VN30 to retry.');
+        return;
+      }
+      applyPreset(retryTickers);
+    });
+  }, [indexComponents, load, loadVn30Components]);
+
+  const applyCustomTickers = useCallback((tickers: string[], successNotice = 'Applied and saved locally in this browser.') => {
     if (pendingPresetIdRef.current) return;
-    const formattedInput = formatCustomWatchlistInput(tickers);
+    filterIntentIdRef.current += 1;
     const nextSelectedTicker = selectedTickerRef.current && tickers.includes(selectedTickerRef.current) ? selectedTickerRef.current : tickers[0] ?? null;
     void load(false, 'manual', tickers, {
       tickers,
       presetId: 'custom',
       selectedTicker: nextSelectedTicker,
       customWatchlist: tickers,
-      customWatchlistInput: formattedInput,
       customNotice: successNotice,
     });
   }, [load]);
@@ -4649,47 +4706,30 @@ const VietnamDashboardPage: React.FC = () => {
 
   const handleApplyCustom = useCallback(() => {
     if (pendingPresetIdRef.current) return;
-    const result = parseCustomWatchlistInput(customWatchlistInput);
-    if (result.error) {
-      setWatchlistError(result.error);
+    if (!customPickerTickers.length) {
+      setWatchlistError('Select at least one ticker before applying.');
       setCustomNotice(null);
       return;
     }
-    setCustomWatchlistInput(formatCustomWatchlistInput(result.tickers));
     setWatchlistError(null);
-    setCustomNotice(result.messages.length ? result.messages.join(' ') : null);
-    applyCustomTickers(result.tickers, result.messages.length ? result.messages.join(' ') : 'Saved locally in this browser.');
-  }, [applyCustomTickers, customWatchlistInput]);
-
-  const handleSaveCustom = useCallback(() => {
-    const result = parseCustomWatchlistInput(customWatchlistInput);
-    if (result.error) {
-      setWatchlistError(result.error);
-      setCustomNotice(null);
-      return;
-    }
-    setCustomWatchlist(result.tickers);
-    setCustomWatchlistInput(formatCustomWatchlistInput(result.tickers));
-    setWatchlistError(null);
-    const saved = writeCustomWatchlist(result.tickers);
-    const status = saved ? 'Saved locally in this browser.' : 'Saved for this session only.';
-    setCustomNotice([...result.messages, status].join(' '));
-  }, [customWatchlistInput]);
+    applyCustomTickers(customPickerTickers);
+  }, [applyCustomTickers, customPickerTickers]);
 
   const handleClearCustom = useCallback(() => {
+    if (pendingPresetIdRef.current) return;
+    filterIntentIdRef.current += 1;
     clearCustomWatchlist();
     setCustomWatchlist([]);
-    setCustomWatchlistInput('');
+    setCustomPickerTickers([]);
+    setCustomTickerQuery('');
     setWatchlistError(null);
     setCustomNotice(null);
-    if (activePresetId === 'custom') {
-      setActivePresetId('my');
-    }
-  }, [activePresetId]);
+  }, []);
 
   const handleResetWatchlist = useCallback(() => {
     if (pendingPresetIdRef.current) return;
     if (activePresetIdRef.current === 'my') return;
+    filterIntentIdRef.current += 1;
     const nextSelectedTicker = selectedTickerRef.current && DEFAULT_WATCHLIST.includes(selectedTickerRef.current) ? selectedTickerRef.current : DEFAULT_WATCHLIST[0] ?? null;
     void load(false, 'manual', DEFAULT_WATCHLIST, {
       tickers: DEFAULT_WATCHLIST,
@@ -4891,6 +4931,44 @@ const VietnamDashboardPage: React.FC = () => {
   const isWatchlistFilterBusy = pendingPresetId !== null;
   const vn30ComponentTickers = useMemo(() => getVn30ComponentTickers(indexComponents), [indexComponents]);
   const vn30ComponentsReady = Boolean(vn30ComponentTickers?.length);
+  const vn30ComponentsUnavailable = Boolean(indexComponents && !vn30ComponentsReady && !vn30ComponentsLoading);
+  const customTickerOptions = useMemo(() => {
+    const options = new Map<string, CustomTickerOption>();
+    const addOption = (
+      rawTicker: string | null | undefined,
+      name: string | null | undefined,
+      source: CustomTickerOption['source'],
+    ) => {
+      const ticker = normalizeVietnamTicker(rawTicker ?? '');
+      if (!/^[A-Z0-9]{2,10}$/.test(ticker)) return;
+      const existing = options.get(ticker);
+      if (existing) {
+        if (!existing.name && name) options.set(ticker, { ...existing, name });
+        return;
+      }
+      options.set(ticker, { ticker, name: name ?? null, source });
+    };
+
+    indexComponents?.rows.forEach((row) => addOption(row.symbol, row.name, 'SSI IndexComponents'));
+    data?.watchlist.forEach((item) => addOption(item.ticker, companyDisplayName(item), 'Current watchlist'));
+    customWatchlist.forEach((ticker) => addOption(ticker, null, 'Saved custom'));
+    customPickerTickers.forEach((ticker) => addOption(ticker, null, 'Saved custom'));
+    return Array.from(options.values()).sort((left, right) => left.ticker.localeCompare(right.ticker));
+  }, [customPickerTickers, customWatchlist, data, indexComponents]);
+  const normalizedCustomTickerQuery = normalizeVietnamTicker(customTickerQuery);
+  const visibleCustomTickerOptions = useMemo(() => {
+    const query = customTickerQuery.trim().toLowerCase();
+    const available = customTickerOptions.filter((option) => !customPickerTickers.includes(option.ticker));
+    if (!query) return available.slice(0, 20);
+    return available
+      .filter((option) => option.ticker.toLowerCase().includes(query) || option.name?.toLowerCase().includes(query))
+      .slice(0, 20);
+  }, [customPickerTickers, customTickerOptions, customTickerQuery]);
+  const exactCustomTickerCandidate = /^[A-Z0-9]{2,10}$/.test(normalizedCustomTickerQuery)
+    && !customTickerOptions.some((option) => option.ticker === normalizedCustomTickerQuery)
+    && !customPickerTickers.includes(normalizedCustomTickerQuery)
+    ? normalizedCustomTickerQuery
+    : null;
 
   return (
     <AppPage className="space-y-5">
@@ -5134,13 +5212,15 @@ const VietnamDashboardPage: React.FC = () => {
             </button>
             {VIETNAM_DASHBOARD_PRESETS.map((preset) => {
               const isActive = activePresetId === preset.id;
-              const isPending = pendingPresetId === preset.id;
-              const isVn30Unavailable = preset.id === 'vn30' && !vn30ComponentsReady;
-              const disabled = isWatchlistFilterBusy || isVn30Unavailable;
+              const isVn30 = preset.id === 'vn30';
+              const isPending = pendingPresetId === preset.id || (isVn30 && vn30ComponentsLoading);
+              const disabled = isWatchlistFilterBusy || (isVn30 && vn30ComponentsLoading);
               const buttonTitle = preset.id === 'vn30'
                 ? vn30ComponentsReady
                   ? `Uses ${vn30ComponentTickers?.length ?? 0} SSI IndexComponents rows.`
-                  : 'VN30 requires SSI IndexComponents rows before this filter can be applied.'
+                  : vn30ComponentsLoading
+                    ? 'Loading SSI VN30 components.'
+                    : 'SSI VN30 components are unavailable or not loaded. Select to retry; current rows stay visible.'
                 : undefined;
               return (
                 <button
@@ -5161,7 +5241,7 @@ const VietnamDashboardPage: React.FC = () => {
                   )}
                 >
                   {isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : null}
-                  {preset.label}
+                  {isVn30 && vn30ComponentsLoading ? 'Loading VN30...' : isVn30 && vn30ComponentsUnavailable ? 'Retry VN30' : preset.label}
                 </button>
               );
             })}
@@ -5173,32 +5253,110 @@ const VietnamDashboardPage: React.FC = () => {
             <p className="mt-1 text-xs text-cyan" role="status">
               Loading {pendingPresetId === 'custom' ? 'custom watchlist' : pendingPresetId?.toUpperCase()} filter; previous rows stay visible.
             </p>
+          ) : vn30ComponentsLoading ? (
+            <p className="mt-1 text-xs text-cyan" role="status">
+              Loading SSI VN30 components; current rows stay visible.
+            </p>
+          ) : vn30ComponentsUnavailable ? (
+            <p className="mt-1 text-xs text-warning">
+              SSI VN30 components are unavailable. Select Retry VN30 to try again; current rows stay visible.
+            </p>
           ) : null}
         </div>
         <div className="mt-4 rounded-lg border border-border/60 bg-elevated/30 p-3">
-          <label className="flex flex-col text-sm font-medium text-foreground">
-            Custom watchlist
-            <textarea
-              value={customWatchlistInput}
-              onChange={(event) => {
-                setCustomWatchlistInput(event.target.value);
-                if (watchlistError) setWatchlistError(null);
-              }}
-              placeholder="FPT, VPB, ACB"
-              rows={3}
-              className="mt-2 min-h-20 rounded-lg border border-border/70 bg-card px-3 py-2 text-sm font-normal uppercase text-foreground outline-none transition-colors placeholder:text-muted focus:border-cyan/50 focus:ring-2 focus:ring-cyan/15"
-            />
-          </label>
-          <p className="mt-2 text-xs text-secondary-text">Saved locally in this browser.</p>
+          <div className="flex flex-col gap-1">
+            <label htmlFor="custom-ticker-search" className="text-sm font-medium text-foreground">Custom watchlist picker</label>
+            <div className="relative mt-1">
+              <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted" aria-hidden="true" />
+              <input
+                id="custom-ticker-search"
+                type="search"
+                value={customTickerQuery}
+                onChange={(event) => {
+                  setCustomTickerQuery(event.target.value);
+                  if (watchlistError) setWatchlistError(null);
+                }}
+                placeholder="Search ticker..."
+                disabled={isWatchlistFilterBusy}
+                className="h-10 w-full rounded-lg border border-border/70 bg-card pl-9 pr-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted focus:border-cyan/50 focus:ring-2 focus:ring-cyan/15 disabled:cursor-not-allowed disabled:opacity-60"
+              />
+            </div>
+          </div>
+          <div className="mt-3 flex min-h-10 flex-wrap gap-2" aria-label="Selected custom tickers">
+            {customPickerTickers.length ? customPickerTickers.map((ticker) => (
+              <span key={ticker} className="inline-flex h-9 items-center gap-1 rounded-full border border-cyan/30 bg-cyan/10 pl-3 pr-1.5 text-sm font-medium text-foreground">
+                {ticker}
+                <button
+                  type="button"
+                  aria-label={`Remove ${ticker}`}
+                  disabled={isWatchlistFilterBusy}
+                  onClick={() => setCustomPickerTickers((current) => current.filter((item) => item !== ticker))}
+                  className="rounded-full p-1 text-secondary-text hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan/25 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <X className="h-3.5 w-3.5" aria-hidden="true" />
+                </button>
+              </span>
+            )) : (
+              <span className="self-center text-xs text-secondary-text">No custom tickers selected.</span>
+            )}
+          </div>
+          <div className="mt-3 max-h-56 overflow-y-auto rounded-lg border border-border/60 bg-card/60 p-1" role="listbox" aria-label="Ticker options" aria-multiselectable="true">
+            {visibleCustomTickerOptions.map((option) => (
+              <button
+                key={option.ticker}
+                type="button"
+                role="option"
+                aria-selected="false"
+                disabled={isWatchlistFilterBusy}
+                onClick={() => {
+                  setCustomPickerTickers((current) => current.includes(option.ticker)
+                    ? current
+                    : [...current, option.ticker].slice(0, VIETNAM_WATCHLIST_MAX_SIZE));
+                  setCustomTickerQuery('');
+                  setWatchlistError(null);
+                }}
+                className="flex w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-sm hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan/25 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <span>
+                  <span className="font-medium text-foreground">{option.ticker}</span>
+                  {option.name ? <span className="ml-2 text-secondary-text">— {option.name}</span> : null}
+                </span>
+                <span className="shrink-0 text-[11px] text-muted">{option.source}</span>
+              </button>
+            ))}
+            {exactCustomTickerCandidate ? (
+              <button
+                type="button"
+                role="option"
+                aria-selected="false"
+                disabled={isWatchlistFilterBusy}
+                onClick={() => {
+                  setCustomPickerTickers((current) => [...current, exactCustomTickerCandidate].slice(0, VIETNAM_WATCHLIST_MAX_SIZE));
+                  setCustomTickerQuery('');
+                  setWatchlistError(null);
+                }}
+                className="flex w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-sm hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan/25 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <span className="font-medium text-foreground">Add {exactCustomTickerCandidate}</span>
+                <span className="text-[11px] text-warning">Validate on apply</span>
+              </button>
+            ) : null}
+            {!visibleCustomTickerOptions.length && !exactCustomTickerCandidate ? (
+              <p className="px-3 py-3 text-xs text-secondary-text">
+                No loaded ticker match. Type an exact 2–10 character symbol to validate on apply.
+              </p>
+            ) : null}
+          </div>
+          <p className="mt-2 text-xs text-secondary-text">
+            Options come from loaded SSI VN30 components, current rows, and saved custom symbols. Exact new symbols are validated by the watchlist response.
+          </p>
           <div className="mt-3 flex flex-wrap gap-2">
-            <Button type="button" variant="secondary" size="sm" onClick={handleApplyCustom} disabled={isWatchlistFilterBusy}>
-              Apply custom
+            <Button type="button" variant="secondary" size="sm" onClick={handleApplyCustom} disabled={isWatchlistFilterBusy || !customPickerTickers.length}>
+              {pendingPresetId === 'custom' ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : null}
+              Apply custom watchlist
             </Button>
-            <Button type="button" variant="outline" size="sm" onClick={handleSaveCustom}>
-              Save custom
-            </Button>
-            <Button type="button" variant="ghost" size="sm" onClick={handleClearCustom}>
-              Clear custom
+            <Button type="button" variant="ghost" size="sm" onClick={handleClearCustom} disabled={isWatchlistFilterBusy || (!customPickerTickers.length && !customTickerQuery)}>
+              Clear
             </Button>
           </div>
           {watchlistError ? (
@@ -5224,7 +5382,7 @@ const VietnamDashboardPage: React.FC = () => {
           ))}
         </div>
         <p className="mt-3 text-xs text-secondary-text">
-          Custom symbols use uppercase letters and numbers, 2 to 10 characters. Separators: comma, whitespace, semicolon, or newline.
+          Custom symbols use uppercase letters and numbers, 2 to 10 characters, with a maximum of {VIETNAM_WATCHLIST_MAX_SIZE} tickers.
         </p>
       </section>
 
