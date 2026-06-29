@@ -61,6 +61,7 @@ Response sections:
 - News status/list.
 - Source/cache/diagnostics metadata.
 - data_quality_summary with canonical price source, checks, and user-safe issues.
+- Additive request-completeness counters: `requested_tickers_count`, `returned_rows_count`, and `missing_tickers`.
 
 Source ownership:
 
@@ -89,6 +90,7 @@ Implemented contract notes:
 - `daily_stock_price` exposes `status`, `quality_status`, `source=SSI DailyStockPrice`, `date`, `date_match`, `staleness_reason`, normalized enrichment fields, `missing_fields`, value-specific `units`, and sanitized diagnostics.
 - `indicators.foreign_net_5d_latest_available`, `indicators.foreign_net_20d_latest_available`, `indicators.foreign_net_latest_available_date`, and `indicators.foreign_net_history_count` are populated from the same bounded per-symbol DailyStockPrice recent window when enough returned `foreign_net_volume` rows exist.
 - Top-level compatibility fields are `daily_stock_price_date`, `daily_stock_price_date_match`, and `daily_stock_price_staleness_reason`. A mismatch never changes `latest_price` or the daily row status.
+- Row-level partial-data issue codes can include `daily_ohlcv_missing`, `daily_stock_price_missing`, `ta_insufficient_history`, `rsi_missing`, `ma_state_insufficient_data`, `foreign_flow_missing`, `provider_empty`, and `provider_error`. They explain missing display cells without synthesizing values or changing `latest_price`.
 
 Future changes:
 

@@ -853,6 +853,22 @@ def build_vietnam_data_quality_summary(row: Dict[str, Any]) -> Dict[str, Any]:
         or "unknown"
     )
     daily_stock_price_missing_fields = list(daily_stock_price.get("missing_fields") or [])
+    indicators = row.get("indicators") if isinstance(row.get("indicators"), dict) else {}
+    rows_loaded_raw = row.get("rows_loaded")
+    try:
+        rows_loaded = int(rows_loaded_raw or 0)
+    except (TypeError, ValueError):
+        rows_loaded = 0
+    rsi14_value = _safe_float(
+        indicators.get("rsi14_wilder")
+        if indicators.get("rsi14_wilder") is not None
+        else indicators.get("rsi14")
+    )
+    ma20_value = _safe_float(indicators.get("ma20"))
+    foreign_block = row.get("foreign") if isinstance(row.get("foreign"), dict) else {}
+    foreign_net_value = _safe_float(row.get("ssi_foreign_net_volume"))
+    if foreign_net_value is None:
+        foreign_net_value = _safe_float(foreign_block.get("net"))
     date_match = str(row.get("date_match") or "")
     intraday_reason_code = str(
         intraday_block.get("reason_code")
@@ -921,6 +937,14 @@ def build_vietnam_data_quality_summary(row: Dict[str, Any]) -> Dict[str, Any]:
                 "fields": {},
             }
         )
+        issues.append(
+            {
+                "code": "daily_ohlcv_missing",
+                "severity": "warning",
+                "message": "SSI DailyOhlc required daily OHLCV fields are missing.",
+                "fields": {"rows_loaded": rows_loaded},
+            }
+        )
     if daily_date and daily_stock_date and daily_date == daily_stock_date and daily_close is not None and daily_stock_close is not None and daily_close != daily_stock_close:
         issues.append(
             {
@@ -957,6 +981,54 @@ def build_vietnam_data_quality_summary(row: Dict[str, Any]) -> Dict[str, Any]:
                 "severity": "info",
                 "message": "SSI DailyStockPrice enrichment is partial.",
                 "fields": {"missing_fields": daily_stock_price_missing_fields},
+            }
+        )
+    elif daily_stock_price_check == "unavailable":
+        issues.append(
+            {
+                "code": "daily_stock_price_missing",
+                "severity": "info",
+                "message": "SSI DailyStockPrice enrichment is unavailable.",
+                "fields": {"status": daily_stock_price_status},
+            }
+        )
+    if daily_ohlc_check == "ok" and rsi14_value is None:
+        issues.append(
+            {
+                "code": "rsi_missing",
+                "severity": "info",
+                "message": "RSI14 requires at least 15 close prices.",
+                "fields": {"rows_loaded": rows_loaded, "required_min_rows": 15},
+            }
+        )
+    if daily_ohlc_check == "ok" and (daily_close is None or ma20_value is None):
+        issues.append(
+            {
+                "code": "ma_state_insufficient_data",
+                "severity": "info",
+                "message": "MA state requires a daily close and at least 20 close prices.",
+                "fields": {"rows_loaded": rows_loaded, "required_min_rows": 20},
+            }
+        )
+    if daily_ohlc_check == "ok" and rows_loaded and rows_loaded < 20:
+        issues.append(
+            {
+                "code": "ta_insufficient_history",
+                "severity": "info",
+                "message": "Technical indicators are limited because the DailyOhlc history is short.",
+                "fields": {"rows_loaded": rows_loaded, "required_min_rows": 20},
+            }
+        )
+    if daily_ohlc_check == "ok" and foreign_net_value is None:
+        issues.append(
+            {
+                "code": "foreign_flow_missing",
+                "severity": "info",
+                "message": "Foreign-flow value is unavailable from SSI DailyStockPrice.",
+                "fields": {
+                    "daily_stock_price_status": daily_stock_price_status,
+                    "daily_stock_price_source": SSI_DAILY_STOCK_PRICE_SOURCE,
+                },
             }
         )
     if final_close_status == "unknown":
@@ -3549,9 +3621,52 @@ class VietnamMarketService:
                         "cache_last_fetched_at": self._disabled_cache_times(),
                         "cache_next_refresh_at": self._disabled_cache_times(),
                         "cache_errors": {},
+                        "data_quality_summary": {
+                            "overall_status": "unavailable",
+                            "canonical_price_source": "SSI DailyOhlc",
+                            "issues": [
+                                {
+                                    "code": "daily_ohlcv_missing",
+                                    "severity": "warning",
+                                    "message": "SSI DailyOhlc required daily OHLCV fields are missing.",
+                                    "fields": {"rows_loaded": 0},
+                                },
+                                {
+                                    "code": "provider_error",
+                                    "severity": "warning",
+                                    "message": "SSI provider path failed for this ticker.",
+                                    "fields": {},
+                                },
+                            ],
+                            "checks": {
+                                "daily_ohlc": "unavailable",
+                                "daily_stock_price": "unavailable",
+                                "final_close_status": "unknown",
+                                "adjusted_price_status": "unknown",
+                                "intraday": "disabled",
+                                "realtime": "disabled",
+                                "trade_tape": "disabled",
+                                "profile": "unavailable",
+                                "news": "disabled",
+                            },
+                        },
                     }
                 )
+        returned_tickers = [
+            vn_ticker(str(row.get("ticker") or "").strip().upper())
+            for row in rows
+            if isinstance(row, dict) and row.get("ticker")
+        ]
+        returned_ticker_set = {ticker for ticker in returned_tickers if ticker}
+        missing_tickers = [symbol for symbol in symbols if symbol not in returned_ticker_set]
         health = self._build_health(rows, fixture_mode, refresh_time)
+        health.update(
+            {
+                "requested_tickers_count": len(symbols),
+                "returned_rows_count": len(rows),
+                "missing_tickers": missing_tickers,
+            }
+        )
         cache_metadata = self._build_cache_metadata(rows)
         return {
             "market": "VN",
@@ -3559,6 +3674,9 @@ class VietnamMarketService:
             "fixture_mode": fixture_mode,
             "last_refresh_time": refresh_time,
             "units": VN_DASHBOARD_UNITS,
+            "requested_tickers_count": len(symbols),
+            "returned_rows_count": len(rows),
+            "missing_tickers": missing_tickers,
             "data_quality": health,
             "cache_metadata": cache_metadata,
             "watchlist": rows,
@@ -4622,6 +4740,18 @@ class VietnamMarketService:
                             "code": "daily_ohlc_unavailable",
                             "severity": "warning",
                             "message": "SSI DailyOhlc data is unavailable.",
+                            "fields": {},
+                        },
+                        {
+                            "code": "daily_ohlcv_missing",
+                            "severity": "warning",
+                            "message": "SSI DailyOhlc required daily OHLCV fields are missing.",
+                            "fields": {"rows_loaded": 0},
+                        },
+                        {
+                            "code": "provider_empty",
+                            "severity": "warning",
+                            "message": "Provider returned no usable DailyOhlc rows for this ticker.",
                             "fields": {},
                         }
                     ],

@@ -1,6 +1,6 @@
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, Banknote, DatabaseZap, Maximize2, RefreshCw, RotateCcw, ShieldAlert, X } from 'lucide-react';
+import { Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, Banknote, DatabaseZap, Loader2, Maximize2, RefreshCw, RotateCcw, ShieldAlert, X } from 'lucide-react';
 import {
   stocksApi,
   type VietnamChartPoint,
@@ -82,11 +82,11 @@ interface WatchlistCommitIntent {
 
 const WATCHLIST_SCAN_ORDER: WatchlistScanLabel[] = ['Strong', 'Improving', 'Neutral', 'Weakening', 'Risk elevated', 'Data unavailable'];
 const DATA_CAVEAT_LABELS = new Set(['Foreign data stale', 'Indicator caution', 'Price finality unknown', 'Adjusted price unknown']);
-const VIETNAM_DASHBOARD_PRESETS: Array<{ id: VietnamDashboardPresetId; label: string; tickers: string[] }> = [
+const VIETNAM_DASHBOARD_PRESETS: Array<{ id: VietnamDashboardPresetId; label: string; tickers?: string[]; source?: string }> = [
   {
     id: 'vn30',
     label: 'VN30',
-    tickers: ['ACB', 'BCM', 'BID', 'BVH', 'CTG', 'FPT', 'GAS', 'GVR', 'HDB', 'HPG', 'MBB', 'MSN', 'MWG', 'PLX', 'POW', 'SAB', 'SHB', 'SSB', 'SSI', 'STB', 'TCB', 'TPB', 'VCB', 'VHM', 'VIC', 'VJC', 'VNM', 'VPB', 'VRE'],
+    source: 'SSI IndexComponents',
   },
   {
     id: 'banks',
@@ -953,7 +953,17 @@ const sumSsiForeignNetVolume = (items: VietnamWatchItem[]) => (
 
 const getDashboardPresetTickers = (presetId: VietnamDashboardPresetId) => {
   const preset = VIETNAM_DASHBOARD_PRESETS.find((item) => item.id === presetId);
-  return preset ? normalizeVietnamWatchlist(preset.tickers) : null;
+  if (!preset?.tickers) return null;
+  return normalizeVietnamWatchlist(preset.tickers);
+};
+
+const getVn30ComponentTickers = (indexComponents?: VietnamIndexComponentsResponse | null) => {
+  if (indexComponents?.status !== 'ok' || !indexComponents.rows.length) return null;
+  return normalizeVietnamWatchlist(
+    indexComponents.rows
+      .map((row) => row.symbol)
+      .filter((symbol): symbol is string => Boolean(symbol)),
+  );
 };
 
 const formatCustomWatchlistInput = (tickers: string[]) => tickers.join(', ');
@@ -2245,11 +2255,63 @@ const dataQualityRank = (item: VietnamWatchItem) => {
   return 2;
 };
 
+const compactIssueText = (code?: string | null, fallback?: string | null) => {
+  switch (code) {
+    case 'daily_ohlcv_missing':
+    case 'daily_ohlc_unavailable':
+      return 'SSI DailyOhlc missing required daily fields.';
+    case 'daily_stock_price_missing':
+      return 'SSI DailyStockPrice unavailable.';
+    case 'daily_stock_price_partial':
+      return 'SSI DailyStockPrice partial.';
+    case 'ta_insufficient_history':
+      return 'DailyOhlc history is too short for some indicators.';
+    case 'rsi_missing':
+      return 'RSI14 requires at least 15 close prices.';
+    case 'ma_state_insufficient_data':
+      return 'MA state requires enough close-price history.';
+    case 'foreign_flow_missing':
+      return 'Foreign-flow value unavailable from SSI DailyStockPrice.';
+    case 'metadata_partial':
+    case 'profile_partial':
+      return 'Profile metadata partial.';
+    case 'realtime_ticker_not_bootstrapped':
+      return 'Realtime not bootstrapped for this ticker.';
+    case 'realtime_config_disabled':
+    case 'realtime_disabled':
+      return 'Realtime disabled.';
+    case 'realtime_cache_empty':
+      return 'Realtime cache miss.';
+    case 'realtime_running_idle':
+      return 'Realtime stream running idle.';
+    case 'realtime_cache_stale':
+      return 'Realtime cache stale.';
+    case 'intraday_unavailable_no_rows':
+    case 'intraday_unavailable':
+      return 'Intraday unavailable.';
+    case 'provider_empty':
+      return 'Provider returned no usable rows.';
+    case 'provider_error':
+      return 'Provider path failed.';
+    default:
+      return fallback && !LIVE_STATUS_DIAGNOSTIC_PATTERN.test(fallback) ? fallback : null;
+  }
+};
+
+const rowIssueSummary = (item: VietnamWatchItem, limit = 3) => {
+  const issues = item.dataQualitySummary?.issues ?? [];
+  const messages = issues
+    .map((issue) => compactIssueText(issue.code, issue.message))
+    .filter((message): message is string => Boolean(message));
+  return Array.from(new Set(messages)).slice(0, limit).join(' ');
+};
+
 const dataQualityBadge = (item: VietnamWatchItem) => {
   const status = dataQualityStatus(item);
-  if (status === 'ready') return { label: 'OK', variant: 'success' as BadgeVariant };
-  if (status === 'partial') return { label: 'Partial', variant: 'warning' as BadgeVariant };
-  return { label: 'Unavailable', variant: 'danger' as BadgeVariant };
+  const reason = rowIssueSummary(item) || 'No row-level data-quality issue reported.';
+  if (status === 'ready') return { label: 'OK', variant: 'success' as BadgeVariant, title: reason };
+  if (status === 'partial') return { label: 'Partial', variant: 'warning' as BadgeVariant, title: reason };
+  return { label: 'Unavailable', variant: 'danger' as BadgeVariant, title: reason };
 };
 
 const maStateBadge = (item: VietnamWatchItem) => {
@@ -2257,23 +2319,42 @@ const maStateBadge = (item: VietnamWatchItem) => {
   const ma20 = finiteNumber(item.indicators.ma20);
   const ma50 = finiteNumber(item.indicators.ma50);
   if (close === null || ma20 === null) {
-    return { label: 'Insufficient data', variant: 'default' as BadgeVariant };
+    return { label: 'Insufficient data', variant: 'default' as BadgeVariant, title: 'MA state requires a daily close and at least 20 close prices.' };
   }
   if (ma50 !== null && ((close >= ma20 && close < ma50) || (close < ma20 && close >= ma50))) {
-    return { label: 'Mixed', variant: 'info' as BadgeVariant };
+    return { label: 'Mixed', variant: 'info' as BadgeVariant, title: 'Daily close is between MA20 and MA50.' };
   }
-  if (close >= ma20) return { label: 'Above MA20', variant: 'success' as BadgeVariant };
-  return { label: 'Below MA20', variant: 'warning' as BadgeVariant };
+  if (close >= ma20) return { label: 'Above MA20', variant: 'success' as BadgeVariant, title: 'Daily close is above MA20.' };
+  return { label: 'Below MA20', variant: 'warning' as BadgeVariant, title: 'Daily close is below MA20.' };
 };
 
 const liveStatusBadge = (item: VietnamWatchItem, quote: VietnamRealtimeQuote | undefined, marketPhase: VietnamMarketPhase) => {
   const status = quote?.status ?? item.realtimeStatus?.status ?? item.dataQualitySummary?.checks?.realtime;
+  const reasonCode = item.realtimeStatus?.reasonCode ?? item.realtimeStatus?.classification;
+  const reasonTitle = realtimeUnavailableStatusText(item.realtimeStatus);
   const state = realtimeSnapshotState(quote, marketPhase.code);
-  if (status === 'disabled') return { label: 'Realtime disabled', variant: 'default' as BadgeVariant };
+  if (status === 'disabled' || reasonCode === 'config_disabled') return { label: 'Realtime disabled', variant: 'default' as BadgeVariant, title: reasonTitle };
   if (hasRealtimeSnapshotData(quote) && state.severity !== 'warning' && state.severity !== 'error') {
-    return { label: 'Realtime ok', variant: 'success' as BadgeVariant };
+    return { label: 'Realtime ok', variant: 'success' as BadgeVariant, title: 'SSI realtime snapshot is available for this row.' };
   }
-  return { label: 'Realtime unavailable', variant: 'warning' as BadgeVariant };
+  if (reasonCode === 'ticker_not_bootstrapped') return { label: 'Not bootstrapped', variant: 'warning' as BadgeVariant, title: reasonTitle };
+  if (reasonCode === 'cache_empty') return { label: 'Realtime cache miss', variant: 'warning' as BadgeVariant, title: reasonTitle };
+  if (reasonCode === 'running_idle') return { label: 'Realtime idle', variant: 'warning' as BadgeVariant, title: reasonTitle };
+  if (reasonCode === 'cache_stale') return { label: 'Realtime stale', variant: 'warning' as BadgeVariant, title: reasonTitle };
+  return { label: 'Realtime unavailable', variant: 'warning' as BadgeVariant, title: reasonTitle };
+};
+
+const missingValue = (reason: string) => (
+  <span title={reason} aria-label={reason} className="text-secondary-text">—</span>
+);
+
+const missingCellReason = (item: VietnamWatchItem, field: 'dailyClose' | 'changePct' | 'rsi14' | 'volumeRatio' | 'foreignNetVolume') => {
+  if (!hasOfficialDailyData(item)) return 'SSI DailyOhlc missing required daily fields.';
+  if (field === 'rsi14') return compactIssueText('rsi_missing') ?? 'RSI14 unavailable.';
+  if (field === 'volumeRatio') return compactIssueText('ta_insufficient_history') ?? 'Volume ratio unavailable.';
+  if (field === 'foreignNetVolume') return compactIssueText('foreign_flow_missing') ?? 'Foreign-flow value unavailable.';
+  if (field === 'changePct') return 'Change percent unavailable from DailyOhlc fields.';
+  return rowIssueSummary(item) || 'Value unavailable from provider data.';
 };
 
 const liveStatusFilterValue = (
@@ -2609,29 +2690,39 @@ const IndicatorTable: React.FC<{
                       <div className="mt-1 text-xs font-normal text-secondary-text">{companyDisplayName(item)}</div>
                     ) : null}
                   </td>
-                  <td className="px-3 py-3 text-right">
-                    <div className="font-medium text-foreground">{formatPrice(close)}</div>
-                    <div className="mt-1 text-xs text-secondary-text">SSI DailyOhlc</div>
+                  <td className="px-3 py-3 text-right tabular-nums">
+                    <div className="font-medium text-foreground">
+                      {close === null ? missingValue(missingCellReason(item, 'dailyClose')) : formatPrice(close)}
+                    </div>
+                    <div className="mt-1 text-xs text-secondary-text">{close === null ? 'SSI DailyOhlc unavailable' : 'SSI DailyOhlc'}</div>
                   </td>
-                  <td className={cn('px-3 py-3 text-right font-medium', signalTone(item.changePct))}>
-                    {hasDisplayValue(item.changePct) ? `${formatSignedNumber(item.changePct, 2)}%` : '-'}
+                  <td className={cn('px-3 py-3 text-right font-medium tabular-nums', signalTone(item.changePct))}>
+                    {hasDisplayValue(item.changePct) ? `${formatSignedNumber(item.changePct, 2)}%` : missingValue(missingCellReason(item, 'changePct'))}
                   </td>
-                  <td className="px-3 py-3 text-right">{formatNumber(rsi14Value(item), 2)}</td>
-                  <td className="px-3 py-3">
-                    <Badge variant={maState.variant}>{maState.label}</Badge>
-                  </td>
-                  <td className="px-3 py-3 text-right">
-                    {volumeRatio === null ? '-' : `${formatNumber(volumeRatio, 2)}x`}
-                  </td>
-                  <td className={cn('px-3 py-3 text-right font-medium', signalTone(foreignNetVolume))}>
-                    <div>{hasDisplayValue(foreignNetVolume) ? formatSignedNumber(foreignNetVolume, 0) : '-'}</div>
-                    <div className="mt-1 text-xs font-normal text-secondary-text">SSI DailyStockPrice</div>
+                  <td className="px-3 py-3 text-right tabular-nums">
+                    {rsi14Value(item) === null ? missingValue(missingCellReason(item, 'rsi14')) : formatNumber(rsi14Value(item), 2)}
                   </td>
                   <td className="px-3 py-3">
-                    <Badge variant={dataQuality.variant}>{dataQuality.label}</Badge>
+                    <Badge variant={maState.variant} title={maState.title} aria-label={`MA state: ${maState.label}. ${maState.title}`}>
+                      {maState.label}
+                    </Badge>
+                  </td>
+                  <td className="px-3 py-3 text-right tabular-nums">
+                    {volumeRatio === null ? missingValue(missingCellReason(item, 'volumeRatio')) : `${formatNumber(volumeRatio, 2)}x`}
+                  </td>
+                  <td className={cn('px-3 py-3 text-right font-medium tabular-nums', signalTone(foreignNetVolume))}>
+                    <div>{hasDisplayValue(foreignNetVolume) ? formatSignedNumber(foreignNetVolume, 0) : missingValue(missingCellReason(item, 'foreignNetVolume'))}</div>
+                    <div className="mt-1 text-xs font-normal text-secondary-text">{hasDisplayValue(foreignNetVolume) ? 'SSI DailyStockPrice' : 'DailyStockPrice unavailable'}</div>
                   </td>
                   <td className="px-3 py-3">
-                    <Badge variant={liveStatus.variant}>{liveStatus.label}</Badge>
+                    <Badge variant={dataQuality.variant} title={dataQuality.title} aria-label={`Data quality: ${dataQuality.label}. ${dataQuality.title}`}>
+                      {dataQuality.label}
+                    </Badge>
+                  </td>
+                  <td className="px-3 py-3">
+                    <Badge variant={liveStatus.variant} title={liveStatus.title} aria-label={`Realtime status: ${liveStatus.label}. ${liveStatus.title}`}>
+                      {liveStatus.label}
+                    </Badge>
                   </td>
                 </tr>
               );
@@ -4145,6 +4236,7 @@ const VietnamDashboardPage: React.FC = () => {
   const initialCustomWatchlist = useMemo(() => readCustomWatchlist(), []);
   const [watchlist, setWatchlist] = useState<string[]>(DEFAULT_WATCHLIST);
   const [activePresetId, setActivePresetId] = useState<VietnamDashboardActivePresetId>('my');
+  const [pendingPresetId, setPendingPresetId] = useState<VietnamDashboardActivePresetId | null>(null);
   const [customWatchlistInput, setCustomWatchlistInput] = useState(() => formatCustomWatchlistInput(initialCustomWatchlist));
   const [customWatchlist, setCustomWatchlist] = useState<string[]>(initialCustomWatchlist);
   const [watchlistError, setWatchlistError] = useState<string | null>(null);
@@ -4200,6 +4292,10 @@ const VietnamDashboardPage: React.FC = () => {
   const logicalWatchlistKey = useMemo(() => logicalWatchlist.join(','), [logicalWatchlist]);
   const logicalWatchlistRef = useRef(logicalWatchlist);
   logicalWatchlistRef.current = logicalWatchlist;
+  const activePresetIdRef = useRef(activePresetId);
+  activePresetIdRef.current = activePresetId;
+  const pendingPresetIdRef = useRef<VietnamDashboardActivePresetId | null>(pendingPresetId);
+  pendingPresetIdRef.current = pendingPresetId;
   const selectedTickerRef = useRef(selectedTicker);
   selectedTickerRef.current = selectedTicker;
   const requestIdRef = useRef(0);
@@ -4450,6 +4546,13 @@ const VietnamDashboardPage: React.FC = () => {
   ) => {
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
+    if (commitIntent) {
+      pendingPresetIdRef.current = commitIntent.presetId;
+      setPendingPresetId(commitIntent.presetId);
+    } else if (pendingPresetIdRef.current) {
+      pendingPresetIdRef.current = null;
+      setPendingPresetId(null);
+    }
     setLoading(true);
     setForceLoading(forceRefresh);
     setError(null);
@@ -4487,14 +4590,26 @@ const VietnamDashboardPage: React.FC = () => {
       if (requestId === requestIdRef.current) {
         setLoading(false);
         setForceLoading(false);
+        if (commitIntent) {
+          pendingPresetIdRef.current = null;
+          setPendingPresetId(null);
+        }
       }
     }
   }, [loadObservability, refreshRealtimeSnapshots]);
 
   const handlePresetSelect = useCallback((presetId: VietnamDashboardPresetId) => {
-    const presetTickers = getDashboardPresetTickers(presetId);
+    if (pendingPresetIdRef.current) return;
+    if (activePresetIdRef.current === presetId) return;
+    const presetTickers = presetId === 'vn30'
+      ? getVn30ComponentTickers(indexComponents)
+      : getDashboardPresetTickers(presetId);
     if (!presetTickers) {
-      setWatchlistError('Preset list is unavailable.');
+      setWatchlistError(
+        presetId === 'vn30'
+          ? 'VN30 components are unavailable from SSI IndexComponents; keeping the current watchlist.'
+          : 'Preset list is unavailable.',
+      );
       return;
     }
     const nextSelectedTicker = selectedTickerRef.current && presetTickers.includes(selectedTickerRef.current) ? selectedTickerRef.current : presetTickers[0] ?? null;
@@ -4504,9 +4619,10 @@ const VietnamDashboardPage: React.FC = () => {
       presetId,
       selectedTicker: nextSelectedTicker,
     });
-  }, [load]);
+  }, [indexComponents, load]);
 
   const applyCustomTickers = useCallback((tickers: string[], successNotice = 'Saved locally in this browser.') => {
+    if (pendingPresetIdRef.current) return;
     const formattedInput = formatCustomWatchlistInput(tickers);
     const nextSelectedTicker = selectedTickerRef.current && tickers.includes(selectedTickerRef.current) ? selectedTickerRef.current : tickers[0] ?? null;
     void load(false, 'manual', tickers, {
@@ -4520,6 +4636,8 @@ const VietnamDashboardPage: React.FC = () => {
   }, [load]);
 
   const handleCustomPresetSelect = useCallback(() => {
+    if (pendingPresetIdRef.current) return;
+    if (activePresetIdRef.current === 'custom') return;
     if (!customWatchlist.length) {
       setWatchlistError('Custom watchlist is empty.');
       setCustomNotice(null);
@@ -4530,6 +4648,7 @@ const VietnamDashboardPage: React.FC = () => {
   }, [applyCustomTickers, customWatchlist]);
 
   const handleApplyCustom = useCallback(() => {
+    if (pendingPresetIdRef.current) return;
     const result = parseCustomWatchlistInput(customWatchlistInput);
     if (result.error) {
       setWatchlistError(result.error);
@@ -4569,6 +4688,8 @@ const VietnamDashboardPage: React.FC = () => {
   }, [activePresetId]);
 
   const handleResetWatchlist = useCallback(() => {
+    if (pendingPresetIdRef.current) return;
+    if (activePresetIdRef.current === 'my') return;
     const nextSelectedTicker = selectedTickerRef.current && DEFAULT_WATCHLIST.includes(selectedTickerRef.current) ? selectedTickerRef.current : DEFAULT_WATCHLIST[0] ?? null;
     void load(false, 'manual', DEFAULT_WATCHLIST, {
       tickers: DEFAULT_WATCHLIST,
@@ -4767,6 +4888,9 @@ const VietnamDashboardPage: React.FC = () => {
   );
   const hasCommittedData = Boolean(data);
   const isUpdatingWatchlist = loading && hasCommittedData;
+  const isWatchlistFilterBusy = pendingPresetId !== null;
+  const vn30ComponentTickers = useMemo(() => getVn30ComponentTickers(indexComponents), [indexComponents]);
+  const vn30ComponentsReady = Boolean(vn30ComponentTickers?.length);
 
   return (
     <AppPage className="space-y-5">
@@ -4984,7 +5108,7 @@ const VietnamDashboardPage: React.FC = () => {
               Preset groups are scan buckets only.
             </p>
           </div>
-          <Button variant="ghost" size="sm" onClick={handleResetWatchlist}>
+          <Button variant="ghost" size="sm" onClick={handleResetWatchlist} disabled={isWatchlistFilterBusy}>
             <RotateCcw className="h-4 w-4" />
             Reset to default
           </Button>
@@ -4994,39 +5118,62 @@ const VietnamDashboardPage: React.FC = () => {
             <button
               type="button"
               aria-pressed={activePresetId === 'custom'}
+              aria-busy={pendingPresetId === 'custom' || undefined}
+              aria-disabled={isWatchlistFilterBusy || undefined}
+              disabled={isWatchlistFilterBusy}
               onClick={handleCustomPresetSelect}
               className={cn(
-                'h-9 rounded-lg border px-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan/25',
+                'inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan/25 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-60',
                 activePresetId === 'custom'
                   ? 'border-cyan/50 bg-cyan/15 text-cyan'
                   : 'border-border/70 bg-elevated text-secondary-text hover:bg-hover hover:text-foreground',
               )}
             >
+              {pendingPresetId === 'custom' ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : null}
               Custom
             </button>
             {VIETNAM_DASHBOARD_PRESETS.map((preset) => {
               const isActive = activePresetId === preset.id;
+              const isPending = pendingPresetId === preset.id;
+              const isVn30Unavailable = preset.id === 'vn30' && !vn30ComponentsReady;
+              const disabled = isWatchlistFilterBusy || isVn30Unavailable;
+              const buttonTitle = preset.id === 'vn30'
+                ? vn30ComponentsReady
+                  ? `Uses ${vn30ComponentTickers?.length ?? 0} SSI IndexComponents rows.`
+                  : 'VN30 requires SSI IndexComponents rows before this filter can be applied.'
+                : undefined;
               return (
                 <button
                   key={preset.id}
                   type="button"
                   aria-pressed={isActive}
+                  aria-busy={isPending || undefined}
+                  aria-disabled={disabled || undefined}
+                  disabled={disabled}
+                  title={buttonTitle}
                   onClick={() => handlePresetSelect(preset.id)}
                   className={cn(
-                    'h-9 rounded-lg border px-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan/25',
+                    'inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan/25 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-60',
                     isActive
                       ? 'border-cyan/50 bg-cyan/15 text-cyan'
                       : 'border-border/70 bg-elevated text-secondary-text hover:bg-hover hover:text-foreground',
+                    isPending && 'border-cyan/60 bg-cyan/20 text-cyan shadow-sm shadow-cyan/10',
                   )}
                 >
+                  {isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : null}
                   {preset.label}
                 </button>
               );
             })}
           </div>
           <p className="mt-2 text-xs text-secondary-text">
-            Selecting a preset replaces the active list and refreshes normally through the cached watchlist endpoint.
+            VN30 uses SSI IndexComponents when available. Other preset groups are local scan buckets.
           </p>
+          {isWatchlistFilterBusy ? (
+            <p className="mt-1 text-xs text-cyan" role="status">
+              Loading {pendingPresetId === 'custom' ? 'custom watchlist' : pendingPresetId?.toUpperCase()} filter; previous rows stay visible.
+            </p>
+          ) : null}
         </div>
         <div className="mt-4 rounded-lg border border-border/60 bg-elevated/30 p-3">
           <label className="flex flex-col text-sm font-medium text-foreground">
@@ -5044,7 +5191,7 @@ const VietnamDashboardPage: React.FC = () => {
           </label>
           <p className="mt-2 text-xs text-secondary-text">Saved locally in this browser.</p>
           <div className="mt-3 flex flex-wrap gap-2">
-            <Button type="button" variant="secondary" size="sm" onClick={handleApplyCustom}>
+            <Button type="button" variant="secondary" size="sm" onClick={handleApplyCustom} disabled={isWatchlistFilterBusy}>
               Apply custom
             </Button>
             <Button type="button" variant="outline" size="sm" onClick={handleSaveCustom}>

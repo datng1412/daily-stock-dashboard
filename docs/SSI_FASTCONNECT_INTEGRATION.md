@@ -516,6 +516,7 @@ Strict index metadata behavior:
 * `/api/v1/stocks/vn/index-list` exposes SSI IndexList rows with `source=SSI IndexList`, field coverage, sanitized diagnostics, and `fallback_used=false`.
 * `/api/v1/stocks/vn/index-components?index_code=...` exposes SSI IndexComponents rows when SSI returns them, or a clean unavailable state when SSI returns no meaningful component rows.
 * The web dashboard calls IndexList, DailyIndex, and IndexComponents independently and keeps optional index context visible when one source is unavailable.
+* The dashboard VN30 filter uses SSI IndexComponents component symbols when `status=ok` and component rows exist. If VN30 components are unavailable, the filter keeps the current watchlist visible instead of falling back to hardcoded constituents.
 * IndexComponents requests use `indexCode`, `pageIndex=1`, and `pageSize=1000` first, and retry safe same-provider parameter variants only when SSI returns no meaningful rows.
 * Status/message-only SSI responses are not counted as index component rows.
 * SSI provider error/status payloads for IndexComponents are parsed with case-insensitive `code`, `errorCode`, `status`, and `Status` handling and must become sanitized unavailable responses, not backend 500s.

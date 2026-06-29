@@ -320,6 +320,9 @@ const makeResponse = (tickers: string[], options: { fixtureMode?: boolean } = {}
   fixtureMode: options.fixtureMode ?? false,
   lastRefreshTime: '2026-06-10T08:00:00Z',
   units: { close: 'VND', volume: 'shares' },
+  requestedTickersCount: tickers.length,
+  returnedRowsCount: tickers.length,
+  missingTickers: [],
   dataQuality: {
     source: options.fixtureMode ? 'SSI fixture' : 'SSI live',
     fixtureMode: options.fixtureMode ?? false,
@@ -327,6 +330,9 @@ const makeResponse = (tickers: string[], options: { fixtureMode?: boolean } = {}
     lastTradingDate: '2026-06-10',
     missingFields: {},
     errors: {},
+    requestedTickersCount: tickers.length,
+    returnedRowsCount: tickers.length,
+    missingTickers: [],
     lastRefreshTime: '2026-06-10T08:00:00Z',
     units: { close: 'VND', volume: 'shares' },
   },
@@ -390,6 +396,16 @@ const makeIndexComponentsResponse = (
   count: 0,
   fallbackUsed: false,
   ...overrides,
+});
+
+const makeVn30ComponentsResponse = (
+  tickers: readonly string[] = presetTickers.VN30,
+): VietnamIndexComponentsResponse => makeIndexComponentsResponse({
+  status: 'ok',
+  source: 'SSI IndexComponents',
+  reason: null,
+  rows: tickers.map((symbol) => ({ indexCode: 'VN30', symbol, source: 'SSI IndexComponents' })),
+  count: tickers.length,
 });
 
 const makeDailyIndexResponse = (
@@ -1365,6 +1381,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
   });
 
   it('switches each preset through the expected watchlist ticker request', async () => {
+    mockedGetVietnamIndexComponents.mockImplementation(async () => makeVn30ComponentsResponse());
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
@@ -1382,6 +1399,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
   });
 
   it('keeps the selected ticker when it exists in the new preset', async () => {
+    mockedGetVietnamIndexComponents.mockImplementation(async () => makeVn30ComponentsResponse());
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
@@ -1391,6 +1409,20 @@ describe('VietnamDashboardPage watchlist loading', () => {
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith([...presetTickers.VN30], false));
     expect(selectedTickerHeader().getByRole('heading', { name: 'FPT' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'VN30' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('does not apply VN30 from a hardcoded list when SSI IndexComponents is unavailable', async () => {
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+
+    const watchlistCalls = mockedGetVietnamWatchlist.mock.calls.length;
+    const vn30Button = screen.getByRole('button', { name: 'VN30' });
+    expect(vn30Button).toBeDisabled();
+    expect(vn30Button).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(vn30Button);
+
+    expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistCalls);
   });
 
   it('falls back to the first preset ticker when the selected ticker is absent', async () => {
@@ -1712,14 +1744,10 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(selectedTickerHeader().getByRole('heading', { name: 'VCB' })).toBeInTheDocument();
   });
 
-  it('ignores stale older preset responses after a newer preset succeeds', async () => {
-    let resolveVn30: ((response: VietnamWatchlistResponse) => void) | undefined;
+  it('suppresses repeated preset clicks while the filter request is pending', async () => {
     let resolveBanks: ((response: VietnamWatchlistResponse) => void) | undefined;
     mockedGetVietnamWatchlist
       .mockResolvedValueOnce(makeResponse(defaultTickers))
-      .mockImplementationOnce(() => new Promise<VietnamWatchlistResponse>((resolve) => {
-        resolveVn30 = resolve;
-      }))
       .mockImplementationOnce(() => new Promise<VietnamWatchlistResponse>((resolve) => {
         resolveBanks = resolve;
       }));
@@ -1727,9 +1755,15 @@ describe('VietnamDashboardPage watchlist loading', () => {
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
-    fireEvent.click(screen.getByRole('button', { name: 'VN30' }));
     fireEvent.click(screen.getByRole('button', { name: 'Banks' }));
-    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(3));
+    fireEvent.click(screen.getByRole('button', { name: 'Banks' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Consumer' }));
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole('button', { name: 'Banks' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Consumer' })).toBeDisabled();
+    expect(screen.getByText('Loading BANKS filter; previous rows stay visible.')).toBeInTheDocument();
+    expect(screen.getByTestId('indicator-row-FPT')).toBeInTheDocument();
 
     await act(async () => {
       resolveBanks?.(makeResponse([...presetTickers.Banks]));
@@ -1738,44 +1772,43 @@ describe('VietnamDashboardPage watchlist loading', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Banks' })).toHaveAttribute('aria-pressed', 'true'));
     expect(screen.getByTestId('indicator-row-EIB')).toBeInTheDocument();
     expect(selectedTickerHeader().getByRole('heading', { name: 'VCB' })).toBeInTheDocument();
-
-    await act(async () => {
-      resolveVn30?.(makeResponse([...presetTickers.VN30]));
-    });
-
-    expect(screen.getByRole('button', { name: 'Banks' })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByRole('button', { name: 'VN30' })).toHaveAttribute('aria-pressed', 'false');
-    expect(screen.getByTestId('indicator-row-EIB')).toBeInTheDocument();
-    expect(screen.queryByTestId('indicator-row-BCM')).not.toBeInTheDocument();
   });
 
-  it('keeps newer failed state when an older preset response resolves late', async () => {
-    let resolveVn30: ((response: VietnamWatchlistResponse) => void) | undefined;
+  it('clicking an already active preset is a no-op', async () => {
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+    fireEvent.click(screen.getByRole('button', { name: 'Banks' }));
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith([...presetTickers.Banks], false));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Banks' })).toHaveAttribute('aria-pressed', 'true'));
+    const watchlistCalls = mockedGetVietnamWatchlist.mock.calls.length;
+
+    fireEvent.click(screen.getByRole('button', { name: 'Banks' }));
+
+    expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistCalls);
+  });
+
+  it('keeps previous rows visible and clears pending state when a preset request fails', async () => {
+    let rejectBanks: ((error: Error) => void) | undefined;
     mockedGetVietnamWatchlist
       .mockResolvedValueOnce(makeResponse(defaultTickers))
-      .mockImplementationOnce(() => new Promise<VietnamWatchlistResponse>((resolve) => {
-        resolveVn30 = resolve;
-      }))
-      .mockRejectedValueOnce(new Error('banks timeout'));
+      .mockImplementationOnce(() => new Promise<VietnamWatchlistResponse>((_resolve, reject) => {
+        rejectBanks = reject;
+      }));
 
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
-    fireEvent.click(screen.getByRole('button', { name: 'VN30' }));
     fireEvent.click(screen.getByRole('button', { name: 'Banks' }));
 
-    expect(await screen.findByText('Last update failed')).toBeInTheDocument();
-    expect(screen.getByTestId('indicator-row-MSB')).toBeInTheDocument();
-
     await act(async () => {
-      resolveVn30?.(makeResponse([...presetTickers.VN30]));
+      rejectBanks?.(new Error('banks timeout'));
     });
 
-    expect(screen.getByText('Last update failed')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'VN30' })).toHaveAttribute('aria-pressed', 'false');
+    expect(await screen.findByText('Last update failed')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Banks' })).toHaveAttribute('aria-pressed', 'false');
     expect(screen.getByTestId('indicator-row-MSB')).toBeInTheDocument();
-    expect(screen.queryByTestId('indicator-row-BCM')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Consumer' })).not.toBeDisabled();
   });
 
   it('keeps the foreign aggregate stable when auxiliary requests fail', async () => {
@@ -2210,6 +2243,105 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(indicatorRowOrder()).toEqual(['ACV', 'ACB']);
     expect(within(indicatorTableSection()).getByText('Showing 2 of 6 rows')).toBeInTheDocument();
     expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistCalls);
+  });
+
+  it('exposes missing-cell and partial data-quality reasons in the watchlist table', async () => {
+    const response = makeResponse(defaultTickers);
+    response.watchlist[0] = {
+      ...response.watchlist[0],
+      status: 'partial',
+      indicators: {
+        ...response.watchlist[0].indicators,
+        ma20: null,
+        rsi14: null,
+        rsi14Wilder: null,
+        volumeRatio: null,
+      },
+      dailyStockPrice: {
+        ...response.watchlist[0].dailyStockPrice,
+        status: 'unavailable',
+        foreignNetVolume: null,
+      },
+      ssiForeignNetVolume: null,
+      dataQualitySummary: {
+        ...response.watchlist[0].dataQualitySummary,
+        overallStatus: 'partial',
+        issues: [
+          {
+            code: 'rsi_missing',
+            severity: 'info',
+            message: 'RSI14 requires at least 15 close prices.',
+            fields: { rowsLoaded: 10, requiredMinRows: 15 },
+          },
+          {
+            code: 'ma_state_insufficient_data',
+            severity: 'info',
+            message: 'MA state requires a daily close and at least 20 close prices.',
+            fields: { rowsLoaded: 10, requiredMinRows: 20 },
+          },
+          {
+            code: 'daily_stock_price_missing',
+            severity: 'info',
+            message: 'SSI DailyStockPrice enrichment is unavailable.',
+            fields: {},
+          },
+        ],
+      },
+    };
+    mockedGetVietnamWatchlist.mockResolvedValue(response);
+
+    render(<VietnamDashboardPage />);
+
+    const row = await screen.findByTestId('indicator-row-FPT');
+    expect(within(row).getByLabelText('RSI14 requires at least 15 close prices.')).toBeInTheDocument();
+    expect(within(row).getByLabelText('Foreign-flow value unavailable from SSI DailyStockPrice.')).toBeInTheDocument();
+    expect(within(row).getByLabelText(/MA state: Insufficient data/)).toHaveAttribute(
+      'title',
+      'MA state requires a daily close and at least 20 close prices.',
+    );
+    expect(within(row).getByLabelText(/Data quality: Partial/)).toHaveAttribute(
+      'title',
+      expect.stringContaining('RSI14 requires at least 15 close prices.'),
+    );
+  });
+
+  it('distinguishes realtime not bootstrapped in the watchlist table', async () => {
+    const response = makeResponse(defaultTickers);
+    response.watchlist[0] = {
+      ...response.watchlist[0],
+      realtimeStatus: {
+        status: 'unavailable',
+        source: 'SSI realtime contract',
+        message: 'Ticker is not in the configured SSI realtime bootstrap list.',
+        reasonCode: 'ticker_not_bootstrapped',
+        classification: 'ticker_not_bootstrapped',
+      },
+      dataQualitySummary: {
+        ...response.watchlist[0].dataQualitySummary,
+        checks: {
+          ...response.watchlist[0].dataQualitySummary?.checks,
+          realtime: 'unavailable',
+        },
+        issues: [
+          {
+            code: 'realtime_ticker_not_bootstrapped',
+            severity: 'info',
+            message: 'Ticker is not in the configured SSI realtime bootstrap list.',
+            fields: {},
+          },
+        ],
+      },
+    };
+    mockedGetVietnamWatchlist.mockResolvedValue(response);
+    mockedGetVietnamRealtimeQuotes.mockImplementation(async (tickers) => makeRealtimeResponse(tickers, { unavailable: true }));
+
+    render(<VietnamDashboardPage />);
+
+    const row = await screen.findByTestId('indicator-row-FPT');
+    expect(within(row).getByLabelText(/Realtime status: Not bootstrapped/)).toHaveAttribute(
+      'title',
+      expect.stringContaining('Ticker is not in the configured SSI realtime bootstrap list.'),
+    );
   });
 
   it('filters rows by data quality and live status', async () => {

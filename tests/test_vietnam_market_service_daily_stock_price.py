@@ -48,12 +48,13 @@ def _full_daily_stock_price_row(**overrides):
 
 
 class FakeSsiFetcher:
-    def __init__(self, daily_stock_price_payload=None):
+    def __init__(self, daily_stock_price_payload=None, *, daily_row_count: int = 30):
         self.daily_stock_price_payload = daily_stock_price_payload or {
             "status": "ok",
             "source": "SSI",
             "rows": [_full_daily_stock_price_row()],
         }
+        self.daily_row_count = daily_row_count
         self.daily_stock_price_calls = []
 
     def get_daily_ohlcv(self, symbol: str, **kwargs):
@@ -69,7 +70,7 @@ class FakeSsiFetcher:
                 "value": 101_000_000 + index,
                 "source": "SSI",
             }
-            for index in range(30)
+            for index in range(self.daily_row_count)
         ]
         return {"status": "ok", "source": "SSI", "rows": rows}
 
@@ -129,6 +130,22 @@ def _issue_codes(item):
         issue["code"]
         for issue in item["data_quality_summary"].get("issues", [])
     }
+
+
+def test_watchlist_response_reports_requested_returned_and_missing_ticker_counts():
+    payload = _service(FakeSsiFetcher()).build_watchlist(
+        ["FPT", "FPT", "ACB", "@@@"],
+        force_refresh=True,
+        include_intraday=False,
+    )
+
+    assert payload["requested_tickers_count"] == 2
+    assert payload["returned_rows_count"] == 2
+    assert payload["missing_tickers"] == []
+    assert payload["data_quality"]["requested_tickers_count"] == 2
+    assert payload["data_quality"]["returned_rows_count"] == 2
+    assert payload["data_quality"]["missing_tickers"] == []
+    assert [row["ticker"] for row in payload["watchlist"]] == ["FPT", "ACB"]
 
 
 def test_daily_stock_price_full_enrichment_is_source_labeled_unit_safe_and_aligned():
@@ -296,6 +313,20 @@ def test_daily_stock_price_unavailable_does_not_invalidate_daily_ohlcv():
     assert enrichment["date_match"] == "unavailable"
     assert enrichment["units"] == {}
     assert item["data_quality_summary"]["checks"]["daily_stock_price"] == "unavailable"
+    assert "daily_stock_price_missing" in _issue_codes(item)
+    assert "foreign_flow_missing" in _issue_codes(item)
+
+
+def test_short_daily_ohlc_history_exposes_ta_missing_reasons_without_changing_latest_price():
+    item = _watch_item(FakeSsiFetcher(daily_row_count=10))
+
+    assert item["status"] == "ok"
+    assert item["latest_price_source"] == "SSI DailyOhlc"
+    assert item["rows_loaded"] == 10
+    codes = _issue_codes(item)
+    assert "ta_insufficient_history" in codes
+    assert "rsi_missing" in codes
+    assert "ma_state_insufficient_data" in codes
 
 
 def test_daily_stock_price_close_mismatch_is_diagnostic_only_and_volume_stays_separate():

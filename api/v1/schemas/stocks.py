@@ -315,6 +315,9 @@ class VietnamWatchlistResponse(BaseModel):
     fixture_mode: bool = False
     last_refresh_time: Optional[str] = None
     units: Dict[str, str] = Field(default_factory=dict)
+    requested_tickers_count: Optional[int] = None
+    returned_rows_count: Optional[int] = None
+    missing_tickers: List[str] = Field(default_factory=list)
     data_quality: Dict[str, Any] = Field(default_factory=dict)
     cache_metadata: Dict[str, Any] = Field(default_factory=dict)
     watchlist: List[VietnamWatchItem] = Field(default_factory=list)
@@ -607,6 +610,9 @@ class VietnamWatchlistHealthResponse(BaseModel):
     last_trading_date: Optional[str] = None
     missing_fields: Dict[str, List[str]] = Field(default_factory=dict)
     errors: Dict[str, List[str]] = Field(default_factory=dict)
+    requested_tickers_count: Optional[int] = None
+    returned_rows_count: Optional[int] = None
+    missing_tickers: List[str] = Field(default_factory=list)
     last_refresh_time: Optional[str] = None
     units: Dict[str, str] = Field(default_factory=dict)
     cache_metadata: Dict[str, Any] = Field(default_factory=dict)

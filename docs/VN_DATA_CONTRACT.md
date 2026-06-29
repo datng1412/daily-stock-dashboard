@@ -69,6 +69,35 @@ Required rules:
 * `checks` records section quality for daily OHLCV, DailyStockPrice, final close, adjusted price, intraday, realtime, trade tape, profile, and news.
 * Optional live-section unavailable states may make the summary `partial`, but they must not make valid daily SSI data unavailable.
 
+Watchlist responses may also expose additive request-completeness counters:
+
+```text
+requested_tickers_count = normalized unique ticker count requested by the watchlist path
+returned_rows_count = number of rows returned in the response
+missing_tickers = requested normalized tickers not represented by a row
+```
+
+The same counters may appear under `data_quality` for diagnostics. A complete response should include one row per normalized requested ticker. If a row is partial or unavailable, it should stay visible and explain why through `data_quality_summary.issues` rather than disappearing.
+
+Reason codes used for row-level partial/missing explanations include:
+
+* `daily_ohlcv_missing`
+* `daily_stock_price_missing`
+* `ta_insufficient_history`
+* `rsi_missing`
+* `ma_state_insufficient_data`
+* `foreign_flow_missing`
+* `metadata_partial` / `profile_partial`
+* `realtime_ticker_not_bootstrapped`
+* `realtime_config_disabled`
+* `realtime_cache_empty`
+* `realtime_cache_stale`
+* `intraday_unavailable_no_rows`
+* `provider_empty`
+* `provider_error`
+
+These codes describe data availability only. They must not synthesize values, hide rows, or change `latest_price`, which remains SSI DailyOhlc when daily rows are usable.
+
 ## Live Section Contract
 
 This is the Phase 2 public contract. Missing live objects and lists must not be represented by placeholder objects or fake metric rows.

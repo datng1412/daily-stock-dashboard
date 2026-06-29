@@ -375,6 +375,9 @@ export type VietnamWatchlistHealthResponse = {
   lastTradingDate?: string | null;
   missingFields: Record<string, string[]>;
   errors: Record<string, string[]>;
+  requestedTickersCount?: number | null;
+  returnedRowsCount?: number | null;
+  missingTickers?: string[];
   lastRefreshTime?: string | null;
   units: Record<string, string>;
   cacheMetadata?: VietnamCacheMetadata;
@@ -386,6 +389,9 @@ export type VietnamWatchlistResponse = {
   fixtureMode: boolean;
   lastRefreshTime?: string | null;
   units: Record<string, string>;
+  requestedTickersCount?: number | null;
+  returnedRowsCount?: number | null;
+  missingTickers?: string[];
   dataQuality: VietnamWatchlistHealthResponse;
   cacheMetadata: VietnamCacheMetadata;
   watchlist: VietnamWatchItem[];

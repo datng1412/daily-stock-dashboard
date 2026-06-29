@@ -988,6 +988,19 @@ Exit criteria:
 * Intraday, realtime, and trade tape unavailable states remain non-fatal and do not erase daily rows.
 * No external provider runtime, fallback provider, VNStocks, FiinGroup, scraping, fake rows, WebSocket/SSE, FC Trading/order/account APIs, or commit/push is introduced.
 
+### Phase 4.6B - VN30 Filter Data Completeness and Watchlist UX Hardening
+
+Status: implemented in current working tree; live SSI smoke not run in this phase.
+
+Result:
+
+* Diagnosed the VN30 filter path: the backend IndexComponents path already resolves exact SSI identifiers and flattens nested `IndexComponent[].StockSymbol` rows, but the frontend VN30 preset still used a static local member list. The filter now uses SSI IndexComponents rows when available and keeps the current watchlist visible when VN30 components are unavailable.
+* Added additive watchlist completeness counters: `requested_tickers_count`, `returned_rows_count`, and `missing_tickers`, also mirrored under `data_quality` for diagnostics. These fields do not change existing rows or price ownership.
+* Added row-level data-quality reason codes for partial/missing values such as `daily_ohlcv_missing`, `daily_stock_price_missing`, `ta_insufficient_history`, `rsi_missing`, `ma_state_insufficient_data`, `foreign_flow_missing`, `provider_empty`, and `provider_error`.
+* Hardened preset/custom filter UX so active-filter clicks are no-ops, pending filter requests disable filter buttons, the pending filter shows a loading state, and previous successful rows remain visible.
+* Improved the watchlist table with compact reason titles/ARIA labels for missing cells and `Partial`/`Unavailable`/realtime badges, including realtime disabled, not bootstrapped, cache miss, idle, and stale states when available.
+* Preserved SSI source ownership: no hardcoded VN30 provider output, no fake values, no external provider runtime, no fallback provider, and `latest_price` remains SSI DailyOhlc.
+
 ### Phase 5.0A - External Provider Contract Design
 
 Status: completed on 2026-06-29.

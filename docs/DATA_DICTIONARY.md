@@ -58,6 +58,9 @@ Conventions:
 | Field | Meaning | Source | Unit | Nullable | Canonical | UI placement | Known caveat |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `data_quality_summary` | Additive summary of source mismatches, section checks, partial metadata, stale intraday, unavailable optional live sections, and finality/adjustment uncertainty | Service-derived from existing watchlist/company fields | object | no, defaults to `{}` at schema boundary | yes for quality summary, no for price | Data Quality Summary | Must not change `latest_price`; messages are short and must not include endpoint dumps or raw provider errors. |
+| `requested_tickers_count` | Count of normalized unique tickers requested by the VN watchlist response | Service-derived from request normalization | count | no | no | Watchlist completeness | Additive diagnostic counter only; duplicates/invalid input are removed before counting. |
+| `returned_rows_count` | Count of watchlist rows returned for the VN watchlist response | Service-derived from response rows | count | no | no | Watchlist completeness | Should match requested count for a complete normalized request; does not imply every row is fully available. |
+| `missing_tickers` | Normalized requested tickers not represented by any watchlist row | Service-derived from request/response comparison | list | no, empty list when complete | no | Watchlist completeness | Missing tickers should be explicit instead of silently disappearing. |
 
 ## Status And Quality Fields
 

@@ -80,6 +80,30 @@ const formatIssueCopy = (issue: VietnamDataQualityIssue) => {
       };
     case 'daily_stock_price_partial':
       return { title: 'DailyStockPrice enrichment partial.', detail: null };
+    case 'daily_stock_price_missing':
+      return { title: 'DailyStockPrice enrichment unavailable.', detail: null };
+    case 'daily_ohlcv_missing':
+      return { title: 'Daily OHLCV required fields missing.', detail: null };
+    case 'ta_insufficient_history':
+      return {
+        title: 'Technical indicators limited by short DailyOhlc history.',
+        detail: [
+          formatNumber(fields.rowsLoaded) ? `${formatNumber(fields.rowsLoaded)} rows loaded` : null,
+          formatNumber(fields.requiredMinRows) ? `${formatNumber(fields.requiredMinRows)} rows required` : null,
+        ].filter(Boolean).join(' | '),
+      };
+    case 'rsi_missing':
+      return { title: 'RSI14 unavailable; insufficient close-price history.', detail: null };
+    case 'ma_state_insufficient_data':
+      return { title: 'MA state unavailable; insufficient close-price history.', detail: null };
+    case 'foreign_flow_missing':
+      return { title: 'Foreign-flow value unavailable from SSI DailyStockPrice.', detail: null };
+    case 'provider_empty':
+      return { title: 'Provider returned no usable rows for this ticker.', detail: null };
+    case 'provider_error':
+      return { title: 'Provider path failed for this ticker.', detail: null };
+    case 'metadata_partial':
+      return { title: 'Metadata partial. Some profile fields are unavailable.', detail: null };
     case 'profile_partial':
       return { title: 'Profile partial. Some metadata is unavailable.', detail: null };
     case 'profile_unavailable':
