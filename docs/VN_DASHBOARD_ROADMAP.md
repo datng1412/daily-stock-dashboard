@@ -1165,6 +1165,20 @@ Result:
 * Added sanitized cache diagnostics (`cache_status`, TTL, negative flag, safe key, expiry), direct-resolution diagnostics, and deterministic tests for IndexList-independent success, no-row/unavailable/rate-limit behavior, cache hits, normalized keys, force-refresh bypass, exact nested rows, and no parameter probes.
 * No hardcoded VN30 output, fake rows, fallback provider, external runtime, frontend behavior change, realtime behavior change, or `latest_price` change was introduced.
 
+### Phase 4.7A-docs - Stock Detail Metrics Availability Audit
+
+Status: completed on 2026-07-02 as a documentation-only audit.
+
+Result:
+
+* Inspected the current backend schemas, SSI fetcher mappings, Vietnam market service normalization, frontend API types, dashboard rendering, and existing docs for stock-detail labels such as open, average, matched/put-through value, foreign buy/sell/room, 52-week high/low, average volume, EPS, valuation ratios, beta, share count, market cap, dividends, ROE, and ROA.
+* Documented the exact current availability matrix in `docs/VN_DATA_CONTRACT.md` and `docs/DATA_DICTIONARY.md`.
+* Confirmed available-now fields remain source-owned: SSI DailyOhlc for daily open/high/low/close/volume/value and SSI DailyStockPrice for reference/limits, matched value/volume, put-through value/volume, and latest foreign buy/sell/net volume/value.
+* Recorded non-implemented but computable future metrics: 52-week high/low and 10D/3M average volume. Current code only computes 20-day average volume and 20-day high/low indicators.
+* Recorded ambiguous fields needing provider-semantics confirmation before display: average price, foreign room, and exact outstanding quantity. Current `listed_shares` is metadata, not an approved market-cap/outstanding-share basis.
+* Recorded future-provider-required fields: EPS TTM, P/E TTM, P/B, beta, market cap, dividend ratio/date, ROE, and ROA. Corporate-action contract fields remain disabled/not configured by default and must not be inferred from price gaps.
+* No runtime code, schema, frontend UI, parser mappings, tests, provider behavior, fallback behavior, or `latest_price` ownership changed.
+
 ### Phase 5.0A - External Provider Contract Design
 
 Status: completed on 2026-06-29.

@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [documentation] Document current VN stock-detail metric availability across SSI DailyOhlc, DailyStockPrice, metadata, computable future metrics, and future provider gaps.
 - [fix] Resolve explicit VN IndexComponents codes directly with the verified SSI `indexCode` request and add 300-second success / 60-second negative process caching.
 - [fix] Make VN30 member resolution an explicit terminal UI state so unavailable, no-row, failure, and timeout responses clear loading without hydrating fallback members.
 - [fix] Make VN dashboard local presets explicit direct watchlist actions and ensure unavailable VN30 component responses settle to retry instead of loading indefinitely.

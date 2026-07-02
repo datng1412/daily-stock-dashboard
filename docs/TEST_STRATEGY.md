@@ -86,6 +86,7 @@ Interpretation:
 - `trades: []` is allowed only when describing the legacy/current wrapper cleanup issue.
 - Recommendation terms are allowed only in prohibitions or historical changelog entries.
 - Provider claim hits must be reviewed for context.
+- Docs-only stock-detail availability audits should inspect current schema/type/service/fetcher evidence and should not run backend/frontend suites unless runtime files changed. The expected validation is `git diff --check`, status review, and targeted documentation grep for the audited labels.
 
 ## Phase 1 Contract Tests Needed
 

@@ -12,6 +12,35 @@ Conventions:
 - Missing objects should be `null`.
 - Diagnostics fields are for debugging and should not become primary metric rows.
 
+## Stock Detail Panel Availability Summary
+
+The stock-detail screenshot labels map to the current dictionary as follows. This is documentation-only: it does not add fields or authorize fallback data.
+
+| Screenshot label | Dictionary/current field | Current status | Source / note |
+| --- | --- | --- | --- |
+| Open | `open`, company `trading_stats.open`, chart `points[].open` | Available now | SSI DailyOhlc daily/session open; nested `daily_stock_price.open` may also exist as DailyStockPrice enrichment. |
+| Average | `realtime_snapshot.average_price` placeholder | Ambiguous, needs provider confirmation | Schema/type exists for optional realtime, but current SSI mapping does not populate it. |
+| Matched val | `daily_stock_price.matched_value`, `ssi_matched_value` | Available now | SSI DailyStockPrice. |
+| PT val | `daily_stock_price.put_through_value`, `ssi_put_through_value` | Available now | SSI DailyStockPrice. |
+| High 52W | none | Computable later, not implemented | Would require a new 52-week calculation from SSI DailyOhlc history. |
+| Avg. vol. 3M | none | Computable later, not implemented | Current indicators expose 20-day average volume, not 3M. |
+| Avg. vol. 10D | none | Computable later, not implemented | Current indicators expose 20-day average volume, not 10D. |
+| EPS (TTM) | none | Not available / future provider required | Future fundamentals provider. |
+| P/E (TTM) | none | Not available / future provider required | Future ratios/fundamentals provider. |
+| P/B | none | Not available / future provider required | Future ratios/fundamentals provider. |
+| Beta | none | Not available / future provider required | Future risk/statistics or computed-metric phase. |
+| FR. buy vol | `daily_stock_price.foreign_buy_volume`, `foreign.buy` | Available now | SSI DailyStockPrice shares quantity when present. |
+| FR. sell vol | `daily_stock_price.foreign_sell_volume`, `foreign.sell` | Available now | SSI DailyStockPrice shares quantity when present. |
+| FR. room | `realtime_snapshot.foreign_room` placeholder | Ambiguous, needs provider confirmation | Schema/type exists for optional realtime, but current SSI mapping does not populate it. |
+| PT vol | `daily_stock_price.put_through_volume`, `ssi_put_through_volume` | Available now | SSI DailyStockPrice. |
+| Low 52W | none | Computable later, not implemented | Would require a new 52-week calculation from SSI DailyOhlc history. |
+| Outs. qty | `symbol_metadata.listed_shares`, `listed_shares`, profile `listed_shares` | Ambiguous, needs provider confirmation | Current field is listed shares/provider share-count metadata; do not relabel as exact outstanding quantity without provider confirmation. |
+| Market cap | none | Not available / future provider required | Do not compute from `latest_price * listed_shares` until share-count semantics and product behavior are designed. |
+| Dividend ratio | future `events[].stock_dividend_ratio` / `cash_dividend_per_share` contract only | Not available / future provider required | CorporateActionsProvider is disabled/not configured by default. |
+| Next div. date | future event `ex_date`, `record_date`, `payment_date` contract only | Not available / future provider required | No verified corporate-action rows today. |
+| ROE | none | Not available / future provider required | Future financial statements/fundamentals provider. |
+| ROA | none | Not available / future provider required | Future financial statements/fundamentals provider. |
+
 ## Price And Daily Fields
 
 | Field | Meaning | Source | Unit | Nullable | Canonical | UI placement | Known caveat |

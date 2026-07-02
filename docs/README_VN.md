@@ -57,6 +57,16 @@ The active dashboard uses source-specific labels:
 
 The dashboard must not present SSI realtime or trade-tape features as KBS, and must not mix DailyOhlc and DailyStockPrice labels into a single source.
 
+## Current Stock Detail Data
+
+The current strict SSI runtime can already show these stock-detail metrics when provider rows contain values:
+
+- Daily open/high/low/close, daily volume, daily trading value, and chart OHLCV from SSI `DailyOhlc`.
+- Reference, ceiling, floor, adjusted close when present, matched value/volume, put-through value/volume, and foreign buy/sell/net volume/value from SSI `DailyStockPrice`.
+- Limited symbol metadata such as exchange, market, security type, issuer, lot size, listed shares, and listed date when SSI `SecuritiesDetails` or `Securities` returns exact ticker fields.
+
+The dashboard does not currently implement 52-week high/low, 10-day or 3-month average volume, EPS, P/E, P/B, beta, ROE, ROA, market cap, dividend ratio, or next dividend date. Some of these are computable future metrics from DailyOhlc, but they are not implemented today. Fundamentals and dividend/corporate-action fields require a future provider contract and must remain unavailable rather than inferred.
+
 ## Data Quality
 
 The VN dashboard is data-quality-first. The API and UI distinguish:

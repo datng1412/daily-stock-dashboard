@@ -49,6 +49,18 @@ Latest bounded live gate: 2026-06-29, using sanitized SSI smoke output plus loca
 | Unsupported news | `external_provider_required` | SSI endpoint not found in current repo/docs/evidence | None; Mozyfin disabled | Watchlist `news=[]`, `news_status.status=disabled`; company `news.status=not_implemented` | Current runtime has no SSI or Mozyfin news path | Future NewsProvider only after access/rights proof | Yes |
 | Unsupported macro | `external_provider_required` | SSI endpoint not found in current repo/docs/evidence | None | No macro block | No SSI macro evidence in current repo | Defer until specific source/series contracts exist | Yes |
 
+## Stock Detail Metrics Audit
+
+Phase 4.7A-docs inspected the current backend schemas, SSI fetcher mappings, service normalization, frontend types, and dashboard rendering for common stock-detail panel labels. The result is documentation-only:
+
+* Available today from SSI DailyOhlc / DailyStockPrice when provider rows contain values: daily open, matched value, put-through value, put-through volume, foreign buy volume, and foreign sell volume.
+* Available today as source-specific metadata but not safe to relabel without confirmation: `listed_shares` from SSI SecuritiesDetails/Securities. Do not present it as exact outstanding quantity until provider semantics are confirmed.
+* Ambiguous optional realtime placeholders: average price and foreign room have schema/type fields under the realtime snapshot contract, but current SSI mapping does not populate them as stock-detail metrics.
+* Computable later but not implemented: 52-week high/low, 10-day average volume, and 3-month average volume. Current code exposes 20-day average volume and 20-day high/low indicators only.
+* Future-provider required: EPS TTM, P/E TTM, P/B, beta, market cap, dividend ratio/date, ROE, and ROA. Corporate-action contract fields exist only behind the disabled/not-configured future provider boundary and return empty lists when no verified rows exist.
+
+Do not infer missing stock-detail values from price gaps, `latest_price`, DailyStockPrice close, optional realtime rows, Mozyfin, KBS, or hardcoded ticker data.
+
 ## Phase 4.5A SSI Gap Separation
 
 * SSI available and implemented: Securities, SecuritiesDetails, DailyOhlc, DailyStockPrice, IndexList, VN30 IndexComponents, VN30 DailyIndex rows, IntradayOhlc, and the optional streaming realtime snapshot contract.
