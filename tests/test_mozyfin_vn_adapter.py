@@ -1070,35 +1070,32 @@ def test_index_components_service_uses_strict_ssi_without_mozyfin_fallback(monke
     assert payload["index_code"] == "VN30"
     assert payload["rows"][0]["symbol"] == "FPT"
     assert payload["rows"][0]["weight"] == 7.25
+    assert ssi.index_list_args == []
     assert ssi.index_components_args == [{"index_code": "VN30", "market": "HOSE"}]
+    assert payload["diagnostics"]["provider_index_identifier"] == "VN30"
+    assert payload["diagnostics"]["index_identifier_source"] == "explicit_index_code"
+    assert payload["diagnostics"]["index_list_status"] == "not_required"
     assert manager.daily_calls == 0
     assert manager.fetcher.quote_calls == 0
 
 
-def test_index_components_resolves_provider_identifier_from_index_list(monkeypatch):
+def test_index_components_uses_explicit_index_code_without_index_list(monkeypatch):
     monkeypatch.delenv("MOZYFIN_FIXTURE_DIR", raising=False)
     manager = _StubManager(_sample_vn_rows_count(60))
     ssi = _StubSsiFetcher(
         index_list={
-            "status": "ok",
+            "status": "unavailable",
             "source": "SSI",
-            "rows": [
-                {
-                    "index_id": "VN30-SSI-ID",
-                    "index_code": "VN30",
-                    "index_name": "VN30 Index",
-                    "market": "HOSE",
-                    "source": "SSI",
-                }
-            ],
+            "reason": "IndexList unavailable",
+            "rows": [],
         },
         index_components={
             "status": "ok",
             "source": "SSI",
-            "index_code": "VN30-SSI-ID",
+            "index_code": "VN30",
             "rows": [
                 {
-                    "index_code": "VN30-SSI-ID",
+                    "index_code": "VN30",
                     "symbol": "FPT",
                     "exchange": "HOSE",
                     "market": "HOSE",
@@ -1120,10 +1117,12 @@ def test_index_components_resolves_provider_identifier_from_index_list(monkeypat
     assert payload["status"] == "ok"
     assert payload["index_code"] == "VN30"
     assert payload["rows"][0]["index_code"] == "VN30"
-    assert ssi.index_list_args == [{"market": "HOSE"}]
-    assert ssi.index_components_args == [{"index_code": "VN30-SSI-ID", "market": "HOSE"}]
-    assert payload["diagnostics"]["provider_index_identifier"] == "VN30-SSI-ID"
-    assert payload["diagnostics"]["index_identifier_source"] == "IndexList"
+    assert ssi.index_list_args == []
+    assert ssi.index_components_args == [{"index_code": "VN30", "market": "HOSE"}]
+    assert payload["diagnostics"]["provider_index_identifier"] == "VN30"
+    assert payload["diagnostics"]["index_identifier_source"] == "explicit_index_code"
+    assert payload["diagnostics"]["index_list_status"] == "not_required"
+    assert payload["diagnostics"]["index_components_attempted"] is True
 
 
 def test_index_components_unavailable_state_remains_clean(monkeypatch):
@@ -1148,7 +1147,12 @@ def test_index_components_unavailable_state_remains_clean(monkeypatch):
     assert payload["rows"] == []
     assert payload["count"] == 0
     assert payload["fallback_used"] is False
-    assert payload["diagnostics"]["index_identifier_source"] == "IndexList"
+    assert ssi.index_list_args == []
+    assert ssi.index_components_args == [{"index_code": "VN30", "market": None}]
+    assert payload["diagnostics"]["provider_index_identifier"] == "VN30"
+    assert payload["diagnostics"]["index_identifier_source"] == "explicit_index_code"
+    assert payload["diagnostics"]["index_list_status"] == "not_required"
+    assert payload["diagnostics"]["index_components_attempted"] is True
     assert manager.daily_calls == 0
 
 

@@ -1646,39 +1646,38 @@ def test_index_components_maps_component_rows_safely():
     assert kwargs["params"] == {"indexCode": "VN30", "pageIndex": 1, "pageSize": 1000}
 
 
-def test_index_components_retries_index_id_variant_when_primary_shape_has_no_rows():
+def test_index_components_does_not_probe_variants_when_verified_shape_has_no_rows():
     session = _FakeSession(
         post_items=[_token_response()],
         get_items=[
             _FakeResponse(payload={"status": "ok", "message": "No data"}),
-            _FakeResponse(payload={"Data": [{"IndexCode": "VN30", "Symbol": "FPT"}]}),
         ],
     )
     fetcher = _fetcher(session=session)
 
     payload = fetcher.get_index_components("VN30")
 
-    assert payload["status"] == "ok"
-    assert payload["rows"][0]["symbol"] == "FPT"
+    assert payload["status"] == "unavailable"
+    assert payload.get("rows", []) == []
     assert session.calls[1][2]["params"] == {"indexCode": "VN30", "pageIndex": 1, "pageSize": 1000}
-    assert session.calls[2][2]["params"] == {"pageIndex": 1, "pageSize": 1000, "indexID": "VN30"}
+    assert len([call for call in session.calls if call[0] == "GET"]) == 1
 
 
-def test_index_components_retries_variant_after_provider_error_shape():
+def test_index_components_does_not_probe_variants_after_provider_error():
     session = _FakeSession(
         post_items=[_token_response()],
         get_items=[
             _FakeResponse(status_code=400, payload={"message": "bad params"}),
-            _FakeResponse(payload={"Data": [{"IndexCode": "VN30", "Symbol": "FPT"}]}),
         ],
     )
     fetcher = _fetcher(session=session)
 
     payload = fetcher.get_index_components("VN30")
 
-    assert payload["status"] == "ok"
-    assert payload["rows"][0]["symbol"] == "FPT"
-    assert session.calls[2][2]["params"] == {"pageIndex": 1, "pageSize": 1000, "indexID": "VN30"}
+    assert payload["status"] == "unavailable"
+    assert payload.get("rows", []) == []
+    assert payload["failure_class"] == "bad_request_params"
+    assert len([call for call in session.calls if call[0] == "GET"]) == 1
 
 
 def test_index_metadata_status_message_only_body_returns_clean_unavailable():
@@ -1705,10 +1704,6 @@ def test_index_components_status_message_only_body_returns_clean_unavailable():
         post_items=[_token_response()],
         get_items=[
             _FakeResponse(payload={"status": "ok", "message": "No data"}),
-            _FakeResponse(payload={"status": "ok", "message": "No data"}),
-            _FakeResponse(payload={"status": "ok", "message": "No data"}),
-            _FakeResponse(payload={"status": "ok", "message": "No data"}),
-            _FakeResponse(payload={"status": "ok", "message": "No data"}),
         ],
     )
     fetcher = _fetcher(session=session)
@@ -1720,6 +1715,7 @@ def test_index_components_status_message_only_body_returns_clean_unavailable():
     assert payload["reason"] == REQUEST_FAILED_REASON
     assert payload["rows"] == []
     assert payload["count"] == 0
+    assert len([call for call in session.calls if call[0] == "GET"]) == 1
 
 
 def test_index_components_flattens_exact_nested_provider_envelope():
@@ -1764,16 +1760,17 @@ def test_index_components_discards_nested_rows_for_other_indices():
     }
     session = _FakeSession(
         post_items=[_token_response()],
-        get_items=[_FakeResponse(payload=nested_payload) for _ in range(5)],
+        get_items=[_FakeResponse(payload=nested_payload)],
     )
     fetcher = _fetcher(session=session)
 
     payload = fetcher.get_index_components("VN30", market="HOSE")
 
     assert payload["status"] == "unavailable"
-    assert payload["rows"] == []
+    assert payload.get("rows", []) == []
     assert payload["count"] == 0
     assert "PVS" not in str(payload)
+    assert len([call for call in session.calls if call[0] == "GET"]) == 1
 
 
 def test_index_component_extractor_does_not_map_failure_code_as_symbol():
@@ -1862,10 +1859,6 @@ def test_index_components_provider_error_body_returns_clean_unavailable_without_
         post_items=[_token_response()],
         get_items=[
             _FakeResponse(payload={"errorCode": "E_BAD_PARAMS", "message": "bad params"}),
-            _FakeResponse(payload={"errorCode": "E_BAD_PARAMS", "message": "bad params"}),
-            _FakeResponse(payload={"errorCode": "E_BAD_PARAMS", "message": "bad params"}),
-            _FakeResponse(payload={"errorCode": "E_BAD_PARAMS", "message": "bad params"}),
-            _FakeResponse(payload={"errorCode": "E_BAD_PARAMS", "message": "bad params"}),
         ],
     )
     fetcher = _fetcher(session=session)
@@ -1878,6 +1871,33 @@ def test_index_components_provider_error_body_returns_clean_unavailable_without_
     assert payload["endpoint"] == "IndexComponents"
     assert payload["error_type"] == "ssi_error"
     assert payload["code"] == "E_BAD_PARAMS"
+    assert len([call for call in session.calls if call[0] == "GET"]) == 1
+
+
+@pytest.mark.parametrize(
+    ("status_code", "provider_payload"),
+    [
+        (429, {"message": "too many requests"}),
+        (200, {"status": "error", "code": "429", "message": "provider rejected request"}),
+    ],
+)
+def test_index_components_rate_limit_is_sanitized_without_variant_probes(
+    status_code,
+    provider_payload,
+):
+    session = _FakeSession(
+        post_items=[_token_response()],
+        get_items=[_FakeResponse(status_code=status_code, payload=provider_payload)],
+    )
+    fetcher = _fetcher(session=session)
+
+    payload = fetcher.get_index_components("VN30", market="HOSE")
+
+    assert payload["status"] == "unavailable"
+    assert payload.get("rows", []) == []
+    assert payload["failure_class"] == "rate_limited"
+    assert len([call for call in session.calls if call[0] == "GET"]) == 1
+    assert SECRET_TOKEN not in str(payload)
 
 
 def test_securities_maps_symbol_metadata():

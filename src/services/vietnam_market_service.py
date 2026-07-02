@@ -63,14 +63,18 @@ VN_CHART_RANGES = {
     "1Y": 366,
 }
 VN_TIMEZONE = ZoneInfo("Asia/Ho_Chi_Minh")
+VN_INDEX_COMPONENTS_CACHE_TTL_SECONDS = 300
+VN_INDEX_COMPONENTS_NEGATIVE_CACHE_TTL_SECONDS = 60
 VN_CACHE_TTL_SECONDS = {
     "ohlcv": 300,
+    "daily_stock_price": 300,
     "quote": 60,
     "intraday_ohlcv": 60,
     "realtime_snapshot": 10,
     "trade_tape": 5,
     "news": 1800,
     "symbol_metadata": 3600,
+    "index_components": VN_INDEX_COMPONENTS_CACHE_TTL_SECONDS,
 }
 VN_PROVIDER_MOZYFIN = "mozyfin"
 VN_PROVIDER_SSI = "ssi"
@@ -293,8 +297,9 @@ def _read_cache(
     data_type: str,
     fetch: Callable[[], Any],
     force_refresh: bool = False,
+    ttl_resolver: Optional[Callable[[Any], int]] = None,
 ) -> Dict[str, Any]:
-    ttl_seconds = VN_CACHE_TTL_SECONDS[data_type]
+    default_ttl_seconds = VN_CACHE_TTL_SECONDS[data_type]
     now = _utc_now()
     entry = _get_cache_entry(key)
     if entry and entry.expires_at > now and not force_refresh:
@@ -324,6 +329,11 @@ def _read_cache(
         try:
             value = fetch()
             _observe(observe_mozyfin_fetch, key, monotonic_ms() - started_ms)
+            ttl_seconds = (
+                max(0, int(ttl_resolver(value)))
+                if ttl_resolver is not None
+                else default_ttl_seconds
+            )
             refreshed = _set_cache_entry(key, value, ttl_seconds)
             if force_refresh:
                 status = "refresh"
@@ -3110,6 +3120,29 @@ class VietnamMarketService:
         )
         return selected, None, diagnostics, foreign_history
 
+    def _read_latest_ssi_daily_stock_price(
+        self,
+        symbol: str,
+        *,
+        force_refresh: bool,
+    ) -> Dict[str, Any]:
+        """Reuse the bounded DailyStockPrice enrichment/history across HTTP requests."""
+        cache_key = _cache_key(
+            "daily_stock_price",
+            symbol,
+            provider=self.config.daily_stock_price_provider,
+            market=get_vn_exchange(symbol),
+            as_of_date=datetime.now(VN_TIMEZONE).date().isoformat(),
+            lookback_days=28,
+            limit=260,
+        )
+        return _read_cache(
+            cache_key,
+            "daily_stock_price",
+            lambda: self._latest_ssi_daily_stock_price(symbol),
+            force_refresh=force_refresh,
+        )
+
     @staticmethod
     def _normalize_ssi_daily_stock_price_enrichment(
         row: Dict[str, Any],
@@ -4218,42 +4251,78 @@ class VietnamMarketService:
         *,
         force_refresh: bool = False,
     ) -> Dict[str, Any]:
-        """Return strict SSI index component rows for a discovered index code."""
+        """Return strict SSI component rows for an explicit index code."""
         normalized_index = str(index_code or "").strip().upper()
         normalized_market = str(market or "").strip().upper() or None
-        provider_index, public_index, diagnostics = self._resolve_ssi_index_identifier(
+        cache_key = _cache_key(
+            "index_components",
             normalized_index,
-            normalized_market,
-            force_refresh=force_refresh,
+            provider=VN_PROVIDER_SSI,
+            market=normalized_market or "",
         )
+        cache_result = _read_cache(
+            cache_key,
+            "index_components",
+            lambda: self._build_index_components_uncached(
+                normalized_index,
+                normalized_market,
+                force_refresh=force_refresh,
+            ),
+            force_refresh=force_refresh,
+            ttl_resolver=lambda payload: (
+                VN_INDEX_COMPONENTS_CACHE_TTL_SECONDS
+                if isinstance(payload, dict)
+                and payload.get("status") == "ok"
+                and bool(payload.get("rows"))
+                else VN_INDEX_COMPONENTS_NEGATIVE_CACHE_TTL_SECONDS
+            ),
+        )
+        result = dict(cache_result["value"])
+        diagnostics = dict(result.get("diagnostics") or {})
+        cache_entry = cache_result.get("entry")
         diagnostics.update(
             {
-                "endpoint": "IndexComponents",
-                "requested_market": normalized_market,
-                "selected_identifier": provider_index,
+                "cache_status": cache_result["status"],
+                "cache_ttl_seconds": (
+                    VN_INDEX_COMPONENTS_CACHE_TTL_SECONDS
+                    if result.get("status") == "ok" and bool(result.get("rows"))
+                    else VN_INDEX_COMPONENTS_NEGATIVE_CACHE_TTL_SECONDS
+                ),
+                "cache_negative": result.get("status") != "ok" or not bool(result.get("rows")),
+                "cache_key": {
+                    "provider": VN_PROVIDER_SSI,
+                    "endpoint": "IndexComponents",
+                    "index_code": normalized_index,
+                    "market": normalized_market,
+                },
+                "cache_expires_at": _iso(cache_entry.expires_at) if cache_entry else None,
             }
         )
-        if not provider_index:
-            diagnostics.update(
-                {
-                    "index_components_status": "unavailable",
-                    "normalized_row_count": 0,
-                }
-            )
-            return {
-                "status": "unavailable",
-                "source": SSI_INDEX_COMPONENTS_SOURCE,
-                "reason": "SSI index identifier unavailable.",
-                "index_code": public_index,
-                "market": normalized_market,
-                "rows": [],
-                "count": 0,
-                "fallback_used": False,
-                "diagnostics": diagnostics,
-            }
+        result["diagnostics"] = diagnostics
+        return result
+
+    def _build_index_components_uncached(
+        self,
+        normalized_index: str,
+        normalized_market: Optional[str],
+        *,
+        force_refresh: bool,
+    ) -> Dict[str, Any]:
+        diagnostics: Dict[str, Any] = {
+            "endpoint": "IndexComponents",
+            "requested_index_code": normalized_index,
+            "requested_market": normalized_market,
+            "provider_index_identifier": normalized_index,
+            "selected_identifier": normalized_index,
+            "index_identifier_source": "explicit_index_code",
+            "resolution_status": "direct",
+            "index_list_status": "not_required",
+            "index_list_rows": 0,
+            "index_components_attempted": True,
+        }
         refresh_kwargs = {"force_refresh": True} if force_refresh else {}
         payload = self._get_ssi_fetcher().get_index_components(
-            provider_index,
+            normalized_index,
             market=normalized_market,
             **refresh_kwargs,
         )
@@ -4269,15 +4338,15 @@ class VietnamMarketService:
             diagnostics["failure_class"] = (
                 str(payload.get("failure_class"))
                 if isinstance(payload, dict) and payload.get("failure_class")
-                else "empty_result"
+                else "no_rows"
                 if payload.get("status") == "ok"
-                else "provider_unavailable"
+                else "index_components_unavailable"
             )
             return {
                 "status": "unavailable",
                 "source": SSI_INDEX_COMPONENTS_SOURCE,
                 "reason": self._safe_provider_reason(payload),
-                "index_code": public_index,
+                "index_code": normalized_index,
                 "market": normalized_market,
                 "rows": [],
                 "count": 0,
@@ -4290,8 +4359,8 @@ class VietnamMarketService:
                 continue
             normalized_row_index = self._normalize_index_value(row.get("index_code"))
             row_payload = dict(row)
-            if not normalized_row_index or normalized_row_index == provider_index:
-                row_payload["index_code"] = public_index
+            if not normalized_row_index or normalized_row_index == normalized_index:
+                row_payload["index_code"] = normalized_index
             row_payload["source"] = SSI_INDEX_COMPONENTS_SOURCE
             coverage, missing = self._index_row_quality(row_payload, INDEX_COMPONENT_FIELDS)
             row_payload["field_coverage"] = coverage
@@ -4311,7 +4380,7 @@ class VietnamMarketService:
             "status": "ok",
             "source": SSI_INDEX_COMPONENTS_SOURCE,
             "fallback_used": False,
-            "index_code": public_index,
+            "index_code": normalized_index,
             "market": normalized_market,
             "rows": rows,
             "count": len(rows),
@@ -4832,12 +4901,21 @@ class VietnamMarketService:
                 "source": SSI_DAILY_STOCK_PRICE_SOURCE,
                 "status": "unavailable",
             }
+        daily_stock_price_result = self._read_latest_ssi_daily_stock_price(
+            symbol,
+            force_refresh=force_refresh,
+        )
         (
             ssi_daily_stock_price,
             ssi_daily_stock_price_reason,
             ssi_daily_stock_price_diagnostics,
             ssi_daily_stock_price_history,
-        ) = self._latest_ssi_daily_stock_price(symbol)
+        ) = daily_stock_price_result["value"]
+        cache_status["daily_stock_price_cache"] = daily_stock_price_result["status"]
+        cache_last_fetched_at["daily_stock_price"] = _iso(daily_stock_price_result["entry"].fetched_at)
+        cache_next_refresh_at["daily_stock_price"] = _iso(daily_stock_price_result["entry"].expires_at)
+        if daily_stock_price_result["error"]:
+            cache_errors["daily_stock_price"] = daily_stock_price_result["error"]
         if ssi_daily_stock_price:
             ssi_daily_stock_price = self._normalize_ssi_daily_stock_price_enrichment(
                 ssi_daily_stock_price,

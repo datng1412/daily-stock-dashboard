@@ -90,8 +90,9 @@ class FakeSsiFetcher:
         return self.get_securities_details(symbol="FPT")
 
 
-def _service(fetcher: FakeSsiFetcher) -> VietnamMarketService:
-    clear_vietnam_cache()
+def _service(fetcher: FakeSsiFetcher, *, reset_cache: bool = True) -> VietnamMarketService:
+    if reset_cache:
+        clear_vietnam_cache()
     return VietnamMarketService(
         manager=ExplodingManager(),
         config=VietnamDashboardConfig(
@@ -216,6 +217,42 @@ def test_daily_stock_price_history_populates_latest_available_foreign_flow_windo
     assert fetcher.daily_stock_price_calls[0]["kwargs"]["limit"] == 260
     assert fetcher.daily_stock_price_calls[0]["kwargs"]["from_date"]
     assert fetcher.daily_stock_price_calls[0]["kwargs"]["to_date"]
+
+
+def test_daily_stock_price_enrichment_cache_is_reused_across_request_scoped_services():
+    first_fetcher = FakeSsiFetcher()
+    first_service = _service(first_fetcher)
+
+    first_item = first_service.build_watchlist(
+        ["FPT"],
+        force_refresh=False,
+        include_intraday=False,
+    )["watchlist"][0]
+
+    second_fetcher = FakeSsiFetcher()
+    second_service = _service(second_fetcher, reset_cache=False)
+    cached_item = second_service.build_watchlist(
+        ["FPT"],
+        force_refresh=False,
+        include_intraday=False,
+    )["watchlist"][0]
+
+    assert len(first_fetcher.daily_stock_price_calls) == 1
+    assert second_fetcher.daily_stock_price_calls == []
+    assert first_item["cache_status"]["daily_stock_price_cache"] == "miss"
+    assert cached_item["cache_status"]["daily_stock_price_cache"] == "hit"
+    assert cached_item["latest_price_source"] == "SSI DailyOhlc"
+    assert cached_item["daily_stock_price"]["source"] == "SSI DailyStockPrice"
+
+    refreshed_item = second_service.build_watchlist(
+        ["FPT"],
+        force_refresh=True,
+        include_intraday=False,
+    )["watchlist"][0]
+
+    assert len(second_fetcher.daily_stock_price_calls) == 1
+    assert refreshed_item["cache_status"]["daily_stock_price_cache"] == "refresh"
+    assert refreshed_item["latest_price_source"] == "SSI DailyOhlc"
 
 
 def test_daily_stock_price_history_partial_preserves_explicit_zero_foreign_net():

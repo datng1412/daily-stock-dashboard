@@ -132,7 +132,7 @@ Unavailable indexes do not produce placeholder rows. Overall status is `ok`, `pa
 
 ### `GET /api/v1/stocks/vn/index-components`
 
-Requires an index code confirmed by SSI IndexList. Returns real SSI component rows and count when available; otherwise `status=unavailable` and `rows=[]`. Missing optional name/weight/exchange fields remain null. The endpoint never supplies hardcoded VN30 membership or another-provider fallback.
+Uses the explicit normalized `index_code` to call SSI IndexComponents directly. SSI IndexList remains separate discovery/diagnostic context and does not block an explicit component request. Returns real SSI component rows and count when available; otherwise `status=unavailable` and `rows=[]`. Successful results are process-cached for 300 seconds; unavailable/rate-limited/no-row results are negatively cached for 60 seconds. Missing optional name/weight/exchange fields remain null. The endpoint never supplies hardcoded VN30 membership or another-provider fallback.
 
 ## `GET /api/v1/stocks/vn/company/{ticker}`
 
@@ -285,7 +285,8 @@ Response sections:
 Source ownership:
 
 - SSI IndexComponents owns component rows when available.
-- The service resolves provider-owned index identifiers from SSI IndexList before requesting IndexComponents.
+- Explicit `index_code` is sent directly through the verified SSI `indexCode` parameter. IndexList is not a prerequisite for this endpoint.
+- Normal responses use a process cache keyed by SSI provider, endpoint, normalized index code, and normalized optional market. `force_refresh=true` bypasses that cache intentionally.
 - No Mozyfin/KBS fallback.
 
 Null/empty rules:

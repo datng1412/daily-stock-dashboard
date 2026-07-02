@@ -573,10 +573,10 @@ def get_vietnam_daily_index(
     description="Return SSI FastConnect component rows for one Vietnam index code.",
 )
 def get_vietnam_index_components(
-    index_code: Optional[str] = Query(None, description="SSI index code returned by /vn/index-list, for example VN30"),
+    index_code: Optional[str] = Query(None, description="Explicit SSI index code, for example VN30"),
     index_alias: Optional[str] = Query(None, alias="index", include_in_schema=False),
     market: Optional[str] = Query(None, description="Optional market/exchange filter such as HOSE, HNX, or UPCOM"),
-    force_refresh: bool = Query(False, description="Bypass process-local SSI IndexList and IndexComponents caches."),
+    force_refresh: bool = Query(False, description="Bypass the process-local SSI IndexComponents cache."),
 ) -> VietnamIndexComponentsResponse:
     try:
         requested_index = index_code or index_alias

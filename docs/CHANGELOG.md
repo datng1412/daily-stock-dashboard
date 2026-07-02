@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [fix] Resolve explicit VN IndexComponents codes directly with the verified SSI `indexCode` request and add 300-second success / 60-second negative process caching.
+- [fix] Make VN30 member resolution an explicit terminal UI state so unavailable, no-row, failure, and timeout responses clear loading without hydrating fallback members.
+- [fix] Make VN dashboard local presets explicit direct watchlist actions and ensure unavailable VN30 component responses settle to retry instead of loading indefinitely.
+- [fix] Decouple VN dashboard IndexList/DailyIndex diagnostics from VN30 member state so local presets stay clickable and VN30 loading appears only after VN30 is selected.
+- [fix] Keep empty-start VN dashboard preset controls clickable and allow newer preset selections to supersede older pending preset requests.
+- [fix] Make VN30 member loading lazy and user-driven so fresh `/vietnam` empty-start sessions do not call SSI IndexComponents until VN30 is selected.
+- [fix] Keep VN30 member preload status preset-local on fresh `/vietnam` sessions so empty-start users do not see active hydration or previous-row refresh copy.
+- [fix] Stop `/vietnam` from auto-loading a hardcoded initial VN watchlist on fresh browser sessions; users now start from saved custom symbols or an empty preset/custom prompt.
+- [improvement] Replace the inline VN30 batch size with a documented bounded strategy using default 5, minimum 3, and maximum 10 tickers.
+- [improvement] Reuse bounded SSI DailyStockPrice enrichment and foreign-flow history for 300 seconds across request-scoped Vietnam market services.
+- [test] Add a manual secret-safe VN watchlist hydration profiler and deterministic batching/cache/profiler coverage.
 - [improvement] Hydrate SSI-derived VN30 watchlist rows progressively in sequential five-ticker batches with ordered shells, loaded-row progress, failed-row retry, and stale-request protection.
 - [improvement] Split VN30 member loading from watchlist-row loading, add staged long-wait copy, and record dev-only filter timing diagnostics without changing provider ownership.
 - [improvement] Make unavailable VN30 components retryable and replace comma-separated custom watchlists with a loaded-symbol search, multi-select chips, and bounded apply flow.
@@ -35,7 +46,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [new feature] Add a config-gated FastAPI startup bootstrap for the SSI streaming realtime manager with explicit symbol lists and process-local cache reads.
 - [fix] Change the SSI streaming realtime default channel template to no-space format after live verification.
 - [fix] Carry SSI Securities/SecuritiesDetails industry metadata into Vietnam watchlist and company profile responses when provider fields exist.
-- [fix] Resolve SSI IndexComponents requests through IndexList identifiers and expose sanitized index/profile audit diagnostics.
+- [fix] Expose sanitized SSI index/profile audit diagnostics while keeping exact IndexComponents rows source-auditable.
 - [improvement] Add direct official SSI streaming handshake diagnostics, package inspection, and selected-channel format checks to the dev verifier.
 - [improvement] Add safe SSI streaming verifier callback/channel diagnostics with sequential channel discovery and bounded sanitized samples.
 - [new feature] Add a dev-only SSI streaming realtime verification script with config-only checks, bounded polling, and deterministic mocked tests.

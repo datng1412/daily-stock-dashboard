@@ -491,7 +491,7 @@ SSI request parameters:
 * IntradayOhlc uses `symbol`, `fromDate`, `toDate`, `pageIndex`, `pageSize`, `ascending`, and an optional `timeFrame` value for the requested dashboard timeframe.
 * DailyStockPrice uses `symbol`, `market`, documented `Fromdate`, `Todate`, `pageIndex`, and `pageSize`.
 * DailyIndex uses `indexID`, documented `Fromdate`, `Todate`, `pageIndex`, and `pageSize`.
-* The provider retries alternate SSI casing such as `Symbol`, `Market`, `fromDate`, `toDate`, and `IndexId` only when the first same-provider response returns no meaningful rows.
+* For DailyOhlc, DailyStockPrice, and DailyIndex only, the provider may retry alternate SSI casing such as `Symbol`, `Market`, `fromDate`, `toDate`, and `IndexId` when the first same-provider response returns no meaningful rows. IndexComponents intentionally uses only the verified `indexCode` request shape.
 * Status/message-only SSI responses are diagnostic responses, not data rows; they are not counted as normalized DailyStockPrice or DailyIndex records.
 
 SSI range limits:
@@ -509,7 +509,7 @@ Strict DailyIndex behavior:
 * `VN_INDEX_DATA_PROVIDER=ssi` enables SSI DailyIndex fetches for optional index context.
 * If SSI DailyIndex is unavailable, index data returns unavailable.
 * `/api/v1/stocks/vn/daily-index` requests a bounded recent window and returns only latest usable rows for requested indexes.
-* DailyIndex and IndexComponents are not called when IndexList cannot confirm the requested identifier.
+* DailyIndex still requires exact IndexList resolution. An explicit IndexComponents `index_code` is attempted directly and is not blocked by IndexList unavailability.
 
 Strict index metadata behavior:
 
@@ -517,7 +517,7 @@ Strict index metadata behavior:
 * `/api/v1/stocks/vn/index-components?index_code=...` exposes SSI IndexComponents rows when SSI returns them, or a clean unavailable state when SSI returns no meaningful component rows.
 * The web dashboard calls IndexList, DailyIndex, and IndexComponents independently and keeps optional index context visible when one source is unavailable.
 * The dashboard VN30 filter uses SSI IndexComponents component symbols when `status=ok` and component rows exist. If VN30 components are unavailable, the filter keeps the current watchlist visible instead of falling back to hardcoded constituents.
-* IndexComponents requests use `indexCode`, `pageIndex=1`, and `pageSize=1000` first, and retry safe same-provider parameter variants only when SSI returns no meaningful rows.
+* IndexComponents requests use only the live-verified `indexCode`, `pageIndex=1`, and `pageSize=1000` shape, plus optional normalized market. Empty or unavailable responses do not trigger speculative parameter probes.
 * Status/message-only SSI responses are not counted as index component rows.
 * SSI provider error/status payloads for IndexComponents are parsed with case-insensitive `code`, `errorCode`, `status`, and `Status` handling and must become sanitized unavailable responses, not backend 500s.
 * Mozyfin and KBS are not used as fallback providers for SSI-owned index list, index component, or daily index data.
@@ -569,7 +569,7 @@ Company research current behavior:
 
 `IndexList` rows normalize `index_id`, `index_code`, `index_name`, `exchange`, `market`, and `source`.
 
-`IndexComponents` rows normalize `index_code`, `symbol`, `exchange`, `market`, `weight`, `name`, and `source` when SSI returns component rows. The service first requires an exact `IndexList` match, then calls `IndexComponents` with that identifier. Missing identifiers and empty/provider-failed responses remain unavailable with `rows=[]`. Responses include sanitized diagnostics for the requested index, selected identifier, identifier source, row count, field coverage, and failure class. Missing optional component fields remain null.
+`IndexComponents` rows normalize `index_code`, `symbol`, `exchange`, `market`, `weight`, `name`, and `source` when SSI returns component rows. The service sends the caller's explicit normalized code directly through the verified SSI `indexCode` parameter; IndexList remains independent discovery/diagnostic context. Empty/provider-failed responses remain unavailable with `rows=[]`. Responses include sanitized diagnostics for the requested index, selected identifier, identifier source, row count, field coverage, failure class, and process-cache state. Missing optional component fields remain null.
 
 `Securities` and `SecuritiesDetails` rows normalize symbol metadata such as symbol, exchange, market, security type, names, industry, sector, issuer, lot size, listed shares, and listed date when present. Aliases are limited to field names already observed in provider fixtures/tests; absent fields remain null.
 
@@ -640,9 +640,9 @@ It requests IndexList sequentially without a market, with `HOSE`, and with `HNX`
 * Phase 4.4A live DailyIndex smoke returned no usable VNINDEX/VN30 rows after exact identifier handling. VN30 IndexComponents also remained cleanly unavailable. These optional failures did not affect FPT/HPG/SSI DailyOhlc watchlist rows.
 * Phase 4.4B supersedes the Phase 4.4A availability finding for VN30. Bounded live discovery on 2026-06-29 proved that DailyIndex uses `indexID=VN30`: it returned 5 rows in the 7-day window and 22 rows in the 29-day window, latest date 2026-06-29. `indexCode=VN30` remained unavailable for DailyIndex.
 * Because the no-market IndexList request remained unavailable, the daily-index service performs its prerequisite exact-identifier lookup with the verified `market=HOSE` request. This is only a discovery request hint: returned identifiers remain authoritative, cross-market rows remain possible, and missing exact identifiers are not guessed.
-* SSI index REST requests are paced at a 1.15-second interval within one fetcher. Live service diagnostics showed that an immediate DailyIndex call after IndexList was classified `rate_limited`; the narrow interval applies only to IndexList, DailyIndex, and IndexComponents and also spaces their chunks/parameter variants.
+* SSI index REST requests are paced at a 1.15-second interval within one fetcher. Live service diagnostics showed that an immediate DailyIndex call after IndexList was classified `rate_limited`; the narrow interval applies only to IndexList, DailyIndex, and IndexComponents. Explicit IndexComponents uses one verified parameter shape rather than variant probes.
 * The live 2026-06-29 VN30 DailyIndex row returned `IndexValue=0` while change and liquidity fields were populated. The mapper treats non-positive index levels as missing, so the optional row remains partial with `index_value=null` instead of presenting zero as a real market level.
-* Phase 4.4B proved that IndexComponents has the inverse parameter shape and a nested response: `indexCode=VN30` returned an exact outer VN30 row containing 30 `IndexComponent` members, while `indexID=VN30` returned mismatched HNX outer rows. The fetcher sends `indexCode` first to avoid rate-limiting the working shape behind a failed request, then flattens nested `StockSymbol` members only after exact outer-index matching. It therefore never substitutes HNX constituents for VN30.
+* Phase 4.4B proved that IndexComponents has the inverse parameter shape and a nested response: `indexCode=VN30` returned an exact outer VN30 row containing 30 `IndexComponent` members, while `indexID=VN30` returned mismatched HNX outer rows. Production now sends only `indexCode` and flattens nested `StockSymbol` members only after exact outer-index matching. It therefore never substitutes HNX constituents for VN30.
 * IndexComponents returned the same exact VN30 count with market omitted and with `market=HOSE`; do not interpret that as proof that market filtering is strict. IndexList with `HOSE` and `HNX` also returned the same 10 cross-market rows, and IndexList without a market remained unavailable.
 * Live IndexList validation works in the current SSI environment, but `market=HOSE` can still return cross-market-looking index codes such as `HNX30`, `HNXINDEX`, and `HNXUPCOMINDEX`; use SSI-returned rows instead of assuming the request market filter is strict.
 * VN30 components are now live-verified only through the exact SSI nested response. Continue to return `components=[]` when an exact outer index row or usable nested members are absent. Do not hardcode members or fallback to Mozyfin/KBS.
@@ -676,9 +676,13 @@ It requests IndexList sequentially without a market, with `HOSE`, and with `HNX`
 * No provider comparison endpoint exists in this strict-default phase.
 * SSI streaming/protocol hardening remains a later phase; this phase wires the dashboard contract, disabled background manager/cache skeleton, and safe unavailable states.
 * Exact VN30 IndexComponents rows are live-verified through `indexCode=VN30`; any missing, mismatched, empty, or provider-failed component response still returns `rows=[]`.
+* Phase 4.6F-4 makes explicit component codes independent from IndexList and adds a process-level cache across request-scoped services: usable rows cache for 300 seconds; unavailable, rate-limited, and no-row responses cache for 60 seconds. The key is SSI provider + IndexComponents endpoint + normalized index code + optional market. `force_refresh=true` bypasses it.
 * Phase 4.6D bounded timing on 2026-06-29 measured exact VN30 IndexComponents at 1.66 seconds, versus 95.99 seconds for the first normal-cache 30-symbol watchlist and 52.21 seconds for an immediate repeat. The member request is not the long path; watchlist construction is sequential and can perform per-symbol DailyOhlc, metadata, bounded DailyStockPrice, optional live-section, and indicator work.
 * `VietnamMarketService` is currently created per API request and its lazily created `SsiFastConnectFetcher` owns an instance-local provider cache. Module-level service caches still reduce some repeated work, but the fetcher cache is not shared across separate watchlist requests. Do not introduce broad provider parallelism as a shortcut; shared fetcher/cache lifetime, thread safety, token lifecycle, streaming-manager attachment, and SSI pacing need a dedicated performance design and tests.
 * Phase 4.6E keeps that backend/provider behavior unchanged and improves perceived VN30 readiness in the web client: exact SSI IndexComponents membership renders as ordered shells, then normal-cache watchlist requests run sequentially in groups of five. A failed group remains explicit and retryable without clearing completed groups. This is ordinary HTTP batching, not streaming, provider parallelism, fallback data, or a change to DailyOhlc price ownership.
+* Phase 4.6F profiling on 2026-07-02 measured cold 1/5/10 ticker watchlists at 3.559/15.984/32.145 seconds. For 10 tickers, provider-stage totals were DailyOhlc 10.861s, metadata 7.529s, optional intraday 5.953s, optional trade tape 4.102s, and DailyStockPrice/history 3.385s; TA took 0.279s and JSON serialization 0.0013s. The path is provider-I/O bound and approximately linear, so backend concurrency remains deferred.
+* The same profile proved a cache-lifetime gap: request-scoped fetchers caused bounded DailyStockPrice enrichment/history to refetch while process-level DailyOhlc, metadata, and optional caches could hit. The combined latest-enrichment/history tuple now uses the existing thread-safe service cache for 300 seconds, keyed by symbol, market, provider, current Vietnam date, lookback, and limit. Explicit force refresh bypasses it. A five-ticker immediate repeat improved from 3.564s to 2.293s and all five DailyStockPrice entries were cache hits; DailyOhlc remained canonical.
+* `scripts/profile_vn_watchlist_hydration.py` is a manual-only profiler for fixed 1/5/10 cases or an explicit bounded custom list. It emits aggregate stage/cache/status/source timings only, caps normal custom input at 10, requires `--allow-thirty` for up to 30, and never prints exception messages or provider payloads.
 * Fundamentals, corporate actions, dividends, rights, splits, and macro data require external providers.
 * FC Trading remains out of scope.
 

@@ -1548,22 +1548,13 @@ class SsiFastConnectFetcher:
         }
         if market:
             params["market"] = market.strip().upper()
-        common_params = {key: value for key, value in params.items() if key != "indexCode"}
-        variants = [
-            {**common_params, "indexID": normalized_index},
-            {**common_params, "IndexCode": normalized_index},
-            {**common_params, "IndexId": normalized_index},
-            self._alternate_param_case(params),
-        ]
         payload = self._cached_normalized(
             "IndexComponents",
             params,
             0,
             lambda row: self._map_index_component(row, normalized_index),
             extra={"index_code": normalized_index, "market": params.get("market")},
-            param_variants=variants,
             required_any=("symbol",),
-            retry_unavailable_variants=True,
             force_refresh=force_refresh,
             row_extractor=lambda provider_payload: _extract_index_component_rows(
                 provider_payload,

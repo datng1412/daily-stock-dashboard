@@ -25,7 +25,7 @@ class FakeIndexFetcher:
         daily_payloads=None,
         components_payload=None,
     ):
-        self.index_list_payload = index_list_payload or {
+        self.index_list_payload = index_list_payload if index_list_payload is not None else {
             "status": "ok",
             "source": "SSI",
             "rows": [
@@ -56,7 +56,7 @@ class FakeIndexFetcher:
             ],
             "count": 3,
         }
-        self.daily_payloads = daily_payloads or {
+        self.daily_payloads = daily_payloads if daily_payloads is not None else {
             "VNINDEX_ID": {
                 "status": "ok",
                 "source": "SSI",
@@ -118,12 +118,12 @@ class FakeIndexFetcher:
                 "pages_used": 2,
             },
         }
-        self.components_payload = components_payload or {
+        self.components_payload = components_payload if components_payload is not None else {
             "status": "ok",
             "source": "SSI",
             "rows": [
                 {
-                    "index_code": "VN30_ID",
+                    "index_code": "VN30",
                     "symbol": "FPT",
                     "exchange": "HOSE",
                     "market": "HOSE",
@@ -204,8 +204,13 @@ class FakeIndexFetcher:
         return self.get_securities_details(symbol="FPT")
 
 
-def _service(fetcher: FakeIndexFetcher) -> VietnamMarketService:
-    clear_vietnam_cache()
+def _service(
+    fetcher: FakeIndexFetcher,
+    *,
+    clear_cache: bool = True,
+) -> VietnamMarketService:
+    if clear_cache:
+        clear_vietnam_cache()
     return VietnamMarketService(
         manager=ExplodingManager(),
         config=VietnamDashboardConfig(
@@ -330,7 +335,7 @@ def test_daily_index_unavailable_does_not_break_watchlist_or_latest_price():
     assert item["latest_price_source"] == "SSI DailyOhlc"
 
 
-def test_index_components_use_index_list_identifier_and_preserve_nulls():
+def test_explicit_index_components_bypass_index_list_and_preserve_nulls():
     fetcher = FakeIndexFetcher()
     payload = _service(fetcher).build_index_components(
         "VN30",
@@ -348,34 +353,138 @@ def test_index_components_use_index_list_identifier_and_preserve_nulls():
     assert payload["rows"][0]["field_coverage"]["name"] is False
     assert fetcher.components_calls == [
         {
-            "index_code": "VN30_ID",
+            "index_code": "VN30",
             "market": "HOSE",
             "force_refresh": True,
         }
     ]
-    assert payload["diagnostics"]["selected_identifier"] == "VN30_ID"
-    assert payload["diagnostics"]["index_identifier_source"] == "IndexList"
+    assert fetcher.index_list_calls == []
+    assert payload["diagnostics"]["selected_identifier"] == "VN30"
+    assert payload["diagnostics"]["index_identifier_source"] == "explicit_index_code"
+    assert payload["diagnostics"]["index_list_status"] == "not_required"
+    assert payload["diagnostics"]["index_components_attempted"] is True
+    assert payload["diagnostics"]["cache_status"] == "refresh"
+    assert payload["diagnostics"]["cache_ttl_seconds"] == 300
+    assert payload["diagnostics"]["cache_negative"] is False
 
 
-def test_unknown_vn30_identifier_does_not_call_components_or_hardcode_members():
+def test_index_list_unavailable_does_not_block_explicit_index_components_success():
     fetcher = FakeIndexFetcher(
         index_list_payload={
-            "status": "ok",
+            "status": "unavailable",
             "source": "SSI",
-            "rows": [
-                {
-                    "index_id": "VNINDEX_ID",
-                    "index_code": "VNINDEX",
-                    "source": "SSI",
-                }
-            ],
+            "reason": "SSI FastConnect request failed",
+            "rows": [],
         }
     )
     payload = _service(fetcher).build_index_components("VN30", market="HOSE")
 
+    assert payload["status"] == "ok"
+    assert payload["rows"][0]["symbol"] == "FPT"
+    assert fetcher.index_list_calls == []
+    assert fetcher.components_calls == [{"index_code": "VN30", "market": "HOSE"}]
+    assert payload["diagnostics"]["index_list_status"] == "not_required"
+    assert payload["diagnostics"]["resolution_status"] == "direct"
+
+
+def test_explicit_index_components_unavailable_is_clean_and_negatively_cached():
+    fetcher = FakeIndexFetcher(
+        components_payload={
+            "status": "unavailable",
+            "source": "SSI",
+            "reason": "SSI FastConnect request failed",
+            "failure_class": "index_components_unavailable",
+            "rows": [],
+            "count": 0,
+        }
+    )
+    first = _service(fetcher).build_index_components("vn30", market="hose")
+    second = _service(fetcher, clear_cache=False).build_index_components(
+        "VN30",
+        market="HOSE",
+    )
+
+    assert first["status"] == "unavailable"
+    assert first["rows"] == []
+    assert first["count"] == 0
+    assert first["fallback_used"] is False
+    assert first["diagnostics"]["failure_class"] == "index_components_unavailable"
+    assert first["diagnostics"]["index_components_attempted"] is True
+    assert first["diagnostics"]["cache_status"] == "miss"
+    assert first["diagnostics"]["cache_ttl_seconds"] == 60
+    assert first["diagnostics"]["cache_negative"] is True
+    assert second["status"] == "unavailable"
+    assert second["diagnostics"]["cache_status"] == "hit"
+    assert len(fetcher.components_calls) == 1
+    assert "FPT" not in str(first)
+    assert "token" not in str(first).lower()
+
+
+def test_index_components_force_refresh_bypasses_negative_cache():
+    fetcher = FakeIndexFetcher(
+        components_payload={
+            "status": "unavailable",
+            "source": "SSI",
+            "reason": "SSI FastConnect request failed",
+            "failure_class": "rate_limited",
+            "rows": [],
+            "count": 0,
+        }
+    )
+    service = _service(fetcher)
+
+    first = service.build_index_components("VN30", market="HOSE")
+    cached = service.build_index_components("VN30", market="HOSE")
+    refreshed = service.build_index_components(
+        "VN30",
+        market="HOSE",
+        force_refresh=True,
+    )
+
+    assert first["diagnostics"]["cache_status"] == "miss"
+    assert cached["diagnostics"]["cache_status"] == "hit"
+    assert refreshed["diagnostics"]["cache_status"] == "refresh"
+    assert refreshed["diagnostics"]["failure_class"] == "rate_limited"
+    assert len(fetcher.components_calls) == 2
+    assert fetcher.components_calls[-1]["force_refresh"] is True
+
+
+def test_index_components_empty_rows_are_unavailable_no_rows():
+    fetcher = FakeIndexFetcher(
+        components_payload={
+            "status": "ok",
+            "source": "SSI",
+            "rows": [],
+            "count": 0,
+        }
+    )
+    payload = _service(fetcher).build_index_components("VN30")
+
     assert payload["status"] == "unavailable"
     assert payload["rows"] == []
-    assert payload["count"] == 0
-    assert payload["diagnostics"]["failure_class"] == "identifier_not_found"
-    assert fetcher.components_calls == []
-    assert "FPT" not in str(payload)
+    assert payload["diagnostics"]["failure_class"] == "no_rows"
+    assert payload["diagnostics"]["cache_ttl_seconds"] == 60
+
+
+def test_index_components_cache_key_normalizes_code_and_separates_market():
+    fetcher = FakeIndexFetcher()
+    first = _service(fetcher).build_index_components("vn30", market="hose")
+    normalized_hit = _service(fetcher, clear_cache=False).build_index_components(
+        "VN30",
+        market="HOSE",
+    )
+    other_market = _service(fetcher, clear_cache=False).build_index_components(
+        "VN30",
+        market="HNX",
+    )
+
+    assert first["diagnostics"]["cache_status"] == "miss"
+    assert normalized_hit["diagnostics"]["cache_status"] == "hit"
+    assert other_market["diagnostics"]["cache_status"] == "miss"
+    assert len(fetcher.components_calls) == 2
+    assert normalized_hit["diagnostics"]["cache_key"] == {
+        "provider": "ssi",
+        "endpoint": "IndexComponents",
+        "index_code": "VN30",
+        "market": "HOSE",
+    }

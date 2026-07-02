@@ -33,6 +33,8 @@ MARKET=VN
 STOCK_LIST=FPT,VPB,MSB,SCS,ACV,ACB
 ```
 
+`STOCK_LIST` remains general runtime/watchlist configuration for the broader app. The `/vietnam` frontend no longer auto-loads this or any hardcoded ticker group on a fresh browser session; it starts from a saved custom list when present, otherwise from an empty prompt where the user chooses a preset or enters tickers.
+
 4. Run the backend and web UI:
 
 ```bash

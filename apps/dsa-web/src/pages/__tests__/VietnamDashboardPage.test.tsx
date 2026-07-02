@@ -1,3 +1,4 @@
+import { StrictMode } from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -13,6 +14,13 @@ import {
   type VietnamWatchItem,
   type VietnamWatchlistResponse,
 } from '../../api/stocks';
+import {
+  VN30_WATCHLIST_BATCH_SIZE_DEFAULT,
+  VN30_WATCHLIST_BATCH_SIZE_MAX,
+  VN30_WATCHLIST_BATCH_SIZE_MIN,
+  chunkVietnamWatchlistTickers,
+  resolveVietnamWatchlistBatchSize,
+} from '../../utils/vietnamWatchlistBatching';
 import VietnamDashboardPage from '../VietnamDashboardPage';
 
 const mockedGetVietnamMarketPhase = vi.fn();
@@ -36,6 +44,7 @@ vi.mock('../../utils/vietnamMarketPhase', () => ({
 }));
 
 const defaultTickers = ['FPT', 'VPB', 'MSB', 'SCS', 'ACV', 'ACB'];
+const vn30BatchSize = VN30_WATCHLIST_BATCH_SIZE_DEFAULT;
 const customWatchlistStorageKey = 'vnDashboard.customWatchlist.v1';
 const presetTickers = {
   VN30: ['ACB', 'BCM', 'BID', 'BVH', 'CTG', 'FPT', 'GAS', 'GVR', 'HDB', 'HPG', 'MBB', 'MSN', 'MWG', 'PLX', 'POW', 'SAB', 'SHB', 'SSB', 'SSI', 'STB', 'TCB', 'TPB', 'VCB', 'VHM', 'VIC', 'VJC', 'VNM', 'VPB', 'VRE'],
@@ -805,6 +814,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     vi.useRealTimers();
     Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
     localStorage.clear();
+    localStorage.setItem(customWatchlistStorageKey, JSON.stringify(defaultTickers));
     mockedGetVietnamWatchlist.mockReset();
     mockedGetVietnamRealtimeQuotes.mockReset();
     mockedGetVietnamRealtimeTrades.mockReset();
@@ -830,6 +840,485 @@ describe('VietnamDashboardPage watchlist loading', () => {
   afterEach(() => {
     vi.useRealTimers();
     Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
+  });
+
+  it('resolves VN30 watchlist batch size through named bounds and supports tuning', () => {
+    const tickers = Array.from({ length: 12 }, (_, index) => `T${index + 1}`);
+
+    expect(resolveVietnamWatchlistBatchSize(tickers.length)).toBe(vn30BatchSize);
+    expect(resolveVietnamWatchlistBatchSize(tickers.length, 1)).toBe(VN30_WATCHLIST_BATCH_SIZE_MIN);
+    expect(resolveVietnamWatchlistBatchSize(tickers.length, 99)).toBe(VN30_WATCHLIST_BATCH_SIZE_MAX);
+    expect(chunkVietnamWatchlistTickers(tickers, 4).map((batch) => batch.length)).toEqual([4, 4, 4]);
+    expect(chunkVietnamWatchlistTickers(tickers, 8).map((batch) => batch.length)).toEqual([8, 4]);
+    expect(chunkVietnamWatchlistTickers(defaultTickers, vn30BatchSize).flat()).toEqual(defaultTickers);
+  });
+
+  it('starts fresh empty localStorage without loading hardcoded default symbols', async () => {
+    localStorage.clear();
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamObservability).toHaveBeenCalled());
+
+    expect(mockedGetVietnamWatchlist).not.toHaveBeenCalled();
+    expect(mockedGetVietnamRealtimeQuotes).not.toHaveBeenCalled();
+    expect(mockedGetVietnamRealtimeTrades).not.toHaveBeenCalled();
+    expect(mockedGetVietnamCorporateActions).not.toHaveBeenCalled();
+    expect(mockedGetVietnamIndexComponents).not.toHaveBeenCalled();
+    expect(screen.getByTestId('watchlist-empty-start-state')).toHaveTextContent('Choose a preset or enter tickers to start.');
+    expect(screen.getByTestId('selected-ticker-empty-state')).toHaveTextContent('No ticker selected');
+    expect(screen.getByTestId('selected-ticker-empty-state')).toHaveTextContent('Choose a preset or enter tickers to start.');
+    expect(screen.getByTestId('active-watchlist-empty-state')).toHaveTextContent('No active watchlist yet.');
+  });
+
+  it('keeps fresh empty start clean without preloading VN30 members', async () => {
+    localStorage.clear();
+    mockedGetVietnamIndexComponents.mockImplementationOnce(() => new Promise<VietnamIndexComponentsResponse>(() => {
+      // Would hang if fresh init still preloaded VN30 members.
+    }));
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamObservability).toHaveBeenCalled());
+    expect(screen.getByRole('button', { name: 'VN30' })).not.toBeDisabled();
+    expect(screen.getByTestId('watchlist-empty-start-state')).toHaveTextContent('Choose a preset or enter tickers to start.');
+    expect(screen.getByTestId('selected-ticker-empty-state')).toHaveTextContent('No ticker selected');
+    expect(screen.queryByRole('button', { name: 'Loading VN30 members...' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Loading VN30 members. Presets and custom picker remain available.')).not.toBeInTheDocument();
+    expect(screen.queryByText(/current rows (stay|remain) visible/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Loaded \d+\/\d+/)).not.toBeInTheDocument();
+    expect(screen.queryByTestId('vn30-hydration-progress')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Banks' })).not.toBeDisabled();
+    expect(screen.getByLabelText('Custom watchlist picker')).not.toBeDisabled();
+    expect(mockedGetVietnamWatchlist).not.toHaveBeenCalled();
+    expect(mockedGetVietnamIndexComponents).not.toHaveBeenCalled();
+  });
+
+  it('keeps every preset and custom control clickable from a fresh empty start', async () => {
+    localStorage.clear();
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamObservability).toHaveBeenCalled());
+    const presetGroup = within(screen.getByRole('group', { name: 'Preset groups' }));
+    expect(presetGroup.getByRole('button', { name: 'VN30' })).not.toBeDisabled();
+    expect(presetGroup.getByRole('button', { name: 'Banks' })).not.toBeDisabled();
+    expect(presetGroup.getByRole('button', { name: 'Securities' })).not.toBeDisabled();
+    expect(presetGroup.getByRole('button', { name: 'Real estate' })).not.toBeDisabled();
+    expect(presetGroup.getByRole('button', { name: 'Consumer' })).not.toBeDisabled();
+    expect(presetGroup.getByRole('button', { name: 'Logistics' })).not.toBeDisabled();
+    expect(presetGroup.getByRole('button', { name: 'Tech' })).not.toBeDisabled();
+    expect(presetGroup.getByRole('button', { name: 'Oil & gas' })).not.toBeDisabled();
+    expect(presetGroup.getByRole('button', { name: 'Electricity' })).not.toBeDisabled();
+    expect(screen.getByLabelText('Custom watchlist picker')).not.toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Apply custom watchlist' })).toBeDisabled();
+    expect(mockedGetVietnamWatchlist).not.toHaveBeenCalled();
+    expect(mockedGetVietnamIndexComponents).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['Banks', presetTickers.Banks],
+    ['Securities', presetTickers.Securities],
+    ['Real estate', presetTickers['Real estate']],
+    ['Consumer', presetTickers.Consumer],
+    ['Logistics', presetTickers.Logistics],
+    ['Tech', presetTickers.Tech],
+    ['Oil & gas', presetTickers['Oil & gas']],
+    ['Electricity', presetTickers.Electricity],
+  ])('loads the %s local preset from a fresh empty start without VN30 members', async (label, tickers) => {
+    localStorage.clear();
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamObservability).toHaveBeenCalled());
+    const presetButton = screen.getByRole('button', { name: label });
+    expect(presetButton).not.toBeDisabled();
+
+    fireEvent.click(presetButton);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith([...tickers], false));
+    expect(mockedGetVietnamIndexComponents).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: label })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('keeps local preset clicks independent while index coverage is still loading', async () => {
+    localStorage.clear();
+    mockedGetVietnamIndexList.mockImplementationOnce(() => new Promise<VietnamIndexListResponse>(() => {
+      // Pending background index diagnostics must not block local scan buckets.
+    }));
+    mockedGetVietnamDailyIndex.mockImplementationOnce(() => new Promise<VietnamDailyIndexResponse>(() => {
+      // Pending background index diagnostics must not look like VN30 member loading.
+    }));
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamObservability).toHaveBeenCalled());
+    expect(screen.getByRole('button', { name: 'VN30' })).not.toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Loading VN30 members...' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Banks' })).not.toBeDisabled();
+    expect(screen.getByLabelText('Custom watchlist picker')).not.toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Banks' }));
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith([...presetTickers.Banks], false));
+    expect(mockedGetVietnamIndexComponents).not.toHaveBeenCalled();
+  });
+
+  it('keeps IndexList and DailyIndex failures out of VN30 component status', async () => {
+    mockedGetVietnamIndexList.mockRejectedValueOnce(new Error('SSI IndexList rate_limited'));
+    mockedGetVietnamDailyIndex.mockRejectedValueOnce(new Error('SSI DailyIndex unavailable'));
+
+    render(<VietnamDashboardPage />);
+
+    expect(await screen.findByText('SSI index coverage request unavailable.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'VN30' })).not.toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Retry VN30' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Loading VN30 members...' })).not.toBeInTheDocument();
+    expect(screen.getByText((_, element) => element?.textContent === 'SSI IndexComponents / not loaded / 0')).toBeInTheDocument();
+    expect(screen.queryByText((_, element) => element?.textContent === 'SSI IndexComponents / unavailable / 0')).not.toBeInTheDocument();
+    expect(mockedGetVietnamIndexComponents).not.toHaveBeenCalled();
+  });
+
+  it('settles user-driven VN30 member loading after a bounded timeout', async () => {
+    localStorage.clear();
+    mockedGetVietnamIndexComponents.mockImplementationOnce(() => new Promise<VietnamIndexComponentsResponse>(() => {
+      // Intentionally unresolved to prove the UI does not stay in member loading forever.
+    }));
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamObservability).toHaveBeenCalled());
+    expect(screen.getByRole('button', { name: 'VN30' })).not.toBeDisabled();
+    expect(mockedGetVietnamIndexComponents).not.toHaveBeenCalled();
+
+    vi.useFakeTimers();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'VN30' }));
+    });
+
+    expect(screen.getByRole('button', { name: 'Loading VN30 members...' })).toBeDisabled();
+    expect(mockedGetVietnamIndexComponents).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('vn30-hydration-progress')).not.toBeInTheDocument();
+
+    await act(async () => {
+      vi.advanceTimersByTime(15_000);
+      await Promise.resolve();
+    });
+
+    expect(screen.getByRole('button', { name: 'Retry VN30' })).not.toBeDisabled();
+    expect(screen.getByTestId('watchlist-empty-start-state')).toHaveTextContent('Choose a preset or enter tickers to start.');
+    expect(screen.getAllByText('SSI VN30 components are unavailable. Select Retry VN30 to try again or choose another preset/custom watchlist.').length).toBeGreaterThan(0);
+    expect(mockedGetVietnamWatchlist).not.toHaveBeenCalled();
+  });
+
+  it('keeps fresh empty start usable when user-driven VN30 member loading is unavailable', async () => {
+    localStorage.clear();
+    mockedGetVietnamIndexComponents.mockRejectedValueOnce(new Error('SSI IndexComponents timeout'));
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'VN30' })).not.toBeDisabled());
+    expect(mockedGetVietnamIndexComponents).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'VN30' }));
+
+    expect(await screen.findByRole('button', { name: 'Retry VN30' })).not.toBeDisabled();
+    expect(mockedGetVietnamIndexComponents).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('watchlist-empty-start-state')).toHaveTextContent('Choose a preset or enter tickers to start.');
+    expect(screen.getAllByText('SSI VN30 components are unavailable. Select Retry VN30 to try again or choose another preset/custom watchlist.').length).toBeGreaterThan(0);
+    expect(screen.queryByText(/Current rows were kept/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Loading VN30 members...' })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('watchlist-request-status')).not.toBeInTheDocument();
+    expect(screen.queryByText(/current rows (stay|remain) visible/i)).not.toBeInTheDocument();
+    expect(mockedGetVietnamWatchlist).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Banks' }));
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith([...presetTickers.Banks], false));
+    expect(mockedGetVietnamIndexComponents).toHaveBeenCalledTimes(1);
+    expect(selectedTickerHeader().getByRole('heading', { name: 'VCB' })).toBeInTheDocument();
+  });
+
+  it('settles VN30 member loading when SSI IndexComponents resolves unavailable with no rows', async () => {
+    localStorage.clear();
+    let resolveComponents: ((response: VietnamIndexComponentsResponse) => void) | undefined;
+    mockedGetVietnamIndexComponents.mockImplementationOnce(() => new Promise<VietnamIndexComponentsResponse>((resolve) => {
+      resolveComponents = resolve;
+    }));
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'VN30' })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole('button', { name: 'VN30' }));
+
+    expect(await screen.findByRole('button', { name: 'Loading VN30 members...' })).toBeDisabled();
+    expect(mockedGetVietnamIndexComponents).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveComponents?.(makeIndexComponentsResponse({
+        status: 'unavailable',
+        source: 'SSI IndexComponents',
+        reason: 'SSI FastConnect request failed',
+        rows: [],
+        count: 0,
+        fallbackUsed: false,
+        diagnostics: {
+          requestedIndexCode: 'VN30',
+          indexListStatus: 'unavailable',
+          indexListReason: 'SSI FastConnect request failed',
+          failureClass: 'index_list_unavailable',
+          indexComponentsStatus: 'unavailable',
+          normalizedRowCount: 0,
+        },
+      }));
+    });
+
+    expect(await screen.findByRole('button', { name: 'Retry VN30' })).not.toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Loading VN30 members...' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('watchlist-empty-start-state')).toHaveTextContent('Choose a preset or enter tickers to start.');
+    expect(screen.getAllByText('SSI VN30 components are unavailable. Select Retry VN30 to try again or choose another preset/custom watchlist.').length).toBeGreaterThan(0);
+    expect(mockedGetVietnamWatchlist).not.toHaveBeenCalled();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(mockedGetVietnamIndexComponents).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Securities' }));
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith([...presetTickers.Securities], false));
+    expect(mockedGetVietnamIndexComponents).toHaveBeenCalledTimes(1);
+    expect(selectedTickerHeader().getByRole('heading', { name: 'SSI' })).toBeInTheDocument();
+  });
+
+  it('settles unavailable VN30 member loading under React StrictMode', async () => {
+    localStorage.clear();
+    let resolveComponents: ((response: VietnamIndexComponentsResponse) => void) | undefined;
+    mockedGetVietnamIndexComponents.mockImplementationOnce(() => new Promise<VietnamIndexComponentsResponse>((resolve) => {
+      resolveComponents = resolve;
+    }));
+
+    render(
+      <StrictMode>
+        <VietnamDashboardPage />
+      </StrictMode>,
+    );
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'VN30' })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole('button', { name: 'VN30' }));
+    expect(await screen.findByRole('button', { name: 'Loading VN30 members...' })).toBeDisabled();
+
+    await act(async () => {
+      resolveComponents?.(makeIndexComponentsResponse({
+        status: 'unavailable',
+        rows: [],
+        count: 0,
+        diagnostics: {
+          indexListStatus: 'unavailable',
+          indexComponentsStatus: 'unavailable',
+          failureClass: 'index_list_unavailable',
+          normalizedRowCount: 0,
+        },
+      }));
+    });
+
+    expect(await screen.findByRole('button', { name: 'Retry VN30' })).not.toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Loading VN30 members...' })).not.toBeInTheDocument();
+    expect(mockedGetVietnamIndexComponents).toHaveBeenCalledTimes(1);
+    expect(mockedGetVietnamWatchlist).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      'ok status with zero rows',
+      makeIndexComponentsResponse({
+        status: 'ok',
+        source: 'SSI IndexComponents',
+        reason: null,
+        rows: [],
+        count: 0,
+        fallbackUsed: false,
+      }),
+    ],
+    [
+      'failure diagnostics with no normalized rows',
+      makeIndexComponentsResponse({
+        status: 'ok',
+        source: 'SSI IndexComponents',
+        reason: null,
+        rows: [],
+        count: 0,
+        fallbackUsed: false,
+        diagnostics: {
+          requestedIndexCode: 'VN30',
+          indexListStatus: 'unavailable',
+          failureClass: 'index_list_unavailable',
+          indexComponentsStatus: 'unavailable',
+          normalizedRowCount: 0,
+        },
+      }),
+    ],
+  ])('settles VN30 member loading for %s without hydration', async (_caseName, response) => {
+    localStorage.clear();
+    mockedGetVietnamIndexComponents.mockResolvedValueOnce(response);
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'VN30' })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole('button', { name: 'VN30' }));
+
+    expect(await screen.findByRole('button', { name: 'Retry VN30' })).not.toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Loading VN30 members...' })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('vn30-hydration-progress')).not.toBeInTheDocument();
+    expect(mockedGetVietnamWatchlist).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('indicator-row-ACB')).not.toBeInTheDocument();
+    expect(mockedGetVietnamIndexComponents).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not auto-retry VN30 after an unavailable terminal state and retries only on user click', async () => {
+    localStorage.clear();
+    let resolveRetry: ((response: VietnamIndexComponentsResponse) => void) | undefined;
+    mockedGetVietnamIndexComponents
+      .mockResolvedValueOnce(makeIndexComponentsResponse())
+      .mockImplementationOnce(() => new Promise<VietnamIndexComponentsResponse>((resolve) => {
+        resolveRetry = resolve;
+      }));
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'VN30' })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole('button', { name: 'VN30' }));
+    expect(await screen.findByRole('button', { name: 'Retry VN30' })).not.toBeDisabled();
+    expect(mockedGetVietnamIndexComponents).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(mockedGetVietnamIndexComponents).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry VN30' }));
+    expect(await screen.findByRole('button', { name: 'Loading VN30 members...' })).toBeDisabled();
+    expect(mockedGetVietnamIndexComponents).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      resolveRetry?.(makeIndexComponentsResponse());
+    });
+    expect(await screen.findByRole('button', { name: 'Retry VN30' })).not.toBeDisabled();
+    expect(mockedGetVietnamIndexComponents).toHaveBeenCalledTimes(2);
+    expect(mockedGetVietnamWatchlist).not.toHaveBeenCalled();
+  });
+
+  it('keeps user-driven VN30 component failure separate from index coverage errors', async () => {
+    mockedGetVietnamIndexComponents.mockRejectedValueOnce(new Error('SSI IndexComponents unavailable'));
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+    fireEvent.click(screen.getByRole('button', { name: 'VN30' }));
+
+    expect(await screen.findByRole('button', { name: 'Retry VN30' })).not.toBeDisabled();
+    expect(screen.getAllByText(/SSI VN30 components are unavailable/).length).toBeGreaterThan(0);
+    expect(screen.queryByText('SSI VN30 components request unavailable.')).not.toBeInTheDocument();
+    expect(screen.getByText((_, element) => element?.textContent === 'SSI IndexComponents / unavailable / 0')).toBeInTheDocument();
+  });
+
+  it('does not create a hardcoded watchlist when force refresh is clicked with no committed list', async () => {
+    localStorage.clear();
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(screen.getByTestId('watchlist-empty-start-state')).toBeInTheDocument());
+    const forceRefresh = screen.getByRole('button', { name: 'Force live refresh' });
+    expect(forceRefresh).toBeDisabled();
+    fireEvent.click(forceRefresh);
+
+    expect(mockedGetVietnamWatchlist).not.toHaveBeenCalled();
+    expect(mockedGetVietnamRealtimeQuotes).not.toHaveBeenCalled();
+  });
+
+  it('loads a preset from a fresh empty start and selects the first returned ticker', async () => {
+    localStorage.clear();
+
+    render(<VietnamDashboardPage />);
+
+    expect(mockedGetVietnamIndexComponents).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Banks' }));
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith([...presetTickers.Banks], false));
+    expect(mockedGetVietnamIndexComponents).not.toHaveBeenCalled();
+    expect(selectedTickerHeader().getByRole('heading', { name: 'VCB' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Banks' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('lets a newer non-VN30 preset supersede an older pending preset from empty start', async () => {
+    localStorage.clear();
+    let resolveBanks: ((response: VietnamWatchlistResponse) => void) | undefined;
+    mockedGetVietnamWatchlist
+      .mockImplementationOnce(() => new Promise<VietnamWatchlistResponse>((resolve) => {
+        resolveBanks = resolve;
+      }))
+      .mockResolvedValueOnce(makeResponse([...presetTickers.Securities]));
+
+    render(<VietnamDashboardPage />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Banks' }));
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith([...presetTickers.Banks], false));
+    expect(screen.getByRole('button', { name: 'Banks' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Securities' })).not.toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Securities' }));
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith([...presetTickers.Securities], false));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Securities' })).toHaveAttribute('aria-pressed', 'true'));
+    expect(selectedTickerHeader().getByRole('heading', { name: 'SSI' })).toBeInTheDocument();
+
+    await act(async () => {
+      resolveBanks?.(makeResponse([...presetTickers.Banks]));
+    });
+
+    expect(screen.getByRole('button', { name: 'Securities' })).toHaveAttribute('aria-pressed', 'true');
+    expect(selectedTickerHeader().getByRole('heading', { name: 'SSI' })).toBeInTheDocument();
+    expect(mockedGetVietnamIndexComponents).not.toHaveBeenCalled();
+  });
+
+  it('keeps non-VN30 presets clickable while VN30 member loading is pending', async () => {
+    localStorage.clear();
+    let resolveVn30Members: ((response: VietnamIndexComponentsResponse) => void) | undefined;
+    mockedGetVietnamIndexComponents.mockImplementationOnce(() => new Promise<VietnamIndexComponentsResponse>((resolve) => {
+      resolveVn30Members = resolve;
+    }));
+
+    render(<VietnamDashboardPage />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'VN30' }));
+    expect(await screen.findByRole('button', { name: 'Loading VN30 members...' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Banks' })).not.toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Banks' }));
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith([...presetTickers.Banks], false));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Banks' })).toHaveAttribute('aria-pressed', 'true'));
+
+    await act(async () => {
+      resolveVn30Members?.(makeVn30ComponentsResponse());
+    });
+
+    expect(mockedGetVietnamIndexComponents).toHaveBeenCalledTimes(1);
+    expect(mockedGetVietnamWatchlist).not.toHaveBeenCalledWith([...presetTickers.VN30.slice(0, vn30BatchSize)], false);
+    expect(selectedTickerHeader().getByRole('heading', { name: 'VCB' })).toBeInTheDocument();
+  });
+
+  it('applies custom typed tickers from a fresh empty start', async () => {
+    localStorage.clear();
+
+    render(<VietnamDashboardPage />);
+
+    fireEvent.change(screen.getByLabelText('Custom watchlist picker'), { target: { value: 'vpb' } });
+    fireEvent.click(screen.getByRole('option', { name: /Add VPB.*Validate on apply/ }));
+    fireEvent.change(screen.getByLabelText('Custom watchlist picker'), { target: { value: 'acb' } });
+    fireEvent.click(screen.getByRole('option', { name: /Add ACB.*Validate on apply/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Apply custom watchlist' }));
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(['VPB', 'ACB'], false));
+    expect(selectedTickerHeader().getByRole('heading', { name: 'VPB' })).toBeInTheDocument();
+    expect(JSON.parse(localStorage.getItem(customWatchlistStorageKey) ?? '[]')).toEqual(['VPB', 'ACB']);
   });
 
   it('renders the data readiness strip from loaded dashboard data', async () => {
@@ -1206,7 +1695,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     await waitFor(() => expect(mockedGetVietnamCorporateActions).toHaveBeenCalledWith(['FPT'], 6));
     await waitFor(() => expect(mockedGetVietnamIndexList).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(mockedGetVietnamDailyIndex).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(mockedGetVietnamIndexComponents).toHaveBeenCalledTimes(1));
+    expect(mockedGetVietnamIndexComponents).not.toHaveBeenCalled();
 
     const callCounts = {
       watchlist: mockedGetVietnamWatchlist.mock.calls.length,
@@ -1235,22 +1724,23 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(dataReadinessStrip().queryByText(/\b(buy|sell|hold)\b|target[- ]price|recommendation/i)).not.toBeInTheDocument();
   });
 
-  it('renders Custom preset controls', async () => {
+  it('renders restored Custom preset controls', async () => {
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
 
-    expect(screen.getByRole('button', { name: 'Custom' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Custom' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByLabelText('Custom watchlist picker')).toHaveAttribute('placeholder', 'Search ticker...');
-    expect(screen.getByRole('button', { name: 'Apply custom watchlist' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Clear' })).toBeDisabled();
-    expect(screen.getByText('No custom tickers selected.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Apply custom watchlist' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Clear' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Remove FPT' })).toBeInTheDocument();
   });
 
   it('searches loaded ticker options by symbol and company name without calling the watchlist endpoint', async () => {
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+    fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
     const watchlistCalls = mockedGetVietnamWatchlist.mock.calls.length;
 
     fireEvent.change(screen.getByLabelText('Custom watchlist picker'), { target: { value: 'fpt listed' } });
@@ -1264,6 +1754,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+    fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
 
     fireEvent.change(screen.getByLabelText('Custom watchlist picker'), { target: { value: 'fpt' } });
     fireEvent.click(screen.getByRole('option', { name: /FPT/ }));
@@ -1282,6 +1773,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+    fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
     const watchlistCalls = mockedGetVietnamWatchlist.mock.calls.length;
 
     fireEvent.change(screen.getByLabelText('Custom watchlist picker'), { target: { value: '@@@' } });
@@ -1296,6 +1788,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+    fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
     const watchlistCalls = mockedGetVietnamWatchlist.mock.calls.length;
 
     fireEvent.change(screen.getByLabelText('Custom watchlist picker'), { target: { value: 'xyz' } });
@@ -1309,6 +1802,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+    fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
 
     fireEvent.change(screen.getByLabelText('Custom watchlist picker'), { target: { value: 'vpb' } });
     fireEvent.click(screen.getByRole('option', { name: /VPB/ }));
@@ -1332,6 +1826,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+    fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
     fireEvent.change(screen.getByLabelText('Custom watchlist picker'), { target: { value: 'vpb' } });
     fireEvent.click(screen.getByRole('option', { name: /VPB/ }));
     const applyButton = screen.getByRole('button', { name: 'Apply custom watchlist' });
@@ -1355,13 +1850,10 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     render(<VietnamDashboardPage />);
 
-    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(['GMD', 'SCS'], false));
     expect(screen.getByRole('button', { name: 'Remove GMD' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Remove SCS' })).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Custom' }));
-
-    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(['GMD', 'SCS'], false));
+    expect(screen.getByRole('button', { name: 'Custom' })).toHaveAttribute('aria-pressed', 'true');
     expect(selectedTickerHeader().getByRole('heading', { name: 'GMD' })).toBeInTheDocument();
   });
 
@@ -1370,7 +1862,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     render(<VietnamDashboardPage />);
 
-    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(['FPT', 'VPB'], false));
     const watchlistCalls = mockedGetVietnamWatchlist.mock.calls.length;
 
     fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
@@ -1402,7 +1894,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     for (const [presetName, tickers] of Object.entries(presetTickers)) {
       fireEvent.click(presetGroup.getByRole('button', { name: presetName }));
       const expectedBatches = presetName === 'VN30'
-        ? Array.from({ length: Math.ceil(tickers.length / 5) }, (_, index) => tickers.slice(index * 5, index * 5 + 5))
+        ? chunkVietnamWatchlistTickers([...tickers], vn30BatchSize)
         : [[...tickers]];
       expectedWatchlistCalls += expectedBatches.length;
       await waitFor(() => {
@@ -1420,24 +1912,26 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'VN30' }));
 
-    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith([...presetTickers.VN30.slice(0, 5)], false));
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith([...presetTickers.VN30.slice(0, vn30BatchSize)], false));
     expect(selectedTickerHeader().getByRole('heading', { name: 'FPT' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'VN30' })).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('keeps VN30 retry enabled when SSI IndexComponents is unavailable and never applies hardcoded rows', async () => {
+    mockedGetVietnamIndexComponents.mockResolvedValueOnce(makeIndexComponentsResponse());
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
-    await waitFor(() => expect(mockedGetVietnamIndexComponents).toHaveBeenCalledTimes(1));
+    expect(mockedGetVietnamIndexComponents).not.toHaveBeenCalled();
 
     const watchlistCalls = mockedGetVietnamWatchlist.mock.calls.length;
-    const vn30Button = screen.getByRole('button', { name: 'Retry VN30' });
+    const vn30Button = screen.getByRole('button', { name: 'VN30' });
     expect(vn30Button).not.toBeDisabled();
     expect(vn30Button).toHaveAttribute('aria-pressed', 'false');
     fireEvent.click(vn30Button);
 
-    await waitFor(() => expect(mockedGetVietnamIndexComponents).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(mockedGetVietnamIndexComponents).toHaveBeenCalledTimes(1));
+    expect(await screen.findByRole('button', { name: 'Retry VN30' })).not.toBeDisabled();
     expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistCalls);
     expect(screen.getAllByText(/SSI VN30 components are unavailable/).length).toBeGreaterThan(0);
     expect(screen.getByTestId('indicator-row-FPT')).toBeInTheDocument();
@@ -1447,11 +1941,9 @@ describe('VietnamDashboardPage watchlist loading', () => {
     const thirtySymbols = Array.from({ length: 30 }, (_, index) => `V${String(index + 1).padStart(2, '0')}`);
     let resolveRetry: ((response: VietnamIndexComponentsResponse) => void) | undefined;
     let resolveRows: ((response: VietnamWatchlistResponse) => void) | undefined;
-    mockedGetVietnamIndexComponents
-      .mockResolvedValueOnce(makeIndexComponentsResponse())
-      .mockImplementationOnce(() => new Promise<VietnamIndexComponentsResponse>((resolve) => {
-        resolveRetry = resolve;
-      }));
+    mockedGetVietnamIndexComponents.mockImplementationOnce(() => new Promise<VietnamIndexComponentsResponse>((resolve) => {
+      resolveRetry = resolve;
+    }));
     mockedGetVietnamWatchlist
       .mockResolvedValueOnce(makeResponse(defaultTickers))
       .mockImplementationOnce(() => new Promise<VietnamWatchlistResponse>((resolve) => {
@@ -1459,8 +1951,9 @@ describe('VietnamDashboardPage watchlist loading', () => {
       }));
     render(<VietnamDashboardPage />);
 
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Retry VN30' })).not.toBeDisabled());
-    fireEvent.click(screen.getByRole('button', { name: 'Retry VN30' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'VN30' })).not.toBeDisabled());
+    expect(mockedGetVietnamIndexComponents).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'VN30' }));
 
     expect(await screen.findByRole('button', { name: 'Loading VN30 members...' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Banks' })).not.toBeDisabled();
@@ -1470,22 +1963,22 @@ describe('VietnamDashboardPage watchlist loading', () => {
     await act(async () => {
       resolveRetry?.(makeVn30ComponentsResponse(thirtySymbols));
     });
-    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(thirtySymbols.slice(0, 5), false));
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(thirtySymbols.slice(0, vn30BatchSize), false));
     expect(screen.queryByRole('button', { name: 'Loading VN30 members...' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'VN30' })).toBeDisabled();
-    expect(screen.getByText('Loaded 0/30 VN30 rows · Loading batch 1/6.')).toBeInTheDocument();
+    expect(screen.getByText(`Loaded 0/30 VN30 rows · Loading batch 1/6 (${vn30BatchSize} tickers per batch).`)).toBeInTheDocument();
     expect(screen.getByTestId('indicator-row-V01')).toHaveAttribute('data-hydration-state', 'loading');
     expect(screen.getAllByTestId(/indicator-row-V/)).toHaveLength(30);
 
     await act(async () => {
-      resolveRows?.(makeResponse(thirtySymbols.slice(0, 5)));
+      resolveRows?.(makeResponse(thirtySymbols.slice(0, vn30BatchSize)));
     });
     await waitFor(() => expect(screen.getByRole('button', { name: 'VN30' })).toHaveAttribute('aria-pressed', 'true'));
     expect(screen.getByTestId('indicator-row-V01')).not.toHaveAttribute('data-hydration-state');
     expect(screen.getAllByTestId(/indicator-row-V/)).toHaveLength(30);
   });
 
-  it('hydrates VN30 rows sequentially in five-ticker batches without changing membership order', async () => {
+  it('hydrates VN30 rows sequentially with the resolved default batch size without changing membership order', async () => {
     const symbols = Array.from({ length: 12 }, (_, index) => `B${String(index + 1).padStart(2, '0')}`);
     let resolveFirst: ((response: VietnamWatchlistResponse) => void) | undefined;
     let resolveSecond: ((response: VietnamWatchlistResponse) => void) | undefined;
@@ -1507,25 +2000,25 @@ describe('VietnamDashboardPage watchlist loading', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'VN30' })).not.toBeDisabled());
     fireEvent.click(screen.getByRole('button', { name: 'VN30' }));
 
-    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(symbols.slice(0, 5), false));
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(symbols.slice(0, vn30BatchSize), false));
     expect(indicatorRowOrder()).toEqual(symbols);
     expect(screen.getByTestId('indicator-row-B01')).toHaveAttribute('data-hydration-state', 'loading');
     expect(screen.getByTestId('indicator-row-B12')).toHaveAttribute('data-hydration-state', 'loading');
 
     await act(async () => {
-      resolveFirst?.(makeResponse(symbols.slice(0, 5)));
+      resolveFirst?.(makeResponse(symbols.slice(0, vn30BatchSize)));
     });
-    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(symbols.slice(5, 10), false));
-    expect(screen.getByText('Loaded 5/12 VN30 rows · Loading batch 2/3.')).toBeInTheDocument();
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(symbols.slice(vn30BatchSize, vn30BatchSize * 2), false));
+    expect(screen.getByText(`Loaded ${vn30BatchSize}/12 VN30 rows · Loading batch 2/3 (${vn30BatchSize} tickers per batch).`)).toBeInTheDocument();
     expect(screen.getByTestId('indicator-row-B01')).not.toHaveAttribute('data-hydration-state');
     expect(screen.getByTestId('indicator-row-B06')).toHaveAttribute('data-hydration-state', 'loading');
     expect(indicatorRowOrder()).toEqual(symbols);
 
     await act(async () => {
-      resolveSecond?.(makeResponse(symbols.slice(5, 10)));
+      resolveSecond?.(makeResponse(symbols.slice(vn30BatchSize, vn30BatchSize * 2)));
     });
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(symbols.slice(10), false));
-    expect(screen.getByText('Loaded 10/12 VN30 rows · Loading batch 3/3.')).toBeInTheDocument();
+    expect(screen.getByText(`Loaded ${vn30BatchSize * 2}/12 VN30 rows · Loading batch 3/3 (${vn30BatchSize} tickers per batch).`)).toBeInTheDocument();
     expect(screen.getByTestId('indicator-row-B06')).not.toHaveAttribute('data-hydration-state');
     expect(screen.getByTestId('indicator-row-B11')).toHaveAttribute('data-hydration-state', 'loading');
     expect(indicatorRowOrder()).toEqual(symbols);
@@ -1543,16 +2036,16 @@ describe('VietnamDashboardPage watchlist loading', () => {
     mockedGetVietnamIndexComponents.mockResolvedValue(makeVn30ComponentsResponse(symbols));
     mockedGetVietnamWatchlist
       .mockResolvedValueOnce(makeResponse(defaultTickers))
-      .mockResolvedValueOnce(makeResponse(symbols.slice(0, 5)))
+      .mockResolvedValueOnce(makeResponse(symbols.slice(0, vn30BatchSize)))
       .mockRejectedValueOnce(new Error('SSI batch timeout'))
-      .mockResolvedValueOnce(makeResponse(symbols.slice(5)));
+      .mockResolvedValueOnce(makeResponse(symbols.slice(vn30BatchSize)));
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(screen.getByRole('button', { name: 'VN30' })).not.toBeDisabled());
     fireEvent.click(screen.getByRole('button', { name: 'VN30' }));
 
     const retry = await screen.findByRole('button', { name: 'Retry failed rows' });
-    expect(screen.getByText('Loaded 5/7 VN30 rows; 2 unavailable.')).toBeInTheDocument();
+    expect(screen.getByText(`Loaded ${vn30BatchSize}/7 VN30 rows; 2 unavailable.`)).toBeInTheDocument();
     expect(screen.getByTestId('indicator-row-R01')).not.toHaveAttribute('data-hydration-state');
     expect(screen.getByTestId('indicator-row-R06')).toHaveAttribute('data-hydration-state', 'failed');
     expect(within(screen.getByTestId('indicator-row-R06')).getAllByText('Unavailable')).toHaveLength(2);
@@ -1561,7 +2054,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     fireEvent.click(retry);
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(callsBeforeRetry + 1));
-    expect(mockedGetVietnamWatchlist).toHaveBeenLastCalledWith(symbols.slice(5), false);
+    expect(mockedGetVietnamWatchlist).toHaveBeenLastCalledWith(symbols.slice(vn30BatchSize), false);
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Retry failed rows' })).not.toBeInTheDocument());
     expect(indicatorRowOrder()).toEqual(symbols);
     expect(screen.getByTestId('indicator-row-R06')).not.toHaveAttribute('data-hydration-state');
@@ -1582,7 +2075,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     fireEvent.click(vn30Button);
     fireEvent.click(vn30Button);
 
-    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(symbols.slice(0, 5), false));
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(symbols.slice(0, vn30BatchSize), false));
     expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(2);
     expect(screen.getByRole('button', { name: 'VN30' })).toBeDisabled();
   });
@@ -1600,19 +2093,19 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     await waitFor(() => expect(screen.getByRole('button', { name: 'VN30' })).not.toBeDisabled());
     fireEvent.click(screen.getByRole('button', { name: 'VN30' }));
-    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(symbols.slice(0, 5), false));
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(symbols.slice(0, vn30BatchSize), false));
     expect(screen.getByRole('button', { name: 'Banks' })).not.toBeDisabled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Banks' }));
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith([...presetTickers.Banks], false));
 
     await act(async () => {
-      resolveVn30Batch?.(makeResponse(symbols.slice(0, 5)));
+      resolveVn30Batch?.(makeResponse(symbols.slice(0, vn30BatchSize)));
     });
 
     await waitFor(() => expect(screen.getByRole('button', { name: 'Banks' })).toHaveAttribute('aria-pressed', 'true'));
     expect(indicatorRowOrder()).toEqual([...presetTickers.Banks]);
-    expect(mockedGetVietnamWatchlist).not.toHaveBeenCalledWith(symbols.slice(5), false);
+    expect(mockedGetVietnamWatchlist).not.toHaveBeenCalledWith(symbols.slice(vn30BatchSize), false);
   });
 
   it('reuses loaded SSI VN30 components and keeps normal watchlist cache semantics', async () => {
@@ -1620,8 +2113,8 @@ describe('VietnamDashboardPage watchlist loading', () => {
     mockedGetVietnamIndexComponents.mockResolvedValue(makeVn30ComponentsResponse(ssiSymbols));
     render(<VietnamDashboardPage />);
 
-    await waitFor(() => expect(mockedGetVietnamIndexComponents).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(screen.getByRole('button', { name: 'VN30' })).not.toBeDisabled());
+    expect(mockedGetVietnamIndexComponents).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: 'VN30' }));
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(ssiSymbols, false));
@@ -1653,7 +2146,10 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
   it('shows staged long-loading copy while preserving previous VN30 rows', async () => {
     const thirtySymbols = Array.from({ length: 30 }, (_, index) => `V${String(index + 1).padStart(2, '0')}`);
-    mockedGetVietnamIndexComponents.mockResolvedValue(makeVn30ComponentsResponse(thirtySymbols));
+    let resolveComponents: ((response: VietnamIndexComponentsResponse) => void) | undefined;
+    mockedGetVietnamIndexComponents.mockImplementationOnce(() => new Promise<VietnamIndexComponentsResponse>((resolve) => {
+      resolveComponents = resolve;
+    }));
     mockedGetVietnamWatchlist
       .mockResolvedValueOnce(makeResponse(defaultTickers))
       .mockImplementationOnce(() => new Promise<VietnamWatchlistResponse>(() => {
@@ -1663,9 +2159,18 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     await waitFor(() => expect(screen.getByRole('button', { name: 'VN30' })).not.toBeDisabled());
     vi.useFakeTimers();
-    fireEvent.click(screen.getByRole('button', { name: 'VN30' }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'VN30' }));
+      await Promise.resolve();
+    });
 
-    expect(screen.getByText('Loaded 0/30 VN30 rows · Loading batch 1/6.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Loading VN30 members...' })).toBeDisabled();
+    await act(async () => {
+      resolveComponents?.(makeVn30ComponentsResponse(thirtySymbols));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByText(new RegExp(`Loaded 0/30 VN30 rows .* Loading batch 1/6 \\(${vn30BatchSize} tickers per batch\\)`, 'i'))).toBeInTheDocument();
     expect(screen.getByTestId('indicator-row-V01')).toHaveAttribute('data-hydration-state', 'loading');
 
     await act(async () => {
@@ -1688,7 +2193,12 @@ describe('VietnamDashboardPage watchlist loading', () => {
       .mockResolvedValueOnce(makeVn30ComponentsResponse(['ssi', 'fpt', 'SSI']));
     render(<VietnamDashboardPage />);
 
+    await waitFor(() => expect(screen.getByRole('button', { name: 'VN30' })).not.toBeDisabled());
+    expect(mockedGetVietnamIndexComponents).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'VN30' }));
     await waitFor(() => expect(screen.getByRole('button', { name: 'Retry VN30' })).not.toBeDisabled());
+    expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(1);
+
     fireEvent.click(screen.getByRole('button', { name: 'Retry VN30' }));
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(['SSI', 'FPT'], false));
@@ -1697,15 +2207,14 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
   it('does not let an older VN30 retry overwrite a newer preset intent', async () => {
     let resolveRetry: ((response: VietnamIndexComponentsResponse) => void) | undefined;
-    mockedGetVietnamIndexComponents
-      .mockResolvedValueOnce(makeIndexComponentsResponse())
-      .mockImplementationOnce(() => new Promise<VietnamIndexComponentsResponse>((resolve) => {
-        resolveRetry = resolve;
-      }));
+    mockedGetVietnamIndexComponents.mockImplementationOnce(() => new Promise<VietnamIndexComponentsResponse>((resolve) => {
+      resolveRetry = resolve;
+    }));
     render(<VietnamDashboardPage />);
 
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Retry VN30' })).not.toBeDisabled());
-    fireEvent.click(screen.getByRole('button', { name: 'Retry VN30' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'VN30' })).not.toBeDisabled());
+    expect(mockedGetVietnamIndexComponents).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'VN30' }));
     fireEvent.click(screen.getByRole('button', { name: 'Banks' }));
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith([...presetTickers.Banks], false));
 
@@ -1735,7 +2244,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
     await waitFor(() => expect(mockedGetVietnamIndexList).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(mockedGetVietnamDailyIndex).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(mockedGetVietnamIndexComponents).toHaveBeenCalledTimes(1));
+    expect(mockedGetVietnamIndexComponents).not.toHaveBeenCalled();
     const watchlistCalls = mockedGetVietnamWatchlist.mock.calls.length;
     const indexListCalls = mockedGetVietnamIndexList.mock.calls.length;
     const dailyIndexCalls = mockedGetVietnamDailyIndex.mock.calls.length;
@@ -1982,15 +2491,17 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
   it('keeps previous committed rows and selection when a custom apply request fails', async () => {
     let rejectCustom: ((error: Error) => void) | undefined;
+    localStorage.clear();
     mockedGetVietnamWatchlist
-      .mockResolvedValueOnce(makeResponse(defaultTickers))
+      .mockImplementationOnce(async (tickers) => makeResponse(tickers ?? []))
       .mockImplementationOnce(() => new Promise<VietnamWatchlistResponse>((_resolve, reject) => {
         rejectCustom = reject;
       }));
 
     render(<VietnamDashboardPage />);
 
-    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+    fireEvent.click(screen.getByRole('button', { name: 'Banks' }));
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith([...presetTickers.Banks], false));
     clickTickerRow('ACB');
 
     fireEvent.change(screen.getByLabelText('Custom watchlist picker'), { target: { value: 'vpb' } });
@@ -2008,7 +2519,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     expect(await screen.findByText('Last update failed')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Custom' })).toHaveAttribute('aria-pressed', 'false');
-    expect(screen.getByTestId('indicator-row-FPT')).toBeInTheDocument();
+    expect(screen.getByTestId('indicator-row-VCB')).toBeInTheDocument();
     expect(selectedTickerHeader().getByRole('heading', { name: 'ACB' })).toBeInTheDocument();
   });
 
@@ -2039,7 +2550,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(selectedTickerHeader().getByRole('heading', { name: 'VCB' })).toBeInTheDocument();
   });
 
-  it('suppresses repeated preset clicks while the filter request is pending', async () => {
+  it('suppresses repeated same-preset clicks while allowing a newer preset intent', async () => {
     let resolveBanks: ((response: VietnamWatchlistResponse) => void) | undefined;
     mockedGetVietnamWatchlist
       .mockResolvedValueOnce(makeResponse(defaultTickers))
@@ -2052,21 +2563,24 @@ describe('VietnamDashboardPage watchlist loading', () => {
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
     fireEvent.click(screen.getByRole('button', { name: 'Banks' }));
     fireEvent.click(screen.getByRole('button', { name: 'Banks' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Consumer' }));
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(2));
     expect(screen.getByRole('button', { name: 'Banks' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Consumer' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Consumer' })).not.toBeDisabled();
     expect(screen.getByText(`Loading ${presetTickers.Banks.length} Banks rows; current rows remain visible.`)).toBeInTheDocument();
     expect(screen.getByTestId('indicator-row-FPT')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Consumer' }));
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith([...presetTickers.Consumer], false));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Consumer' })).toHaveAttribute('aria-pressed', 'true'));
 
     await act(async () => {
       resolveBanks?.(makeResponse([...presetTickers.Banks]));
     });
 
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Banks' })).toHaveAttribute('aria-pressed', 'true'));
-    expect(screen.getByTestId('indicator-row-EIB')).toBeInTheDocument();
-    expect(selectedTickerHeader().getByRole('heading', { name: 'VCB' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Consumer' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('indicator-row-VNM')).toBeInTheDocument();
+    expect(selectedTickerHeader().getByRole('heading', { name: 'VNM' })).toBeInTheDocument();
   });
 
   it('clicking an already active preset is a no-op', async () => {
@@ -2723,6 +3237,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Banks' }));
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith([...presetTickers.Banks], false));
     clickTickerRow('ACB');
+    fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
     fireEvent.change(screen.getByLabelText('Custom watchlist picker'), { target: { value: 'fpt' } });
     fireEvent.click(screen.getByRole('option', { name: /FPT/ }));
     const watchlistCalls = mockedGetVietnamWatchlist.mock.calls.length;
@@ -3018,7 +3533,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(screen.queryByText('Time unavailable')).not.toBeInTheDocument();
   });
 
-  it('renders SSI index coverage when VN30 components are unavailable', async () => {
+  it('renders SSI index coverage without preloading VN30 components', async () => {
     mockedGetVietnamIndexList.mockResolvedValue(makeIndexListResponse({
       rows: [
         { indexId: 'VN30', indexCode: 'VN30', indexName: 'VN30 Index', exchange: 'HOSE', market: 'HOSE', source: 'SSI' },
@@ -3027,21 +3542,21 @@ describe('VietnamDashboardPage watchlist loading', () => {
       ],
       count: 3,
     }));
-    mockedGetVietnamIndexComponents.mockResolvedValue(makeIndexComponentsResponse());
 
     render(<VietnamDashboardPage />);
 
     expect(await screen.findByText('SSI index coverage')).toBeInTheDocument();
     expect(mockedGetVietnamIndexList).toHaveBeenCalledWith('HOSE');
     expect(mockedGetVietnamDailyIndex).toHaveBeenCalledWith(['VNINDEX', 'VN30']);
-    expect(mockedGetVietnamIndexComponents).toHaveBeenCalledWith('VN30');
+    expect(mockedGetVietnamIndexComponents).not.toHaveBeenCalled();
     expect(screen.getByText('IndexList source/status/count')).toBeInTheDocument();
     expect(screen.getByText('DailyIndex source/status/count')).toBeInTheDocument();
     expect(screen.getByText('VN30 components source/status/count')).toBeInTheDocument();
     expect(screen.getAllByText('VN30').length).toBeGreaterThan(0);
     expect(screen.getAllByText('VNINDEX').length).toBeGreaterThan(0);
     expect(screen.getByText('HNX30')).toBeInTheDocument();
-    expect(screen.getByText('VN30 components unavailable from SSI.')).toBeInTheDocument();
+    expect(screen.getByText('VN30 components are loaded only after choosing the VN30 preset.')).toBeInTheDocument();
+    expect(screen.getByText('VN30 components load after choosing the VN30 preset.')).toBeInTheDocument();
 
     const indicatorTable = within(screen.getByRole('heading', { name: 'Indicator table' }).closest('section') as HTMLElement);
     expect(indicatorTable.getByTestId('indicator-row-FPT')).not.toHaveTextContent('Unavailable');
@@ -3072,13 +3587,13 @@ describe('VietnamDashboardPage watchlist loading', () => {
       rows: [],
       count: 0,
     }));
-    mockedGetVietnamIndexComponents.mockResolvedValue(makeIndexComponentsResponse());
 
     render(<VietnamDashboardPage />);
 
     const context = within(await screen.findByTestId('index-context'));
     expect(context.getByText('SSI daily index unavailable.')).toBeInTheDocument();
-    expect(context.getByText('SSI index components unavailable.')).toBeInTheDocument();
+    expect(context.getByText('VN30 components load after choosing the VN30 preset.')).toBeInTheDocument();
+    expect(mockedGetVietnamIndexComponents).not.toHaveBeenCalled();
     expect(screen.getByTestId('indicator-row-FPT')).toBeInTheDocument();
     expect(selectedTickerHeader().getByRole('heading', { name: 'FPT' })).toBeInTheDocument();
     expect(await screen.findByTestId('inspect-chart-card')).toBeInTheDocument();
@@ -3098,6 +3613,10 @@ describe('VietnamDashboardPage watchlist loading', () => {
     }));
 
     render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'VN30' })).not.toBeDisabled());
+    expect(mockedGetVietnamIndexComponents).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'VN30' }));
 
     const context = within(await screen.findByTestId('index-context'));
     expect(context.getByText('2 VN30 component rows returned by SSI IndexComponents.')).toBeInTheDocument();
@@ -4563,6 +5082,8 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
     await waitFor(() => expect(mockedGetVietnamRealtimeTrades).toHaveBeenCalledWith('FPT', 100));
+    await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('FPT', '6M'));
+    await waitFor(() => expect(mockedGetVietnamCorporateActions).toHaveBeenCalledWith(['FPT'], 6));
     const watchlistCalls = mockedGetVietnamWatchlist.mock.calls.length;
     const chartCalls = mockedGetVietnamChart.mock.calls.length;
     const corporateActionsCalls = mockedGetVietnamCorporateActions.mock.calls.length;
@@ -4778,6 +5299,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
 
     fireEvent.change(screen.getByLabelText('Custom watchlist picker'), { target: { value: 'FPT @@@ ACB' } });
 

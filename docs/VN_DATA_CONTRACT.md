@@ -281,7 +281,7 @@ Future adapters must treat `events` as the only canonical event list. If an adap
 | Foreign 5D/20D flow | SSI DailyStockPrice | Compute only from returned recent DailyStockPrice `foreign_net_volume` rows; null when history is insufficient |
 | Index list | SSI IndexList | Use SSI-returned index codes and identifiers |
 | Daily index | SSI DailyIndex | Optional index value/change/liquidity/breadth rows only after exact IndexList resolution |
-| Index components | SSI IndexComponents | Resolve through SSI IndexList identifiers; use only when SSI returns rows |
+| Index components | SSI IndexComponents | Use an explicit normalized index code directly; expose rows only when SSI returns exact usable members |
 | Symbol metadata | SSI SecuritiesDetails, then SSI Securities fallback | Optional fields remain null; metadata availability/quality never changes daily validity |
 | Intraday candles | SSI IntradayOhlc | Strict source; no fallback |
 | Realtime snapshot | SSI FastConnect streaming realtime contract | Parser, manager/cache, official-client adapter, and FastAPI startup bootstrap exist behind disabled-by-default config; request handlers read process-local cache only |
@@ -303,8 +303,8 @@ Index data is optional and independent of watchlist/company daily validity:
 * IndexComponents unavailable: `rows=[]`, `status=unavailable`.
 * Missing optional index fields remain `null`; provider zero values remain zero.
 * DailyIndex `date_match` compares requested indexes with the newest DailyIndex date in the same response. It does not assert exchange-session finality.
-* Exact SSI IndexList identifiers are required before DailyIndex or IndexComponents requests. Missing identifiers are unavailable, not guessed.
-* Diagnostics may include endpoint, requested market/code, selected identifier, normalized row count, selected date, field coverage, missing fields, and failure class. Raw provider payloads and authentication data are excluded.
+* Exact SSI IndexList identifiers remain required for DailyIndex discovery. An explicit IndexComponents `index_code` is attempted directly through SSI `indexCode`; IndexList failure does not block that request.
+* Diagnostics may include endpoint, requested market/code, selected identifier, IndexList status (`not_required` for explicit IndexComponents), normalized row count, field coverage, missing fields, failure class, and sanitized process-cache status/TTL/key fields. Raw provider payloads and authentication data are excluded.
 
 ## Symbol Metadata Contract
 
@@ -383,6 +383,10 @@ Units metadata does not prove data availability. UI availability must depend on 
 ### Cache Errors
 
 Cache errors and provider unavailable states are separate concepts. A provider 404 or unavailable live endpoint should not be shown as a daily SSI cache failure.
+
+`cache_status.daily_stock_price_cache` may report `hit`, `miss`, `refresh`, or `stale` for the bounded recent DailyStockPrice enrichment/history result. Its process-local TTL is 300 seconds. `force_refresh=true` bypasses this freshness check. This diagnostic cache field does not change source ownership: `latest_price` remains SSI DailyOhlc, while the cached enrichment remains SSI DailyStockPrice.
+
+IndexComponents diagnostics may report `cache_status`, `cache_ttl_seconds`, `cache_negative`, and a sanitized key containing only provider, endpoint, normalized index code, and optional market. Usable rows use a 300-second TTL. Unavailable, rate-limited, and no-row responses use a 60-second negative TTL. `force_refresh=true` bypasses this cache.
 
 ## Recently Completed Contract Cleanup
 

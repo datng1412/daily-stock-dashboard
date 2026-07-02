@@ -84,7 +84,7 @@ If SSI-owned data is unavailable, show unavailable. Do not silently fallback.
 * DailyStockPrice works but requires 29-day provider-level chunking because SSI rejects broad ranges.
 * DailyIndex works but requires 29-day provider-level chunking because SSI rejects broad ranges.
 * IndexList is exposed through `/api/v1/stocks/vn/index-list` and should be used to discover SSI-returned index codes.
-* IndexComponents is exposed through `/api/v1/stocks/vn/index-components?index_code=...`. Phase 4.4B live discovery proved exact VN30 nested component rows through `indexCode=VN30`, while missing identifiers or empty/provider-failed responses still return `rows=[]`; do not hardcode components or fallback to another provider.
+* IndexComponents is exposed through `/api/v1/stocks/vn/index-components?index_code=...`. The explicit normalized code is sent directly through the live-verified `indexCode` shape; IndexList is not a prerequisite. Empty/provider-failed responses still return `rows=[]`; do not hardcode components or fallback to another provider.
 * SSI IntradayOhlc is implemented for the watchlist/company intraday pulse through the same SSI auth/cache path. If SSI returns no candles, stale rows, malformed rows, provider code `429`, or the endpoint is disabled, expose a clean SSI `disabled`/`unavailable` intraday status and keep daily rows OK.
 * Phase 4.0B fixed the IntradayOhlc paging bug by using internal `pageSize=1000`, sorting provider rows, and applying the public candle limit afterward. Phase 4.0B-2 added sanitized failure classification for current live failures; the observed FPT failure was SSI provider code `429` with HTTP 200, classified as `rate_limited`. Phase 4.0B-3 added a symbol/timeframe-scoped cooldown after IntradayOhlc rate-limit signals so repeat requests return unavailable without hitting SSI.
 * `/api/v1/stocks/vn/chart` should be SSI-backed and should return SSI source metadata.
@@ -879,7 +879,7 @@ Acceptance criteria:
 Result:
 
 * Added `/api/v1/stocks/vn/daily-index` for bounded recent `VNINDEX,VN30` context. It returns only latest real SSI rows, explicit source/status/date/date-match, field coverage, missing fields, and sanitized diagnostics.
-* IndexList is authoritative for DailyIndex and IndexComponents identifiers. If SSI does not return an exact requested code/id, the dependent request remains unavailable and is not sent with a guessed identifier.
+* IndexList is authoritative for DailyIndex identifiers and general index discovery. Explicit IndexComponents codes are sent directly through the verified `indexCode` shape; unavailable/no-row results remain empty and are not replaced by guessed members.
 * IndexList preserves SSI-returned cross-market rows even when a market filter was requested and exposes returned markets under diagnostics.
 * IndexComponents remains empty-list-safe. No VN30 constituents are hardcoded and no fallback provider is used.
 * The dashboard renders a separate optional market-index section. Real DailyIndex values and real component counts render when present; unavailable index data does not clear watchlist rows, selected ticker, chart, or live sections.
@@ -905,7 +905,7 @@ Result:
 * Live DailyIndex discovery proved that `indexID=VN30` returns usable rows: 5 rows for 2026-06-23 through 2026-06-29 and 22 rows for 2026-06-01 through 2026-06-29, latest date 2026-06-29. The same windows with `indexCode=VN30` remained unavailable. Production already uses `indexID`; only the prerequisite IndexList call needed the verified market-qualified parameter.
 * Live IndexComponents discovery exposed a nested provider envelope: each outer index row contains an `IndexComponent` list whose members use `StockSymbol`. `indexID=VN30` returned only mismatched HNX outer rows, so exact filtering correctly produced zero VN30 members. `indexCode=VN30`, with market omitted or `HOSE`, returned an exact VN30 outer row and 30 nested members.
 * The provider now sends the live-verified `indexCode` shape first and flattens nested component rows only when the outer SSI index identifier exactly matches the request. This avoids an unnecessary `indexID` request that could cause the working retry to be rate-limited. It never reuses HNX members for VN30 and never hardcodes constituents.
-* IndexList, DailyIndex, and IndexComponents requests from one fetcher are spaced by a narrow 1.15-second provider-safety interval. This prevents the required IndexList lookup from immediately rate-limiting DailyIndex and spaces chunk/variant requests without affecting daily stock, intraday, realtime, metadata, or trade-tape paths.
+* IndexList, DailyIndex, and IndexComponents requests from one fetcher are spaced by a narrow 1.15-second provider-safety interval. This prevents the required DailyIndex discovery lookup from immediately rate-limiting DailyIndex. Explicit IndexComponents uses one verified request shape and a process cache rather than parameter variants.
 * The live latest VN30 row carried a provider `IndexValue` of zero despite non-zero change/liquidity fields. Because a zero index level is not a usable market level, normalization now exposes it as null and marks `index_value` missing/partial rather than rendering a fake zero.
 * SSI error parsing now recognizes direct nested error records and safely classifies observed request-null-style codes as bad request parameters without exposing provider messages or payload bodies.
 * Public endpoints and fields are unchanged. DailyIndex and IndexComponents remain optional and empty-list-safe when unavailable. `latest_price` remains SSI DailyOhlc; DailyStockPrice, intraday, realtime, metadata, and trade-tape behavior are unchanged.
@@ -994,7 +994,7 @@ Status: implemented in current working tree; live SSI smoke not run in this phas
 
 Result:
 
-* Diagnosed the VN30 filter path: the backend IndexComponents path already resolves exact SSI identifiers and flattens nested `IndexComponent[].StockSymbol` rows, but the frontend VN30 preset still used a static local member list. The filter now uses SSI IndexComponents rows when available and keeps the current watchlist visible when VN30 components are unavailable.
+* Diagnosed the VN30 filter path: the backend IndexComponents path flattens exact nested `IndexComponent[].StockSymbol` rows, but the frontend VN30 preset still used a static local member list. The filter now uses SSI IndexComponents rows when available and keeps the current watchlist visible when VN30 components are unavailable. Phase 4.6F-4 later made explicit component codes independent from IndexList.
 * Added additive watchlist completeness counters: `requested_tickers_count`, `returned_rows_count`, and `missing_tickers`, also mirrored under `data_quality` for diagnostics. These fields do not change existing rows or price ownership.
 * Added row-level data-quality reason codes for partial/missing values such as `daily_ohlcv_missing`, `daily_stock_price_missing`, `ta_insufficient_history`, `rsi_missing`, `ma_state_insufficient_data`, `foreign_flow_missing`, `provider_empty`, and `provider_error`.
 * Hardened preset/custom filter UX so active-filter clicks are no-ops, pending filter requests disable filter buttons, the pending filter shows a loading state, and previous successful rows remain visible.
@@ -1040,10 +1040,130 @@ Result:
 * Once exact SSI IndexComponents symbols resolve, the table immediately switches from previous rows to ordered VN30 shell rows. Tickers and membership provenance are visible, while numeric cells remain `Loading...` or `—`; shells never enter the committed market-data snapshot as real values.
 * Each successful batch replaces only its shell rows and updates `Loaded X/N`. Normal selection always uses `force_refresh=false`. Development timing events now include safe batch index/count fields. Explicit toolbar Force Refresh retains its existing force-refresh semantics.
 * Failed or incomplete batches preserve completed rows, mark only affected shells unavailable with a concise reason, and expose a retry that requests only failed tickers. Aggregated frontend counters use the full requested membership, currently hydrated row count, and failed ticker list.
-* The active VN30 action suppresses duplicate clicks while hydration is pending. Other presets and reset remain available; their newer filter intent cancels the VN30 UI run, and late batch responses cannot overwrite it or trigger the next batch.
-* A successful SSI-derived component list is retained only in current frontend memory. If a later component retry fails, that same session list may be used with the explicit `last successful SSI VN30 list` label. No static or persisted VN30 runtime list was added.
+* The active VN30 action suppresses duplicate clicks while hydration is pending. Other presets and the clear action remain available; their newer filter intent cancels the VN30 UI run, and late batch responses cannot overwrite it or trigger the next batch.
+* A successful SSI-derived component list remains available while its successful response is current. Phase 4.6F-3F later removed hydration from a last-successful list after a newer unavailable/no-row/failure/timeout response; those terminal responses now require an explicit VN30 retry.
 * The 3-second and 8-second states now include loaded-row progress. Backend construction, public API/schema fields, provider calls, and caches are unchanged; shared cache/service lifetime remains a future performance task requiring thread-safety, token-lifecycle, and SSI pacing review.
 * No hardcoded VN30 provider output, fake data, external provider runtime, fallback provider, SSE/WebSocket behavior, or `latest_price` change was introduced.
+
+### Phase 4.6F - Watchlist Backend Hydration Profiling and Bounded Batch Strategy
+
+Status: completed on 2026-07-02 with bounded live SSI profiling and deterministic backend/frontend tests.
+
+Result:
+
+* Added manual-only `scripts/profile_vn_watchlist_hydration.py`. It accepts fixed 1/5/10 cases or explicit bounded custom tickers, requires an opt-in flag above 10 up to the hard cap of 30, and emits only aggregate stage/cache/status/source timings. Raw payloads, credentials, headers, tokens, account identifiers, and exception messages are excluded.
+* Cold live profiles with normal cache semantics and optional intraday enabled measured 3.559s for FPT, 15.984s for five tickers, and 32.145s for ten tickers. Full 30-row profiling was skipped to avoid repeating the already measured 95.99-second provider load and unnecessary SSI pressure.
+* The ten-row stage totals were DailyOhlc 10.861s, metadata 7.529s, optional intraday 5.953s, optional trade tape 4.102s, DailyStockPrice plus foreign history 3.385s, TA 0.279s, and serialization 0.0013s. This classifies the backend as sequential provider-I/O bound; TA and serialization are not optimization targets.
+* Confirmed no duplicate DailyStockPrice request exists inside one row: the latest enrichment and 5D/20D foreign-flow history already share one bounded provider response. The evidence-backed defect was cache scope: DailyStockPrice used only the request-scoped fetcher cache while DailyOhlc, metadata, and optional sections also used the process-level service cache.
+* Added a 300-second process-level cache entry for the combined DailyStockPrice enrichment/history tuple. It uses existing locking/single-flight behavior, includes provider/market/Vietnam date/lookback/limit in its key, and honors explicit force refresh. A five-row immediate repeat improved from 3.564s to 2.293s, with five DailyStockPrice cache hits and unchanged `latest_price_source=SSI DailyOhlc`.
+* Replaced the inline frontend batch literal with `VN30_WATCHLIST_BATCH_SIZE_DEFAULT=5`, minimum 3, maximum 10, plus pure resolver/chunk helpers. The default remains five because live results were approximately linear and five rows reached the first useful batch in roughly half the ten-row time. Progress now discloses the resolved size.
+* Backend concurrency, shared global fetchers/tokens, and broad optional-section behavior changes remain deferred. They require SSI pacing/rate-limit, thread-safety, token lifecycle, streaming-manager attachment, and product-contract review. No evidence justified a provider call burst.
+* No public endpoint/schema shape changed. The additive `cache_status.daily_stock_price_cache` diagnostic follows the existing map contract. No hardcoded VN30 membership, fake data, fallback provider, external runtime, or price-source change was introduced.
+
+### Phase 4.6F-2 - Remove Hardcoded Initial VN Watchlist Auto-Selection
+
+Status: completed on 2026-07-02 with deterministic frontend validation; no backend/API behavior changed.
+
+Result:
+
+* Diagnosed the unwanted fresh-start load as frontend state initialization: `/vietnam` initialized `watchlist` from a hardcoded symbol list, initialized `selectedTicker` to the first symbol, and immediately called the watchlist API. Because the frontend API omits `tickers` for empty arrays, any unguarded empty call could also hit the backend's direct no-`tickers` service default.
+* Changed fresh browser sessions with empty localStorage to start with no active tickers, no selected ticker, disabled ordinary watchlist refresh, and explicit empty-start copy: `Choose a preset or enter tickers to start.`
+* Preserved saved custom watchlists: if localStorage has a valid saved custom list, it is restored, loaded, shown as the Custom preset, and still saved/cleared through the existing browser-local flow.
+* Preserved user-driven preset and custom flows. Clicking a preset uses the existing request path and selects the first valid returned ticker when needed; custom exact symbols still require explicit `Validate on apply`; stale/pending request protection remains in place.
+* Kept Phase 4.6F batching unchanged. The default/min/max batch-size helper controls hydration chunking only and does not create, cap, replace, or imply watchlist membership.
+* No public API/schema change, provider behavior change, hardcoded VN30 output, fake data, fallback provider, external runtime, or `latest_price` change was introduced.
+
+### Phase 4.6F-3A - Separate VN30 Member Preload State From Active Watchlist Loading UI
+
+Status: completed on 2026-07-02 with deterministic frontend validation; no backend/API behavior changed.
+
+Result:
+
+* Diagnosed the fresh empty-start copy issue as frontend state ownership drift: VN30 member preload used a preset-local loading flag, but the preset status copy still said `current rows stay visible` even when no committed watchlist rows existed.
+* Kept fresh `/vietnam` sessions empty when localStorage has no saved custom list. VN30 member preload can mark only the VN30 preset as loading/unavailable; it does not trigger active watchlist hydration progress, previous-row refresh copy, or a hardcoded watchlist request.
+* Previous-row copy such as `current rows stay visible` and `Showing previous data` remains reserved for flows where committed rows already exist. User-driven preset/custom/VN30 hydration still uses existing loading and progressive batch behavior after a watchlist load is actually requested.
+* VN30 member unavailable state clears loading, leaves preset/custom controls usable, and does not create a full-dashboard failure state or fallback members.
+* No public API/schema change, provider behavior change, hardcoded VN30 output, fake data, fallback provider, external runtime, or `latest_price` change was introduced.
+
+### Phase 4.6F-3B - Make VN30 Member Loading Lazy and User-Driven
+
+Status: completed on 2026-07-02 with deterministic frontend validation; no backend/API behavior changed.
+
+Result:
+
+* Diagnosed the fresh empty-start spinner as frontend eager loading: index coverage loaded IndexList, DailyIndex, and VN30 IndexComponents together on mount, so empty sessions could show `Loading VN30 members...` even with no active watchlist.
+* Changed index coverage to load only IndexList and DailyIndex on page mount. VN30 IndexComponents now load only after the user selects the VN30 preset or retry action.
+* Added a bounded VN30 component request timeout so an unresolved user-driven member request clears the loading state and returns the VN30 action to retryable unavailable status. It does not start watchlist hydration, create default rows, or emit fallback/hardcoded VN30 members.
+* Updated index coverage copy to distinguish not-yet-loaded VN30 components from unavailable provider results.
+* Preserved Phase 4.6F progressive hydration, resolved batch size behavior, normal `force_refresh=false` VN30 batches, saved custom restore, and empty-start no-watchlist behavior.
+* No public API/schema change, provider behavior change, hardcoded VN30 output, fake data, fallback provider, external runtime, or `latest_price` change was introduced.
+
+### Phase 4.6F-3C - Restore Preset Button Clickability After Empty-Start UX
+
+Status: completed on 2026-07-02 with deterministic frontend validation; no backend/API behavior changed.
+
+Result:
+
+* Diagnosed the clickability regression as frontend request-state gating: a pending non-VN30 preset/custom request used a broad guard and disabled state that blocked all other preset/custom actions.
+* Changed preset/custom selection so only the exact pending action is disabled for duplicate-click protection. Other presets remain clickable and can supersede the older pending request through the existing request-id stale-response guard.
+* Kept fresh `/vietnam` sessions empty when localStorage has no saved custom list. Empty-start sessions still do not call the watchlist endpoint with omitted tickers and still do not preload VN30 IndexComponents.
+* Confirmed non-VN30 presets use local scan bucket membership and do not depend on VN30 member loading, failure, or unavailability.
+* Preserved lazy VN30 member loading, existing progressive VN30 hydration, resolved batch-size behavior, normal `force_refresh=false` batches, saved custom restore, and Force Refresh disabled/no-op behavior when no active watchlist exists.
+* No public API/schema change, provider behavior change, hardcoded VN30 output, fake data, fallback provider, external runtime, or `latest_price` change was introduced.
+
+### Phase 4.6F-3D - Restore Local Preset Clickability and Decouple Index Coverage From VN30 State
+
+Status: completed on 2026-07-02 with deterministic frontend validation; no backend/API behavior changed.
+
+Result:
+
+* Diagnosed the remaining state leak as frontend diagnostic coupling: background IndexList/DailyIndex failures shared the same index coverage error surface as user-driven VN30 component failures, so diagnostics could imply VN30 component unavailability before VN30 was selected.
+* Kept every non-VN30 preset as a local scan bucket with its existing static ticker list. Banks, Securities, Real estate, Consumer, Logistics, Tech, Oil & gas, and Electricity load through the normal watchlist path from fresh empty start and do not call SSI IndexComponents.
+* Changed index coverage diagnostics so pending/unavailable/rate-limited IndexList or DailyIndex does not label VN30 components as unavailable, does not show `Loading VN30 members...`, and does not disable local presets or custom input.
+* Kept VN30 component failure in the VN30 preset retry flow. It can mark VN30 components unavailable after a user-driven VN30 request, but it no longer sets the generic IndexList/DailyIndex coverage error.
+* Preserved empty-start no-default-watchlist behavior, lazy VN30 member loading, progressive VN30 hydration, resolved batch-size behavior, saved custom restore, and Force Refresh disabled/no-op behavior when no active watchlist exists.
+* No public API/schema change, provider behavior change, hardcoded VN30 output, fake data, fallback provider, external runtime, or `latest_price` change was introduced.
+
+### Phase 4.6F-3E - Make Local Presets Direct Watchlist Actions and Make VN30 Unavailable Settle
+
+Status: completed on 2026-07-02 with deterministic frontend validation; no backend/API behavior changed.
+
+Result:
+
+* Diagnosed the current local preset path as functionally direct but still embedded in the mixed VN30 handler, which made the action boundary difficult to verify against manual click reports. Split non-VN30 presets into an explicit direct watchlist action path.
+* Banks, Securities, Real estate, Consumer, Logistics, Tech, Oil & gas, and Electricity now resolve their existing static local scan-bucket lists and call the normal watchlist load path directly. They do not depend on custom picker selected symbols/options, current rows, committed rows, active watchlist state, VN30 members, IndexList, or DailyIndex.
+* Added request-id ownership to the VN30 component request state. Fulfilled unavailable/no-row responses, rejected requests, and bounded timeouts clear `Loading VN30 members...` and settle to Retry VN30 / unavailable copy without starting watchlist hydration.
+* Confirmed a local preset can be selected after VN30 component unavailability, with no additional IndexComponents call and no hardcoded VN30 fallback members.
+* Preserved empty-start no-default-watchlist behavior, lazy VN30 member loading, progressive VN30 hydration, resolved batch-size behavior, custom picker workflow, saved custom restore, and Force Refresh disabled/no-op behavior when no active watchlist exists.
+* No public API/schema change, provider behavior change, hardcoded VN30 output, fake data, fallback provider, external runtime, realtime behavior, or `latest_price` change was introduced.
+
+### Phase 4.6F-3F - Make VN30 Member Resolution a Terminal State Machine
+
+Status: completed on 2026-07-02 with deterministic frontend validation; no backend/API behavior changed.
+
+Result:
+
+* Found the live-only gap that direct page tests had missed: React StrictMode replayed the mount effect cleanup, which set the shared unmounted guard to `true`, while the following setup did not reset it. The completed VN30 response was therefore ignored and the member state stayed loading. The effect setup now explicitly restores the mounted guard.
+* Replaced the implicit VN30 member `loading` boolean plus response-derived availability with explicit `not_loaded`, `loading`, `ready`, `unavailable`, `failed`, and `timeout` states.
+* Only the latest user-driven VN30 request owns its state transition. Usable normalized SSI component rows enter `ready`; HTTP-successful unavailable/no-row/failure-diagnostic responses, network rejection, and bounded timeout enter terminal retry states.
+* Terminal non-ready member responses clear `Loading VN30 members...`, show Retry VN30/unavailable, and start no watchlist hydration. Rendering the retry state does not issue another request; only an explicit retry action does.
+* Removed the last-successful-member hydration path after a newer unavailable/no-row response so completed unavailability cannot create shell rows or an active VN30 watchlist.
+* Added React StrictMode regression coverage plus fulfilled unavailable/no-row/failure-diagnostic, rejection, timeout, explicit retry, no-loop, local-preset-after-failure, fresh-start, and success-path coverage.
+* Preserved fresh empty start, lazy member loading, direct local preset actions, custom controls, successful SSI VN30 progressive hydration, bounded batch sizing, and stale-intent protection.
+* No public API/schema change, provider behavior change, hardcoded VN30 output, fake data, fallback provider, external runtime, realtime behavior, or `latest_price` change was introduced.
+
+### Phase 4.6F-4 - Fix VN IndexComponents API Resolution and Negative Cache Behavior
+
+Status: completed on 2026-07-02 with deterministic backend/fetcher validation and bounded local API smoke.
+
+Result:
+
+* Diagnosed `/index-components?index_code=VN30` as service-gated by IndexList even though the endpoint already required an explicit code. An unavailable IndexList therefore returned `index_list_unavailable` without attempting SSI IndexComponents.
+* Explicit normalized component codes now call SSI IndexComponents directly with the live-verified `indexCode`, `pageIndex=1`, `pageSize=1000`, and optional normalized market. IndexList is recorded as `not_required` and remains separate discovery/DailyIndex context.
+* Removed speculative IndexComponents parameter variants. Empty, mismatched, provider-error, and rate-limited responses use one provider request per uncached service resolution and remain clean unavailable with `rows=[]`.
+* Added a process-level cache across request-scoped services keyed by SSI provider, IndexComponents endpoint, normalized index code, and optional market. Usable rows cache for 300 seconds; unavailable/rate-limited/no-row results cache for 60 seconds. `force_refresh=true` intentionally bypasses it.
+* Added sanitized cache diagnostics (`cache_status`, TTL, negative flag, safe key, expiry), direct-resolution diagnostics, and deterministic tests for IndexList-independent success, no-row/unavailable/rate-limit behavior, cache hits, normalized keys, force-refresh bypass, exact nested rows, and no parameter probes.
+* No hardcoded VN30 output, fake rows, fallback provider, external runtime, frontend behavior change, realtime behavior change, or `latest_price` change was introduced.
 
 ### Phase 5.0A - External Provider Contract Design
 
@@ -1862,7 +1982,7 @@ Status: provider, service, API, and mocked parser coverage added in the current 
 * Added SSI-only index list coverage through `/api/v1/stocks/vn/index-list`.
 * Added SSI-only index component coverage through `/api/v1/stocks/vn/index-components?index_code=...`; the endpoint also accepts the legacy `index=...` query alias.
 * Added compact dashboard diagnostics for SSI index coverage so IndexList identifier resolution, provider identifier, and VN30 component availability are visible.
-* Avoid hardcoded index assumptions; use SSI-returned index identifiers from IndexList before calling IndexComponents.
+* Avoid hardcoded index assumptions. Use IndexList for discovery and DailyIndex identifiers; send an explicit caller-provided IndexComponents code directly through the verified SSI `indexCode` shape.
 * Live IndexList works in the current SSI environment.
 * Phase 4.4B live discovery proved exact SSI VN30 IndexComponents rows through `indexCode=VN30`; continue verifying any other index before relying on component rows.
 

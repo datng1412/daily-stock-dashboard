@@ -143,6 +143,8 @@ Conventions:
 | `daily_index.rows[].date_match` | Alignment with newest DailyIndex date in the response | Service-derived | classification | no | no | Index freshness note/diagnostics | `matched`, `mismatched`, or `unknown`; not exchange-session finality. |
 | `index_components.rows[]` | Real SSI index membership rows | SSI IndexComponents | list | no | no | Optional count/diagnostics | Empty when unavailable; no hardcoded VN30 members. |
 | Index `missing_fields` / `field_coverage` | Explicit optional-field availability | Service-derived from SSI rows | list/object | no | no | Diagnostics | Missing stays null; zero stays zero. |
+| `index_components.diagnostics.cache_status` / `cache_ttl_seconds` / `cache_negative` / `cache_key` | Process-cache result and sanitized cache identity for explicit IndexComponents requests | Service cache over SSI IndexComponents | diagnostic object | yes | no | Index diagnostics only | Usable rows cache for 300 seconds; unavailable/rate-limited/no-row responses cache for 60 seconds. Key contains provider, endpoint, normalized index code, and optional market only. |
+| `cache_status.daily_stock_price_cache` | Process-cache result for the combined recent DailyStockPrice enrichment/history request | Service cache over SSI DailyStockPrice | `hit`, `miss`, `refresh`, or `stale` | yes | no | Diagnostics/cache metadata | TTL is 300 seconds; force refresh bypasses freshness. It does not change DailyOhlc canonical price ownership. |
 
 ## Current Decision Points
 
