@@ -40,6 +40,9 @@ const CUSTOM_WATCHLIST_STORAGE_KEY = 'vnDashboard.customWatchlist.v1';
 const AUTO_REFRESH_INTERVALS = [60, 180, 300];
 const REALTIME_SNAPSHOT_REFRESH_INTERVALS = [2, 3, 5, 10, 15];
 const TRADE_TAPE_REFRESH_INTERVALS = [5, 10, 15];
+const FILTER_SLOW_LOADING_MS = 3_000;
+const FILTER_VERY_SLOW_LOADING_MS = 8_000;
+const VN30_WATCHLIST_BATCH_SIZE = 5;
 const DEFAULT_WATCHLIST = normalizeVietnamWatchlist(DEFAULT_TICKERS) ?? DEFAULT_TICKERS;
 const DETAIL_NEWS_LIMIT = 8;
 const INSPECT_RANGES = [
@@ -53,6 +56,10 @@ type BadgeVariant = NonNullable<React.ComponentProps<typeof Badge>['variant']>;
 type WatchlistScanLabel = 'Strong' | 'Improving' | 'Neutral' | 'Weakening' | 'Risk elevated' | 'Data unavailable';
 type VietnamDashboardPresetId = 'vn30' | 'banks' | 'securities' | 'real-estate' | 'consumer' | 'logistics' | 'tech' | 'oil-gas' | 'electricity';
 type VietnamDashboardActivePresetId = 'my' | 'custom' | VietnamDashboardPresetId;
+type FilterLoadingStage = 'idle' | 'loading' | 'slow' | 'very_slow';
+type Vn30HydrationStatus = 'idle' | 'loading' | 'partial' | 'complete';
+type Vn30MembershipSource = 'SSI IndexComponents' | 'last successful SSI VN30 list';
+type Vn30HydrationRowState = 'loading' | 'failed';
 type ReadinessState = 'Ready' | 'Partial' | 'Unavailable' | 'Disabled' | 'Loading' | 'Not implemented';
 type SectionState = 'Ready' | 'Loading' | 'Updating...' | 'Partial' | 'Unavailable' | 'Disabled' | 'Failed';
 type ReadinessItemKey = 'daily' | 'referenceForeign' | 'indicators' | 'intraday' | 'realtime' | 'tradeTape' | 'news';
@@ -84,6 +91,46 @@ interface CustomTickerOption {
   name: string | null;
   source: 'SSI IndexComponents' | 'Current watchlist' | 'Saved custom';
 }
+
+type Vn30WatchItem = VietnamWatchItem & {
+  hydrationState?: Vn30HydrationRowState;
+  hydrationReason?: string;
+  membershipSource?: Vn30MembershipSource;
+};
+
+interface Vn30HydrationState {
+  status: Vn30HydrationStatus;
+  tickers: string[];
+  rows: Vn30WatchItem[];
+  loadedTickersCount: number;
+  failedTickers: string[];
+  pendingBatchIndex: number | null;
+  totalBatches: number;
+  membershipSource: Vn30MembershipSource | null;
+}
+
+const emptyVn30HydrationState = (): Vn30HydrationState => ({
+  status: 'idle',
+  tickers: [],
+  rows: [],
+  loadedTickersCount: 0,
+  failedTickers: [],
+  pendingBatchIndex: null,
+  totalBatches: 0,
+  membershipSource: null,
+});
+
+const timingNow = () => (
+  typeof performance !== 'undefined' && typeof performance.now === 'function'
+    ? performance.now()
+    : Date.now()
+);
+
+const reportFilterTiming = (stage: 'vn30_components' | 'watchlist_fetch', details: Record<string, unknown>) => {
+  if (import.meta.env.DEV && import.meta.env.MODE !== 'test') {
+    console.debug(`[VN dashboard timing] ${stage}`, details);
+  }
+};
 
 const WATCHLIST_SCAN_ORDER: WatchlistScanLabel[] = ['Strong', 'Improving', 'Neutral', 'Weakening', 'Risk elevated', 'Data unavailable'];
 const DATA_CAVEAT_LABELS = new Set(['Foreign data stale', 'Indicator caution', 'Price finality unknown', 'Adjusted price unknown']);
@@ -1064,6 +1111,108 @@ const isCompleteWatchlistResponse = (response: VietnamWatchlistResponse, request
   if (!expectedTickers.length) return true;
   const actualTickers = new Set((response.watchlist ?? []).map((item) => normalizeVietnamTicker(item.ticker)));
   return expectedTickers.every((ticker) => actualTickers.has(ticker));
+};
+
+const chunkTickers = (tickers: string[], size: number) => {
+  const chunks: string[][] = [];
+  for (let index = 0; index < tickers.length; index += size) {
+    chunks.push(tickers.slice(index, index + size));
+  }
+  return chunks;
+};
+
+const buildVn30ShellRow = (
+  ticker: string,
+  membershipSource: Vn30MembershipSource,
+  hydrationState: Vn30HydrationRowState = 'loading',
+  hydrationReason = 'Waiting for SSI watchlist data.',
+): Vn30WatchItem => ({
+  ticker,
+  status: hydrationState === 'loading' ? 'loading' : 'unavailable',
+  reason: hydrationReason,
+  source: membershipSource,
+  liquidity: {},
+  priceLimit: {},
+  foreign: {},
+  indicators: {},
+  statusLabels: [],
+  validation: {
+    valid: false,
+    missingFields: ['daily_ohlcv'],
+    errors: hydrationState === 'failed' ? [hydrationReason] : [],
+  },
+  trend: {},
+  warnings: hydrationState === 'failed' ? [hydrationReason] : [],
+  news: [],
+  cacheStatus: {},
+  cacheLastFetchedAt: {},
+  cacheNextRefreshAt: {},
+  cacheErrors: {},
+  hydrationState,
+  hydrationReason,
+  membershipSource,
+});
+
+const mergeVn30BatchResponses = (
+  responses: VietnamWatchlistResponse[],
+  orderedRows: VietnamWatchItem[],
+  requestedTickers: string[],
+  failedTickers: string[],
+): VietnamWatchlistResponse | null => {
+  if (!responses.length) return null;
+  const first = responses[0];
+  const latest = responses[responses.length - 1];
+  const missingFields: Record<string, string[]> = Object.assign({}, ...responses.map((response) => response.dataQuality.missingFields ?? {}));
+  const errors: Record<string, string[]> = Object.assign({}, ...responses.map((response) => response.dataQuality.errors ?? {}));
+  failedTickers.forEach((ticker) => {
+    if (!errors[ticker]) errors[ticker] = ['SSI watchlist row unavailable after batch hydration.'];
+  });
+  const cacheMetadata = responses.reduce<VietnamWatchlistResponse['cacheMetadata']>((combined, response) => ({
+    cacheHitCount: combined.cacheHitCount + response.cacheMetadata.cacheHitCount,
+    cacheMissCount: combined.cacheMissCount + response.cacheMetadata.cacheMissCount,
+    staleCacheUsedCount: combined.staleCacheUsedCount + response.cacheMetadata.staleCacheUsedCount,
+    cacheTtlSeconds: { ...combined.cacheTtlSeconds, ...response.cacheMetadata.cacheTtlSeconds },
+    lastFetchedAt: { ...combined.lastFetchedAt, ...response.cacheMetadata.lastFetchedAt },
+    nextRefreshAt: { ...combined.nextRefreshAt, ...response.cacheMetadata.nextRefreshAt },
+    symbols: { ...combined.symbols, ...response.cacheMetadata.symbols },
+  }), {
+    cacheHitCount: 0,
+    cacheMissCount: 0,
+    staleCacheUsedCount: 0,
+    cacheTtlSeconds: {},
+    lastFetchedAt: {},
+    nextRefreshAt: {},
+    symbols: {},
+  });
+  const fixtureMode = responses.some((response) => response.fixtureMode);
+  const tradingDates = responses
+    .map((response) => response.dataQuality.lastTradingDate)
+    .filter((date): date is string => Boolean(date))
+    .sort();
+  const lastTradingDate = tradingDates[tradingDates.length - 1] ?? null;
+
+  return {
+    ...first,
+    fixtureMode,
+    lastRefreshTime: latest.lastRefreshTime ?? first.lastRefreshTime,
+    requestedTickersCount: requestedTickers.length,
+    returnedRowsCount: orderedRows.length,
+    missingTickers: failedTickers,
+    dataQuality: {
+      ...first.dataQuality,
+      fixtureMode,
+      symbolsLoaded: orderedRows.length,
+      lastTradingDate,
+      missingFields,
+      errors,
+      requestedTickersCount: requestedTickers.length,
+      returnedRowsCount: orderedRows.length,
+      missingTickers: failedTickers,
+      lastRefreshTime: latest.dataQuality.lastRefreshTime ?? first.dataQuality.lastRefreshTime,
+    },
+    cacheMetadata,
+    watchlist: orderedRows,
+  };
 };
 
 const newsUnavailableText = (item: VietnamWatchItem) => (
@@ -2458,19 +2607,35 @@ const nextIndicatorSortState = (
 );
 
 const IndicatorTable: React.FC<{
-  items: VietnamWatchItem[];
+  items: Vn30WatchItem[];
   realtimeQuotes: Record<string, VietnamRealtimeQuote | undefined>;
   realtimeLoading?: boolean;
   realtimeError?: string | null;
   isUpdating?: boolean;
   hasRequestFailure?: boolean;
+  hydrationStatus?: Vn30HydrationStatus;
   selectedTicker?: string | null;
   marketPhase: VietnamMarketPhase;
   onSelect: (ticker: string) => void;
-}> = ({ items, realtimeQuotes, realtimeLoading = false, realtimeError, isUpdating = false, hasRequestFailure = false, selectedTicker, marketPhase, onSelect }) => {
+}> = ({
+  items,
+  realtimeQuotes,
+  realtimeLoading = false,
+  realtimeError,
+  isUpdating = false,
+  hasRequestFailure = false,
+  hydrationStatus = 'idle',
+  selectedTicker,
+  marketPhase,
+  onSelect,
+}) => {
   const [sortState, setSortState] = useState<IndicatorSortState>(null);
   const [filters, setFilters] = useState<IndicatorFilters>(INITIAL_INDICATOR_FILTERS);
-  const sectionState: SectionState = isUpdating
+  const sectionState: SectionState = hydrationStatus === 'loading'
+    ? 'Loading'
+    : hydrationStatus === 'partial'
+      ? 'Partial'
+      : isUpdating
     ? 'Updating...'
     : hasRequestFailure && items.length
       ? 'Partial'
@@ -2667,6 +2832,53 @@ const IndicatorTable: React.FC<{
           </thead>
           <tbody>
             {sortedItems.map((item) => {
+              if (item.hydrationState) {
+                const isLoadingRow = item.hydrationState === 'loading';
+                const reason = item.hydrationReason ?? (isLoadingRow ? 'Waiting for SSI watchlist data.' : 'SSI watchlist row unavailable.');
+                return (
+                  <tr
+                    key={item.ticker}
+                    data-testid={`indicator-row-${item.ticker}`}
+                    data-hydration-state={item.hydrationState}
+                    aria-busy={isLoadingRow || undefined}
+                    className="border-b border-border/40 text-secondary-text"
+                  >
+                    <td className="py-3 pr-3 font-semibold text-foreground">
+                      {item.ticker}
+                      <div className="mt-1 text-xs font-normal text-secondary-text">
+                        {item.membershipSource ?? 'SSI IndexComponents'} membership
+                      </div>
+                    </td>
+                    {(['Daily close', '% change', 'RSI14', 'MA state', 'Volume / 20D avg', 'Foreign net volume'] as const).map((label) => (
+                      <td
+                        key={label}
+                        className={cn('px-3 py-3', label !== 'MA state' && 'text-right tabular-nums')}
+                        title={reason}
+                        aria-label={`${item.ticker} ${label}: ${isLoadingRow ? 'Loading' : `Unavailable. ${reason}`}`}
+                      >
+                        {isLoadingRow ? <span className="text-muted">Loading...</span> : <span aria-hidden="true">—</span>}
+                      </td>
+                    ))}
+                    <td className="px-3 py-3">
+                      <Badge
+                        variant={isLoadingRow ? 'info' : 'danger'}
+                        title={reason}
+                        aria-label={`Data quality: ${isLoadingRow ? 'Loading' : 'Unavailable'}. ${reason}`}
+                      >
+                        {isLoadingRow ? 'Loading' : 'Unavailable'}
+                      </Badge>
+                    </td>
+                    <td className="px-3 py-3">
+                      <Badge
+                        variant="default"
+                        title={isLoadingRow ? 'Realtime status will be evaluated after the daily row loads.' : reason}
+                      >
+                        {isLoadingRow ? 'Awaiting row' : 'Unavailable'}
+                      </Badge>
+                    </td>
+                  </tr>
+                );
+              }
               const quote = realtimeQuotes[item.ticker];
               const close = dailyCloseValue(item);
               const volumeRatio = volumeRatioValue(item);
@@ -4244,6 +4456,9 @@ const VietnamDashboardPage: React.FC = () => {
   const [watchlist, setWatchlist] = useState<string[]>(DEFAULT_WATCHLIST);
   const [activePresetId, setActivePresetId] = useState<VietnamDashboardActivePresetId>('my');
   const [pendingPresetId, setPendingPresetId] = useState<VietnamDashboardActivePresetId | null>(null);
+  const [pendingWatchlistTickerCount, setPendingWatchlistTickerCount] = useState<number | null>(null);
+  const [filterLoadingStage, setFilterLoadingStage] = useState<FilterLoadingStage>('idle');
+  const [vn30Hydration, setVn30Hydration] = useState<Vn30HydrationState>(emptyVn30HydrationState);
   const [customWatchlist, setCustomWatchlist] = useState<string[]>(initialCustomWatchlist);
   const [customPickerTickers, setCustomPickerTickers] = useState<string[]>(initialCustomWatchlist);
   const [customTickerQuery, setCustomTickerQuery] = useState('');
@@ -4307,8 +4522,14 @@ const VietnamDashboardPage: React.FC = () => {
   pendingPresetIdRef.current = pendingPresetId;
   const selectedTickerRef = useRef(selectedTicker);
   selectedTickerRef.current = selectedTicker;
+  const dataRef = useRef(data);
+  dataRef.current = data;
+  const vn30HydrationRef = useRef(vn30Hydration);
+  vn30HydrationRef.current = vn30Hydration;
   const requestIdRef = useRef(0);
   const filterIntentIdRef = useRef(0);
+  const vn30HydrationRunIdRef = useRef(0);
+  const lastSuccessfulVn30TickersRef = useRef<string[]>([]);
   const vn30ComponentsPromiseRef = useRef<Promise<VietnamIndexComponentsResponse> | null>(null);
   const initialWatchlistLoadStartedRef = useRef(false);
   const realtimeRequestIdRef = useRef(0);
@@ -4329,6 +4550,7 @@ const VietnamDashboardPage: React.FC = () => {
     tradesRequestIdRef.current += 1;
     corporateActionsRequestIdRef.current += 1;
     filterIntentIdRef.current += 1;
+    vn30HydrationRunIdRef.current += 1;
   }, []);
 
   const loadObservability = useCallback(async () => {
@@ -4455,9 +4677,20 @@ const VietnamDashboardPage: React.FC = () => {
       return vn30ComponentsPromiseRef.current;
     }
 
+    const startedAt = timingNow();
     setVn30ComponentsLoading(true);
     const request = stocksApi.getVietnamIndexComponents('VN30')
       .then((response) => {
+        const returnedTickers = getVn30ComponentTickers(response);
+        if (returnedTickers) {
+          lastSuccessfulVn30TickersRef.current = returnedTickers;
+        }
+        reportFilterTiming('vn30_components', {
+          durationMs: Math.round(timingNow() - startedAt),
+          status: response.status,
+          returnedRowsCount: response.count ?? response.rows.length,
+          reusedInFlightRequest: false,
+        });
         if (!unmountedRef.current) {
           setIndexComponents(response);
         }
@@ -4473,6 +4706,12 @@ const VietnamDashboardPage: React.FC = () => {
           count: 0,
           fallbackUsed: false,
         };
+        reportFilterTiming('vn30_components', {
+          durationMs: Math.round(timingNow() - startedAt),
+          status: 'error',
+          returnedRowsCount: 0,
+          reusedInFlightRequest: false,
+        });
         if (!unmountedRef.current) {
           setIndexComponents(unavailableResponse);
           setIndexCoverageError('SSI VN30 components request unavailable.');
@@ -4581,22 +4820,37 @@ const VietnamDashboardPage: React.FC = () => {
     tickersOverride?: string[],
     commitIntent?: WatchlistCommitIntent,
   ) => {
+    vn30HydrationRunIdRef.current += 1;
+    setVn30Hydration(emptyVn30HydrationState());
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
+    const requestedTickers = tickersOverride ?? logicalWatchlistRef.current;
+    const startedAt = timingNow();
     if (commitIntent) {
       pendingPresetIdRef.current = commitIntent.presetId;
       setPendingPresetId(commitIntent.presetId);
+      setPendingWatchlistTickerCount(requestedTickers.length);
     } else if (pendingPresetIdRef.current) {
       pendingPresetIdRef.current = null;
       setPendingPresetId(null);
+      setPendingWatchlistTickerCount(null);
     }
     setLoading(true);
     setForceLoading(forceRefresh);
     setError(null);
     try {
-      const requestedTickers = tickersOverride ?? logicalWatchlistRef.current;
       const nextData = await stocksApi.getVietnamWatchlist(requestedTickers, forceRefresh);
-      if (requestId !== requestIdRef.current) return;
+      const staleResponse = requestId !== requestIdRef.current;
+      reportFilterTiming('watchlist_fetch', {
+        durationMs: Math.round(timingNow() - startedAt),
+        filter: commitIntent?.presetId ?? refreshKind,
+        forceRefresh,
+        requestedTickersCount: requestedTickers.length,
+        returnedRowsCount: nextData.returnedRowsCount ?? nextData.watchlist.length,
+        missingTickersCount: nextData.missingTickers?.length ?? 0,
+        status: staleResponse ? 'stale_ignored' : 'success',
+      });
+      if (staleResponse) return;
       if (!isCompleteWatchlistResponse(nextData, requestedTickers)) {
         setError('Incomplete watchlist response; keeping previous successful snapshot.');
         return;
@@ -4620,7 +4874,15 @@ const VietnamDashboardPage: React.FC = () => {
       void loadObservability();
       void refreshRealtimeSnapshots(requestedTickers);
     } catch (err) {
-      if (requestId !== requestIdRef.current) return;
+      const staleResponse = requestId !== requestIdRef.current;
+      reportFilterTiming('watchlist_fetch', {
+        durationMs: Math.round(timingNow() - startedAt),
+        filter: commitIntent?.presetId ?? refreshKind,
+        forceRefresh,
+        requestedTickersCount: requestedTickers.length,
+        status: staleResponse ? 'stale_error_ignored' : 'error',
+      });
+      if (staleResponse) return;
       setError(err instanceof Error ? err.message : 'Failed to load Vietnam dashboard');
     } finally {
       if (requestId === requestIdRef.current) {
@@ -4629,13 +4891,181 @@ const VietnamDashboardPage: React.FC = () => {
         if (commitIntent) {
           pendingPresetIdRef.current = null;
           setPendingPresetId(null);
+          setPendingWatchlistTickerCount(null);
         }
       }
     }
   }, [loadObservability, refreshRealtimeSnapshots]);
 
+  const hydrateVn30Watchlist = useCallback(async (
+    tickers: string[],
+    membershipSource: Vn30MembershipSource,
+    intentId: number,
+    retryTickers?: string[],
+  ) => {
+    const requestedForThisRun = retryTickers ?? tickers;
+    if (!requestedForThisRun.length) return;
+    const retryOnly = Boolean(retryTickers);
+    const runId = vn30HydrationRunIdRef.current + 1;
+    vn30HydrationRunIdRef.current = runId;
+    requestIdRef.current += 1;
+
+    const previousHydration = vn30HydrationRef.current;
+    const retrySet = new Set(requestedForThisRun);
+    let currentRows: Vn30WatchItem[] = tickers.map((ticker) => {
+      const existing = retryOnly
+        ? previousHydration.rows.find((row) => row.ticker === ticker)
+        : null;
+      if (existing && !retrySet.has(ticker)) return existing;
+      return buildVn30ShellRow(ticker, membershipSource);
+    });
+    const previousData = dataRef.current;
+    const responses: VietnamWatchlistResponse[] = retryOnly && previousData
+      ? [{
+          ...previousData,
+          missingTickers: previousData.missingTickers?.filter((ticker) => !retrySet.has(ticker)),
+          dataQuality: {
+            ...previousData.dataQuality,
+            missingFields: Object.fromEntries(
+              Object.entries(previousData.dataQuality.missingFields).filter(([ticker]) => !retrySet.has(ticker)),
+            ),
+            errors: Object.fromEntries(
+              Object.entries(previousData.dataQuality.errors).filter(([ticker]) => !retrySet.has(ticker)),
+            ),
+            missingTickers: previousData.dataQuality.missingTickers?.filter((ticker) => !retrySet.has(ticker)),
+          },
+        }]
+      : [];
+    const batches = chunkTickers(requestedForThisRun, VN30_WATCHLIST_BATCH_SIZE);
+
+    pendingPresetIdRef.current = 'vn30';
+    setPendingPresetId('vn30');
+    setPendingWatchlistTickerCount(tickers.length);
+    setError(null);
+    setWatchlistError(null);
+    if (!retryOnly) {
+      const nextSelectedTicker = selectedTickerRef.current && tickers.includes(selectedTickerRef.current)
+        ? selectedTickerRef.current
+        : tickers[0] ?? null;
+      setWatchlist(tickers);
+      setActivePresetId('vn30');
+      setSelectedTicker(nextSelectedTicker);
+    }
+    setVn30Hydration({
+      status: 'loading',
+      tickers,
+      rows: currentRows,
+      loadedTickersCount: currentRows.filter((row) => !row.hydrationState).length,
+      failedTickers: [],
+      pendingBatchIndex: 1,
+      totalBatches: batches.length,
+      membershipSource,
+    });
+
+    const isStaleRun = () => (
+      runId !== vn30HydrationRunIdRef.current
+      || intentId !== filterIntentIdRef.current
+      || unmountedRef.current
+    );
+    const publishRows = (pendingBatchIndex: number | null, final = false) => {
+      const hydratedRows = currentRows.filter((row): row is VietnamWatchItem => !row.hydrationState);
+      const failedRows = currentRows.filter((row) => row.hydrationState === 'failed');
+      const failedTickers = failedRows.map((row) => row.ticker);
+      const aggregate = mergeVn30BatchResponses(responses, hydratedRows, tickers, failedTickers);
+      if (aggregate) {
+        setData(aggregate);
+      }
+      setVn30Hydration({
+        status: final ? (failedTickers.length ? 'partial' : 'complete') : 'loading',
+        tickers,
+        rows: currentRows,
+        loadedTickersCount: hydratedRows.length,
+        failedTickers,
+        pendingBatchIndex,
+        totalBatches: batches.length,
+        membershipSource,
+      });
+    };
+
+    for (let batchIndex = 0; batchIndex < batches.length; batchIndex += 1) {
+      if (isStaleRun()) return;
+      const batch = batches[batchIndex];
+      const startedAt = timingNow();
+      try {
+        const response = await stocksApi.getVietnamWatchlist(batch, false);
+        if (isStaleRun()) return;
+        responses.push(response);
+        const returnedRows = new Map(
+          response.watchlist
+            .map((row) => [normalizeVietnamTicker(row.ticker), row] as const)
+            .filter(([ticker]) => batch.includes(ticker)),
+        );
+        currentRows = currentRows.map((row) => {
+          if (!batch.includes(row.ticker)) return row;
+          const returned = returnedRows.get(row.ticker);
+          if (returned) return returned;
+          const responseErrors = response.dataQuality.errors?.[row.ticker];
+          const responseMissing = response.dataQuality.missingFields?.[row.ticker];
+          const reason = responseErrors?.join('; ')
+            ?? (responseMissing?.length ? `SSI row missing: ${responseMissing.join(', ')}.` : 'SSI watchlist response returned no row for this ticker.');
+          return buildVn30ShellRow(row.ticker, membershipSource, 'failed', reason);
+        });
+        reportFilterTiming('watchlist_fetch', {
+          durationMs: Math.round(timingNow() - startedAt),
+          filter: 'vn30',
+          hydrationMode: 'batch',
+          batchIndex: batchIndex + 1,
+          totalBatches: batches.length,
+          forceRefresh: false,
+          requestedTickersCount: batch.length,
+          returnedRowsCount: returnedRows.size,
+          missingTickersCount: batch.length - returnedRows.size,
+          status: 'success',
+        });
+      } catch (err) {
+        if (isStaleRun()) return;
+        const reason = err instanceof Error ? err.message : 'SSI watchlist batch unavailable.';
+        currentRows = currentRows.map((row) => (
+          batch.includes(row.ticker)
+            ? buildVn30ShellRow(row.ticker, membershipSource, 'failed', reason)
+            : row
+        ));
+        reportFilterTiming('watchlist_fetch', {
+          durationMs: Math.round(timingNow() - startedAt),
+          filter: 'vn30',
+          hydrationMode: 'batch',
+          batchIndex: batchIndex + 1,
+          totalBatches: batches.length,
+          forceRefresh: false,
+          requestedTickersCount: batch.length,
+          returnedRowsCount: 0,
+          missingTickersCount: batch.length,
+          status: 'error',
+        });
+      }
+      publishRows(batchIndex + 1 < batches.length ? batchIndex + 2 : null);
+    }
+
+    if (isStaleRun()) return;
+    publishRows(null, true);
+    const failedCount = currentRows.filter((row) => row.hydrationState === 'failed').length;
+    setWatchlistError(failedCount
+      ? `${failedCount} VN30 row${failedCount === 1 ? '' : 's'} unavailable. Retry only the failed rows.`
+      : null);
+    setLastRefreshKind('manual');
+    setLastRefreshAt(new Date().toISOString());
+    void loadObservability();
+    void refreshRealtimeSnapshots(tickers);
+    if (runId === vn30HydrationRunIdRef.current) {
+      pendingPresetIdRef.current = null;
+      setPendingPresetId(null);
+      setPendingWatchlistTickerCount(null);
+    }
+  }, [loadObservability, refreshRealtimeSnapshots]);
+
   const handlePresetSelect = useCallback((presetId: VietnamDashboardPresetId) => {
-    if (pendingPresetIdRef.current) return;
+    if (pendingPresetIdRef.current && pendingPresetIdRef.current !== 'vn30') return;
+    if (pendingPresetIdRef.current === 'vn30' && presetId === 'vn30') return;
     const availableVn30Tickers = presetId === 'vn30' ? getVn30ComponentTickers(indexComponents) : null;
     if (activePresetIdRef.current === presetId && (presetId !== 'vn30' || availableVn30Tickers)) return;
     const intentId = filterIntentIdRef.current + 1;
@@ -4643,6 +5073,10 @@ const VietnamDashboardPage: React.FC = () => {
 
     const applyPreset = (presetTickers: string[]) => {
       if (intentId !== filterIntentIdRef.current || unmountedRef.current) return;
+      if (presetId === 'vn30') {
+        void hydrateVn30Watchlist(presetTickers, 'SSI IndexComponents', intentId);
+        return;
+      }
       const nextSelectedTicker = selectedTickerRef.current && presetTickers.includes(selectedTickerRef.current) ? selectedTickerRef.current : presetTickers[0] ?? null;
       setWatchlistError(null);
       void load(false, 'manual', presetTickers, {
@@ -4672,15 +5106,31 @@ const VietnamDashboardPage: React.FC = () => {
       if (intentId !== filterIntentIdRef.current || unmountedRef.current) return;
       const retryTickers = getVn30ComponentTickers(response);
       if (!retryTickers) {
+        if (lastSuccessfulVn30TickersRef.current.length) {
+          void hydrateVn30Watchlist(
+            lastSuccessfulVn30TickersRef.current,
+            'last successful SSI VN30 list',
+            intentId,
+          );
+          return;
+        }
         setWatchlistError('SSI VN30 components are unavailable. Current rows were kept; select VN30 to retry.');
         return;
       }
       applyPreset(retryTickers);
     });
-  }, [indexComponents, load, loadVn30Components]);
+  }, [hydrateVn30Watchlist, indexComponents, load, loadVn30Components]);
+
+  const handleRetryFailedVn30 = useCallback(() => {
+    const current = vn30HydrationRef.current;
+    if (pendingPresetIdRef.current || current.status !== 'partial' || !current.failedTickers.length || !current.membershipSource) return;
+    const intentId = filterIntentIdRef.current + 1;
+    filterIntentIdRef.current = intentId;
+    void hydrateVn30Watchlist(current.tickers, current.membershipSource, intentId, current.failedTickers);
+  }, [hydrateVn30Watchlist]);
 
   const applyCustomTickers = useCallback((tickers: string[], successNotice = 'Applied and saved locally in this browser.') => {
-    if (pendingPresetIdRef.current) return;
+    if (pendingPresetIdRef.current && pendingPresetIdRef.current !== 'vn30') return;
     filterIntentIdRef.current += 1;
     const nextSelectedTicker = selectedTickerRef.current && tickers.includes(selectedTickerRef.current) ? selectedTickerRef.current : tickers[0] ?? null;
     void load(false, 'manual', tickers, {
@@ -4693,7 +5143,7 @@ const VietnamDashboardPage: React.FC = () => {
   }, [load]);
 
   const handleCustomPresetSelect = useCallback(() => {
-    if (pendingPresetIdRef.current) return;
+    if (pendingPresetIdRef.current && pendingPresetIdRef.current !== 'vn30') return;
     if (activePresetIdRef.current === 'custom') return;
     if (!customWatchlist.length) {
       setWatchlistError('Custom watchlist is empty.');
@@ -4705,7 +5155,7 @@ const VietnamDashboardPage: React.FC = () => {
   }, [applyCustomTickers, customWatchlist]);
 
   const handleApplyCustom = useCallback(() => {
-    if (pendingPresetIdRef.current) return;
+    if (pendingPresetIdRef.current && pendingPresetIdRef.current !== 'vn30') return;
     if (!customPickerTickers.length) {
       setWatchlistError('Select at least one ticker before applying.');
       setCustomNotice(null);
@@ -4727,7 +5177,7 @@ const VietnamDashboardPage: React.FC = () => {
   }, []);
 
   const handleResetWatchlist = useCallback(() => {
-    if (pendingPresetIdRef.current) return;
+    if (pendingPresetIdRef.current && pendingPresetIdRef.current !== 'vn30') return;
     if (activePresetIdRef.current === 'my') return;
     filterIntentIdRef.current += 1;
     const nextSelectedTicker = selectedTickerRef.current && DEFAULT_WATCHLIST.includes(selectedTickerRef.current) ? selectedTickerRef.current : DEFAULT_WATCHLIST[0] ?? null;
@@ -4756,6 +5206,24 @@ const VietnamDashboardPage: React.FC = () => {
   useEffect(() => {
     void loadIndexCoverage();
   }, [loadIndexCoverage]);
+
+  useEffect(() => {
+    if (!pendingPresetId) {
+      setFilterLoadingStage('idle');
+      return undefined;
+    }
+    setFilterLoadingStage('loading');
+    const slowTimer = window.setTimeout(() => {
+      setFilterLoadingStage('slow');
+    }, FILTER_SLOW_LOADING_MS);
+    const verySlowTimer = window.setTimeout(() => {
+      setFilterLoadingStage('very_slow');
+    }, FILTER_VERY_SLOW_LOADING_MS);
+    return () => {
+      window.clearTimeout(slowTimer);
+      window.clearTimeout(verySlowTimer);
+    };
+  }, [pendingPresetId]);
 
   useEffect(() => {
     if (initialWatchlistLoadStartedRef.current) return;
@@ -4929,9 +5397,31 @@ const VietnamDashboardPage: React.FC = () => {
   const hasCommittedData = Boolean(data);
   const isUpdatingWatchlist = loading && hasCommittedData;
   const isWatchlistFilterBusy = pendingPresetId !== null;
+  const isVn30Hydrating = pendingPresetId === 'vn30' && vn30Hydration.status === 'loading';
+  const canSwitchAwayFromPendingFilter = pendingPresetId === 'vn30';
+  const indicatorRows: Vn30WatchItem[] = vn30Hydration.status === 'idle'
+    ? data?.watchlist ?? []
+    : vn30Hydration.rows;
   const vn30ComponentTickers = useMemo(() => getVn30ComponentTickers(indexComponents), [indexComponents]);
   const vn30ComponentsReady = Boolean(vn30ComponentTickers?.length);
   const vn30ComponentsUnavailable = Boolean(indexComponents && !vn30ComponentsReady && !vn30ComponentsLoading);
+  const pendingFilterLabel = pendingPresetId === 'custom'
+    ? 'custom watchlist'
+    : pendingPresetId === 'my'
+      ? 'default watchlist'
+      : VIETNAM_DASHBOARD_PRESETS.find((preset) => preset.id === pendingPresetId)?.label ?? 'watchlist';
+  const pendingRowCount = pendingWatchlistTickerCount ?? 0;
+  const filterLoadingMessage = isVn30Hydrating
+    ? filterLoadingStage === 'very_slow'
+      ? `Taking longer than expected. Loaded ${vn30Hydration.loadedTickersCount}/${vn30Hydration.tickers.length}. You can keep using the current data.`
+      : filterLoadingStage === 'slow'
+        ? `Still loading VN30 rows... Loaded ${vn30Hydration.loadedTickersCount}/${vn30Hydration.tickers.length}.`
+        : `Loaded ${vn30Hydration.loadedTickersCount}/${vn30Hydration.tickers.length} VN30 rows · Loading batch ${vn30Hydration.pendingBatchIndex ?? vn30Hydration.totalBatches}/${vn30Hydration.totalBatches}.`
+    : filterLoadingStage === 'very_slow'
+      ? `Taking longer than expected to load ${pendingRowCount} ${pendingFilterLabel} rows. Current rows remain visible; select the filter again to retry if this request fails.`
+      : filterLoadingStage === 'slow'
+        ? `Still loading ${pendingRowCount} ${pendingFilterLabel} rows; current rows remain visible.`
+        : `Loading ${pendingRowCount} ${pendingFilterLabel} rows; current rows remain visible.`;
   const customTickerOptions = useMemo(() => {
     const options = new Map<string, CustomTickerOption>();
     const addOption = (
@@ -5186,7 +5676,12 @@ const VietnamDashboardPage: React.FC = () => {
               Preset groups are scan buckets only.
             </p>
           </div>
-          <Button variant="ghost" size="sm" onClick={handleResetWatchlist} disabled={isWatchlistFilterBusy}>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleResetWatchlist}
+            disabled={isWatchlistFilterBusy && !canSwitchAwayFromPendingFilter}
+          >
             <RotateCcw className="h-4 w-4" />
             Reset to default
           </Button>
@@ -5197,8 +5692,8 @@ const VietnamDashboardPage: React.FC = () => {
               type="button"
               aria-pressed={activePresetId === 'custom'}
               aria-busy={pendingPresetId === 'custom' || undefined}
-              aria-disabled={isWatchlistFilterBusy || undefined}
-              disabled={isWatchlistFilterBusy}
+              aria-disabled={(isWatchlistFilterBusy && !canSwitchAwayFromPendingFilter) || undefined}
+              disabled={isWatchlistFilterBusy && !canSwitchAwayFromPendingFilter}
               onClick={handleCustomPresetSelect}
               className={cn(
                 'inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan/25 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-60',
@@ -5213,8 +5708,11 @@ const VietnamDashboardPage: React.FC = () => {
             {VIETNAM_DASHBOARD_PRESETS.map((preset) => {
               const isActive = activePresetId === preset.id;
               const isVn30 = preset.id === 'vn30';
-              const isPending = pendingPresetId === preset.id || (isVn30 && vn30ComponentsLoading);
-              const disabled = isWatchlistFilterBusy || (isVn30 && vn30ComponentsLoading);
+              const isComponentPending = isVn30 && vn30ComponentsLoading;
+              const isWatchlistPending = pendingPresetId === preset.id;
+              const isPending = isWatchlistPending || isComponentPending;
+              const disabled = (isWatchlistFilterBusy && !canSwitchAwayFromPendingFilter)
+                || (isVn30 && (vn30ComponentsLoading || isVn30Hydrating));
               const buttonTitle = preset.id === 'vn30'
                 ? vn30ComponentsReady
                   ? `Uses ${vn30ComponentTickers?.length ?? 0} SSI IndexComponents rows.`
@@ -5241,7 +5739,7 @@ const VietnamDashboardPage: React.FC = () => {
                   )}
                 >
                   {isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : null}
-                  {isVn30 && vn30ComponentsLoading ? 'Loading VN30...' : isVn30 && vn30ComponentsUnavailable ? 'Retry VN30' : preset.label}
+                  {isComponentPending ? 'Loading VN30 members...' : isVn30 && vn30ComponentsUnavailable ? 'Retry VN30' : preset.label}
                 </button>
               );
             })}
@@ -5250,16 +5748,38 @@ const VietnamDashboardPage: React.FC = () => {
             VN30 uses SSI IndexComponents when available. Other preset groups are local scan buckets.
           </p>
           {isWatchlistFilterBusy ? (
-            <p className="mt-1 text-xs text-cyan" role="status">
-              Loading {pendingPresetId === 'custom' ? 'custom watchlist' : pendingPresetId?.toUpperCase()} filter; previous rows stay visible.
-            </p>
+            <div
+              className={cn('mt-1 flex flex-wrap items-center gap-2 text-xs', filterLoadingStage === 'very_slow' ? 'text-warning' : 'text-cyan')}
+              role="status"
+              data-testid={isVn30Hydrating ? 'vn30-hydration-progress' : undefined}
+            >
+              <span>{filterLoadingMessage}</span>
+              {isVn30Hydrating && vn30Hydration.membershipSource === 'last successful SSI VN30 list' ? (
+                <Badge variant="warning">last successful SSI VN30 list</Badge>
+              ) : null}
+            </div>
           ) : vn30ComponentsLoading ? (
             <p className="mt-1 text-xs text-cyan" role="status">
-              Loading SSI VN30 components; current rows stay visible.
+              Loading VN30 members; current rows stay visible.
             </p>
           ) : vn30ComponentsUnavailable ? (
             <p className="mt-1 text-xs text-warning">
               SSI VN30 components are unavailable. Select Retry VN30 to try again; current rows stay visible.
+            </p>
+          ) : null}
+          {vn30Hydration.status === 'partial' ? (
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-warning" role="status">
+              <span>
+                Loaded {vn30Hydration.loadedTickersCount}/{vn30Hydration.tickers.length} VN30 rows; {vn30Hydration.failedTickers.length} unavailable.
+              </span>
+              <Button type="button" variant="outline" size="sm" onClick={handleRetryFailedVn30}>
+                Retry failed rows
+              </Button>
+            </div>
+          ) : null}
+          {vn30Hydration.status !== 'idle' && vn30Hydration.membershipSource === 'last successful SSI VN30 list' && !isVn30Hydrating ? (
+            <p className="mt-1 text-xs text-warning">
+              Membership uses the last successful SSI VN30 list from this browser session because the latest component retry was unavailable.
             </p>
           ) : null}
         </div>
@@ -5424,12 +5944,13 @@ const VietnamDashboardPage: React.FC = () => {
             marketPhase={marketPhase}
           />
           <IndicatorTable
-            items={data?.watchlist ?? []}
+            items={indicatorRows}
             realtimeQuotes={realtimeQuotes}
             realtimeLoading={realtimeLoading}
             realtimeError={realtimeError}
             isUpdating={isUpdatingWatchlist}
             hasRequestFailure={Boolean(error)}
+            hydrationStatus={vn30Hydration.status}
             selectedTicker={selectedItem?.ticker}
             marketPhase={marketPhase}
             onSelect={setSelectedTicker}

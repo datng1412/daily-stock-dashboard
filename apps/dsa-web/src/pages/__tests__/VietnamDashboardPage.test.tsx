@@ -1341,7 +1341,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(2));
     expect(screen.getByRole('button', { name: 'Apply custom watchlist' })).toBeDisabled();
     expect(screen.getByLabelText('Custom watchlist picker')).toBeDisabled();
-    expect(screen.getByText('Loading custom watchlist filter; previous rows stay visible.')).toBeInTheDocument();
+    expect(screen.getByText('Loading 1 custom watchlist rows; current rows remain visible.')).toBeInTheDocument();
     expect(screen.getByTestId('indicator-row-FPT')).toBeInTheDocument();
 
     await act(async () => {
@@ -1401,9 +1401,12 @@ describe('VietnamDashboardPage watchlist loading', () => {
     let expectedWatchlistCalls = 1;
     for (const [presetName, tickers] of Object.entries(presetTickers)) {
       fireEvent.click(presetGroup.getByRole('button', { name: presetName }));
-      expectedWatchlistCalls += 1;
+      const expectedBatches = presetName === 'VN30'
+        ? Array.from({ length: Math.ceil(tickers.length / 5) }, (_, index) => tickers.slice(index * 5, index * 5 + 5))
+        : [[...tickers]];
+      expectedWatchlistCalls += expectedBatches.length;
       await waitFor(() => {
-        expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith([...tickers], false);
+        expectedBatches.forEach((batch) => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(batch, false));
         expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(expectedWatchlistCalls);
       });
     }
@@ -1417,7 +1420,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'VN30' }));
 
-    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith([...presetTickers.VN30], false));
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith([...presetTickers.VN30.slice(0, 5)], false));
     expect(selectedTickerHeader().getByRole('heading', { name: 'FPT' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'VN30' })).toHaveAttribute('aria-pressed', 'true');
   });
@@ -1440,27 +1443,243 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(screen.getByTestId('indicator-row-FPT')).toBeInTheDocument();
   });
 
-  it('shows loading and disables only VN30 while a component retry is pending', async () => {
+  it('splits VN30 member loading from the 30-row watchlist loading stage', async () => {
+    const thirtySymbols = Array.from({ length: 30 }, (_, index) => `V${String(index + 1).padStart(2, '0')}`);
     let resolveRetry: ((response: VietnamIndexComponentsResponse) => void) | undefined;
+    let resolveRows: ((response: VietnamWatchlistResponse) => void) | undefined;
     mockedGetVietnamIndexComponents
       .mockResolvedValueOnce(makeIndexComponentsResponse())
       .mockImplementationOnce(() => new Promise<VietnamIndexComponentsResponse>((resolve) => {
         resolveRetry = resolve;
+      }));
+    mockedGetVietnamWatchlist
+      .mockResolvedValueOnce(makeResponse(defaultTickers))
+      .mockImplementationOnce(() => new Promise<VietnamWatchlistResponse>((resolve) => {
+        resolveRows = resolve;
       }));
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(screen.getByRole('button', { name: 'Retry VN30' })).not.toBeDisabled());
     fireEvent.click(screen.getByRole('button', { name: 'Retry VN30' }));
 
-    expect(await screen.findByRole('button', { name: 'Loading VN30...' })).toBeDisabled();
+    expect(await screen.findByRole('button', { name: 'Loading VN30 members...' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Banks' })).not.toBeDisabled();
-    expect(screen.getByText('Loading SSI VN30 components; current rows stay visible.')).toBeInTheDocument();
+    expect(screen.getByText('Loading VN30 members; current rows stay visible.')).toBeInTheDocument();
     expect(screen.getByTestId('indicator-row-FPT')).toBeInTheDocument();
 
     await act(async () => {
-      resolveRetry?.(makeVn30ComponentsResponse());
+      resolveRetry?.(makeVn30ComponentsResponse(thirtySymbols));
     });
-    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith([...presetTickers.VN30], false));
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(thirtySymbols.slice(0, 5), false));
+    expect(screen.queryByRole('button', { name: 'Loading VN30 members...' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'VN30' })).toBeDisabled();
+    expect(screen.getByText('Loaded 0/30 VN30 rows · Loading batch 1/6.')).toBeInTheDocument();
+    expect(screen.getByTestId('indicator-row-V01')).toHaveAttribute('data-hydration-state', 'loading');
+    expect(screen.getAllByTestId(/indicator-row-V/)).toHaveLength(30);
+
+    await act(async () => {
+      resolveRows?.(makeResponse(thirtySymbols.slice(0, 5)));
+    });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'VN30' })).toHaveAttribute('aria-pressed', 'true'));
+    expect(screen.getByTestId('indicator-row-V01')).not.toHaveAttribute('data-hydration-state');
+    expect(screen.getAllByTestId(/indicator-row-V/)).toHaveLength(30);
+  });
+
+  it('hydrates VN30 rows sequentially in five-ticker batches without changing membership order', async () => {
+    const symbols = Array.from({ length: 12 }, (_, index) => `B${String(index + 1).padStart(2, '0')}`);
+    let resolveFirst: ((response: VietnamWatchlistResponse) => void) | undefined;
+    let resolveSecond: ((response: VietnamWatchlistResponse) => void) | undefined;
+    let resolveThird: ((response: VietnamWatchlistResponse) => void) | undefined;
+    mockedGetVietnamIndexComponents.mockResolvedValue(makeVn30ComponentsResponse(symbols));
+    mockedGetVietnamWatchlist
+      .mockResolvedValueOnce(makeResponse(defaultTickers))
+      .mockImplementationOnce(() => new Promise<VietnamWatchlistResponse>((resolve) => {
+        resolveFirst = resolve;
+      }))
+      .mockImplementationOnce(() => new Promise<VietnamWatchlistResponse>((resolve) => {
+        resolveSecond = resolve;
+      }))
+      .mockImplementationOnce(() => new Promise<VietnamWatchlistResponse>((resolve) => {
+        resolveThird = resolve;
+      }));
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'VN30' })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole('button', { name: 'VN30' }));
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(symbols.slice(0, 5), false));
+    expect(indicatorRowOrder()).toEqual(symbols);
+    expect(screen.getByTestId('indicator-row-B01')).toHaveAttribute('data-hydration-state', 'loading');
+    expect(screen.getByTestId('indicator-row-B12')).toHaveAttribute('data-hydration-state', 'loading');
+
+    await act(async () => {
+      resolveFirst?.(makeResponse(symbols.slice(0, 5)));
+    });
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(symbols.slice(5, 10), false));
+    expect(screen.getByText('Loaded 5/12 VN30 rows · Loading batch 2/3.')).toBeInTheDocument();
+    expect(screen.getByTestId('indicator-row-B01')).not.toHaveAttribute('data-hydration-state');
+    expect(screen.getByTestId('indicator-row-B06')).toHaveAttribute('data-hydration-state', 'loading');
+    expect(indicatorRowOrder()).toEqual(symbols);
+
+    await act(async () => {
+      resolveSecond?.(makeResponse(symbols.slice(5, 10)));
+    });
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(symbols.slice(10), false));
+    expect(screen.getByText('Loaded 10/12 VN30 rows · Loading batch 3/3.')).toBeInTheDocument();
+    expect(screen.getByTestId('indicator-row-B06')).not.toHaveAttribute('data-hydration-state');
+    expect(screen.getByTestId('indicator-row-B11')).toHaveAttribute('data-hydration-state', 'loading');
+    expect(indicatorRowOrder()).toEqual(symbols);
+
+    await act(async () => {
+      resolveThird?.(makeResponse(symbols.slice(10)));
+    });
+    await waitFor(() => expect(screen.queryByTestId('vn30-hydration-progress')).not.toBeInTheDocument());
+    expect(indicatorRowOrder()).toEqual(symbols);
+    expect(screen.getByTestId('indicator-row-B12')).not.toHaveAttribute('data-hydration-state');
+  });
+
+  it('keeps successful VN30 batches and retries only failed rows', async () => {
+    const symbols = ['R01', 'R02', 'R03', 'R04', 'R05', 'R06', 'R07'];
+    mockedGetVietnamIndexComponents.mockResolvedValue(makeVn30ComponentsResponse(symbols));
+    mockedGetVietnamWatchlist
+      .mockResolvedValueOnce(makeResponse(defaultTickers))
+      .mockResolvedValueOnce(makeResponse(symbols.slice(0, 5)))
+      .mockRejectedValueOnce(new Error('SSI batch timeout'))
+      .mockResolvedValueOnce(makeResponse(symbols.slice(5)));
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'VN30' })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole('button', { name: 'VN30' }));
+
+    const retry = await screen.findByRole('button', { name: 'Retry failed rows' });
+    expect(screen.getByText('Loaded 5/7 VN30 rows; 2 unavailable.')).toBeInTheDocument();
+    expect(screen.getByTestId('indicator-row-R01')).not.toHaveAttribute('data-hydration-state');
+    expect(screen.getByTestId('indicator-row-R06')).toHaveAttribute('data-hydration-state', 'failed');
+    expect(within(screen.getByTestId('indicator-row-R06')).getAllByText('Unavailable')).toHaveLength(2);
+    const callsBeforeRetry = mockedGetVietnamWatchlist.mock.calls.length;
+
+    fireEvent.click(retry);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(callsBeforeRetry + 1));
+    expect(mockedGetVietnamWatchlist).toHaveBeenLastCalledWith(symbols.slice(5), false);
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Retry failed rows' })).not.toBeInTheDocument());
+    expect(indicatorRowOrder()).toEqual(symbols);
+    expect(screen.getByTestId('indicator-row-R06')).not.toHaveAttribute('data-hydration-state');
+  });
+
+  it('suppresses repeated VN30 clicks while the first batch is pending', async () => {
+    const symbols = ['D01', 'D02', 'D03', 'D04', 'D05', 'D06'];
+    mockedGetVietnamIndexComponents.mockResolvedValue(makeVn30ComponentsResponse(symbols));
+    mockedGetVietnamWatchlist
+      .mockResolvedValueOnce(makeResponse(defaultTickers))
+      .mockImplementationOnce(() => new Promise<VietnamWatchlistResponse>(() => {
+        // Keep batch one pending so duplicate click suppression is observable.
+      }));
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'VN30' })).not.toBeDisabled());
+    const vn30Button = screen.getByRole('button', { name: 'VN30' });
+    fireEvent.click(vn30Button);
+    fireEvent.click(vn30Button);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(symbols.slice(0, 5), false));
+    expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole('button', { name: 'VN30' })).toBeDisabled();
+  });
+
+  it('ignores a stale VN30 batch after switching to another preset', async () => {
+    const symbols = ['S01', 'S02', 'S03', 'S04', 'S05', 'S06'];
+    let resolveVn30Batch: ((response: VietnamWatchlistResponse) => void) | undefined;
+    mockedGetVietnamIndexComponents.mockResolvedValue(makeVn30ComponentsResponse(symbols));
+    mockedGetVietnamWatchlist
+      .mockResolvedValueOnce(makeResponse(defaultTickers))
+      .mockImplementationOnce(() => new Promise<VietnamWatchlistResponse>((resolve) => {
+        resolveVn30Batch = resolve;
+      }));
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'VN30' })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole('button', { name: 'VN30' }));
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(symbols.slice(0, 5), false));
+    expect(screen.getByRole('button', { name: 'Banks' })).not.toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Banks' }));
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith([...presetTickers.Banks], false));
+
+    await act(async () => {
+      resolveVn30Batch?.(makeResponse(symbols.slice(0, 5)));
+    });
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Banks' })).toHaveAttribute('aria-pressed', 'true'));
+    expect(indicatorRowOrder()).toEqual([...presetTickers.Banks]);
+    expect(mockedGetVietnamWatchlist).not.toHaveBeenCalledWith(symbols.slice(5), false);
+  });
+
+  it('reuses loaded SSI VN30 components and keeps normal watchlist cache semantics', async () => {
+    const ssiSymbols = ['FPT', 'HPG', 'SSI'];
+    mockedGetVietnamIndexComponents.mockResolvedValue(makeVn30ComponentsResponse(ssiSymbols));
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamIndexComponents).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'VN30' })).not.toBeDisabled());
+
+    fireEvent.click(screen.getByRole('button', { name: 'VN30' }));
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(ssiSymbols, false));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'VN30' })).toHaveAttribute('aria-pressed', 'true'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Banks' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Banks' })).toHaveAttribute('aria-pressed', 'true'));
+    fireEvent.click(screen.getByRole('button', { name: 'VN30' }));
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(ssiSymbols, false));
+    expect(mockedGetVietnamIndexComponents).toHaveBeenCalledTimes(1);
+    expect(mockedGetVietnamIndexComponents).toHaveBeenCalledWith('VN30');
+  });
+
+  it('keeps explicit force-refresh semantics after VN30 batch hydration completes', async () => {
+    const symbols = ['FPT', 'HPG', 'SSI'];
+    mockedGetVietnamIndexComponents.mockResolvedValue(makeVn30ComponentsResponse(symbols));
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'VN30' })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole('button', { name: 'VN30' }));
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(symbols, false));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'VN30' })).toHaveAttribute('aria-pressed', 'true'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Force live refresh' }));
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(symbols, true));
+  });
+
+  it('shows staged long-loading copy while preserving previous VN30 rows', async () => {
+    const thirtySymbols = Array.from({ length: 30 }, (_, index) => `V${String(index + 1).padStart(2, '0')}`);
+    mockedGetVietnamIndexComponents.mockResolvedValue(makeVn30ComponentsResponse(thirtySymbols));
+    mockedGetVietnamWatchlist
+      .mockResolvedValueOnce(makeResponse(defaultTickers))
+      .mockImplementationOnce(() => new Promise<VietnamWatchlistResponse>(() => {
+        // Intentionally unresolved so staged long-loading copy can be asserted.
+      }));
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'VN30' })).not.toBeDisabled());
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByRole('button', { name: 'VN30' }));
+
+    expect(screen.getByText('Loaded 0/30 VN30 rows · Loading batch 1/6.')).toBeInTheDocument();
+    expect(screen.getByTestId('indicator-row-V01')).toHaveAttribute('data-hydration-state', 'loading');
+
+    await act(async () => {
+      vi.advanceTimersByTime(3_000);
+      await Promise.resolve();
+    });
+    expect(screen.getByText('Still loading VN30 rows... Loaded 0/30.')).toBeInTheDocument();
+
+    await act(async () => {
+      vi.advanceTimersByTime(5_000);
+      await Promise.resolve();
+    });
+    expect(screen.getByText('Taking longer than expected. Loaded 0/30. You can keep using the current data.')).toBeInTheDocument();
+    expect(screen.getByTestId('indicator-row-V01')).toHaveAttribute('data-hydration-state', 'loading');
   });
 
   it('retries unavailable VN30 components and applies only the returned SSI symbols', async () => {
@@ -1838,7 +2057,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(2));
     expect(screen.getByRole('button', { name: 'Banks' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Consumer' })).toBeDisabled();
-    expect(screen.getByText('Loading BANKS filter; previous rows stay visible.')).toBeInTheDocument();
+    expect(screen.getByText(`Loading ${presetTickers.Banks.length} Banks rows; current rows remain visible.`)).toBeInTheDocument();
     expect(screen.getByTestId('indicator-row-FPT')).toBeInTheDocument();
 
     await act(async () => {

@@ -132,6 +132,9 @@ Add or update frontend tests for:
 - Profile unavailable keeps valid daily and DailyStockPrice sections visible and does not synthesize company names or metadata rows.
 - Optional index context renders real SSI DailyIndex rows/counts only; index failures preserve watchlist rows, selected ticker, chart, realtime polling, and hidden-tab behavior.
 - VN30 dashboard filter tests should prove the filter uses SSI IndexComponents rows when available, does not fall back to hardcoded VN30 constituents when SSI components are unavailable, exposes a retry action after unavailable/error responses, disables VN30 only while its component request is pending, suppresses repeated preset/custom clicks, ignores stale VN30 component intents, and keeps previous rows visible.
+- VN30 loading tests should distinguish `Loading VN30 members` from `Loading N VN30 rows`, prove the member spinner stops before the watchlist response completes, preserve prior rows, reuse already-loaded component symbols without another IndexComponents request, keep `force_refresh=false` for normal selection, and advance fake timers through the 3-second and 8-second long-wait states.
+- VN30 progressive-hydration tests should defer each five-ticker request independently and prove all SSI-derived shell rows render before batch one completes, batch results merge without clearing prior successes, membership order remains stable, `Loaded X/N` advances, and normal batches use `force_refresh=false`.
+- VN30 failure/race tests should prove a failed batch becomes explicit unavailable shells, retry requests only failed tickers, duplicate VN30 clicks start no second run, and switching to another preset ignores an older VN30 response and prevents later VN30 batches from starting.
 
 ## Future Progressive Loading Tests Needed
 

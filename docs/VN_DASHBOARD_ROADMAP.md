@@ -1014,6 +1014,37 @@ Result:
 * Custom apply saves normalized uppercase unique symbols locally only after a successful response, disables picker controls while pending, suppresses duplicate apply clicks, and keeps previous rows visible.
 * No public API/schema fields changed. SSI ownership, watchlist counters, row-level reason codes, and `latest_price_source=SSI DailyOhlc` remain unchanged.
 
+### Phase 4.6D - VN30 Loading Split and Performance Diagnostics
+
+Status: completed on 2026-06-29 with deterministic frontend validation and bounded live SSI timing.
+
+Result:
+
+* Classified the reported delay as `watchlist_30_rows_slow`, `backend_batch_slow`, and `combined_loading_state_misleading`. A local bounded smoke measured exact SSI VN30 IndexComponents at 1.66 seconds, the first normal-cache 30-symbol watchlist at 95.99 seconds, and an immediate repeat at 52.21 seconds.
+* Confirmed normal VN30 selection does not send `force_refresh=true`. Already-loaded `status=ok` IndexComponents symbols are normalized, deduplicated, and reused in frontend state; unavailable/error state remains explicitly retryable.
+* Split the frontend state presentation into `Loading VN30 members...` and `Loading N VN30 rows`. The member spinner stops once components resolve even while the heavier watchlist request remains pending, and previous successful rows remain visible.
+* Added soft row-loading stages after 3 seconds (`Still loading`) and 8 seconds (`Taking longer than expected`). Requests are not automatically duplicated or cancelled; after failure, selecting the filter again retries through the existing request-sequence protection.
+* Added development-only console timing events for `vn30_components` and `watchlist_fetch`. Events contain only duration, status, filter/cache intent, and safe row/count fields; they are suppressed in tests and production.
+* Confirmed the backend builds watchlist symbols sequentially. Each cold symbol path can traverse cached/remote DailyOhlc, symbol metadata, bounded DailyStockPrice history, optional intraday, realtime, trade-tape, and indicator derivation. The endpoint creates a new `VietnamMarketService` per request, whose SSI fetcher cache is instance-local; this explains why an immediate repeat still remained slow even though module-level cache layers reduced elapsed time.
+* Deferred backend service/fetcher lifetime or concurrency changes. Sharing the SSI fetcher across requests affects token/cache lifecycle, streaming-manager attachment, thread safety, and provider pacing, so it requires a separately tested Phase 6 performance/caching task rather than broad parallelization here.
+* No public API/schema fields, backend behavior, data-source ownership, or price semantics changed. No hardcoded VN30 runtime output, fake rows, external provider, or fallback was added.
+
+### Phase 4.6E - VN30 Progressive Watchlist Hydration
+
+Status: completed on 2026-07-02 with deterministic frontend validation; live timing was not repeated.
+
+Result:
+
+* Confirmed the Phase 4.6D diagnosis: SSI VN30 membership resolution is the shorter stage, while one frontend request previously waited for the backend's sequential work across every requested ticker before committing any VN30 row.
+* Chose `frontend_batch_requests` over visible-window fetching. The current table has no virtualization, and six sequential five-ticker HTTP requests for a 30-member index provide a smaller, deterministic change with bounded SSI pressure.
+* Once exact SSI IndexComponents symbols resolve, the table immediately switches from previous rows to ordered VN30 shell rows. Tickers and membership provenance are visible, while numeric cells remain `Loading...` or `—`; shells never enter the committed market-data snapshot as real values.
+* Each successful batch replaces only its shell rows and updates `Loaded X/N`. Normal selection always uses `force_refresh=false`. Development timing events now include safe batch index/count fields. Explicit toolbar Force Refresh retains its existing force-refresh semantics.
+* Failed or incomplete batches preserve completed rows, mark only affected shells unavailable with a concise reason, and expose a retry that requests only failed tickers. Aggregated frontend counters use the full requested membership, currently hydrated row count, and failed ticker list.
+* The active VN30 action suppresses duplicate clicks while hydration is pending. Other presets and reset remain available; their newer filter intent cancels the VN30 UI run, and late batch responses cannot overwrite it or trigger the next batch.
+* A successful SSI-derived component list is retained only in current frontend memory. If a later component retry fails, that same session list may be used with the explicit `last successful SSI VN30 list` label. No static or persisted VN30 runtime list was added.
+* The 3-second and 8-second states now include loaded-row progress. Backend construction, public API/schema fields, provider calls, and caches are unchanged; shared cache/service lifetime remains a future performance task requiring thread-safety, token-lifecycle, and SSI pacing review.
+* No hardcoded VN30 provider output, fake data, external provider runtime, fallback provider, SSE/WebSocket behavior, or `latest_price` change was introduced.
+
 ### Phase 5.0A - External Provider Contract Design
 
 Status: completed on 2026-06-29.

@@ -1,6 +1,6 @@
 # Project State
 
-Last updated: 2026-06-29
+Last updated: 2026-07-02
 
 ## Purpose
 
@@ -35,6 +35,8 @@ This document gives Codex and other agents enough context to resume project work
 - Phase 4.5B completed bounded SSI DailyStockPrice historical foreign-flow enrichment. DailyOhlc and DailyStockPrice are `strong`; IndexList, exact VN30 IndexComponents, and supported market metadata are `usable`; DailyIndex and IntradayOhlc are `partial`; true trade-tape history is `unavailable_parameter_unknown`; realtime snapshot is `optional_live_dependent`; unsupported fundamentals, statements, ratios, corporate actions, dividends/rights/splits, news, and macro are `external_provider_required`.
 - Phase 4.5C live gate on 2026-06-29 confirmed DailyStockPrice 20-row recent foreign-flow history for FPT/HPG/SSI, re-confirmed VN30 IndexComponents with 30 rows, and kept `latest_price_source=SSI DailyOhlc`; VN30 DailyIndex remained partial because `index_value`/`exchange` were missing in the public row, exact `VNINDEX` stayed unresolved, and intraday/realtime/trade tape stayed optional unavailable.
 - Phase 4.6C keeps the VN30 filter retryable when SSI IndexComponents is unknown or unavailable, preserves current rows during retry, and provides a bounded custom ticker search/multi-select picker sourced only from loaded SSI components, current rows, and saved symbols. No API or market-data ownership changed.
+- Phase 4.6D separates VN30 member loading from watchlist-row loading and adds 3-second/8-second long-wait states. A bounded live timing smoke measured 30 SSI components in 1.66s versus 95.99s for the first 30-symbol watchlist and 52.21s for an immediate normal-cache repeat; the sequential watchlist/provider path is the measured bottleneck. Backend cache-lifetime optimization remains deferred because it requires concurrency and rate-limit review.
+- Phase 4.6E applies SSI-derived VN30 membership immediately as ordered shell rows and hydrates full rows through sequential five-ticker normal-cache requests. Successful batches remain visible, failed shells expose their reason and can be retried without refetching successful rows, and stale batches are ignored after another filter wins. This is frontend-only; the public API, backend sequence, provider ownership, and `latest_price_source=SSI DailyOhlc` are unchanged.
 - Mozyfin is disabled for VN dashboard runtime. Do not use it for news, social, OHLCV, chart, reference, foreign flow, index, metadata, intraday, realtime, trade tape, or fallback behavior.
 - KBS is legacy optional only and disabled by default. It must require explicit legacy flags before any diagnostic use and must not silently replace SSI-owned data.
 - VN news is disabled until a separate NewsProvider is implemented.
