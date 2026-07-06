@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [test] Add a secret-safe SSI DailyOhlc diagnostic script for bounded request-shape and date-window capability checks without fallback data.
+- [fix] Retry SSI DailyOhlc with the existing alternate documented parameter casing after non-rate-limit provider errors and classify all-empty DailyOhlc responses as unavailable instead of successful zero-row daily data.
+- [fix] Harden the VN SSI daily backend path so unavailable DailyOhlc/DailyStockPrice refreshes are not cached as successful values and DailyStockPrice enrichment remains source-labeled when DailyOhlc is unavailable.
 - [documentation] Document current VN stock-detail metric availability across SSI DailyOhlc, DailyStockPrice, metadata, computable future metrics, and future provider gaps.
 - [fix] Resolve explicit VN IndexComponents codes directly with the verified SSI `indexCode` request and add 300-second success / 60-second negative process caching.
 - [fix] Make VN30 member resolution an explicit terminal UI state so unavailable, no-row, failure, and timeout responses clear loading without hydrating fallback members.

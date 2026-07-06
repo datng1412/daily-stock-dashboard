@@ -54,6 +54,8 @@ Daily finality must stay explicit:
 
 If daily SSI data is unavailable, the row should expose an unavailable status and null daily metrics rather than borrowing live, intraday, or legacy-provider values.
 
+If SSI DailyOhlc is unavailable but SSI DailyStockPrice returns usable enrichment, `latest_price`, `daily_close`, and OHLCV fields must remain null/unavailable. The row may still expose source-labeled DailyStockPrice fields such as reference, ceiling/floor, matched/put-through, and foreign-flow values. DailyStockPrice close must not become `latest_price`.
+
 Company detail aligns shared canonical daily fields with the watchlist row: `latest_price`, `daily_close`, daily OHLCV open/high/low/close/volume, and daily trading value use SSI DailyOhlc fields. In the company price block, `price.source` and `price.canonical_source` identify `SSI DailyOhlc`; `price.reference_source` identifies `SSI DailyStockPrice` for reference, ceiling, and floor fields. Company foreign-flow, matched, put-through, and adjusted-close fields remain SSI DailyStockPrice-specific and must be labeled as such when shown.
 
 ## Stock Detail Metrics Availability

@@ -528,6 +528,27 @@ def _has_ssi_error(payload: Any) -> bool:
     return _ssi_error_record(payload) is not None
 
 
+def _is_rate_limited_payload(payload: Any) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    failure_class = str(payload.get("failure_class") or "").strip().lower()
+    code = str(payload.get("code") or "").strip()
+    http_status = str(payload.get("http_status") or "").strip()
+    return failure_class == "rate_limited" or code == "429" or http_status == "429"
+
+
+def _should_retry_param_variant(payload: Any) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    if _is_rate_limited_payload(payload):
+        return False
+    error_type = str(payload.get("error_type") or "").strip().lower()
+    failure_class = str(payload.get("failure_class") or "").strip().lower()
+    if failure_class in {"auth_failed", "permission_denied", "network_error", "timeout", "parse_failed"}:
+        return False
+    return error_type == "ssi_error"
+
+
 def _token_from_payload(payload: Any) -> Optional[str]:
     if not isinstance(payload, dict):
         return None
@@ -1009,7 +1030,7 @@ class SsiFastConnectFetcher:
         limit: int = 260,
     ) -> Dict[str, Any]:
         params = self._date_params({"symbol": symbol.strip().upper()}, from_date, to_date, limit)
-        return self._cached_normalized(
+        payload = self._cached_normalized(
             "DailyOhlc",
             params,
             limit,
@@ -1017,6 +1038,21 @@ class SsiFastConnectFetcher:
             extra={"symbol": symbol.strip().upper()},
             param_variants=[self._alternate_param_case(params)],
             required_any=("date", "open", "high", "low", "close", "volume", "value"),
+            retry_unavailable_variants=True,
+        )
+        return self._empty_as_unavailable(
+            payload,
+            reason="SSI DailyOhlc returned no rows.",
+            failure_class="empty_response",
+            diagnostics={
+                "endpoint": "DailyOhlc",
+                "symbol": symbol.strip().upper(),
+                "from_date": params.get("fromDate") or params.get("Fromdate"),
+                "to_date": params.get("toDate") or params.get("Todate"),
+                "pageIndex": params.get("pageIndex"),
+                "pageSize": params.get("pageSize"),
+                "ascending": params.get("ascending"),
+            },
         )
 
     def get_daily_stock_price(
@@ -1782,6 +1818,8 @@ class SsiFastConnectFetcher:
         first_unavailable = payload if isinstance(payload, dict) and payload.get("status") == "unavailable" else None
         if first_unavailable and not retry_unavailable_variants:
             return payload
+        if first_unavailable and not _should_retry_param_variant(first_unavailable):
+            return first_unavailable
 
         extract_rows = row_extractor or _extract_rows
         rows = [] if first_unavailable else [mapper(row) for row in extract_rows(payload)]

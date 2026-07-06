@@ -283,6 +283,44 @@ def _set_cache_entry(key: Tuple[Any, ...], value: Any, ttl_seconds: int) -> _Cac
     return entry
 
 
+def _transient_cache_entry(value: Any) -> _CacheEntry:
+    now = _utc_now()
+    return _CacheEntry(value=value, fetched_at=now, expires_at=now)
+
+
+def _safe_cache_error_text(value: Any, fallback: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return fallback
+    lowered = text.lower()
+    if any(marker in lowered for marker in ("token", "secret", "authorization", "bearer", "consumer", "account")):
+        return fallback
+    return text[:160]
+
+
+def _daily_cache_unavailable_reason(data_type: str, value: Any) -> Optional[str]:
+    if data_type == "ohlcv" and isinstance(value, tuple) and len(value) >= 3:
+        meta = value[2] if isinstance(value[2], dict) else {}
+        if str(meta.get("status") or "").lower() == "unavailable":
+            return _safe_cache_error_text(
+                meta.get("unavailable_reason"),
+                "refresh returned unavailable DailyOhlc value",
+            )
+        df = value[0]
+        if isinstance(df, pd.DataFrame) and df.empty:
+            return "refresh returned empty DailyOhlc value"
+    if data_type == "daily_stock_price" and isinstance(value, tuple):
+        row = value[0] if len(value) > 0 else None
+        reason = value[1] if len(value) > 1 else None
+        diagnostics = value[2] if len(value) > 2 and isinstance(value[2], dict) else {}
+        if row is None and (reason or diagnostics.get("failure_class")):
+            return _safe_cache_error_text(
+                reason or diagnostics.get("failure_class"),
+                "refresh returned unavailable DailyStockPrice value",
+            )
+    return None
+
+
 def _get_inflight_lock(key: Tuple[Any, ...]) -> Lock:
     with _VN_INFLIGHT_LOCKS_LOCK:
         lock = _VN_INFLIGHT_LOCKS.get(key)
@@ -329,6 +367,23 @@ def _read_cache(
         try:
             value = fetch()
             _observe(observe_mozyfin_fetch, key, monotonic_ms() - started_ms)
+            unavailable_reason = _daily_cache_unavailable_reason(data_type, value)
+            if unavailable_reason:
+                if current_entry is not None:
+                    _observe(observe_mozyfin_cache_result, "stale", key, waited=waited)
+                    return {
+                        "value": current_entry.value,
+                        "status": "stale",
+                        "entry": current_entry,
+                        "error": unavailable_reason,
+                    }
+                _observe(observe_mozyfin_cache_result, "error", key, waited=waited)
+                return {
+                    "value": value,
+                    "status": "error",
+                    "entry": _transient_cache_entry(value),
+                    "error": unavailable_reason,
+                }
             ttl_seconds = (
                 max(0, int(ttl_resolver(value)))
                 if ttl_resolver is not None
@@ -2399,14 +2454,14 @@ class VietnamMarketService:
                         "fallback_reason": None,
                         "unavailable_reason": None,
                     }
-                except Exception:
+                except Exception as exc:
                     return pd.DataFrame(), VN_SOURCE_SSI, {
                         "status": "unavailable",
                         "primary_source": primary_source,
                         "actual_source": VN_SOURCE_SSI,
                         "fallback_used": False,
                         "fallback_reason": None,
-                        "unavailable_reason": SSI_UNAVAILABLE_REASON,
+                        "unavailable_reason": _safe_cache_error_text(exc, SSI_UNAVAILABLE_REASON),
                     }
 
             try:
@@ -3141,6 +3196,71 @@ class VietnamMarketService:
             "daily_stock_price",
             lambda: self._latest_ssi_daily_stock_price(symbol),
             force_refresh=force_refresh,
+        )
+
+    def _daily_stock_price_enrichment_block(
+        self,
+        symbol: str,
+        *,
+        daily_ohlc_date: Optional[str],
+        force_refresh: bool,
+    ) -> Tuple[Dict[str, Any], Dict[str, Any], List[Dict[str, Any]]]:
+        cache_status: Dict[str, Any] = {}
+        cache_last_fetched_at: Dict[str, Any] = {}
+        cache_next_refresh_at: Dict[str, Any] = {}
+        cache_errors: Dict[str, Any] = {}
+        if self.config.daily_stock_price_provider != VN_PROVIDER_SSI:
+            return (
+                {
+                    "daily_stock_price": {},
+                    "cache_status": cache_status,
+                    "cache_last_fetched_at": cache_last_fetched_at,
+                    "cache_next_refresh_at": cache_next_refresh_at,
+                    "cache_errors": cache_errors,
+                },
+                {},
+                [],
+            )
+
+        daily_stock_price_result = self._read_latest_ssi_daily_stock_price(
+            symbol,
+            force_refresh=force_refresh,
+        )
+        (
+            ssi_daily_stock_price,
+            ssi_daily_stock_price_reason,
+            ssi_daily_stock_price_diagnostics,
+            ssi_daily_stock_price_history,
+        ) = daily_stock_price_result["value"]
+        cache_status["daily_stock_price_cache"] = daily_stock_price_result["status"]
+        cache_last_fetched_at["daily_stock_price"] = _iso(daily_stock_price_result["entry"].fetched_at)
+        cache_next_refresh_at["daily_stock_price"] = _iso(daily_stock_price_result["entry"].expires_at)
+        if daily_stock_price_result["error"]:
+            cache_errors["daily_stock_price"] = daily_stock_price_result["error"]
+
+        if ssi_daily_stock_price:
+            enrichment = self._normalize_ssi_daily_stock_price_enrichment(
+                ssi_daily_stock_price,
+                daily_ohlc_date=daily_ohlc_date,
+                diagnostics=ssi_daily_stock_price_diagnostics,
+            )
+        else:
+            enrichment = self._unavailable_ssi_daily_stock_price(
+                reason=ssi_daily_stock_price_reason,
+                daily_ohlc_date=daily_ohlc_date,
+                diagnostics=ssi_daily_stock_price_diagnostics,
+            )
+
+        return (
+            {
+                "daily_stock_price": enrichment,
+                "cache_status": cache_status,
+                "cache_last_fetched_at": cache_last_fetched_at,
+                "cache_next_refresh_at": cache_next_refresh_at,
+                "cache_errors": cache_errors,
+            },
+            enrichment,
+            ssi_daily_stock_price_history,
         )
 
     @staticmethod
@@ -4761,7 +4881,37 @@ class VietnamMarketService:
         company_name = symbol_metadata.get("name") if symbol_metadata.get("status") == "ok" else None
         if df is None or df.empty:
             unavailable_reason = provider_meta.get("unavailable_reason") or "No OHLCV rows were returned."
-            return {
+            daily_stock_price_payload, ssi_daily_stock_price, _ssi_daily_stock_price_history = (
+                self._daily_stock_price_enrichment_block(
+                    symbol,
+                    daily_ohlc_date=None,
+                    force_refresh=force_refresh,
+                )
+            )
+            cache_status.update(daily_stock_price_payload["cache_status"])
+            cache_last_fetched_at.update(daily_stock_price_payload["cache_last_fetched_at"])
+            cache_next_refresh_at.update(daily_stock_price_payload["cache_next_refresh_at"])
+            cache_errors.update(daily_stock_price_payload["cache_errors"])
+            daily_stock_price_status = str(ssi_daily_stock_price.get("status") or "unavailable")
+            price_limit_status = (
+                "ok"
+                if daily_stock_price_status == "ok"
+                and any(
+                    ssi_daily_stock_price.get(field) is not None
+                    for field in ("reference_price", "ceiling_price", "floor_price")
+                )
+                else "unavailable"
+            )
+            foreign_status = (
+                "ok"
+                if daily_stock_price_status == "ok"
+                and any(
+                    ssi_daily_stock_price.get(field) is not None
+                    for field in ("foreign_buy_volume", "foreign_sell_volume", "foreign_net_volume")
+                )
+                else "unavailable"
+            )
+            row_payload = {
                 "ticker": symbol,
                 "status": "unavailable",
                 "reason": unavailable_reason,
@@ -4783,12 +4933,57 @@ class VietnamMarketService:
                 "actual_source": provider_meta.get("actual_source"),
                 "fallback_used": False,
                 "fallback_reason": None,
+                "reference_source": SSI_DAILY_STOCK_PRICE_SOURCE,
+                "foreign_flow_source": SSI_DAILY_STOCK_PRICE_SOURCE,
                 "rows_loaded": 0,
+                "latest_price": None,
+                "latest_price_source": None,
+                "latest_price_date": None,
+                "ohlcv_close": None,
+                "daily_close": None,
+                "ohlcv_date": None,
+                "daily_stock_price_date": ssi_daily_stock_price.get("date"),
+                "daily_stock_price_date_match": ssi_daily_stock_price.get("date_match"),
+                "daily_stock_price_staleness_reason": ssi_daily_stock_price.get("staleness_reason"),
                 "validation": {
                     "valid": False,
                     "trading_date": None,
                     "missing_fields": ["date", "close", "volume", "foreign_net"],
                     "errors": [unavailable_reason],
+                },
+                "price_limit": {
+                    "limit_pct": get_vn_price_limit_pct(symbol),
+                    "reference_price": _safe_float(ssi_daily_stock_price.get("reference_price")),
+                    "ceiling_price": _safe_float(ssi_daily_stock_price.get("ceiling_price")),
+                    "floor_price": _safe_float(ssi_daily_stock_price.get("floor_price")),
+                    "distance_to_limit_pct": None,
+                    "near_limit": False,
+                    "source": SSI_DAILY_STOCK_PRICE_SOURCE,
+                    "status": price_limit_status,
+                },
+                "daily_stock_price": ssi_daily_stock_price,
+                "ssi_reference_price": _safe_float(ssi_daily_stock_price.get("reference_price")),
+                "ssi_ceiling_price": _safe_float(ssi_daily_stock_price.get("ceiling_price")),
+                "ssi_floor_price": _safe_float(ssi_daily_stock_price.get("floor_price")),
+                "ssi_adjusted_close": _safe_float(ssi_daily_stock_price.get("adjusted_close")),
+                "ssi_foreign_net_volume": _safe_float(ssi_daily_stock_price.get("foreign_net_volume")),
+                "ssi_foreign_net_value": _safe_float(ssi_daily_stock_price.get("foreign_net_value")),
+                "ssi_matched_volume": _safe_float(ssi_daily_stock_price.get("matched_volume")),
+                "ssi_matched_value": _safe_float(ssi_daily_stock_price.get("matched_value")),
+                "ssi_put_through_volume": _safe_float(ssi_daily_stock_price.get("put_through_volume")),
+                "ssi_put_through_value": _safe_float(ssi_daily_stock_price.get("put_through_value")),
+                "foreign": {
+                    "buy": _safe_float(ssi_daily_stock_price.get("foreign_buy_volume")),
+                    "sell": _safe_float(ssi_daily_stock_price.get("foreign_sell_volume")),
+                    "net": _safe_float(ssi_daily_stock_price.get("foreign_net_volume")),
+                    "buy_value": _safe_float(ssi_daily_stock_price.get("foreign_buy_value")),
+                    "sell_value": _safe_float(ssi_daily_stock_price.get("foreign_sell_value")),
+                    "net_value": _safe_float(ssi_daily_stock_price.get("foreign_net_value")),
+                    "date": ssi_daily_stock_price.get("date"),
+                    "net_unit": "shares" if foreign_status == "ok" else None,
+                    "value_unit": "VND" if _safe_float(ssi_daily_stock_price.get("foreign_net_value")) is not None else None,
+                    "source": SSI_DAILY_STOCK_PRICE_SOURCE,
+                    "status": foreign_status,
                 },
                 "indicators": {},
                 "status_labels": ["Watch"],
@@ -4801,46 +4996,21 @@ class VietnamMarketService:
                 **self._disabled_intraday_payload(intraday_timeframe),
                 **self._disabled_realtime_payload(symbol),
                 **self._disabled_trade_tape_payload(symbol),
-                "data_quality_summary": {
-                    "overall_status": "unavailable",
-                    "canonical_price_source": "SSI DailyOhlc",
-                    "issues": [
-                        {
-                            "code": "daily_ohlc_unavailable",
-                            "severity": "warning",
-                            "message": "SSI DailyOhlc data is unavailable.",
-                            "fields": {},
-                        },
-                        {
-                            "code": "daily_ohlcv_missing",
-                            "severity": "warning",
-                            "message": "SSI DailyOhlc required daily OHLCV fields are missing.",
-                            "fields": {"rows_loaded": 0},
-                        },
-                        {
-                            "code": "provider_empty",
-                            "severity": "warning",
-                            "message": "Provider returned no usable DailyOhlc rows for this ticker.",
-                            "fields": {},
-                        }
-                    ],
-                    "checks": {
-                        "daily_ohlc": "unavailable",
-                        "daily_stock_price": "unavailable",
-                        "final_close_status": "unknown",
-                        "adjusted_price_status": "unknown",
-                        "intraday": "disabled",
-                        "realtime": "disabled",
-                        "trade_tape": "disabled",
-                        "profile": "unavailable",
-                        "news": "disabled",
-                    },
-                },
                 "cache_status": cache_status,
                 "cache_last_fetched_at": cache_last_fetched_at,
                 "cache_next_refresh_at": cache_next_refresh_at,
                 "cache_errors": cache_errors,
             }
+            row_payload["data_quality_summary"] = build_vietnam_data_quality_summary(row_payload)
+            row_payload["data_quality_summary"]["issues"].append(
+                {
+                    "code": "provider_empty",
+                    "severity": "warning",
+                    "message": "Provider returned no usable DailyOhlc rows for this ticker.",
+                    "fields": {"rows_loaded": 0},
+                }
+            )
+            return row_payload
 
         df = df.sort_values("date").reset_index(drop=True)
         latest = df.iloc[-1]

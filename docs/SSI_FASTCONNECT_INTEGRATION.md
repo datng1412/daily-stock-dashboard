@@ -445,6 +445,7 @@ Strict daily/chart behavior:
 * `VN_DAILY_DATA_PROVIDER=ssi` uses SSI `DailyOhlc` for the watchlist daily OHLCV dataframe.
 * `VN_CHART_DATA_PROVIDER=ssi` uses SSI `DailyOhlc` for `/api/v1/stocks/vn/chart`.
 * If SSI DailyOhlc is unavailable, watchlist rows and chart responses return `status: "unavailable"` with `fallback_used: false`.
+* Unavailable or empty DailyOhlc refreshes are not stored as successful daily cache values. If a prior valid DailyOhlc cache entry exists, the service can keep serving that stale entry with an explicit cache error; otherwise the row stays unavailable.
 * Mozyfin is not called as OHLCV or chart fallback for SSI-owned data.
 * Chart responses include `source`, `primary_source`, `actual_source`, `fallback_used`, `fallback_reason`, `points`, and a compatibility `candles` alias.
 * Watchlist rows include the same provider metadata. `latest_price` and `daily_close` use the SSI daily close when SSI supplied the daily OHLCV row, and `latest_price_source` is tagged as `SSI`.
@@ -457,6 +458,8 @@ Strict DailyStockPrice behavior:
 
 * `VN_DAILY_STOCK_PRICE_PROVIDER=ssi` owns reference, ceiling, floor, adjusted close, matched volume/value, put-through volume/value, and foreign buy/sell/net volume/value fields.
 * If SSI DailyStockPrice is unavailable, these fields return unavailable/null states.
+* If SSI DailyOhlc is unavailable but DailyStockPrice returns usable enrichment, the row remains unavailable for canonical daily price/OHLCV, keeps `latest_price=null`, and exposes only source-labeled DailyStockPrice reference/limit/foreign/matched/put-through fields.
+* Unavailable DailyStockPrice refreshes are not stored as successful enrichment cache values.
 * Mozyfin quote and KBS reference are not used as fallback for SSI-owned reference or foreign-flow fields.
 * The enrichment does not mutate OHLCV rows.
 * The enrichment does not infer corporate actions.
@@ -647,6 +650,9 @@ It requests IndexList sequentially without a market, with `HOSE`, and with `HNX`
 * Live IndexList validation works in the current SSI environment, but `market=HOSE` can still return cross-market-looking index codes such as `HNX30`, `HNXINDEX`, and `HNXUPCOMINDEX`; use SSI-returned rows instead of assuming the request market filter is strict.
 * VN30 components are now live-verified only through the exact SSI nested response. Continue to return `components=[]` when an exact outer index row or usable nested members are absent. Do not hardcode members or fallback to Mozyfin/KBS.
 * Quote fields are not currently a reliable REST latest-price source. Watchlist payloads can have `quote_cache=missing`, `quote=null`, `quote_price_date=null`, and `quote_price_raw_field=null`; `latest_price` uses SSI DailyOhlc close when SSI daily rows are available.
+* Phase 4.6F-Recovery-2 live diagnostics on 2026-07-06 found that configured credentials and `api/v2` access could fetch DailyStockPrice and VN30 IndexComponents, while DailyOhlc returned sanitized provider `code=Exception` for the documented `symbol/fromDate/toDate/pageIndex/pageSize/ascending` shape. This is DailyOhlc endpoint/provider behavior, not proof that realtime, IndexComponents, or DailyStockPrice are broken. Keep rows unavailable rather than substituting DailyStockPrice close or realtime values for DailyOhlc.
+* Phase 4.6F-Recovery-3 keeps the existing SSI DailyOhlc alternate parameter casing retry for non-rate-limit provider errors and treats all-empty DailyOhlc responses as unavailable. Provider `429`/rate-limited responses are not variant-probed further, to avoid worsening SSI throttling.
+* Phase 4.6F-Recovery-4 adds `scripts/diagnose_ssi_daily_ohlc.py` for manual, bounded, secret-safe DailyOhlc capability checks. A 5-day FPT live run on 2026-07-06 returned sanitized provider `code=Exception` for the primary `symbol/fromDate/toDate` request shape and `code=429` for the existing alternate casing, with no normalized DailyOhlc rows. Further DailyOhlc probing was stopped after the rate-limit response. The diagnostic does not print credentials, headers, tokens, account IDs, raw provider bodies, or fallback data.
 * DailyStockPrice and DailyIndex require <=29/30-day request windows. Provider chunking is available for smoke/debug/internal validation, but broad automatic UI requests should be avoided unless deliberately designed. Phase 4.5B did not add broad market scans; it reuses the existing selected-ticker/watchlist per-symbol recent window.
 * Local market-data DB storage is deferred. Current mode remains SSI live API plus backend cache/TTL.
 * SSI IntradayOhlc is implemented for compact dashboard/company pulse, but live availability still depends on SSI endpoint permission and response shape. If unavailable, show the SSI intraday state without fallback.

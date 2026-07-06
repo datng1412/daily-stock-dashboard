@@ -1092,6 +1092,65 @@ def test_empty_rows_retry_alternate_param_casing():
     assert retry_kwargs["params"]["Todate"] == "17/06/2026"
 
 
+def test_daily_ohlc_provider_exception_retries_alternate_param_casing():
+    session = _FakeSession(
+        post_items=[_token_response()],
+        get_items=[
+            _FakeResponse(payload={"status": "error", "code": "Exception", "message": "provider rejected request"}),
+            _FakeResponse(payload={"data": [{"TradingDate": "2026-06-17", "Close": "124.6"}]}),
+        ],
+    )
+    fetcher = _fetcher(session=session)
+
+    payload = fetcher.get_daily_ohlcv("FPT", from_date="01/01/2026", to_date="17/06/2026", limit=1000)
+
+    assert payload["status"] == "ok"
+    assert payload["count"] == 1
+    get_calls = [call for call in session.calls if call[0] == "GET"]
+    assert len(get_calls) == 2
+    _, _, retry_kwargs = get_calls[-1]
+    assert retry_kwargs["params"]["Symbol"] == "FPT"
+    assert retry_kwargs["params"]["Fromdate"] == "01/01/2026"
+    assert retry_kwargs["params"]["Todate"] == "17/06/2026"
+
+
+def test_daily_ohlc_rate_limit_does_not_probe_alternate_param_casing():
+    session = _FakeSession(
+        post_items=[_token_response()],
+        get_items=[
+            _FakeResponse(payload={"status": "error", "code": "429", "message": "provider rate-limited request"}),
+            _FakeResponse(payload={"data": [{"TradingDate": "2026-06-17", "Close": "124.6"}]}),
+        ],
+    )
+    fetcher = _fetcher(session=session)
+
+    payload = fetcher.get_daily_ohlcv("FPT", from_date="01/01/2026", to_date="17/06/2026", limit=1000)
+
+    assert payload["status"] == "unavailable"
+    assert payload["failure_class"] == "rate_limited"
+    assert _get_call_count(session) == 1
+
+
+def test_daily_ohlc_empty_rows_return_unavailable_without_success_payload():
+    session = _FakeSession(
+        post_items=[_token_response()],
+        get_items=[
+            _FakeResponse(payload={"data": []}),
+            _FakeResponse(payload={"data": []}),
+        ],
+    )
+    fetcher = _fetcher(session=session)
+
+    payload = fetcher.get_daily_ohlcv("FPT", from_date="01/01/2026", to_date="17/06/2026", limit=1000)
+
+    assert payload["status"] == "unavailable"
+    assert payload["reason"] == "SSI DailyOhlc returned no rows."
+    assert payload["failure_class"] == "empty_response"
+    assert payload["rows"] == []
+    assert payload["count"] == 0
+    assert payload["diagnostics"]["endpoint"] == "DailyOhlc"
+
+
 def test_daily_stock_price_retries_hose_market_aliases_without_provider_fallback():
     session = _FakeSession(
         post_items=[_token_response()],

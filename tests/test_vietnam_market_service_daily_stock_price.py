@@ -48,16 +48,21 @@ def _full_daily_stock_price_row(**overrides):
 
 
 class FakeSsiFetcher:
-    def __init__(self, daily_stock_price_payload=None, *, daily_row_count: int = 30):
+    def __init__(self, daily_stock_price_payload=None, daily_ohlcv_payload=None, *, daily_row_count: int = 30):
         self.daily_stock_price_payload = daily_stock_price_payload or {
             "status": "ok",
             "source": "SSI",
             "rows": [_full_daily_stock_price_row()],
         }
+        self.daily_ohlcv_payload = daily_ohlcv_payload
         self.daily_row_count = daily_row_count
+        self.daily_ohlcv_calls = []
         self.daily_stock_price_calls = []
 
     def get_daily_ohlcv(self, symbol: str, **kwargs):
+        self.daily_ohlcv_calls.append({"symbol": symbol, "kwargs": dict(kwargs)})
+        if self.daily_ohlcv_payload is not None:
+            return self.daily_ohlcv_payload
         start = date(2026, 6, 1)
         rows = [
             {
@@ -352,6 +357,85 @@ def test_daily_stock_price_unavailable_does_not_invalidate_daily_ohlcv():
     assert item["data_quality_summary"]["checks"]["daily_stock_price"] == "unavailable"
     assert "daily_stock_price_missing" in _issue_codes(item)
     assert "foreign_flow_missing" in _issue_codes(item)
+
+
+def test_daily_ohlc_unavailable_exposes_daily_stock_price_without_latest_price_substitution():
+    item = _watch_item(
+        FakeSsiFetcher(
+            daily_ohlcv_payload={
+                "status": "unavailable",
+                "source": "SSI",
+                "reason": "SSI FastConnect request failed",
+                "rows": [],
+            },
+            daily_stock_price_payload={
+                "status": "ok",
+                "source": "SSI",
+                "rows": [_full_daily_stock_price_row()],
+            },
+        )
+    )
+    enrichment = item["daily_stock_price"]
+
+    assert item["status"] == "unavailable"
+    assert item["latest_price"] is None
+    assert item["latest_price_source"] is None
+    assert item["cache_status"]["ohlcv_cache"] == "error"
+    assert item["cache_status"]["daily_stock_price_cache"] == "refresh"
+    assert enrichment["status"] == "ok"
+    assert enrichment["source"] == "SSI DailyStockPrice"
+    assert enrichment["date_match"] == "unknown"
+    assert item["daily_stock_price_date"] == "2026-06-30"
+    assert item["ssi_reference_price"] == 129.0
+    assert item["ssi_matched_volume"] == 1_234_567
+    assert item["ssi_foreign_net_volume"] == 20_000
+    assert item["price_limit"]["reference_price"] == 129.0
+    assert item["foreign"]["net"] == 20_000
+    assert item["data_quality_summary"]["checks"]["daily_ohlc"] == "unavailable"
+    assert item["data_quality_summary"]["checks"]["daily_stock_price"] == "partial"
+    assert "daily_ohlc_unavailable" in _issue_codes(item)
+
+
+def test_unavailable_daily_ohlc_cold_result_is_not_cached_as_success():
+    fetcher = FakeSsiFetcher(
+        daily_ohlcv_payload={
+            "status": "unavailable",
+            "source": "SSI",
+            "reason": "SSI FastConnect request failed",
+            "rows": [],
+        }
+    )
+    service = _service(fetcher)
+
+    first = service.build_watchlist(["FPT"], force_refresh=False, include_intraday=False)["watchlist"][0]
+    second = service.build_watchlist(["FPT"], force_refresh=False, include_intraday=False)["watchlist"][0]
+
+    assert len(fetcher.daily_ohlcv_calls) == 2
+    assert first["cache_status"]["ohlcv_cache"] == "error"
+    assert second["cache_status"]["ohlcv_cache"] == "error"
+    assert first["cache_errors"]["ohlcv"] == "SSI FastConnect request failed"
+    assert second["cache_errors"]["ohlcv"] == "SSI FastConnect request failed"
+
+
+def test_stale_daily_ohlc_cache_is_preserved_when_refresh_returns_unavailable():
+    fetcher = FakeSsiFetcher()
+    service = _service(fetcher)
+
+    first = service.build_watchlist(["FPT"], force_refresh=False, include_intraday=False)["watchlist"][0]
+    fetcher.daily_ohlcv_payload = {
+        "status": "unavailable",
+        "source": "SSI",
+        "reason": "SSI FastConnect request failed",
+        "rows": [],
+    }
+    refreshed = service.build_watchlist(["FPT"], force_refresh=True, include_intraday=False)["watchlist"][0]
+
+    assert first["latest_price_source"] == "SSI DailyOhlc"
+    assert refreshed["status"] == "ok"
+    assert refreshed["latest_price_source"] == "SSI DailyOhlc"
+    assert refreshed["latest_price"] == first["latest_price"]
+    assert refreshed["cache_status"]["ohlcv_cache"] == "stale"
+    assert refreshed["cache_errors"]["ohlcv"] == "SSI FastConnect request failed"
 
 
 def test_short_daily_ohlc_history_exposes_ta_missing_reasons_without_changing_latest_price():

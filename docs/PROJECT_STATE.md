@@ -1,6 +1,6 @@
 # Project State
 
-Last updated: 2026-07-02
+Last updated: 2026-07-06
 
 ## Purpose
 
@@ -47,6 +47,9 @@ This document gives Codex and other agents enough context to resume project work
 - Phase 4.6F-3F fixes the remaining development/runtime loading hang: React StrictMode cleanup marked the page unmounted and the next setup did not reset that guard, so completed VN30 responses were discarded. VN30 member resolution now has explicit terminal states; unavailable/no-row/failure/timeout responses clear `Loading VN30 members...` and do not hydrate a fallback or last-successful member list.
 - Phase 4.6F-4 makes explicit IndexComponents codes independent from IndexList availability. `/index-components?index_code=VN30` now calls SSI with the verified `indexCode` shape directly, uses no speculative parameter variants, caches usable rows for 300 seconds, and negatively caches unavailable/rate-limited/no-row results for 60 seconds across request-scoped services.
 - Phase 4.7A-docs audited current stock-detail panel data without runtime changes. Available fields today are DailyOhlc open/high/low/close/volume/value and DailyStockPrice reference/limits/matched/put-through/foreign-flow fields when SSI returns them. 52-week high/low and 10D/3M average volume are computable later but not implemented; average price, foreign room, and outstanding quantity need provider-semantics confirmation; fundamentals, ratios, beta, market cap, and dividends remain future-provider work.
+- Phase 4.6F-Recovery-2 hardened the backend daily SSI path after live diagnostics found DailyOhlc returning sanitized provider `code=Exception` while DailyStockPrice and VN30 IndexComponents remained reachable. Unavailable DailyOhlc/DailyStockPrice refreshes are no longer cached as successful daily values. If DailyOhlc is unavailable but DailyStockPrice returns usable enrichment, the row remains unavailable for canonical daily price/OHLCV, keeps `latest_price=null`, and exposes only source-labeled DailyStockPrice fields.
+- Phase 4.6F-Recovery-3 keeps the strict DailyOhlc path backend-only: DailyOhlc retries its existing alternate parameter casing only after non-rate-limit provider errors, all-empty DailyOhlc responses are unavailable rather than successful zero-row data, and provider `429` responses are not variant-probed further.
+- Phase 4.6F-Recovery-4 adds a manual-only, secret-safe DailyOhlc diagnostic script. A bounded 5-day FPT live probe on 2026-07-06 returned sanitized provider `code=Exception` for the primary `symbol/fromDate/toDate` shape and provider `code=429` for the existing alternate casing, with no normalized DailyOhlc rows; further probing was stopped to avoid worsening SSI throttling. DailyStockPrice, realtime cache, and VN30 IndexComponents remained separate from DailyOhlc availability.
 - Mozyfin is disabled for VN dashboard runtime. Do not use it for news, social, OHLCV, chart, reference, foreign flow, index, metadata, intraday, realtime, trade tape, or fallback behavior.
 - KBS is legacy optional only and disabled by default. It must require explicit legacy flags before any diagnostic use and must not silently replace SSI-owned data.
 - VN news is disabled until a separate NewsProvider is implemented.
@@ -98,8 +101,8 @@ Vietnam cache TTLs are process-local and should be interpreted per source block:
 
 | Data type | Current behavior |
 | --- | --- |
-| SSI DailyOhlc | Backend cache/TTL, strict source for daily rows and chart |
-| SSI DailyStockPrice | Recent-window fetch for quick facts and bounded 5D/20D foreign-flow summaries; the combined result is process-cached for 300 seconds and explicit force refresh bypasses it |
+| SSI DailyOhlc | Backend cache/TTL, strict source for daily rows and chart; unavailable/empty refreshes are not cached as successful values, and prior valid rows may be served stale with an explicit cache error |
+| SSI DailyStockPrice | Recent-window fetch for quick facts and bounded 5D/20D foreign-flow summaries; the combined result is process-cached for 300 seconds only when usable, explicit force refresh bypasses it, and unavailable refreshes remain explicit |
 | SSI IndexComponents | Explicit normalized index code; usable rows process-cached for 300 seconds, unavailable/rate-limited/no-row responses negatively cached for 60 seconds; explicit force refresh bypasses |
 | SSI IntradayOhlc | Backend cache/TTL; unavailable/stale states should not affect daily row validity |
 | SSI realtime snapshot | Separate realtime contract; unavailable state should not affect daily row validity |
