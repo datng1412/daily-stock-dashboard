@@ -71,6 +71,17 @@ Do not infer missing stock-detail values from price gaps, `latest_price`, DailyS
 
 Phase 4.5B added no runtime providers, fallback providers, scraping, fake rows, WebSocket/SSE delivery, FC Trading calls, or changes to `latest_price`.
 
+## Phase 5.0D External Provider Qualification Summary
+
+Phase 5.0D refreshed the external-provider qualification matrix in `docs/VN_EXTERNAL_PROVIDER_STRATEGY.md` without changing runtime behavior:
+
+* Vnstock / Vnstock Data is `prototype_only` for research/manual comparison until commercial license, source-owner terms, storage/display rights, redistribution rights, rate limits, and provenance are explicitly resolved.
+* FiinQuant is `candidate_after_entitlement` for licensed realtime, tick, orderbook, historical, financial-statement, and valuation workflows. It is not an automatic replacement for SSI realtime, trade tape, DailyOhlc, or DailyStockPrice.
+* FiinGroup API Datafeed is `preferred_after_entitlement` for automated corporate actions/dividends/rights/splits first, then financial statements, ratios, news, metadata fallback, macro, and source-labeled external index context.
+* Manual/provenance-required import remains the offline fallback for corporate actions and dividends; it must retain source references and must not scrape public portals.
+
+No external provider is authorized, configured, called, or allowed as fallback. SSI DailyOhlc remains canonical for `latest_price`, SSI DailyStockPrice remains the enrichment owner, and unsupported external domains remain `external_provider_required` until their legal/access gates pass.
+
 ## Phase 4.5C Live Capability Gate
 
 * DailyStockPrice remains `strong`: live smoke returned chunked FPT yearly rows and local API smoke populated 20 recent foreign-flow rows for FPT, HPG, and SSI with non-null latest-available 5D/20D foreign-net summaries.

@@ -1248,6 +1248,20 @@ Result:
 * Documented unrelated LiteLLM remote pricing refresh as offline TestClient import noise when the full FastAPI app is imported for a stock-only smoke; deterministic tests should use the existing LiteLLM stub instead of changing production startup semantics.
 * Did not implement VNStocks, FiinGroup, external provider runtime, fallback providers, scraping, fake events, or changes to SSI `latest_price` ownership.
 
+### Phase 5.0D - External Provider Qualification: VNStock / FiinQuant / FiinGroup API Datafeed
+
+Status: completed on 2026-07-06 as a documentation-only qualification pass.
+
+Result:
+
+* Updated `docs/VN_EXTERNAL_PROVIDER_STRATEGY.md` with a current provider qualification matrix comparing Vnstock, FiinQuant, FiinGroup API Datafeed, and manual/provenance-required import.
+* Classified Vnstock as `prototype_only` unless licensing, source-owner terms, storage/display rights, redistribution rights, rate limits, and data provenance are explicitly resolved.
+* Classified FiinQuant as `candidate_after_entitlement` for licensed realtime/tick/orderbook and research workflows; it is not an automatic SSI replacement and must not overwrite DailyOhlc, DailyStockPrice, realtime, or trade-tape ownership.
+* Kept FiinGroup API Datafeed as `preferred_after_entitlement` for automated corporate actions/dividends/rights/splits first, followed by financial statements, ratios, news, metadata fallback, macro, and source-labeled external index context.
+* Kept manual/provenance-required import as the offline fallback for corporate actions and dividends only when source references are explicit.
+* Defined Phase 5.1A entry criteria: written entitlement, auth, production endpoint/package path, rate limits/SLA/pricing, storage/display/redistribution rights, source provenance, historical depth, correction/cancellation semantics, SSI symbol mapping, licensed fixture, disabled-by-default config plan, and explicit SSI ownership isolation.
+* Did not implement VNStock, FiinQuant, FiinGroup, external provider runtime, fallback providers, scraping, credentials, config flags, API endpoints, frontend changes, fake data, or changes to SSI `latest_price` ownership.
+
 ### Phase 5.1A - Corporate Actions and Dividends Provider
 
 Goal:

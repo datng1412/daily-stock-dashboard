@@ -1,6 +1,6 @@
 # Vietnam External Provider Capability Strategy
 
-Last verified: 2026-06-29
+Last verified: 2026-07-06
 
 ## Purpose
 
@@ -25,6 +25,68 @@ Phase 4.5A completes the SSI capability audit before any external implementation
 | FiinGroup API Datafeed | `candidate_external_provider` | `needs_verification` for commercial entitlement, auth, rate limits, timestamp semantics, price/data semantics, storage/display rights, redistribution rights, and contracted exchange coverage | None; do not call, configure, or fallback to FiinGroup until a later qualification phase passes |
 
 This boundary does not invalidate the Phase 5.0A provider-selection work below; it only records that no external provider is authorized or implemented during the SSI-first Phase 4.5A pass.
+
+## Phase 5.0D Provider Qualification Update
+
+Phase 5.0D reviewed the current repository docs plus current official provider documentation for Vnstock, FiinQuant, and FiinGroup API Datafeed. This is a documentation-only qualification pass. It does not authorize runtime integration, credentials, scraping, fallback providers, source switching, or any change to SSI-owned fields.
+
+Official docs reviewed:
+
+* [Vnstock docs](https://vnstocks.com/docs), [Vnstock free library](https://vnstocks.com/docs/vnstock), [market data](https://vnstocks.com/docs/vnstock/du-lieu-thi-truong-market-data), [financial analysis](https://vnstocks.com/docs/vnstock/phan-tich-co-ban-fundamental), [disclaimer](https://vnstocks.com/onboard/mien-tru-trach-nhiem), and [license](https://vnstocks.com/onboard/giay-phep-su-dung).
+* [FiinQuant docs](https://docs.fiinquant.vn/), including the [available data list](https://docs.fiinquant.vn/tai-lieu-ki-thuat/danh-sach-du-lieu-hien-co), [login](https://docs.fiinquant.vn/tai-lieu-ki-thuat/dang-nhap-tai-khoan), [realtime data](https://docs.fiinquant.vn/ham-va-cong-thuc/2.-du-lieu-giao-dich/2.1.-ham-du-lieu-realtime), [historical data](https://docs.fiinquant.vn/ham-va-cong-thuc/2.-du-lieu-giao-dich/2.2.-ham-du-lieu-lich-su), [order book](https://docs.fiinquant.vn/ham-va-cong-thuc/2.-du-lieu-giao-dich/2.4.-ham-du-lieu-so-lenh), [financial statements](https://docs.fiinquant.vn/ham-va-cong-thuc/3.-phan-tich-co-ban-and-dinh-gia/3.1.-bao-cao-tai-chinh), and [P/E, P/B valuation](https://docs.fiinquant.vn/ham-va-cong-thuc/3.-phan-tich-co-ban-and-dinh-gia/3.3.-lay-du-lieu-dinh-gia-p-e-p-b-theo-ma-chung-khoan).
+* [FiinGroup API Datafeed](https://datafeed.fiingroup.vn/), including [corporate events](https://datafeed.fiingroup.vn/api-datafeed-en/api-corporate/event-calendar/events), [stock issuance](https://datafeed.fiingroup.vn/api-datafeed-en/api-corporate/event-calendar/stock-issuance), [organization profile](https://datafeed.fiingroup.vn/api-datafeed-en/api-corporate/business-profile/business-profile/overview-of-organization), [financial statements](https://datafeed.fiingroup.vn/api-datafeed-en/api-corporate/financial-statements/separated-financial-statements-of-production/separated-cash-flow-statements-of-production), [financial ratios](https://datafeed.fiingroup.vn/api-datafeed-en/api-corporate/corporate-financial-ratios/corporate-financial-ratios/year-ratio), [news](https://datafeed.fiingroup.vn/api-datafeed-en/api-news/news/news), [HOSE index](https://datafeed.fiingroup.vn/api-giao-dich/co-phieu/co-phieu/hose-index), [macro categories](https://datafeed.fiingroup.vn/api-kinh-te-vi-mo), and [contact](https://datafeed.fiingroup.vn/lien-he).
+
+### Provider qualification matrix
+
+| Provider/source | Evidence-backed capability | Best-fit domains | Legal/access blockers | Qualification status | Runtime allowed now? |
+| --- | --- | --- | --- | --- | --- |
+| Vnstock / Vnstock Data | Public docs describe reference lists, company info/events/news, OHLCV, quote, tick-by-tick, index OHLCV, statements, and ratios. The docs also state Vnstock is a technical connector, not a data distributor; users are responsible for source terms; commercial integration requires written permission. | Research, notebooks, prototype exploration, manual analyst comparison. | Source provenance, automation rights, storage/display/redistribution rights, commercial license, rate limits, and source-owner terms are not resolved for production dashboard use. | `prototype_only` | No |
+| FiinQuant | Docs describe Python-library access, username/password login, historical OHLCV, realtime matched-order stream, order book, intraday intervals, foreign-flow fields, financial statements, ratios, and P/E/P/B valuation. | Licensed realtime/tick/orderbook research; possible future source-labeled live feed only if SSI streaming is insufficient and commercial rights are explicit. | Commercial entitlement, production SLA, rate limits, display/storage/redistribution rights, credentials handling, and whether app redistribution is allowed remain unresolved. | `candidate_after_entitlement` | No |
+| FiinGroup API Datafeed | Docs expose named API surfaces for corporate events, stock issuance, organization profile, financial statements, ratios, news, trading/index data, and macro categories. Event examples include publication, record, ex-right, execution, ratio, value, source URL, create/update, and status fields. | Preferred automated candidate for corporate actions/dividends/rights/splits, then financial statements, ratios, news, metadata fallback, macro, and source-labeled index context. | Written entitlement, auth method, production endpoint, rate limits/SLA/pricing, historical depth, correction semantics, source provenance, storage/display/redistribution rights, and raw-payload rules remain required. | `preferred_after_entitlement` | No |
+| Manual/provenance-required import | Safe only when the user provides licensed or provenance-labeled files. Required minimum fields: ticker, event type, announcement date, ex-date, record date, payment/execution date, cash amount or ratio if available, source name/document URL/reference, and correction/cancellation flags. | Corporate actions/dividends/rights/splits offline fallback when commercial automation is unavailable. | Input provenance must be explicit; no public-page scraping or automated harvesting; source license still controls display/storage. | `manual_provenance_required` | Offline/manual only; no automated provider runtime |
+
+### Provider-domain routing matrix
+
+| Domain | Preferred candidate | Secondary candidate | Current status | Legal/access gates | Runtime allowed now? | Notes | Must not overwrite SSI fields? |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Corporate actions / dividends / rights / splits | FiinGroup API Datafeed | Manual/provenance-required import | `external_provider_required`; `preferred_after_entitlement` | Written entitlement, event coverage, source provenance, correction/cancellation semantics, storage/display/redistribution rights | No | First external integration target remains unchanged | Yes |
+| Financial statements | FiinGroup API Datafeed | FiinQuant after entitlement | `candidate_after_entitlement` | Statement coverage, period/audit/restatement semantics, source provenance, storage/display rights | No | Add only after corporate-actions provider gate proves auth/provenance patterns | Yes |
+| Financial ratios | FiinGroup API Datafeed | FiinQuant after entitlement | `candidate_after_entitlement` | Methodology, sector comparability, period semantics, licensing | No | Keep provider ratios separate from local derivations | Yes |
+| Company metadata fallback | FiinGroup API Datafeed | Vnstock for research only | `candidate_after_entitlement` | Per-field provenance, freshness, source priority, display rights | No | Only fill SSI-null fields with source labels after approval | Yes |
+| News | FiinGroup API Datafeed | Licensed exchange/RSS source after terms review | `candidate_after_entitlement` | Content copyright, retention, display, redistribution, ticker matching | No | Future NewsProvider only; no Mozyfin/KBS fallback | Yes |
+| Macro | FiinGroup API Datafeed or series-specific official source | None selected | `deferred` | Series owner, revision semantics, timestamp, storage/display rights | No | Define a small indicator list before implementation | Yes |
+| External VNINDEX/index context | FiinGroup API Datafeed | FiinQuant research only | `candidate_after_entitlement` | Exchange-data display/redistribution rights and source labeling | No | Never label external index rows as SSI | Yes |
+| Realtime/tick/orderbook/trade tape | FiinQuant | FiinGroup trading data only after contract review | `deferred`; `candidate_after_entitlement` | Commercial live data entitlement, latency/SLA, storage/display/redistribution, stream lifecycle | No | Consider only if SSI streaming is insufficient; do not replace SSI-owned daily data | Yes |
+| Historical OHLCV fallback | None for production | Vnstock or FiinQuant for research comparison | `not_allowed_now` | Would need explicit source-ownership decision and exchange/vendor rights | No | SSI DailyOhlc remains canonical; do not add silent fallback | Yes |
+| Research/prototype-only data | Vnstock | FiinQuant sandbox after entitlement | `prototype_only` | Must not be redistributed or promoted into runtime without qualification | No | Useful for analyst exploration, not production dashboard data | Yes |
+
+### Recommended qualification and integration order
+
+1. Corporate actions/dividends/rights/splits: highest correctness impact for event markers and dividend context. Candidate: FiinGroup API Datafeed, with manual/provenance import as offline fallback. Requires written entitlement, event coverage, correction/cancellation semantics, provenance, storage/display/redistribution rights, and a licensed fixture. No impact on SSI DailyOhlc or `latest_price`.
+2. Financial statements: unlocks company fundamentals without inferring from prices. Candidate: FiinGroup API Datafeed first; FiinQuant only after entitlement. Requires statement-type, audit, period, restatement, units, source, and display/storage proof. No impact on SSI market-data fields.
+3. Financial ratios/methodology: useful only after statements/provenance are understood. Candidate: FiinGroup ratios or FiinQuant valuation after methodology and licensing proof. Ratios must be source-labeled and not mixed silently with local calculations.
+4. NewsProvider qualification: candidate FiinGroup news or licensed exchange/disclosure feeds. Requires copyright, retention, ticker-matching, duplicate, timestamp, and redistribution proof. No Mozyfin/KBS fallback.
+5. Macro/index context: candidate FiinGroup macro/index or series-specific official sources. Requires series-by-series rights, revision, timestamp, and source labeling. External index context must not replace or masquerade as SSI.
+6. Realtime/tick/orderbook provider qualification: candidate FiinQuant only if SSI streaming remains insufficient and commercial live-data rights are clear. It must be a separate, source-labeled live section and must not overwrite SSI DailyOhlc, DailyStockPrice, realtime, or trade tape.
+
+### Phase 5.1A entry criteria before runtime code
+
+Before any live external provider adapter is implemented, record all of the following in this document or a linked provider proof:
+
+1. Written provider entitlement for the exact domain and exchanges.
+2. Auth method and secret-handling plan.
+3. Production endpoint or package access path.
+4. Rate limits, pacing, retry rules, and SLA/support terms.
+5. Pricing/commercial status.
+6. Display, storage, and redistribution rights.
+7. Raw-payload storage rules.
+8. Source provenance guarantees and required attribution.
+9. Historical depth, update cadence, and correction/cancellation semantics.
+10. Symbol mapping to SSI tickers, including renamed, delisted, and transferred securities.
+11. A sanitized licensed fixture covering success, empty, missing optional fields, corrections/cancellations, and duplicates.
+12. Disabled-by-default provider configuration plan.
+13. Contract proof that external rows are source-labeled and domain-scoped.
+14. Explicit confirmation that SSI-owned DailyOhlc, DailyStockPrice, intraday, realtime, trade tape, index components, metadata, and `latest_price` are not overwritten.
 
 ## Phase 5.0A Decision
 
@@ -236,7 +298,7 @@ Verified from official sources:
 
 ## Source Review Notes
 
-Official pages reviewed on 2026-06-29:
+Initial official pages reviewed on 2026-06-29:
 
 * [FiinGroup API Datafeed contact](https://datafeed.fiingroup.vn/lien-he)
 * [FiinGroup Events API](https://datafeed.fiingroup.vn/api-datafeed-en/api-corporate/event-calendar/events)
@@ -254,3 +316,5 @@ Official pages reviewed on 2026-06-29:
 * [EIA Open Data](https://www.eia.gov/opendata/)
 
 This review did not inspect or authorize repository `docs/resources/` providers.
+
+Phase 5.0D reviewed the current Vnstock, FiinQuant, and FiinGroup API Datafeed documentation on 2026-07-06; those links are listed in the Phase 5.0D section above. The review remains a qualification artifact only and does not authorize runtime calls, credentials, scraping, fallback behavior, or replacement of SSI-owned fields.
