@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [fix] Split VN realtime and trade-tape public status messages from sanitized diagnostics, with company trade tape now using `trade_tape=[]` plus separate `trade_tape_status`.
 - [fix] Add a process-local SSI DailyOhlc rate-limit cooldown that suppresses token and provider calls after HTTP/provider 429 responses while preserving strict DailyOhlc price ownership and stale valid service cache behavior.
 - [test] Add a secret-safe SSI DailyOhlc diagnostic script for bounded request-shape and date-window capability checks without fallback data.
 - [fix] Retry SSI DailyOhlc with the existing alternate documented parameter casing after non-rate-limit provider errors and classify all-empty DailyOhlc responses as unavailable instead of successful zero-row daily data.

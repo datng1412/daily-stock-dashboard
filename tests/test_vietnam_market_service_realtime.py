@@ -200,7 +200,8 @@ def test_ssi_realtime_failure_is_separate_from_daily_row():
     assert item["realtime_status"]["message"] == "SSI realtime unavailable."
     assert item["realtime_status"]["reason_code"] == "unknown"
     assert "RealtimeQuote" not in item["realtime_status"]["message"]
-    assert item["realtime_status"]["diagnostics"]["provider_message"] == REALTIME_STREAMING_NOT_IMPLEMENTED_REASON
+    assert "diagnostics" not in item["realtime_status"]
+    assert item["diagnostics"]["realtime"]["provider_message"] == REALTIME_STREAMING_NOT_IMPLEMENTED_REASON
 
 
 class IntradayAvailableRealtimeUnavailableFetcher(FakeSsiFetcher):
@@ -279,10 +280,110 @@ def test_ssi_trade_tape_failure_is_separate_from_daily_row():
     assert item["trade_tape_source"] == "SSI trade-tape contract"
     assert item["trade_tape"] == []
     assert item["trade_tape_status"]["status"] == "unavailable"
-    assert item["trade_tape_status"]["message"] == "Historical SSI trade tape is unavailable; X-TRADE is latest-trade stream context only."
+    assert item["trade_tape_status"]["message"] == "SSI trade tape unavailable."
     assert item["trade_tape_status"]["reason_code"] == "latest_trade_stream_only"
     assert "TradeTape" not in item["trade_tape_status"]["message"]
-    assert "TradeTape" in item["trade_tape_status"]["diagnostics"]["provider_message"]
+    assert "diagnostics" not in item["trade_tape_status"]
+    assert "TradeTape" in item["diagnostics"]["trade_tape"]["provider_message"]
+
+
+def test_live_status_messages_are_short_and_diagnostics_are_sanitized():
+    secret = "SECRET_LIVE_CONTRACT_VALUE"
+    fetcher = FakeSsiFetcher(
+        realtime_payload={
+            "status": "unavailable",
+            "source": "SSI",
+            "reason": f"Authorization Bearer {secret} failed at https://provider.example/realtime",
+            "quotes": [],
+            "diagnostics": {
+                "endpoint": "RealtimeQuote",
+                "http_status": 403,
+                "failure_class": "permission_denied",
+                "latest_error": f"Bearer {secret}",
+                "raw_payload": {"accessToken": secret},
+            },
+        },
+        trade_payload={
+            "status": "unavailable",
+            "source": "SSI",
+            "symbol": "FPT",
+            "reason": f"Cookie={secret} https://provider.example/TradeTape",
+            "attempted_endpoints": ["TradeTape", "MatchedTrades"],
+            "endpoint": "TradeTape",
+            "http_status": 429,
+            "failure_class": "rate_limited",
+            "trades": [],
+        },
+    )
+
+    item = _service(fetcher).build_watchlist(["FPT"], force_refresh=True)["watchlist"][0]
+
+    assert item["status"] == "ok"
+    assert item["latest_price_source"] == "SSI DailyOhlc"
+    assert item["realtime_snapshot"] is None
+    assert item["trade_tape"] == []
+    assert item["realtime_status"]["message"] == "SSI realtime unavailable."
+    assert item["trade_tape_status"]["message"] == "SSI trade tape unavailable."
+    assert len(item["realtime_status"]["message"]) < 80
+    assert len(item["trade_tape_status"]["message"]) < 80
+    assert "diagnostics" not in item["realtime_status"]
+    assert "diagnostics" not in item["trade_tape_status"]
+    assert item["diagnostics"]["realtime"]["endpoint"] == "RealtimeQuote"
+    assert item["diagnostics"]["realtime"]["http_status"] == 403
+    assert item["diagnostics"]["realtime"]["provider_message"] == "[redacted]"
+    assert item["diagnostics"]["trade_tape"]["attempted_endpoints"] == ["TradeTape", "MatchedTrades"]
+    assert item["diagnostics"]["trade_tape"]["http_status"] == 429
+    assert item["diagnostics"]["trade_tape"]["retryable"] is True
+    assert secret not in str(item)
+    assert "raw_payload" not in str(item["diagnostics"])
+
+
+def test_standalone_live_contract_keeps_messages_safe_and_details_in_diagnostics():
+    secret = "SECRET_STANDALONE_LIVE_VALUE"
+    fetcher = FakeSsiFetcher(
+        realtime_payload={
+            "status": "unavailable",
+            "source": "SSI",
+            "reason": f"Bearer {secret} from https://provider.example/realtime",
+            "quotes": [],
+            "diagnostics": {
+                "endpoint": "RealtimeQuote",
+                "http_status": 403,
+                "failure_class": "permission_denied",
+            },
+        },
+        trade_payload={
+            "status": "unavailable",
+            "source": "SSI",
+            "symbol": "FPT",
+            "reason": f"Authorization {secret} at https://provider.example/trades",
+            "attempted_endpoints": ["TradeTape", "MatchedTrades"],
+            "http_status": 429,
+            "failure_class": "rate_limited",
+            "trades": [],
+        },
+    )
+    service = _service(fetcher)
+
+    realtime = service.build_realtime_snapshot(["FPT"], force_refresh=True)
+    trade_tape = service.build_trade_tape("FPT", force_refresh=True)
+
+    assert realtime["status"] == "unavailable"
+    assert realtime["status_message"] == "SSI realtime unavailable."
+    assert realtime["error"] == realtime["status_message"]
+    assert realtime["error_detail"] == realtime["status_message"]
+    assert realtime["diagnostics"]["endpoint"] == "RealtimeQuote"
+    assert realtime["diagnostics"]["provider_message"] == "[redacted]"
+    assert trade_tape["status"] == "unavailable"
+    assert trade_tape["trades"] == []
+    assert trade_tape["status_message"] == "SSI trade tape unavailable."
+    assert trade_tape["error"] == trade_tape["status_message"]
+    assert trade_tape["error_detail"] == trade_tape["status_message"]
+    assert trade_tape["diagnostics"]["attempted_endpoints"] == ["TradeTape", "MatchedTrades"]
+    assert trade_tape["diagnostics"]["http_status"] == 429
+    assert trade_tape["diagnostics"]["retryable"] is True
+    assert secret not in str(realtime)
+    assert secret not in str(trade_tape)
 
 
 def test_ssi_realtime_running_idle_reason_is_exposed_without_daily_downgrade():
@@ -314,7 +415,7 @@ def test_ssi_realtime_running_idle_reason_is_exposed_without_daily_downgrade():
     assert item["realtime_snapshot"] is None
     assert item["realtime_status"]["status"] == "unavailable"
     assert item["realtime_status"]["reason_code"] == "running_idle"
-    assert item["realtime_status"]["message"] == "SSI stream is running but no recent tick is cached for this ticker."
+    assert item["realtime_status"]["message"] == "SSI realtime cache miss."
     assert summary["checks"]["daily_ohlc"] == "ok"
     assert any(issue["code"] == "realtime_running_idle" for issue in summary["issues"])
 
@@ -344,7 +445,7 @@ def test_ssi_realtime_ticker_not_bootstrapped_reason_is_exposed():
 
     assert item["status"] == "ok"
     assert item["realtime_status"]["reason_code"] == "ticker_not_bootstrapped"
-    assert item["realtime_status"]["message"] == "Ticker is not in the configured SSI realtime bootstrap list."
+    assert item["realtime_status"]["message"] == "SSI realtime cache miss."
 
 
 def test_realtime_and_trade_tape_can_be_disabled_without_kbs_fallback():

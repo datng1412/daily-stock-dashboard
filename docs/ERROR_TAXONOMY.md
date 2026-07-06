@@ -32,12 +32,12 @@ Do not mix them into a single UI badge without source context.
 ## Phase 2.1 Public Contract Cleanup
 
 - Company intraday unavailable shape is visible with `pulse = null`, `candles = []`, and status/message fields.
-- Watchlist trade tape public data is list-shaped: `trade_tape = []` when unavailable/no rows. Company detail keeps a nested block with `trade_tape.trades = []`.
-- Realtime/trade-tape public messages are short and user-safe; sanitized provider details move to status diagnostics or other diagnostics-only structures.
+- Watchlist and company trade tape public data is list-shaped: `trade_tape = []` when unavailable/no rows.
+- Realtime/trade-tape public messages are short and user-safe; sanitized provider details move to sectioned diagnostics such as `diagnostics.realtime` and `diagnostics.trade_tape`.
 - Profile provider status can be `ok` while profile completeness is `partial`.
 
 ## Diagnostics Rules
 
 - Public message: short, user-safe, no endpoint dump.
-- Diagnostics: attempted endpoint, last endpoint, HTTP status, retryable flag, stale-date mismatch, sanitized provider error summary. Watchlist live status objects may carry these in a nested `diagnostics` field.
+- Diagnostics: attempted endpoint, last endpoint, HTTP status, retryable flag, stale-date mismatch, sanitized provider error summary. Live-section details belong in sectioned diagnostics, not primary status messages.
 - Forbidden everywhere: credentials, tokens, auth headers, account IDs, raw auth responses.

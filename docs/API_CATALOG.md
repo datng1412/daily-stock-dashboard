@@ -83,7 +83,7 @@ Null/empty rules:
 Implemented contract notes:
 
 - Watchlist `trade_tape` is public list data. It returns `[]` when unavailable/no rows and trade rows when usable.
-- Realtime/trade-tape status messages are short and user-safe. Sanitized provider details may appear under status diagnostics or other diagnostics-only structures.
+- Realtime/trade-tape status messages are short and user-safe. Sanitized provider details appear under sectioned diagnostics such as `diagnostics.realtime` or `diagnostics.trade_tape`.
 - Intraday cadence fields are public: `intraday_requested_timeframe` is the request hint, `intraday_actual_granularity` / `intraday_actual_granularity_seconds` describe detected regular provider spacing, and `intraday_cadence_status` is `matched`, `different_from_requested`, `irregular`, `unknown`, or `unavailable`.
 - Intraday unavailable status may include sanitized diagnostics such as `failure_class`, `endpoint=IntradayOhlc`, HTTP status, provider code, requested timeframe, internal page size, public limit, usable row count, date match, and cadence status.
 - DailyOhlc and DailyStockPrice can disagree on same ticker/date.
@@ -183,7 +183,7 @@ Null/empty rules:
 - `intraday.candles = []` and `intraday.pulse = null` when intraday is unavailable.
 - `intraday.requested_timeframe` is a request hint; `intraday.actual_granularity`, `intraday.actual_granularity_seconds`, and `intraday.cadence_status` describe the detected provider-returned cadence when available.
 - `realtime_snapshot = null` when unavailable.
-- `trade_tape.trades = []` when unavailable/no rows.
+- `trade_tape = []` when unavailable/no rows.
 - Future module lists stay empty while not implemented/unavailable.
 - Missing optional DailyStockPrice and foreign-flow metrics remain null and are not rendered as zero.
 - Missing optional profile fields remain null. Profile unavailability does not clear usable DailyOhlc or DailyStockPrice sections.

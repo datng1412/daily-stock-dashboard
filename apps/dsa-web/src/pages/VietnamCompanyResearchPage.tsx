@@ -119,9 +119,9 @@ const hasCompanyIntradayData = (snapshot: VietnamCompanyResearchResponse) => (
 );
 
 const hasCompanyRealtimeData = (snapshot: VietnamCompanyResearchResponse) => (
-  snapshot.realtime?.status === 'ok'
-  && Boolean(snapshot.realtime.snapshot)
-  && hasMetricValue(snapshot.realtime.snapshot?.price ?? snapshot.realtime.snapshot?.realtimePrice)
+  snapshot.realtimeStatus?.status === 'ok'
+  && Boolean(snapshot.realtimeSnapshot)
+  && hasMetricValue(snapshot.realtimeSnapshot?.price ?? snapshot.realtimeSnapshot?.realtimePrice)
 );
 
 const companyIntradayCadenceText = (snapshot: VietnamCompanyResearchResponse) => {
@@ -136,8 +136,8 @@ const companyIntradayCadenceText = (snapshot: VietnamCompanyResearchResponse) =>
 };
 
 const hasCompanyTradeTapeData = (snapshot: VietnamCompanyResearchResponse) => (
-  snapshot.tradeTape?.status === 'ok'
-  && (snapshot.tradeTape.trades?.length ?? 0) > 0
+  snapshot.tradeTapeStatus?.status === 'ok'
+  && (snapshot.tradeTape?.length ?? 0) > 0
 );
 
 const SectionShell: React.FC<{
@@ -207,8 +207,8 @@ const CompanyDiagnosticsPanel: React.FC<{ snapshot: VietnamCompanyResearchRespon
     ...liveStatusDiagnosticRows('SSI profile metadata status', snapshot.profile.diagnostics),
     ...liveStatusDiagnosticRows('SSI DailyStockPrice status', snapshot.dailyStockPrice?.diagnostics),
     ...liveStatusDiagnosticRows('SSI intraday status', snapshot.intraday?.diagnostics),
-    ...liveStatusDiagnosticRows('SSI realtime status', snapshot.realtime?.diagnostics),
-    ...liveStatusDiagnosticRows('SSI trade tape status', snapshot.tradeTape?.diagnostics),
+    ...liveStatusDiagnosticRows('SSI realtime status', snapshot.diagnostics?.realtime),
+    ...liveStatusDiagnosticRows('SSI trade tape status', snapshot.diagnostics?.tradeTape),
   ];
 
   if (!rows.length) return null;
@@ -412,20 +412,20 @@ const VietnamCompanyResearchPage: React.FC = () => {
     { label: 'Candles loaded', value: snapshot.intraday?.candles?.length ?? 0 },
   ];
   const realtimeRows: MetricRow[] = [
-    { label: 'Realtime snapshot price', value: snapshot.realtime?.snapshot?.price ?? snapshot.realtime?.snapshot?.realtimePrice, formatter: formatPrice },
-    { label: 'Realtime change', value: snapshot.realtime?.snapshot?.change ?? snapshot.realtime?.snapshot?.priceChange, formatter: formatSignedNumber },
-    { label: 'Realtime change %', value: snapshot.realtime?.snapshot?.changePct ?? snapshot.realtime?.snapshot?.percentChange, formatter: (value) => `${formatNumber(value, 2)}%` },
-    { label: 'Realtime reference price', value: snapshot.realtime?.snapshot?.referencePrice, formatter: formatPrice },
-    { label: 'SSI realtime/session volume', value: snapshot.realtime?.snapshot?.volume ?? snapshot.realtime?.snapshot?.volumeAccumulated },
-    { label: 'Fetched at', value: snapshot.realtime?.snapshot?.fetchedAt, formatter: (value) => formatNumber(value) },
+    { label: 'Realtime snapshot price', value: snapshot.realtimeSnapshot?.price ?? snapshot.realtimeSnapshot?.realtimePrice, formatter: formatPrice },
+    { label: 'Realtime change', value: snapshot.realtimeSnapshot?.change ?? snapshot.realtimeSnapshot?.priceChange, formatter: formatSignedNumber },
+    { label: 'Realtime change %', value: snapshot.realtimeSnapshot?.changePct ?? snapshot.realtimeSnapshot?.percentChange, formatter: (value) => `${formatNumber(value, 2)}%` },
+    { label: 'Realtime reference price', value: snapshot.realtimeSnapshot?.referencePrice, formatter: formatPrice },
+    { label: 'SSI realtime/session volume', value: snapshot.realtimeSnapshot?.volume ?? snapshot.realtimeSnapshot?.volumeAccumulated },
+    { label: 'Fetched at', value: snapshot.realtimeSnapshot?.fetchedAt, formatter: (value) => formatNumber(value) },
   ];
   const tradeTapeRows: MetricRow[] = [
-    { label: 'Trades loaded', value: snapshot.tradeTape?.trades?.length ?? 0 },
-    { label: 'Latest time', value: snapshot.tradeTape?.trades?.[0]?.time, formatter: (value) => formatNumber(value) },
-    { label: 'Latest trade tape price', value: snapshot.tradeTape?.trades?.[0]?.price, formatter: formatPrice },
-    { label: 'Latest trade tape volume', value: snapshot.tradeTape?.trades?.[0]?.volume },
-    { label: 'Latest trade tape value', value: snapshot.tradeTape?.trades?.[0]?.value },
-    { label: 'Source', value: snapshot.tradeTape?.source, formatter: (value) => formatNumber(value) },
+    { label: 'Trades loaded', value: snapshot.tradeTape?.length ?? 0 },
+    { label: 'Latest time', value: snapshot.tradeTape?.[0]?.time, formatter: (value) => formatNumber(value) },
+    { label: 'Latest trade tape price', value: snapshot.tradeTape?.[0]?.price, formatter: formatPrice },
+    { label: 'Latest trade tape volume', value: snapshot.tradeTape?.[0]?.volume },
+    { label: 'Latest trade tape value', value: snapshot.tradeTape?.[0]?.value },
+    { label: 'Source', value: snapshot.tradeTapeStatus?.source, formatter: (value) => formatNumber(value) },
   ];
 
   return (
@@ -492,14 +492,14 @@ const VietnamCompanyResearchPage: React.FC = () => {
             <p className="text-sm text-secondary-text">SSI intraday unavailable.</p>
           )}
         </SectionShell>
-        <SectionShell title="SSI realtime" source={snapshot.realtime?.source ?? 'SSI realtime contract'} status={snapshot.realtime?.status ?? 'unavailable'}>
+        <SectionShell title="SSI realtime" source={snapshot.realtimeStatus?.source ?? 'SSI realtime contract'} status={snapshot.realtimeStatus?.status ?? 'unavailable'}>
           {hasRealtimeData ? (
             <MetricGrid rows={realtimeRows} />
           ) : (
             <p className="text-sm text-secondary-text">SSI realtime unavailable. Daily SSI data is still available.</p>
           )}
         </SectionShell>
-        <SectionShell title="SSI trade tape" source={snapshot.tradeTape?.source ?? 'SSI trade-tape contract'} status={snapshot.tradeTape?.status ?? 'unavailable'}>
+        <SectionShell title="SSI trade tape" source={snapshot.tradeTapeStatus?.source ?? 'SSI trade-tape contract'} status={snapshot.tradeTapeStatus?.status ?? 'unavailable'}>
           {hasTradeTapeRows ? (
             <MetricGrid rows={tradeTapeRows} />
           ) : (

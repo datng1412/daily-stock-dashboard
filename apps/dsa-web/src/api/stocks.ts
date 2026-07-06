@@ -293,6 +293,10 @@ export type VietnamWatchItem = {
     fetchedAt?: string | null;
     diagnostics?: Record<string, unknown> | null;
   };
+  diagnostics?: {
+    realtime?: Record<string, unknown> | null;
+    tradeTape?: Record<string, unknown> | null;
+  };
   dataQualitySummary?: VietnamDataQualitySummary;
   cacheStatus: Record<string, string>;
   cacheLastFetchedAt: Record<string, string | null>;
@@ -500,6 +504,7 @@ export type VietnamRealtimeTradesResponse = {
   trades: VietnamRealtimeTrade[];
   note?: string | null;
   cache: Record<string, unknown>;
+  diagnostics?: Record<string, unknown>;
 };
 
 export type VietnamChartPoint = {
@@ -652,22 +657,6 @@ export type VietnamCompanyIntraday = {
   diagnostics?: Record<string, unknown> | null;
 };
 
-export type VietnamCompanyRealtime = {
-  snapshot?: VietnamRealtimeQuote | null;
-  source?: string | null;
-  status: 'ok' | 'disabled' | 'not_implemented' | 'unavailable' | 'error' | string;
-  message?: string | null;
-  diagnostics?: Record<string, unknown> | null;
-};
-
-export type VietnamCompanyTradeTape = {
-  trades?: VietnamRealtimeTrade[];
-  source?: string | null;
-  status: 'ok' | 'disabled' | 'not_implemented' | 'unavailable' | 'error' | string;
-  message?: string | null;
-  diagnostics?: Record<string, unknown> | null;
-};
-
 export type VietnamDataQualityIssue = {
   code?: string | null;
   severity?: 'info' | 'warning' | 'error' | string | null;
@@ -717,8 +706,26 @@ export type VietnamCompanyResearchResponse = {
   foreignFlow: VietnamCompanyForeignFlow;
   technical: VietnamCompanyTechnical;
   intraday?: VietnamCompanyIntraday;
-  realtime?: VietnamCompanyRealtime;
-  tradeTape?: VietnamCompanyTradeTape;
+  realtimeSnapshot?: VietnamRealtimeQuote | null;
+  realtimeStatus?: {
+    status: 'ok' | 'disabled' | 'not_implemented' | 'unavailable' | 'error' | string;
+    source?: string | null;
+    message?: string | null;
+    reasonCode?: string | null;
+    classification?: string | null;
+  };
+  tradeTape?: VietnamRealtimeTrade[];
+  tradeTapeStatus?: {
+    status: 'ok' | 'disabled' | 'not_implemented' | 'unavailable' | 'error' | string;
+    source?: string | null;
+    message?: string | null;
+    reasonCode?: string | null;
+    classification?: string | null;
+  };
+  diagnostics?: {
+    realtime?: Record<string, unknown> | null;
+    tradeTape?: Record<string, unknown> | null;
+  };
   dataQualitySummary?: VietnamDataQualitySummary;
   sourceCoverage: VietnamCompanySourceCoverageItem[];
   news: VietnamCompanyPlaceholderBlock;

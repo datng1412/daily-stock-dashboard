@@ -1469,17 +1469,19 @@ describe('VietnamDashboardPage watchlist loading', () => {
             status: 'unavailable',
             source: 'SSI',
             message: 'SSI realtime unavailable.',
-            diagnostics: {
-              attemptedEndpoints: ['RealtimeQuote'],
-              httpStatus: 404,
-              rawProviderErrorSummary: 'raw provider message',
-            },
           },
           tradeTapeStatus: {
             status: 'unavailable',
             source: 'SSI',
             message: 'SSI trade tape unavailable.',
-            diagnostics: {
+          },
+          diagnostics: {
+            realtime: {
+              attemptedEndpoints: ['RealtimeQuote'],
+              httpStatus: 404,
+              rawProviderErrorSummary: 'raw provider message',
+            },
+            tradeTape: {
               attemptedEndpoints: ['TradeTape'],
               httpStatus: 404,
               rawProviderErrorSummary: 'raw provider message',
@@ -1624,7 +1626,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
       realtimeStatus: {
         status: 'unavailable',
         source: 'SSI realtime contract',
-        message: 'SSI stream is running but no recent tick is cached for this ticker.',
+        message: 'SSI realtime cache miss.',
         reasonCode: 'running_idle',
         runtimeStatus: 'running_idle',
         cacheStatus: 'empty',
@@ -1633,7 +1635,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
       tradeTapeStatus: {
         status: 'unavailable',
         source: 'SSI trade-tape contract',
-        message: 'Historical SSI trade tape is unavailable; X-TRADE is latest-trade stream context only.',
+        message: 'SSI trade tape unavailable.',
         reasonCode: 'latest_trade_stream_only',
       },
       tradeTape: [],
@@ -1641,8 +1643,8 @@ describe('VietnamDashboardPage watchlist loading', () => {
         ...item.dataQualitySummary,
         issues: [
           { code: 'intraday_unavailable_no_rows', severity: 'info', message: 'SSI IntradayOhlc returned no usable candles.' },
-          { code: 'realtime_running_idle', severity: 'info', message: 'SSI stream is running but no recent tick is cached for this ticker.' },
-          { code: 'trade_tape_latest_trade_stream_only', severity: 'info', message: 'Historical SSI trade tape is unavailable; X-TRADE is latest-trade stream context only.' },
+          { code: 'realtime_running_idle', severity: 'info', message: 'SSI realtime cache miss.' },
+          { code: 'trade_tape_latest_trade_stream_only', severity: 'info', message: 'SSI trade tape unavailable.' },
         ],
         checks: {
           ...item.dataQualitySummary?.checks,
@@ -1655,14 +1657,14 @@ describe('VietnamDashboardPage watchlist loading', () => {
     mockedGetVietnamWatchlist.mockResolvedValue(response);
     mockedGetVietnamRealtimeQuotes.mockImplementation(async (tickers) => ({
       ...makeRealtimeResponse(tickers, { unavailable: true }),
-      statusMessage: 'SSI stream is running but no recent tick is cached for this ticker.',
+      statusMessage: 'SSI realtime cache miss.',
       reasonCode: 'running_idle',
       quotes: [],
     }));
     mockedGetVietnamRealtimeTrades.mockImplementation(async (symbol) => ({
       ...makeTradesResponse(symbol),
       status: 'unavailable',
-      statusMessage: 'Historical SSI trade tape is unavailable; X-TRADE is latest-trade stream context only.',
+      statusMessage: 'SSI trade tape unavailable.',
       reasonCode: 'latest_trade_stream_only',
       error: null,
       errorDetail: null,
@@ -1679,8 +1681,8 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     const detail = within(screen.getByText('Stock detail').closest('section') as HTMLElement);
     expect(detail.getByText('SSI IntradayOhlc returned no usable candles.')).toBeInTheDocument();
-    expect(detail.getByText('SSI stream is running but no recent tick is cached for this ticker. Daily SSI data is still available.')).toBeInTheDocument();
-    expect(detail.getByText('Historical trade tape is unavailable. X-TRADE is latest-trade stream context only.')).toBeInTheDocument();
+    expect(detail.getByText('SSI realtime cache miss. Daily SSI data is still available.')).toBeInTheDocument();
+    expect(detail.getByText('SSI trade tape unavailable.')).toBeInTheDocument();
     expect(detail.queryByText(/attempted endpoints|HTTP status|raw provider/i)).not.toBeInTheDocument();
     expect(detail.queryByText('Realtime price')).not.toBeInTheDocument();
     expect(detail.queryByRole('table')).not.toBeInTheDocument();
@@ -2708,18 +2710,20 @@ describe('VietnamDashboardPage watchlist loading', () => {
         status: 'unavailable',
         source: 'SSI realtime contract',
         message: 'SSI realtime unavailable.',
-        diagnostics: {
-          attemptedEndpoints: ['RealtimeQuote'],
-          httpStatus: 404,
-          retryable: false,
-        },
       },
       tradeTapeStatus: {
         status: 'unavailable',
         source: 'SSI trade-tape contract',
         message: 'SSI trade tape unavailable.',
         count: 0,
-        diagnostics: {
+      },
+      diagnostics: {
+        realtime: {
+          attemptedEndpoints: ['RealtimeQuote'],
+          httpStatus: 404,
+          retryable: false,
+        },
+        tradeTape: {
           attemptedEndpoints: ['TradeTape'],
           httpStatus: 404,
           retryable: false,
@@ -3121,7 +3125,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
       realtimeStatus: {
         status: 'unavailable',
         source: 'SSI realtime contract',
-        message: 'Ticker is not in the configured SSI realtime bootstrap list.',
+        message: 'SSI realtime cache miss.',
         reasonCode: 'ticker_not_bootstrapped',
         classification: 'ticker_not_bootstrapped',
       },
@@ -3135,7 +3139,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
           {
             code: 'realtime_ticker_not_bootstrapped',
             severity: 'info',
-            message: 'Ticker is not in the configured SSI realtime bootstrap list.',
+            message: 'SSI realtime cache miss.',
             fields: {},
           },
         ],
@@ -3149,7 +3153,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     const row = await screen.findByTestId('indicator-row-FPT');
     expect(within(row).getByLabelText(/Realtime status: Not bootstrapped/)).toHaveAttribute(
       'title',
-      expect.stringContaining('Ticker is not in the configured SSI realtime bootstrap list.'),
+      expect.stringContaining('SSI realtime cache miss.'),
     );
   });
 

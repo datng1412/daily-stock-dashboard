@@ -158,10 +158,10 @@ def test_vietnam_company_research_endpoint_returns_phase_one_contract(monkeypatc
     assert coverage["Financials"]["source"] == "external provider future"
     assert coverage["Corporate actions"]["source"] == "external provider future"
     assert payload["intraday"]["status"] == "ok"
-    assert payload["realtime"]["status"] == "ok"
-    assert payload["realtime"]["snapshot"]["price"] == 124.8
-    assert payload["trade_tape"]["status"] == "ok"
-    assert payload["trade_tape"]["trades"][0]["price"] == 124.8
+    assert payload["realtime_status"]["status"] == "ok"
+    assert payload["realtime_snapshot"]["price"] == 124.8
+    assert payload["trade_tape_status"]["status"] == "ok"
+    assert payload["trade_tape"][0]["price"] == 124.8
     assert coverage["News"]["status"] == "not_implemented"
     assert coverage["Financials"]["status"] == "not_implemented"
     assert payload["news"]["items"] == []
@@ -227,7 +227,6 @@ def test_vietnam_company_research_keeps_unavailable_live_sections_visible(monkey
                             "status": "unavailable",
                             "source": "SSI realtime contract",
                             "message": "SSI realtime unavailable.",
-                            "diagnostics": {"provider_message": "attempted endpoints: RealtimeQuote"},
                         },
                         "realtime_snapshot": None,
                         "trade_tape_source": "SSI trade-tape contract",
@@ -235,9 +234,12 @@ def test_vietnam_company_research_keeps_unavailable_live_sections_visible(monkey
                             "status": "unavailable",
                             "source": "SSI trade-tape contract",
                             "message": "SSI trade tape unavailable.",
-                            "diagnostics": {"provider_message": "attempted endpoints: TradeTape"},
                         },
                         "trade_tape": [],
+                        "diagnostics": {
+                            "realtime": {"provider_message": "attempted endpoints: RealtimeQuote"},
+                            "trade_tape": {"provider_message": "attempted endpoints: TradeTape"},
+                        },
                         "data_quality_summary": {
                             "overall_status": "partial",
                             "canonical_price_source": "SSI DailyOhlc",
@@ -278,12 +280,14 @@ def test_vietnam_company_research_keeps_unavailable_live_sections_visible(monkey
     assert payload["intraday"]["diagnostics"]["failure_class"] == "rate_limited"
     assert payload["intraday"]["diagnostics"]["endpoint"] == "IntradayOhlc"
     assert payload["intraday"]["diagnostics"]["provider_code"] == "429"
-    assert payload["realtime"]["status"] == "unavailable"
-    assert payload["realtime"]["snapshot"] is None
-    assert payload["realtime"]["message"] == "SSI realtime unavailable."
-    assert payload["trade_tape"]["status"] == "unavailable"
-    assert payload["trade_tape"]["trades"] == []
-    assert payload["trade_tape"]["message"] == "SSI trade tape unavailable."
+    assert payload["realtime_status"]["status"] == "unavailable"
+    assert payload["realtime_snapshot"] is None
+    assert payload["realtime_status"]["message"] == "SSI realtime unavailable."
+    assert payload["trade_tape_status"]["status"] == "unavailable"
+    assert payload["trade_tape"] == []
+    assert payload["trade_tape_status"]["message"] == "SSI trade tape unavailable."
+    assert payload["diagnostics"]["realtime"]["provider_message"] == "attempted endpoints: RealtimeQuote"
+    assert payload["diagnostics"]["trade_tape"]["provider_message"] == "attempted endpoints: TradeTape"
     assert payload["data_quality_summary"]["checks"]["intraday"] == "unavailable"
     assert payload["data_quality_summary"]["checks"]["realtime"] == "unavailable"
     assert payload["data_quality_summary"]["checks"]["trade_tape"] == "unavailable"

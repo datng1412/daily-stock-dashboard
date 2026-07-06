@@ -511,7 +511,7 @@ def test_running_idle_realtime_does_not_make_daily_data_invalid():
     assert item["status"] == "ok"
     assert item["latest_price_source"] == "SSI DailyOhlc"
     assert item["realtime_status"]["status"] == "unavailable"
-    assert item["realtime_status"]["diagnostics"]["runtime_status"] == RUNTIME_RUNNING_IDLE
+    assert item["diagnostics"]["realtime"]["runtime_status"] == RUNTIME_RUNNING_IDLE
     assert item["data_quality_summary"]["checks"]["daily_ohlc"] == "ok"
 
 
@@ -685,7 +685,7 @@ def test_service_config_off_returns_unavailable_even_if_fetcher_cache_has_data()
     payload = service.build_realtime_snapshot(["FPT"], force_refresh=True)
 
     assert payload["status"] == "unavailable"
-    assert payload["error"] == SSI_STREAMING_REALTIME_DISABLED_REASON
+    assert payload["error"] == "SSI realtime manager disabled."
     assert payload["quotes"] == []
     assert payload["streaming_status"] == "disabled"
 

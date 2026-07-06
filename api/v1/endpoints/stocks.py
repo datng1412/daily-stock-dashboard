@@ -712,9 +712,24 @@ def get_vietnam_realtime_trades(
         )
     except Exception as e:
         logger.error("Vietnam realtime trades failed: %s", e, exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail={"error": "vn_realtime_trades_failed", "message": str(e)},
+        return VietnamRealtimeTradesResponse(
+            market="VN",
+            source="SSI trade-tape contract",
+            symbol=symbol.strip().upper(),
+            status="unavailable",
+            error="SSI trade tape unavailable.",
+            error_detail="SSI trade tape unavailable.",
+            reason_code="unavailable_provider_error",
+            classification="unavailable_provider_error",
+            status_message="SSI trade tape unavailable.",
+            trades=[],
+            note="SSI trade tape is separate from official daily OHLCV.",
+            cache={"cache_status": "unavailable"},
+            diagnostics={
+                "failure_class": "provider_unavailable",
+                "retryable": True,
+                "exception_type": type(e).__name__,
+            },
         )
 
 

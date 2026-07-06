@@ -92,7 +92,8 @@ This document gives Codex and other agents enough context to resume project work
 - Technical provider details such as attempted endpoints, HTTP status, stale dates, retryability, and raw provider error summaries belong in diagnostics/logs, not primary metric fields.
 - When no usable SSI realtime snapshot exists, `realtime_snapshot` should be `null`.
 - When intraday is unavailable, stale, or mismatched, `intraday_pulse` should be `null` and `intraday_candles` should be `[]`.
-- When no trade rows exist, trade rows should be `[]`.
+- When no trade rows exist, watchlist and company `trade_tape` should be `[]`; company trade-tape status belongs in `trade_tape_status`.
+- Watchlist/company live diagnostics are sectioned under `diagnostics.realtime` and `diagnostics.trade_tape`, not embedded in primary status messages.
 - UI availability must depend on section status plus null/empty checks, not on units metadata or cached diagnostic fields.
 - The UI should not render fake metric rows with `-` or `Unavailable` as if they were values for unavailable live sections.
 

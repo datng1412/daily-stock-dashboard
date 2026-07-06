@@ -190,6 +190,8 @@ realtime_status.reason_code = disabled, config_disabled, not_started, bootstrap_
 realtime_snapshot = null
 ```
 
+`realtime_status.message` is short user-facing copy such as `SSI realtime unavailable.`, `SSI realtime cache miss.`, `SSI realtime manager disabled.`, or `SSI realtime stale.` Technical state is not embedded in this message. Sanitized provider/runtime details live under `diagnostics.realtime`.
+
 The primary UI should not render snapshot price, snapshot time, change, or session-volume metric rows when `realtime_snapshot` is `null`.
 
 SSI realtime is streaming-backed. The service may read from a background manager/cache only when `SSI_STREAMING_REALTIME_ENABLED=true`, lifecycle bootstrap symbols are configured, the manager is running, and the cache row is fresh. Request handlers must not open streams, stop streams, reconnect streams, or subscribe requested tickers dynamically. When streaming runtime is disabled, bootstrap symbols are empty, config/package setup is incomplete, the manager is not started, cache is empty/stale, runtime is idle, or the manager is errored, the public object remains `null` and diagnostics carry the safe reason.
@@ -218,7 +220,9 @@ trade_tape_status.reason_code = disabled, latest_trade_stream_only, unavailable_
 trade_tape = []
 ```
 
-The watchlist public contract is a list for `trade_tape`. Company detail keeps a nested `trade_tape.trades` list because the company page groups block status and rows together. `X-TRADE` streaming messages are latest-trade stream context only; they are not historical trade-tape/time-and-sales rows. `GET /api/v1/stocks/vn/realtime/trades` exposes compatible top-level `reason_code`, `classification`, and `status_message` fields for the optional trade-tape state.
+`trade_tape_status.message` is short user-facing copy such as `SSI trade tape unavailable.`, `SSI trade tape disabled.`, or `No SSI trade rows available.` Technical details are not embedded in this message.
+
+The watchlist and company public contracts both use a list for `trade_tape`; company status is separate in `trade_tape_status`. Company realtime follows the same split with `realtime_snapshot` and `realtime_status`. `X-TRADE` streaming messages are latest-trade stream context only; they are not historical trade-tape/time-and-sales rows. `GET /api/v1/stocks/vn/realtime/trades` retains its top-level `trades` list plus short `status_message`; sanitized technical detail lives in its `diagnostics` object.
 
 ### Diagnostics
 
@@ -229,6 +233,18 @@ Diagnostics may include:
 * HTTP status.
 * Provider status code.
 * Retryable flag.
+* Failure classification.
+* Cooldown or reconnect backoff timing.
+* A bounded sanitized provider-error summary.
+
+Watchlist/company live diagnostics use:
+
+```text
+diagnostics.realtime = { ... }
+diagnostics.trade_tape = { ... }
+```
+
+Status blocks do not carry endpoint dumps or raw provider messages. Diagnostics must not contain tokens, Authorization headers, cookies, account IDs, consumer credentials, full provider bodies, or stack traces. Secret-like diagnostic strings are redacted and URLs in provider summaries are collapsed.
 * Stale-date details.
 * Row counts.
 * Normalized keys.
@@ -237,8 +253,6 @@ Diagnostics may include:
 * Intraday failure mode such as `rate_limited`, `bad_request_params`, `auth_failed`, `permission_denied`, `timeout`, `network_error`, `parse_failed`, `provider_unavailable`, or `empty_response`.
 * Intraday request diagnostics such as `endpoint=IntradayOhlc`, HTTP status, provider code, requested timeframe, internal request page size, and public candle limit.
 * Sanitized provider error summaries.
-
-Watchlist live-section status objects may include a nested `diagnostics` object for sanitized provider details that were previously embedded in public messages. The public `message` field must remain short and user-safe.
 
 Diagnostics must not include:
 
@@ -429,9 +443,9 @@ IndexComponents diagnostics may report `cache_status`, `cache_ttl_seconds`, `cac
 
 ## Recently Completed Contract Cleanup
 
-* Phase 2.1 completed: unavailable watchlist `trade_tape` is `[]`, status stays in `trade_tape_status`, and sanitized provider details move to status diagnostics instead of public messages.
+* Phase 4.7B completed: unavailable watchlist/company `trade_tape` is `[]`, status stays in `trade_tape_status`, realtime data/status stay split, and sanitized provider details live under sectioned `diagnostics` instead of status messages.
 * Phase 2.1 completed: unavailable company `intraday.pulse` is `null`, not `{}`.
-* Phase 2.2 completed: frontend rendering treats unavailable live objects as `null`, missing watchlist trade tape as `[]`, company trade rows as `trade_tape.trades = []`, and status diagnostics as diagnostics-only UI content.
+* Phase 4.7B completed: frontend rendering treats unavailable live objects as `null`, missing watchlist/company trade tape as `[]`, and sectioned diagnostics as diagnostics-only UI content.
 
 ## Known Contract TODOs
 

@@ -6,6 +6,7 @@ from __future__ import annotations
 import math
 import logging
 import os
+import re
 import statistics
 import time
 from dataclasses import dataclass
@@ -607,10 +608,114 @@ def _status_from_block(block: Any, default: str = "unavailable") -> str:
     return str(value) if value else default
 
 
-def _status_diagnostics(reason: Optional[str]) -> Dict[str, Any]:
-    if not reason:
-        return {}
-    return {"provider_message": str(reason)}
+LIVE_DIAGNOSTIC_KEYS = {
+    "attempted_endpoints",
+    "endpoint",
+    "last_endpoint",
+    "http_status",
+    "provider_code",
+    "code",
+    "errorCode",
+    "failure_class",
+    "error_type",
+    "retryable",
+    "cooldown_active",
+    "cooldown_seconds",
+    "cooldown_remaining_seconds",
+    "cooldown_until",
+    "backoff_seconds",
+    "next_reconnect_at",
+    "reconnect_attempts",
+    "streaming_status",
+    "runtime_status",
+    "manager_state",
+    "cache_status",
+    "cache_ttl_seconds",
+    "live_adapter_status",
+    "bootstrap_symbols",
+    "messages_observed",
+    "parser_rows_observed",
+    "last_message_at",
+    "provider_message",
+    "latest_error",
+}
+LIVE_SECRET_MARKERS = (
+    "authorization",
+    "bearer ",
+    "token",
+    "secret",
+    "cookie",
+    "accountid",
+    "account_id",
+    "consumerid",
+    "consumer_id",
+    "consumersecret",
+    "consumer_secret",
+    "api_key",
+    "apikey",
+)
+
+
+def _safe_live_diagnostic_text(value: Any, *, max_length: int = 160) -> Optional[str]:
+    if value in (None, ""):
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    lowered = text.lower()
+    if any(marker in lowered for marker in LIVE_SECRET_MARKERS):
+        return "[redacted]"
+    text = re.sub(r"https?://\S+", "<url>", text, flags=re.IGNORECASE)
+    return text[:max_length]
+
+
+def _safe_live_diagnostic_value(key: str, value: Any) -> Any:
+    if value in (None, ""):
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        if isinstance(value, float) and math.isnan(value):
+            return None
+        return value
+    if key in {"attempted_endpoints", "bootstrap_symbols"} and isinstance(value, (list, tuple, set)):
+        safe_items = [
+            _safe_live_diagnostic_text(item, max_length=80)
+            for item in list(value)[:20]
+        ]
+        return [item for item in safe_items if item]
+    return _safe_live_diagnostic_text(value)
+
+
+def _live_failure_diagnostics(payload: Any, *, reason: Optional[str] = None) -> Dict[str, Any]:
+    payload = payload if isinstance(payload, dict) else {}
+    nested = payload.get("diagnostics")
+    sources = [nested] if isinstance(nested, dict) else []
+    sources.append(payload)
+    diagnostics: Dict[str, Any] = {}
+    for source in sources:
+        for key, value in source.items():
+            if key not in LIVE_DIAGNOSTIC_KEYS:
+                continue
+            output_key = "provider_code" if key in {"code", "errorCode"} else key
+            if key in {"latest_error", "provider_message"}:
+                output_key = "provider_message"
+            safe_value = _safe_live_diagnostic_value(output_key, value)
+            if safe_value is not None:
+                diagnostics[output_key] = safe_value
+    safe_reason = _safe_live_diagnostic_text(reason)
+    if safe_reason and "provider_message" not in diagnostics:
+        diagnostics["provider_message"] = safe_reason
+    if "retryable" not in diagnostics:
+        failure_class = str(diagnostics.get("failure_class") or "").lower()
+        if failure_class:
+            diagnostics["retryable"] = failure_class in {
+                "rate_limited",
+                "timeout",
+                "network_error",
+                "provider_unavailable",
+            }
+    return diagnostics
 
 
 def _lower_text(value: Any) -> str:
@@ -687,28 +792,28 @@ def _status_message_from_reason(
         messages = {
             "cache_hit": "SSI realtime snapshot ready.",
             "disabled": VN_REALTIME_DISABLED_REASON,
-            "config_disabled": "SSI streaming realtime manager disabled.",
-            "not_started": "SSI streaming realtime manager not started.",
-            "bootstrap_symbols_empty": "SSI streaming realtime bootstrap symbols empty.",
-            "ticker_not_bootstrapped": "Ticker is not in the configured SSI realtime bootstrap list.",
-            "running_idle": "SSI stream is running but no recent tick is cached for this ticker.",
-            "cache_empty": "SSI realtime stream cache is empty for this ticker.",
-            "cache_stale": "SSI realtime stream cache is stale for this ticker.",
-            "connection_error": "SSI realtime connection unavailable.",
-            "auth_or_entitlement_failure": "SSI realtime authentication or entitlement failed.",
-            "network_or_tls_failure": "SSI realtime network or TLS connection failed.",
-            "rate_limited": "SSI realtime provider rate-limited the request.",
+            "config_disabled": "SSI realtime manager disabled.",
+            "not_started": "SSI realtime manager unavailable.",
+            "bootstrap_symbols_empty": "SSI realtime cache miss.",
+            "ticker_not_bootstrapped": "SSI realtime cache miss.",
+            "running_idle": "SSI realtime cache miss.",
+            "cache_empty": "SSI realtime cache miss.",
+            "cache_stale": "SSI realtime stale.",
+            "connection_error": VN_REALTIME_UNAVAILABLE_REASON,
+            "auth_or_entitlement_failure": VN_REALTIME_UNAVAILABLE_REASON,
+            "network_or_tls_failure": VN_REALTIME_UNAVAILABLE_REASON,
+            "rate_limited": VN_REALTIME_UNAVAILABLE_REASON,
             "unknown": VN_REALTIME_UNAVAILABLE_REASON,
         }
     else:
         messages = {
             "historical_trade_tape_supported": "SSI historical trade tape ready.",
-            "latest_trade_stream_only": "Historical SSI trade tape is unavailable; X-TRADE is latest-trade stream context only.",
+            "latest_trade_stream_only": VN_TRADE_TAPE_UNAVAILABLE_REASON,
             "disabled": VN_TRADE_TAPE_DISABLED_REASON,
-            "unavailable_no_rows": "SSI trade tape returned no trade rows.",
-            "unavailable_provider_error": "SSI trade tape provider unavailable.",
+            "unavailable_no_rows": "No SSI trade rows available.",
+            "unavailable_provider_error": VN_TRADE_TAPE_UNAVAILABLE_REASON,
             "unavailable_unknown": VN_TRADE_TAPE_UNAVAILABLE_REASON,
-            "not_implemented": "Historical SSI trade tape is not proven by current SSI evidence.",
+            "not_implemented": VN_TRADE_TAPE_UNAVAILABLE_REASON,
         }
     if reason_code in messages:
         return messages[reason_code]
@@ -2869,9 +2974,10 @@ class VietnamMarketService:
     ) -> Dict[str, Any]:
         reason_text = reason or VN_REALTIME_UNAVAILABLE_REASON
         public_status = _public_live_status(status)
-        safe_diagnostics = _status_diagnostics(reason_text if reason_text != VN_REALTIME_UNAVAILABLE_REASON else None)
-        if diagnostics:
-            safe_diagnostics.update(diagnostics)
+        safe_diagnostics = _live_failure_diagnostics(
+            diagnostics,
+            reason=reason_text if reason_text != VN_REALTIME_UNAVAILABLE_REASON else None,
+        )
         reason_code = _classify_realtime_reason(
             status=public_status,
             reason=reason_text,
@@ -2908,6 +3014,7 @@ class VietnamMarketService:
         *,
         status: str = "unavailable",
         reason: Optional[str] = None,
+        diagnostics: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         reason_text = reason or VN_TRADE_TAPE_UNAVAILABLE_REASON
         public_status = _public_live_status(status)
@@ -2925,9 +3032,12 @@ class VietnamMarketService:
         reason_code = _classify_trade_tape_reason(status=public_status, reason=reason_text)
         status_payload["reason_code"] = reason_code
         status_payload["classification"] = reason_code
-        diagnostics = _status_diagnostics(reason_text if reason_text != VN_TRADE_TAPE_UNAVAILABLE_REASON else None)
-        if diagnostics:
-            status_payload["diagnostics"] = diagnostics
+        safe_diagnostics = _live_failure_diagnostics(
+            diagnostics,
+            reason=reason_text if reason_text != VN_TRADE_TAPE_UNAVAILABLE_REASON else None,
+        )
+        if safe_diagnostics:
+            status_payload["diagnostics"] = safe_diagnostics
         return {
             "trade_tape_source": SSI_TRADE_TAPE_SOURCE,
             "trade_tape": [],
@@ -3039,7 +3149,7 @@ class VietnamMarketService:
                         "reason_code": "cache_hit",
                         "classification": "cache_hit",
                         "ticker": symbol,
-                        "diagnostics": payload.get("diagnostics") or {},
+                        "diagnostics": _live_failure_diagnostics(payload),
                     },
                 }
             return self._ssi_realtime_unavailable_payload(symbol, reason="SSI realtime returned no quote row.")
@@ -3049,9 +3159,7 @@ class VietnamMarketService:
             symbol,
             status=status or "unavailable",
             reason=(payload.get("reason") or payload.get("message")) if isinstance(payload, dict) else None,
-            diagnostics=(payload.get("diagnostics") if isinstance(payload.get("diagnostics"), dict) else None)
-            if isinstance(payload, dict)
-            else None,
+            diagnostics=payload if isinstance(payload, dict) else None,
         )
 
     def _load_ssi_trade_tape_payload(self, symbol: str, limit: int = 100) -> Dict[str, Any]:
@@ -3063,19 +3171,23 @@ class VietnamMarketService:
         if status == "ok":
             trades = [self._trade_row_from_ssi(row) for row in (payload.get("trades") or []) if isinstance(row, dict)]
             if trades:
+                safe_diagnostics = _live_failure_diagnostics(payload)
+                trade_tape_status = {
+                    "status": "ok",
+                    "source": SSI_TRADE_TAPE_SOURCE,
+                    "message": None,
+                    "reason_code": "historical_trade_tape_supported",
+                    "classification": "historical_trade_tape_supported",
+                    "ticker": symbol,
+                    "count": len(trades),
+                    "fetched_at": _utc_now().isoformat(),
+                }
+                if safe_diagnostics:
+                    trade_tape_status["diagnostics"] = safe_diagnostics
                 return {
                     "trade_tape_source": SSI_TRADE_TAPE_SOURCE,
                     "trade_tape": trades,
-                    "trade_tape_status": {
-                        "status": "ok",
-                        "source": SSI_TRADE_TAPE_SOURCE,
-                        "message": None,
-                        "reason_code": "historical_trade_tape_supported",
-                        "classification": "historical_trade_tape_supported",
-                        "ticker": symbol,
-                        "count": len(trades),
-                        "fetched_at": _utc_now().isoformat(),
-                    },
+                    "trade_tape_status": trade_tape_status,
                 }
             return self._ssi_trade_tape_unavailable_payload(symbol, reason="SSI trade tape returned no trade rows.")
         if status == "disabled":
@@ -3084,6 +3196,7 @@ class VietnamMarketService:
             symbol,
             status=status or "unavailable",
             reason=(payload.get("reason") or payload.get("message")) if isinstance(payload, dict) else None,
+            diagnostics=payload if isinstance(payload, dict) else None,
         )
 
     def _unpack_daily_ohlcv_value(
@@ -4662,11 +4775,11 @@ class VietnamMarketService:
                 "market": "VN",
                 "source": SSI_REALTIME_SOURCE,
                 "status": "unavailable",
-                "error": SSI_STREAMING_REALTIME_DISABLED_REASON,
-                "error_detail": SSI_STREAMING_REALTIME_DISABLED_REASON,
+                "error": "SSI realtime manager disabled.",
+                "error_detail": "SSI realtime manager disabled.",
                 "reason_code": "config_disabled",
                 "classification": "config_disabled",
-                "status_message": "SSI streaming realtime manager disabled.",
+                "status_message": "SSI realtime manager disabled.",
                 "requested_tickers": tickers,
                 "quotes": [],
                 "cache": {"cache_status": "disabled"},
@@ -4693,7 +4806,10 @@ class VietnamMarketService:
             for row in payload.get("quotes", [])
             if isinstance(row, dict)
         ]
-        diagnostics = payload.get("diagnostics") if isinstance(payload.get("diagnostics"), dict) else {}
+        diagnostics = _live_failure_diagnostics(
+            payload,
+            reason=(payload.get("reason") or payload.get("message")) if status != "ok" else None,
+        )
         streaming_cache_ttl_seconds = _safe_int(diagnostics.get("cache_ttl_seconds"))
         response = {
             "market": "VN",
@@ -4727,6 +4843,12 @@ class VietnamMarketService:
             response["error"] = VN_REALTIME_UNAVAILABLE_REASON
             response["error_detail"] = VN_REALTIME_UNAVAILABLE_REASON
             response["cache"]["streaming_cache_status"] = "unavailable"
+            diagnostics = {
+                **diagnostics,
+                "failure_class": "provider_unavailable",
+                "retryable": True,
+            }
+            response["diagnostics"] = diagnostics
         response_reason_code = _classify_realtime_reason(
             status=str(response.get("status") or status or "unavailable"),
             reason=str(response.get("error_detail") or response.get("error") or payload.get("reason") or ""),
@@ -4741,6 +4863,9 @@ class VietnamMarketService:
             reason_code=response_reason_code,
             fallback=VN_REALTIME_UNAVAILABLE_REASON,
         )
+        if response.get("status") != "ok":
+            response["error"] = response["status_message"]
+            response["error_detail"] = response["status_message"]
         return response
 
     def build_trade_tape(
@@ -4800,6 +4925,10 @@ class VietnamMarketService:
         payload = result["value"] if isinstance(result.get("value"), dict) else {}
         status = str(payload.get("status") or "unavailable").lower()
         trades = [self._trade_row_from_ssi(row) for row in payload.get("trades", []) if isinstance(row, dict)]
+        diagnostics = _live_failure_diagnostics(
+            payload,
+            reason=(payload.get("reason") or payload.get("message")) if status != "ok" else None,
+        )
         response = {
             "market": "VN",
             "source": SSI_TRADE_TAPE_SOURCE,
@@ -4815,6 +4944,7 @@ class VietnamMarketService:
                 "next_refresh_at": _iso(result["entry"].expires_at),
                 "ttl_seconds": VN_CACHE_TTL_SECONDS["trade_tape"],
             },
+            "diagnostics": diagnostics,
         }
         if status == "ok" and not trades:
             response["status"] = "unavailable"
@@ -4824,6 +4954,10 @@ class VietnamMarketService:
             response["status"] = "unavailable"
             response["error"] = VN_TRADE_TAPE_UNAVAILABLE_REASON
             response["error_detail"] = str(result["error"])
+            response["diagnostics"] = _live_failure_diagnostics(
+                payload,
+                reason=str(result["error"]),
+            )
         response_reason_code = _classify_trade_tape_reason(
             status=str(response.get("status") or status or "unavailable"),
             reason=str(response.get("error_detail") or response.get("error") or payload.get("reason") or ""),
@@ -4836,6 +4970,9 @@ class VietnamMarketService:
             reason_code=response_reason_code,
             fallback=VN_TRADE_TAPE_UNAVAILABLE_REASON,
         )
+        if response.get("status") != "ok":
+            response["error"] = response["status_message"]
+            response["error_detail"] = response["status_message"]
         return response
 
     def _build_symbol(
@@ -5000,6 +5137,10 @@ class VietnamMarketService:
                 **self._disabled_intraday_payload(intraday_timeframe),
                 **self._disabled_realtime_payload(symbol),
                 **self._disabled_trade_tape_payload(symbol),
+                "diagnostics": {
+                    "realtime": {},
+                    "trade_tape": {},
+                },
                 "cache_status": cache_status,
                 "cache_last_fetched_at": cache_last_fetched_at,
                 "cache_next_refresh_at": cache_next_refresh_at,
@@ -5186,7 +5327,10 @@ class VietnamMarketService:
             lambda: self._load_ssi_realtime_payload(symbol),
             force_refresh=force_refresh,
         )
-        realtime_payload = realtime_result["value"]
+        realtime_payload = dict(realtime_result["value"])
+        realtime_status_payload = dict(realtime_payload.get("realtime_status") or {})
+        realtime_diagnostics = _live_failure_diagnostics(realtime_status_payload.pop("diagnostics", {}))
+        realtime_payload["realtime_status"] = realtime_status_payload
         cache_status["realtime_cache"] = realtime_result["status"]
         cache_last_fetched_at["realtime_snapshot"] = _iso(realtime_result["entry"].fetched_at)
         cache_next_refresh_at["realtime_snapshot"] = _iso(realtime_result["entry"].expires_at)
@@ -5207,7 +5351,10 @@ class VietnamMarketService:
             lambda: self._load_ssi_trade_tape_payload(symbol, limit=100),
             force_refresh=force_refresh,
         )
-        trade_tape_payload = trade_tape_result["value"]
+        trade_tape_payload = dict(trade_tape_result["value"])
+        trade_tape_status_payload = dict(trade_tape_payload.get("trade_tape_status") or {})
+        trade_tape_diagnostics = _live_failure_diagnostics(trade_tape_status_payload.pop("diagnostics", {}))
+        trade_tape_payload["trade_tape_status"] = trade_tape_status_payload
         cache_status["trade_tape_cache"] = trade_tape_result["status"]
         cache_last_fetched_at["trade_tape"] = _iso(trade_tape_result["entry"].fetched_at)
         cache_next_refresh_at["trade_tape"] = _iso(trade_tape_result["entry"].expires_at)
@@ -5370,6 +5517,10 @@ class VietnamMarketService:
             **intraday_payload,
             **realtime_payload,
             **trade_tape_payload,
+            "diagnostics": {
+                "realtime": realtime_diagnostics,
+                "trade_tape": trade_tape_diagnostics,
+            },
             "cache_status": cache_status,
             "cache_last_fetched_at": cache_last_fetched_at,
             "cache_next_refresh_at": cache_next_refresh_at,

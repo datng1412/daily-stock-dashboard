@@ -1407,25 +1407,25 @@ const optionalLiveStatusText = (
     unavailable_provider_error: section === 'tradeTape'
       ? 'SSI trade tape provider unavailable.'
       : 'SSI IntradayOhlc provider unavailable.',
-    config_disabled: 'SSI streaming realtime manager disabled.',
+    config_disabled: 'SSI realtime manager disabled.',
     disabled: section === 'intraday'
       ? 'SSI IntradayOhlc is disabled.'
       : section === 'realtime'
         ? 'SSI realtime is disabled.'
         : 'SSI trade tape is disabled.',
-    not_started: 'SSI streaming realtime manager not started.',
-    bootstrap_symbols_empty: 'SSI streaming realtime bootstrap symbols empty.',
-    ticker_not_bootstrapped: 'Ticker is not in the configured SSI realtime bootstrap list.',
-    running_idle: 'SSI stream is running but no recent tick is cached for this ticker.',
-    cache_empty: 'SSI realtime stream cache is empty for this ticker.',
-    cache_stale: 'SSI realtime stream cache is stale; realtime is event-driven and may stop updating outside active ticks.',
-    connection_error: 'SSI realtime connection unavailable.',
-    auth_or_entitlement_failure: 'SSI realtime authentication or entitlement failed.',
-    network_or_tls_failure: 'SSI realtime network or TLS connection failed.',
-    rate_limited: 'SSI realtime provider rate-limited the request.',
-    latest_trade_stream_only: 'Historical trade tape is unavailable. X-TRADE is latest-trade stream context only.',
+    not_started: 'SSI realtime manager unavailable.',
+    bootstrap_symbols_empty: 'SSI realtime cache miss.',
+    ticker_not_bootstrapped: 'SSI realtime cache miss.',
+    running_idle: 'SSI realtime cache miss.',
+    cache_empty: 'SSI realtime cache miss.',
+    cache_stale: 'SSI realtime stale.',
+    connection_error: 'SSI realtime unavailable.',
+    auth_or_entitlement_failure: 'SSI realtime unavailable.',
+    network_or_tls_failure: 'SSI realtime unavailable.',
+    rate_limited: 'SSI realtime unavailable.',
+    latest_trade_stream_only: 'SSI trade tape unavailable.',
     not_implemented: section === 'tradeTape'
-      ? 'Historical trade tape is not proven by current SSI evidence.'
+      ? 'SSI trade tape unavailable.'
       : 'This optional live section is not implemented.',
   };
   if (reasonCode && copyByReason[reasonCode]) return copyByReason[reasonCode];
@@ -1977,8 +1977,8 @@ const DataStatusPanel: React.FC<{
   const issueSummary = realtimeIssueSummary(realtimeError, tradesError);
   const liveStatusDiagnostics = [
     ...liveStatusDiagnosticRows('SSI intraday status', selectedItem?.intradayStatus?.diagnostics),
-    ...liveStatusDiagnosticRows('SSI realtime status', selectedItem?.realtimeStatus?.diagnostics),
-    ...liveStatusDiagnosticRows('SSI trade tape status', selectedItem?.tradeTapeStatus?.diagnostics),
+    ...liveStatusDiagnosticRows('SSI realtime status', selectedItem?.diagnostics?.realtime),
+    ...liveStatusDiagnosticRows('SSI trade tape status', selectedItem?.diagnostics?.tradeTape),
   ];
   const diagnosticsAvailable = Boolean(
     liveStatusDiagnostics.length

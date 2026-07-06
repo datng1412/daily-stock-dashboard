@@ -126,34 +126,38 @@ const makeCompanySnapshot = (): VietnamCompanyResearchResponse => ({
       direction: 'up',
     },
   },
-  realtime: {
+  realtimeStatus: {
     source: 'SSI realtime contract',
     status: 'ok',
     message: null,
-    snapshot: {
-      ticker: 'FPT',
-      price: 124.8,
-      change: 0.2,
-      changePct: 0.16,
-      referencePrice: 123,
-      volume: 10_000,
-      source: 'SSI',
-      status: 'ok',
-    },
   },
-  tradeTape: {
+  realtimeSnapshot: {
+    ticker: 'FPT',
+    price: 124.8,
+    change: 0.2,
+    changePct: 0.16,
+    referencePrice: 123,
+    volume: 10_000,
+    source: 'SSI',
+    status: 'ok',
+  },
+  tradeTapeStatus: {
     source: 'SSI trade-tape contract',
     status: 'ok',
     message: null,
-    trades: [
-      {
-        time: '10:16:00',
-        price: 124.8,
-        volume: 1000,
-        value: 124_800_000,
-        source: 'SSI',
-      },
-    ],
+  },
+  tradeTape: [
+    {
+      time: '10:16:00',
+      price: 124.8,
+      volume: 1000,
+      value: 124_800_000,
+      source: 'SSI',
+    },
+  ],
+  diagnostics: {
+    realtime: {},
+    tradeTape: {},
   },
   dataQualitySummary: {
     overallStatus: 'ok',
@@ -274,23 +278,25 @@ describe('VietnamCompanyResearchPage', () => {
         dateMatch: 'mismatched',
       },
     };
-    snapshot.realtime = {
+    snapshot.realtimeStatus = {
       source: 'SSI realtime contract',
       status: 'unavailable',
       message: 'SSI realtime unavailable.',
-      snapshot: null,
-      diagnostics: {
+    };
+    snapshot.realtimeSnapshot = null;
+    snapshot.tradeTapeStatus = {
+      source: 'SSI trade-tape contract',
+      status: 'unavailable',
+      message: 'SSI trade tape unavailable.',
+    };
+    snapshot.tradeTape = [];
+    snapshot.diagnostics = {
+      realtime: {
         attemptedEndpoints: ['RealtimeQuote'],
         httpStatus: 404,
         retryable: false,
       },
-    };
-    snapshot.tradeTape = {
-      source: 'SSI trade-tape contract',
-      status: 'unavailable',
-      message: 'SSI trade tape unavailable.',
-      trades: [],
-      diagnostics: {
+      tradeTape: {
         attemptedEndpoints: ['TradeTape'],
         httpStatus: 404,
         retryable: false,

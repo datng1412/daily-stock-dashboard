@@ -303,6 +303,7 @@ class VietnamWatchItem(BaseModel):
     cache_last_fetched_at: Dict[str, Any] = Field(default_factory=dict)
     cache_next_refresh_at: Dict[str, Any] = Field(default_factory=dict)
     cache_errors: Dict[str, Any] = Field(default_factory=dict)
+    diagnostics: Dict[str, Any] = Field(default_factory=dict)
     data_quality_summary: Dict[str, Any] = Field(default_factory=dict)
     error: Optional[str] = None
 
@@ -543,24 +544,6 @@ class VietnamCompanyIntraday(BaseModel):
     diagnostics: Dict[str, Any] = Field(default_factory=dict)
 
 
-class VietnamCompanyRealtime(BaseModel):
-    """Realtime snapshot block for the Vietnam company research page."""
-
-    snapshot: Optional[Dict[str, Any]] = None
-    source: Optional[str] = None
-    status: str = "unavailable"
-    message: Optional[str] = None
-
-
-class VietnamCompanyTradeTape(BaseModel):
-    """Trade tape block for the Vietnam company research page."""
-
-    trades: List[Dict[str, Any]] = Field(default_factory=list)
-    source: Optional[str] = None
-    status: str = "unavailable"
-    message: Optional[str] = None
-
-
 class VietnamCompanySourceCoverageItem(BaseModel):
     """Per-block source coverage row for Vietnam company research."""
 
@@ -590,8 +573,11 @@ class VietnamCompanyResearchResponse(BaseModel):
     foreign_flow: VietnamCompanyForeignFlow
     technical: VietnamCompanyTechnical
     intraday: VietnamCompanyIntraday = Field(default_factory=VietnamCompanyIntraday)
-    realtime: VietnamCompanyRealtime = Field(default_factory=VietnamCompanyRealtime)
-    trade_tape: VietnamCompanyTradeTape = Field(default_factory=VietnamCompanyTradeTape)
+    realtime_snapshot: Optional[Dict[str, Any]] = None
+    realtime_status: Dict[str, Any] = Field(default_factory=dict)
+    trade_tape: List[Dict[str, Any]] = Field(default_factory=list)
+    trade_tape_status: Dict[str, Any] = Field(default_factory=dict)
+    diagnostics: Dict[str, Any] = Field(default_factory=dict)
     source_coverage: List[VietnamCompanySourceCoverageItem] = Field(default_factory=list)
     news: VietnamCompanyPlaceholderBlock
     financials: VietnamCompanyPlaceholderBlock
@@ -786,6 +772,7 @@ class VietnamRealtimeTradesResponse(BaseModel):
     trades: List[VietnamRealtimeTrade] = Field(default_factory=list)
     note: Optional[str] = None
     cache: Dict[str, Any] = Field(default_factory=dict)
+    diagnostics: Dict[str, Any] = Field(default_factory=dict)
 
 
 class VietnamMozyfinObservability(BaseModel):

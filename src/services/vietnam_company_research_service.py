@@ -223,24 +223,41 @@ class VietnamCompanyResearchService:
             "message": intraday_status.get("message") or row.get("intraday_warning"),
             "diagnostics": intraday_diagnostics,
         }
-        realtime_status = _dict(row.get("realtime_status"))
-        realtime = {
-            "snapshot": row.get("realtime_snapshot") if isinstance(row.get("realtime_snapshot"), dict) else None,
-            "source": SSI_REALTIME_SOURCE,
+        realtime_status = dict(_dict(row.get("realtime_status")))
+        row_diagnostics = _dict(row.get("diagnostics"))
+        realtime_diagnostics = _dict(row_diagnostics.get("realtime")) or _dict(realtime_status.pop("diagnostics", None))
+        realtime_snapshot = row.get("realtime_snapshot") if isinstance(row.get("realtime_snapshot"), dict) else None
+        realtime_status = {
+            **realtime_status,
+            "source": realtime_status.get("source") or SSI_REALTIME_SOURCE,
             "status": realtime_status.get("status") or "unavailable",
             "message": realtime_status.get("message"),
         }
-        trade_tape_status = _dict(row.get("trade_tape_status"))
+        trade_tape_status = dict(_dict(row.get("trade_tape_status")))
         trade_tape_payload = row.get("trade_tape")
         trade_tape_rows = trade_tape_payload if isinstance(trade_tape_payload, list) else _dict(trade_tape_payload).get("trades")
-        trade_tape = {
-            "trades": list(trade_tape_rows or []),
-            "source": SSI_TRADE_TAPE_SOURCE,
+        trade_tape_diagnostics = _dict(row_diagnostics.get("trade_tape")) or _dict(
+            trade_tape_status.pop("diagnostics", None)
+        )
+        trade_tape = list(trade_tape_rows or [])
+        trade_tape_status = {
+            **trade_tape_status,
+            "source": trade_tape_status.get("source") or SSI_TRADE_TAPE_SOURCE,
             "status": trade_tape_status.get("status") or _dict(trade_tape_payload).get("status") or "unavailable",
             "message": trade_tape_status.get("message"),
         }
 
-        source_coverage = self._source_coverage(profile, price, trading_stats, foreign_flow, technical, daily_stock_price, intraday, realtime, trade_tape)
+        source_coverage = self._source_coverage(
+            profile,
+            price,
+            trading_stats,
+            foreign_flow,
+            technical,
+            daily_stock_price,
+            intraday,
+            realtime_status,
+            trade_tape_status,
+        )
         market_blocks_ok = any(block.get("status") == "ok" for block in [profile, price, trading_stats, foreign_flow, technical])
         status = "ok" if price["status"] == "ok" and trading_stats["status"] == "ok" else "partial" if market_blocks_ok else "unavailable"
 
@@ -258,8 +275,14 @@ class VietnamCompanyResearchService:
             "foreign_flow": foreign_flow,
             "technical": technical,
             "intraday": intraday,
-            "realtime": realtime,
+            "realtime_snapshot": realtime_snapshot,
+            "realtime_status": realtime_status,
             "trade_tape": trade_tape,
+            "trade_tape_status": trade_tape_status,
+            "diagnostics": {
+                "realtime": realtime_diagnostics,
+                "trade_tape": trade_tape_diagnostics,
+            },
             "source_coverage": source_coverage,
             "news": self._placeholder("not_implemented", NEWS_FUTURE_SOURCE, NOT_IMPLEMENTED_MESSAGE),
             "financials": self._placeholder("not_implemented", EXTERNAL_FUTURE_SOURCE),
@@ -278,8 +301,8 @@ class VietnamCompanyResearchService:
         technical: Dict[str, Any],
         daily_stock_price: Dict[str, Any],
         intraday: Optional[Dict[str, Any]] = None,
-        realtime: Optional[Dict[str, Any]] = None,
-        trade_tape: Optional[Dict[str, Any]] = None,
+        realtime_status: Optional[Dict[str, Any]] = None,
+        trade_tape_status: Optional[Dict[str, Any]] = None,
     ) -> list[Dict[str, Any]]:
         has_daily_stock_price_fields = any(
             price.get(field) is not None
@@ -293,14 +316,14 @@ class VietnamCompanyResearchService:
             else "missing"
         )
         intraday_status = _dict(intraday).get("status") or "unavailable"
-        realtime_status = _dict(realtime).get("status") or "unavailable"
-        trade_tape_status = _dict(trade_tape).get("status") or "unavailable"
+        realtime_status_value = _dict(realtime_status).get("status") or "unavailable"
+        trade_tape_status_value = _dict(trade_tape_status).get("status") or "unavailable"
         return [
             {"block": "Daily OHLCV", "source": SSI_DAILY_OHLC_SOURCE, "status": "ok" if technical.get("status") == "ok" or trading_stats.get("status") == "ok" else "missing"},
             {"block": "Daily stock price", "source": SSI_DAILY_STOCK_PRICE_SOURCE, "status": daily_stock_status},
             {"block": "Intraday OHLCV", "source": SSI_INTRADAY_SOURCE, "status": intraday_status},
-            {"block": "Realtime snapshot", "source": SSI_REALTIME_SOURCE, "status": realtime_status},
-            {"block": "Trade tape", "source": SSI_TRADE_TAPE_SOURCE, "status": trade_tape_status},
+            {"block": "Realtime snapshot", "source": SSI_REALTIME_SOURCE, "status": realtime_status_value},
+            {"block": "Trade tape", "source": SSI_TRADE_TAPE_SOURCE, "status": trade_tape_status_value},
             {
                 "block": "Profile",
                 "source": profile.get("source") or SSI_SECURITIES_DETAILS_SOURCE,
@@ -413,14 +436,12 @@ class VietnamCompanyResearchService:
             "status": "unavailable",
             "message": "SSI intraday unavailable.",
         }
-        missing_realtime = {
-            "snapshot": None,
+        missing_realtime_status = {
             "source": SSI_REALTIME_SOURCE,
             "status": "unavailable",
             "message": "SSI realtime unavailable.",
         }
-        missing_trade_tape = {
-            "trades": [],
+        missing_trade_tape_status = {
             "source": SSI_TRADE_TAPE_SOURCE,
             "status": "unavailable",
             "message": "SSI trade tape unavailable.",
@@ -435,9 +456,25 @@ class VietnamCompanyResearchService:
             "foreign_flow": missing_foreign,
             "technical": missing_technical,
             "intraday": missing_intraday,
-            "realtime": missing_realtime,
-            "trade_tape": missing_trade_tape,
-            "source_coverage": self._source_coverage(profile, missing_price, missing_trading, missing_foreign, missing_technical, missing_daily_stock_price, missing_intraday, missing_realtime, missing_trade_tape),
+            "realtime_snapshot": None,
+            "realtime_status": missing_realtime_status,
+            "trade_tape": [],
+            "trade_tape_status": missing_trade_tape_status,
+            "diagnostics": {
+                "realtime": {},
+                "trade_tape": {},
+            },
+            "source_coverage": self._source_coverage(
+                profile,
+                missing_price,
+                missing_trading,
+                missing_foreign,
+                missing_technical,
+                missing_daily_stock_price,
+                missing_intraday,
+                missing_realtime_status,
+                missing_trade_tape_status,
+            ),
             "news": self._placeholder("not_implemented", NEWS_FUTURE_SOURCE, NOT_IMPLEMENTED_MESSAGE),
             "financials": self._placeholder("not_implemented", EXTERNAL_FUTURE_SOURCE),
             "events": self._placeholder("not_implemented", EXTERNAL_FUTURE_SOURCE),

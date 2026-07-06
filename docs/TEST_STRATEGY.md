@@ -258,7 +258,7 @@ Expected protection:
 - Requested watchlist tickers are present.
 - Daily SSI fields remain available for usable rows.
 - The printed `EXPECTED Foreign net volume` is computed only from `ssi_foreign_net_volume`.
-- Watchlist trade tape remains list data and company trade rows remain `trade_tape.trades`.
+- Watchlist and company trade tape remain list data as `trade_tape`.
 - Unavailable live objects use `null`; unavailable live lists use `[]`.
 - Company price/trading/foreign-flow sources stay split between SSI DailyOhlc and SSI DailyStockPrice.
 - News, financials, and events are not labeled as SSI market-data sections.
