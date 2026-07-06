@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [documentation] Document the SSI-first VN data ownership matrix and planned Phase 4.8A SSI-derived metrics completion without runtime or provider changes.
 - [documentation] Qualify Vnstock, FiinQuant, FiinGroup API Datafeed, and manual import for future VN external-provider domains without adding runtime providers or changing SSI ownership.
 - [new feature] Add a bounded SSI streaming X-TRADE event buffer for optional VN trade-tape rows without request-handler streaming, REST probing, fake data, or latest-price ownership changes.
 - [fix] Split VN realtime and trade-tape public status messages from sanitized diagnostics, with company trade tape now using `trade_tape=[]` plus separate `trade_tape_status`.

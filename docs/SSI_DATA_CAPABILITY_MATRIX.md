@@ -25,6 +25,65 @@ Latest bounded live gate: 2026-06-29, using sanitized SSI smoke output plus loca
 | `external_provider_required` | No SSI-owned endpoint or repo evidence supports the domain; a separate provider contract is required. |
 | `not_implemented` | A placeholder or contract may exist, but no provider implementation is present. |
 | `deferred` | Valid future work, intentionally out of scope for the current SSI-first phase. |
+| `computable_from_ssi_daily_ohlc` | Not implemented yet, but the inputs should come from SSI DailyOhlc and should be calculated internally. |
+| `computable_from_ssi_daily_ohlc_and_daily_stock_price` | Not implemented yet, but the inputs should come from SSI DailyOhlc plus SSI DailyStockPrice and should be calculated internally. |
+| `deferred_pending_ssi_index_methodology` | Deferred until SSI index data and a documented beta/statistics methodology are verified; not an external-provider default. |
+| `deferred_pending_share_basis_verification` | Deferred until listed/outstanding/free-float share-count semantics and ownership are verified; do not compute from ambiguous metadata. |
+
+## SSI-first Data Ownership Rule
+
+If SSI can provide a market-data field, SSI owns it. If a metric can be calculated from SSI-owned data, calculate it internally from SSI data. External providers are allowed only for domains SSI cannot provide or cannot support with verified semantics and legal rights.
+
+External providers must be source-labeled and domain-scoped. They must not overwrite SSI DailyOhlc, SSI DailyStockPrice, SSI IntradayOhlc, SSI streaming realtime, SSI X-TRADE trade tape, SSI index data, SSI metadata, or SSI-derived technical indicators. External-provider failures must not change valid SSI daily rows, and no fallback provider may silently replace SSI-owned fields.
+
+## SSI Ownership and Derived Metric Matrix
+
+This is the canonical SSI-first ownership matrix for future VN dashboard work. Public contracts may reference this table instead of duplicating it.
+
+| Data field or metric | Ownership class | Owner / derivation | Current status | Rule |
+| --- | --- | --- | --- | --- |
+| Daily OHLCV | SSI-owned | SSI DailyOhlc | `strong` | Canonical daily OHLCV. |
+| `latest_price` | SSI-owned | SSI DailyOhlc close | `strong` | Must not be overwritten by DailyStockPrice, realtime, trade tape, or external providers. |
+| Chart candles | SSI-owned | SSI DailyOhlc | `strong` | Chart source remains DailyOhlc. |
+| Reference price | SSI-owned | SSI DailyStockPrice | `strong` | Source-specific enrichment, not canonical close. |
+| Ceiling/floor | SSI-owned | SSI DailyStockPrice | `strong` | Use only when SSI returns values. |
+| Matched volume/value | SSI-owned | SSI DailyStockPrice | `strong` | Do not substitute DailyOhlc volume/value. |
+| Put-through volume/value | SSI-owned | SSI DailyStockPrice | `strong` | Null when SSI does not provide it; provider zero remains zero. |
+| Foreign buy/sell/net volume/value | SSI-owned | SSI DailyStockPrice | `strong` | Latest enrichment comes from DailyStockPrice. |
+| Intraday candles | SSI-owned | SSI IntradayOhlc | `partial` | Optional; unavailable intraday does not affect daily rows. |
+| Realtime snapshot | SSI-owned optional live | SSI streaming `X:{symbol}` cache | `optional_live_dependent` | Background cache only; no request-handler stream start. |
+| Trade tape / latest trade events | SSI-owned optional live | SSI streaming `X-TRADE:{symbol}` event buffer when verified | `partial` | Latest-event tape only; not full historical time-and-sales. |
+| IndexList | SSI-owned | SSI IndexList | `usable` | Use SSI-returned identifiers. |
+| VN30 components | SSI-owned | SSI IndexComponents | `usable` | Use exact SSI component rows; no hardcoded constituents. |
+| DailyIndex | SSI-owned optional index context | SSI DailyIndex where identifiers/rows are verified | `partial` | Optional; unresolved broad VNINDEX may need source-labeled external context later. |
+| Symbol metadata | SSI-owned where present | SSI SecuritiesDetails, then SSI Securities same-provider fallback | `partial` | Missing optional metadata stays null; external fallback only for SSI-null fields after approval. |
+| MA20 / MA50 | SSI-derived internal | SSI DailyOhlc history | implemented internal indicator | Keep internal/source-labeled; no external provider. |
+| RSI14 | SSI-derived internal | SSI DailyOhlc history, Wilder/RMA | implemented internal indicator | Keep internal/source-labeled; no external provider. |
+| Bollinger 20,2 | SSI-derived internal | SSI DailyOhlc history | implemented internal indicator | Keep internal/source-labeled; no external provider. |
+| 20D average volume | SSI-derived internal | SSI DailyOhlc volume history | implemented internal indicator | Existing 20-day indicator remains SSI-derived. |
+| 20D high/low | SSI-derived internal | SSI DailyOhlc high/low history | implemented internal indicator | Existing 20-day indicator remains SSI-derived. |
+| Volume ratio | SSI-derived internal | SSI DailyOhlc volume and SSI-derived average volume | implemented internal indicator | Null/unavailable when inputs are insufficient. |
+| Foreign net 5D/20D | SSI-derived internal | SSI DailyStockPrice recent `foreign_net_volume` history | implemented bounded enrichment | Null when returned SSI history is insufficient. |
+| 52W high/low | SSI-derived future | SSI DailyOhlc high/low history | `computable_from_ssi_daily_ohlc` | Phase 4.8A candidate; null/unavailable when history is insufficient. |
+| Avg volume 10D | SSI-derived future | SSI DailyOhlc volume history | `computable_from_ssi_daily_ohlc` | Phase 4.8A candidate; no external provider. |
+| Avg volume 3M | SSI-derived future | SSI DailyOhlc volume history | `computable_from_ssi_daily_ohlc` | Phase 4.8A candidate; define trading-day window before implementation. |
+| Price vs reference % | SSI-derived future | SSI DailyOhlc close + SSI DailyStockPrice reference | `computable_from_ssi_daily_ohlc_and_daily_stock_price` | Phase 4.8A candidate; no realtime or external substitute. |
+| Daily range % | SSI-derived future | SSI DailyOhlc open/high/low/close | `computable_from_ssi_daily_ohlc` | Phase 4.8A candidate; null when OHLC inputs are incomplete. |
+| Beta | Deferred SSI-derived/statistical metric | SSI DailyOhlc plus verified SSI index data and documented methodology | `deferred_pending_ssi_index_methodology` | Do not default to external provider; require index/methodology proof first. |
+| Market cap | Deferred share-basis metric | SSI or verified external share-count semantics plus canonical price rule | `deferred_pending_share_basis_verification` | Do not compute from ambiguous `listed_shares`; require share-basis proof. |
+| Corporate actions | External-provider-only | Future CorporateActionsProvider / licensed source | `external_provider_required` | First external domain; no inference from price gaps. |
+| Dividends | External-provider-only | Future CorporateActionsProvider / licensed source | `external_provider_required` | Requires explicit event rows and provenance. |
+| Rights | External-provider-only | Future CorporateActionsProvider / licensed source | `external_provider_required` | Requires explicit event rows and provenance. |
+| Splits | External-provider-only | Future CorporateActionsProvider / licensed source | `external_provider_required` | Requires explicit event rows and provenance. |
+| Financial statements / BCTC / KQKD | External-provider-only | Future licensed fundamentals provider | `external_provider_required` | No SSI evidence in repo. |
+| EPS TTM | External-provider-only | Future statements/ratios provider | `external_provider_required` | Do not infer from price data. |
+| P/E TTM | External-provider-only | Future statements/ratios provider | `external_provider_required` | Do not compute without EPS methodology/source. |
+| P/B | External-provider-only | Future statements/ratios provider | `external_provider_required` | Requires book-value source/methodology. |
+| ROE / ROA | External-provider-only | Future financial statements/ratios provider | `external_provider_required` | Requires financial statements/ratio provider. |
+| News | External-provider-only | Future NewsProvider / licensed source | `external_provider_required` | No Mozyfin/KBS fallback. |
+| Macro | External-provider-only | Future licensed/provider-specific source | `external_provider_required` | Defer until series ownership and rights are verified. |
+| Rich metadata SSI cannot provide | External-provider-only for SSI-null fields | Future source-labeled metadata provider | `external_provider_required` | May fill only SSI-null fields after per-field priority and rights proof. |
+| Explicit external VNINDEX/index context | External-provider-only if SSI remains unresolved | Future licensed source-labeled index provider | `deferred` | Must never be labeled SSI or replace SSI index rows. |
 
 ## Capability Matrix
 
@@ -56,8 +115,9 @@ Phase 4.7A-docs inspected the current backend schemas, SSI fetcher mappings, ser
 * Available today from SSI DailyOhlc / DailyStockPrice when provider rows contain values: daily open, matched value, put-through value, put-through volume, foreign buy volume, and foreign sell volume.
 * Available today as source-specific metadata but not safe to relabel without confirmation: `listed_shares` from SSI SecuritiesDetails/Securities. Do not present it as exact outstanding quantity until provider semantics are confirmed.
 * Ambiguous optional realtime placeholders: average price and foreign room have schema/type fields under the realtime snapshot contract, but current SSI mapping does not populate them as stock-detail metrics.
-* Computable later but not implemented: 52-week high/low, 10-day average volume, and 3-month average volume. Current code exposes 20-day average volume and 20-day high/low indicators only.
-* Future-provider required: EPS TTM, P/E TTM, P/B, beta, market cap, dividend ratio/date, ROE, and ROA. Corporate-action contract fields exist only behind the disabled/not-configured future provider boundary and return empty lists when no verified rows exist.
+* SSI-derived later but not implemented: 52-week high/low, 10-day average volume, 3-month average volume, price-vs-reference %, and daily range %. Current code exposes 20-day average volume, 20-day high/low indicators, and bounded DailyStockPrice foreign-flow summaries only.
+* Deferred pending methodology/semantics: beta requires verified SSI index data plus a documented calculation method before implementation; market cap requires verified share-count semantics before any calculation.
+* Future-provider required: EPS TTM, P/E TTM, P/B, dividend ratio/date, ROE, and ROA. Corporate-action contract fields exist only behind the disabled/not-configured future provider boundary and return empty lists when no verified rows exist.
 
 Do not infer missing stock-detail values from price gaps, `latest_price`, DailyStockPrice close, optional realtime rows, Mozyfin, KBS, or hardcoded ticker data.
 

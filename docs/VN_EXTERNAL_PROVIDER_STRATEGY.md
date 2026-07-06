@@ -8,12 +8,15 @@ This document records the Phase 5.0A decision for Vietnam data domains that SSI 
 
 The current application contract remains unchanged:
 
+* SSI-first rule: if SSI can provide a market-data field, SSI owns it; if a metric can be calculated from SSI-owned data, it should be calculated internally and source-labeled as SSI-derived.
 * SSI owns daily OHLCV, DailyStockPrice enrichment including bounded recent foreign-flow history, intraday candles, optional realtime, IndexList, DailyIndex where valid, IndexComponents, and SSI-returned metadata.
 * External providers must use separate source labels and must not overwrite SSI-owned fields.
 * `latest_price` remains SSI DailyOhlc close when SSI daily rows exist.
 * External-provider failures must not break SSI daily rows.
 * Missing objects remain `null`; missing lists remain `[]`.
 * No corporate action, dividend, news, financial, macro, metadata, or index value may be inferred or fabricated.
+
+The canonical ownership and SSI-derived metrics matrix lives in `docs/SSI_DATA_CAPABILITY_MATRIX.md`. External-provider qualification starts only after that matrix classifies a domain as unsupported by SSI or legally/technically not supportable through SSI.
 
 ## Phase 4.5A SSI-First Candidate Boundary
 
@@ -29,6 +32,8 @@ This boundary does not invalidate the Phase 5.0A provider-selection work below; 
 ## Phase 5.0D Provider Qualification Update
 
 Phase 5.0D reviewed the current repository docs plus current official provider documentation for Vnstock, FiinQuant, and FiinGroup API Datafeed. This is a documentation-only qualification pass. It does not authorize runtime integration, credentials, scraping, fallback providers, source switching, or any change to SSI-owned fields.
+
+Phase 5.0D-2 clarifies that Vnstock, FiinQuant, FiinGroup API Datafeed, and manual imports are not fallback sources for SSI-owned or SSI-derived fields. Daily OHLCV, `latest_price`, chart candles, DailyStockPrice enrichment, intraday, realtime, trade tape, index discovery/components, and technical indicators remain SSI-owned or SSI-derived. External providers are limited to domain-scoped gaps such as corporate actions, dividends/rights/splits, financial statements, ratios, news, macro, and approved source-labeled metadata/index context.
 
 Official docs reviewed:
 

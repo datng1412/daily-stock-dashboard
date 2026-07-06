@@ -22,20 +22,20 @@ The stock-detail screenshot labels map to the current dictionary as follows. Thi
 | Average | `realtime_snapshot.average_price` placeholder | Ambiguous, needs provider confirmation | Schema/type exists for optional realtime, but current SSI mapping does not populate it. |
 | Matched val | `daily_stock_price.matched_value`, `ssi_matched_value` | Available now | SSI DailyStockPrice. |
 | PT val | `daily_stock_price.put_through_value`, `ssi_put_through_value` | Available now | SSI DailyStockPrice. |
-| High 52W | none | Computable later, not implemented | Would require a new 52-week calculation from SSI DailyOhlc history. |
-| Avg. vol. 3M | none | Computable later, not implemented | Current indicators expose 20-day average volume, not 3M. |
-| Avg. vol. 10D | none | Computable later, not implemented | Current indicators expose 20-day average volume, not 10D. |
+| High 52W | none | SSI-derived later, not implemented | Phase 4.8A candidate from SSI DailyOhlc high history; null/unavailable when history is insufficient. |
+| Avg. vol. 3M | none | SSI-derived later, not implemented | Phase 4.8A candidate from SSI DailyOhlc volume history; current indicators expose 20-day average volume, not 3M. |
+| Avg. vol. 10D | none | SSI-derived later, not implemented | Phase 4.8A candidate from SSI DailyOhlc volume history; current indicators expose 20-day average volume, not 10D. |
 | EPS (TTM) | none | Not available / future provider required | Future fundamentals provider. |
 | P/E (TTM) | none | Not available / future provider required | Future ratios/fundamentals provider. |
 | P/B | none | Not available / future provider required | Future ratios/fundamentals provider. |
-| Beta | none | Not available / future provider required | Future risk/statistics or computed-metric phase. |
+| Beta | none | Deferred pending SSI index methodology | Do not default to external provider; requires SSI index input and documented beta method, or a later explicit source-labeled provider decision if SSI cannot support it. |
 | FR. buy vol | `daily_stock_price.foreign_buy_volume`, `foreign.buy` | Available now | SSI DailyStockPrice shares quantity when present. |
 | FR. sell vol | `daily_stock_price.foreign_sell_volume`, `foreign.sell` | Available now | SSI DailyStockPrice shares quantity when present. |
 | FR. room | `realtime_snapshot.foreign_room` placeholder | Ambiguous, needs provider confirmation | Schema/type exists for optional realtime, but current SSI mapping does not populate it. |
 | PT vol | `daily_stock_price.put_through_volume`, `ssi_put_through_volume` | Available now | SSI DailyStockPrice. |
-| Low 52W | none | Computable later, not implemented | Would require a new 52-week calculation from SSI DailyOhlc history. |
+| Low 52W | none | SSI-derived later, not implemented | Phase 4.8A candidate from SSI DailyOhlc low history; null/unavailable when history is insufficient. |
 | Outs. qty | `symbol_metadata.listed_shares`, `listed_shares`, profile `listed_shares` | Ambiguous, needs provider confirmation | Current field is listed shares/provider share-count metadata; do not relabel as exact outstanding quantity without provider confirmation. |
-| Market cap | none | Not available / future provider required | Do not compute from `latest_price * listed_shares` until share-count semantics and product behavior are designed. |
+| Market cap | none | Deferred pending share-basis verification | Do not compute from `latest_price * listed_shares` until share-count semantics and product behavior are designed. |
 | Dividend ratio | future `events[].stock_dividend_ratio` / `cash_dividend_per_share` contract only | Not available / future provider required | CorporateActionsProvider is disabled/not configured by default. |
 | Next div. date | future event `ex_date`, `record_date`, `payment_date` contract only | Not available / future provider required | No verified corporate-action rows today. |
 | ROE | none | Not available / future provider required | Future financial statements/fundamentals provider. |
@@ -192,6 +192,7 @@ The stock-detail screenshot labels map to the current dictionary as follows. Thi
 - `SSI DailyOhlc`: canonical daily OHLCV, daily close, chart candles, daily volume, and daily trading value.
 - `SSI DailyStockPrice`: reference, ceiling, floor, matched/put-through, adjusted-close, and foreign-flow fields.
 - `derived from SSI DailyOhlc`: technical indicators computed from canonical daily OHLCV.
+- `SSI-derived/internal`: metrics calculated from SSI-owned inputs, including existing MA/RSI/Bollinger/20D indicators and future Phase 4.8A candidates such as 52W high/low, 10D/3M average volume, price-vs-reference %, and daily range %.
 - `SSI Securities` / `SSI SecuritiesDetails`: security metadata and profile fields when available.
 - `SSI IntradayOhlc`: intraday candles and derived intraday pulse.
 - `SSI realtime contract`: optional FastConnect streaming realtime snapshot contract; live support is not confirmed by this label or by parser/cache/adapter test presence.

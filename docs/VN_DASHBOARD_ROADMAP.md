@@ -1174,10 +1174,45 @@ Result:
 * Inspected the current backend schemas, SSI fetcher mappings, Vietnam market service normalization, frontend API types, dashboard rendering, and existing docs for stock-detail labels such as open, average, matched/put-through value, foreign buy/sell/room, 52-week high/low, average volume, EPS, valuation ratios, beta, share count, market cap, dividends, ROE, and ROA.
 * Documented the exact current availability matrix in `docs/VN_DATA_CONTRACT.md` and `docs/DATA_DICTIONARY.md`.
 * Confirmed available-now fields remain source-owned: SSI DailyOhlc for daily open/high/low/close/volume/value and SSI DailyStockPrice for reference/limits, matched value/volume, put-through value/volume, and latest foreign buy/sell/net volume/value.
-* Recorded non-implemented but computable future metrics: 52-week high/low and 10D/3M average volume. Current code only computes 20-day average volume and 20-day high/low indicators.
+* Recorded non-implemented but computable future metrics: 52-week high/low and 10D/3M average volume. Phase 5.0D-2 later classified price-vs-reference % and daily range % as SSI-derived candidates as well. Current code only computes 20-day average volume and 20-day high/low indicators.
 * Recorded ambiguous fields needing provider-semantics confirmation before display: average price, foreign room, and exact outstanding quantity. Current `listed_shares` is metadata, not an approved market-cap/outstanding-share basis.
-* Recorded future-provider-required fields: EPS TTM, P/E TTM, P/B, beta, market cap, dividend ratio/date, ROE, and ROA. Corporate-action contract fields remain disabled/not configured by default and must not be inferred from price gaps.
+* Recorded future-provider-required fields: EPS TTM, P/E TTM, P/B, dividend ratio/date, ROE, and ROA. Corporate-action contract fields remain disabled/not configured by default and must not be inferred from price gaps.
+* Deferred beta pending SSI index data and methodology; deferred market cap pending share-basis verification.
 * No runtime code, schema, frontend UI, parser mappings, tests, provider behavior, fallback behavior, or `latest_price` ownership changed.
+
+### Phase 4.8A - SSI-Derived Metrics Completion
+
+Status: planned.
+
+Goal:
+
+Complete safe metrics that should be calculated internally from SSI-owned inputs before assigning any domain to an external provider.
+
+Scope:
+
+* 52W high/low from SSI DailyOhlc high/low history.
+* 10D average volume from SSI DailyOhlc volume history.
+* 3M average volume from SSI DailyOhlc volume history.
+* Price vs reference % from SSI DailyOhlc close plus SSI DailyStockPrice reference price.
+* Daily range % from SSI DailyOhlc open/high/low/close.
+* Optional beta only after SSI index data and beta methodology are verified.
+
+Rules:
+
+* No external provider.
+* No `latest_price` change.
+* No fake rows.
+* No provider fallback.
+* No corporate-action inference.
+* Metrics must return null/unavailable when SSI history or required SSI fields are insufficient.
+
+Acceptance criteria:
+
+* Metrics are source-labeled as SSI-derived/internal.
+* Inputs and required history windows are documented.
+* Insufficient history returns null/unavailable, not guessed values.
+* DailyOhlc remains canonical.
+* External providers are not used for any metric that SSI can provide or that can be calculated from SSI-owned data.
 
 ### Phase 5.0A - External Provider Contract Design
 
@@ -1261,6 +1296,21 @@ Result:
 * Kept manual/provenance-required import as the offline fallback for corporate actions and dividends only when source references are explicit.
 * Defined Phase 5.1A entry criteria: written entitlement, auth, production endpoint/package path, rate limits/SLA/pricing, storage/display/redistribution rights, source provenance, historical depth, correction/cancellation semantics, SSI symbol mapping, licensed fixture, disabled-by-default config plan, and explicit SSI ownership isolation.
 * Did not implement VNStock, FiinQuant, FiinGroup, external provider runtime, fallback providers, scraping, credentials, config flags, API endpoints, frontend changes, fake data, or changes to SSI `latest_price` ownership.
+
+### Phase 5.0D-2 - SSI-First Data Ownership Matrix Docs Update
+
+Status: completed on 2026-07-06 as a documentation-only ownership clarification.
+
+Result:
+
+* Made `docs/SSI_DATA_CAPABILITY_MATRIX.md` the canonical SSI-first ownership matrix.
+* Clarified that SSI owns every field it can provide, and metrics calculable from SSI-owned fields must be calculated internally as SSI-derived data.
+* Classified DailyOhlc, `latest_price`, chart candles, DailyStockPrice enrichment, intraday, realtime, trade tape, index data, and SSI-returned metadata as SSI-owned.
+* Classified MA/RSI/Bollinger, 20D indicators, bounded DailyStockPrice foreign-flow summaries, and planned 52W high/low, 10D/3M average volume, price-vs-reference %, and daily range % as SSI-derived/internal.
+* Deferred beta until SSI index data and methodology are verified; deferred market cap until share-basis semantics are verified.
+* Kept corporate actions/dividends/rights/splits, financial statements, EPS/P/E/P/B/ROE/ROA, news, macro, and approved source-labeled non-SSI metadata/index context as external-provider domains.
+* Added Phase 4.8A as the planned SSI-derived metrics completion phase before assigning SSI-computable metrics to external providers.
+* Did not change runtime code, schemas, frontend behavior, configuration, provider adapters, fallback behavior, fake data behavior, or `latest_price` ownership.
 
 ### Phase 5.1A - Corporate Actions and Dividends Provider
 

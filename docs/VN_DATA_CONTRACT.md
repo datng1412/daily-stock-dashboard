@@ -66,7 +66,8 @@ Status values:
 
 * `Available now`: already exposed by the current strict SSI runtime/API/schema/frontend data model when the source returns the field.
 * `Present internally, not exposed`: normalized internally but not part of the current public contract.
-* `Computable later, not implemented`: can likely be derived from existing SSI DailyOhlc data, but the current code does not compute this exact metric.
+* `SSI-derived later, not implemented`: can be derived from SSI-owned data, but the current code does not compute this exact metric.
+* `Deferred pending methodology/semantics`: should not be treated as external-provider-required until SSI inputs, share-count semantics, or methodology are verified.
 * `Not available / future provider required`: requires a future fundamentals, corporate-actions, or other external provider contract.
 * `Ambiguous, needs provider confirmation`: a related field exists, but its semantics or population path are not confirmed enough to present under the screenshot label.
 
@@ -76,20 +77,20 @@ Status values:
 | Average | Average trading price | Ambiguous, needs provider confirmation | Optional SSI realtime schema placeholder only | `realtime_snapshot.average_price` / realtime quote `average_price` exists in schema/types but current provider mapping does not populate it | Do not show as available stock-detail data until SSI realtime payload semantics and mapping are verified. |
 | Matched val | Matched trading value | Available now | SSI DailyStockPrice | `daily_stock_price.matched_value`; compatibility `ssi_matched_value` | Do not fill from DailyOhlc `amount`/`value`; source label must remain DailyStockPrice. |
 | PT val | Put-through trading value | Available now | SSI DailyStockPrice | `daily_stock_price.put_through_value`; compatibility `ssi_put_through_value` | Null means SSI did not provide the field; zero remains a real provider value. |
-| High 52W | 52-week high | Computable later, not implemented | Would be derived from SSI DailyOhlc history | No current 52W field | Current code computes 20-day high/low indicators only; do not add 52W values in docs or UI until implemented. |
-| Avg. vol. 3M | Three-month average volume | Computable later, not implemented | Would be derived from SSI DailyOhlc volume history | No current 3M average-volume field | Current code exposes 20-day average volume and volume ratio only. |
-| Avg. vol. 10D | Ten-day average volume | Computable later, not implemented | Would be derived from SSI DailyOhlc volume history | No current 10D average-volume field | Current code exposes 20-day average volume and chart `volume_ma20`/`volume_ma50`, not 10D. |
+| High 52W | 52-week high | SSI-derived later, not implemented | Would be derived from SSI DailyOhlc history | No current 52W field | Phase 4.8A candidate; return null/unavailable when SSI history is insufficient. |
+| Avg. vol. 3M | Three-month average volume | SSI-derived later, not implemented | Would be derived from SSI DailyOhlc volume history | No current 3M average-volume field | Phase 4.8A candidate; define the trading-day window before implementation. |
+| Avg. vol. 10D | Ten-day average volume | SSI-derived later, not implemented | Would be derived from SSI DailyOhlc volume history | No current 10D average-volume field | Phase 4.8A candidate; current code exposes 20-day average volume and chart `volume_ma20`/`volume_ma50`, not 10D. |
 | EPS (TTM) | Trailing-twelve-month earnings per share | Not available / future provider required | Future fundamentals provider | No current EPS field | Not implemented in SSI runtime; do not infer from price data. |
 | P/E (TTM) | Price-to-earnings ratio | Not available / future provider required | Future fundamentals/ratios provider | No current P/E field | Do not compute from missing EPS. |
 | P/B | Price-to-book ratio | Not available / future provider required | Future fundamentals/ratios provider | No current P/B field | Requires book-value/fundamentals source. |
-| Beta | Market beta | Not available / future provider required | Future risk/statistics provider or explicit computed-metric phase | No current beta field | Not currently computed from history. |
+| Beta | Market beta | Deferred pending methodology/semantics | SSI DailyOhlc plus verified SSI index data and documented beta methodology, or future source-labeled provider only if SSI cannot support it | No current beta field | Do not default to external provider; verify SSI index input and methodology first. |
 | FR. buy vol | Foreign buy volume | Available now | SSI DailyStockPrice | `daily_stock_price.foreign_buy_volume`; `foreign.buy`; raw-field marker `foreign_buy_raw_field` | Unit is shares when quantity fields exist. |
 | FR. sell vol | Foreign sell volume | Available now | SSI DailyStockPrice | `daily_stock_price.foreign_sell_volume`; `foreign.sell`; raw-field marker `foreign_sell_raw_field` | Unit is shares when quantity fields exist. |
 | FR. room | Foreign ownership room/remaining room | Ambiguous, needs provider confirmation | Optional SSI realtime schema placeholder only | Realtime quote `foreign_room` / `foreignRoom` exists in schema/types but current provider mapping does not populate it | Do not present as available DailyStockPrice or stock-detail data today. |
 | PT vol | Put-through trading volume | Available now | SSI DailyStockPrice | `daily_stock_price.put_through_volume`; compatibility `ssi_put_through_volume` | Do not substitute DailyOhlc volume or matched volume. |
-| Low 52W | 52-week low | Computable later, not implemented | Would be derived from SSI DailyOhlc history | No current 52W field | Current code computes 20-day high/low indicators only. |
+| Low 52W | 52-week low | SSI-derived later, not implemented | Would be derived from SSI DailyOhlc history | No current 52W field | Phase 4.8A candidate; return null/unavailable when SSI history is insufficient. |
 | Outs. qty | Outstanding quantity / share count | Ambiguous, needs provider confirmation | SSI SecuritiesDetails/Securities metadata when provider returns share-count fields | `symbol_metadata.listed_shares`; watchlist/company `listed_shares`; profile `listed_shares` | Exposed field is listed shares / provider share-count metadata. Do not label it as exact outstanding quantity until SSI semantics are confirmed. |
-| Market cap | Equity market capitalization | Not available / future provider required | Future fundamentals/profile provider or future computed-metric phase after share-count semantics are confirmed | No current market-cap field | Do not compute from `latest_price * listed_shares` in this phase. |
+| Market cap | Equity market capitalization | Deferred pending methodology/semantics | SSI or verified external share-count semantics plus canonical price rule | No current market-cap field | Do not compute from `latest_price * listed_shares` until share-count basis and product behavior are verified. |
 | Dividend ratio | Cash/stock dividend ratio | Not available / future provider required | Future CorporateActionsProvider | Future contract fields may include `cash_dividend_per_share` and `stock_dividend_ratio`, but default provider returns empty lists | Corporate actions are disabled/not configured by default and must not be inferred from price gaps. |
 | Next div. date | Next dividend/ex-date/payment date | Not available / future provider required | Future CorporateActionsProvider | Future event fields may include `ex_date`, `record_date`, and `payment_date`, but no live provider exists | `events=[]` means no verified rows are available, not confirmed absence of dividends. |
 | ROE | Return on equity | Not available / future provider required | Future fundamentals/financial statements provider | No current ROE field | Not implemented. |
@@ -325,6 +326,8 @@ Future adapters must treat `events` as the only canonical event list. If an adap
 
 ## Source Ownership
 
+The SSI-first rule is: if SSI can provide a market-data field, SSI owns it; if a metric can be calculated from SSI-owned data, calculate it internally and label it as SSI-derived/internal. External providers are limited to domains SSI cannot provide or cannot legally/technically support with verified semantics. The canonical ownership matrix lives in `docs/SSI_DATA_CAPABILITY_MATRIX.md`.
+
 | Data block | Owner | Public rule |
 | --- | --- | --- |
 | Daily OHLCV | SSI DailyOhlc | Canonical daily close and chart candles |
@@ -334,13 +337,16 @@ Future adapters must treat `events` as the only canonical event list. If an adap
 | Put-through volume/value | SSI DailyStockPrice | Use when available |
 | Latest foreign flow | SSI DailyStockPrice | Use latest matched-date row when available |
 | Foreign 5D/20D flow | SSI DailyStockPrice | Compute only from returned recent DailyStockPrice `foreign_net_volume` rows; null when history is insufficient |
+| Technical indicators | SSI-derived internal | MA20/MA50, RSI14, Bollinger 20,2, 20D average volume, 20D high/low, and volume ratio are derived from SSI DailyOhlc and must not use external provider substitutes |
+| Future SSI-derived metrics | SSI-derived internal | 52W high/low, 10D average volume, 3M average volume, price-vs-reference %, and daily range % should be computed from SSI DailyOhlc and DailyStockPrice inputs when implemented |
+| Deferred beta / market cap | SSI-derived or source-labeled after proof | Beta requires verified SSI index data and methodology; market cap requires verified share-count semantics before calculation |
 | Index list | SSI IndexList | Use SSI-returned index codes and identifiers |
 | Daily index | SSI DailyIndex | Optional index value/change/liquidity/breadth rows only after exact IndexList resolution |
 | Index components | SSI IndexComponents | Use an explicit normalized index code directly; expose rows only when SSI returns exact usable members |
 | Symbol metadata | SSI SecuritiesDetails, then SSI Securities fallback | Optional fields remain null; metadata availability/quality never changes daily validity |
 | Intraday candles | SSI IntradayOhlc | Strict source; no fallback |
 | Realtime snapshot | SSI FastConnect streaming realtime contract | Parser, manager/cache, official-client adapter, and FastAPI startup bootstrap exist behind disabled-by-default config; request handlers read process-local cache only |
-| Trade tape | SSI trade-tape contract | Contract exists; live list/history semantics not confirmed |
+| Trade tape / latest trade events | SSI streaming X-TRADE event buffer | Fresh bootstrapped X-TRADE rows may populate latest-event tape; full historical time-and-sales remains unverified |
 | News | Future NewsProvider | Disabled now |
 | Financials | Future external provider | Not implemented |
 | Corporate actions | `CorporateActionsProvider` future external boundary | Disabled/not configured by default; no inference |
