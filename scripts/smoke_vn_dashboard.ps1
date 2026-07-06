@@ -371,8 +371,10 @@ if ($null -ne $companyResponse) {
   $tradingStats = Get-Property $companyResponse @("trading_stats", "tradingStats")
   $foreignFlow = Get-Property $companyResponse @("foreign_flow", "foreignFlow")
   $intraday = Get-Property $companyResponse @("intraday")
-  $realtime = Get-Property $companyResponse @("realtime")
-  $tradeTapeBlock = Get-Property $companyResponse @("trade_tape", "tradeTape")
+  $realtimeSnapshot = Get-Property $companyResponse @("realtime_snapshot", "realtimeSnapshot")
+  $realtimeStatus = Get-Property $companyResponse @("realtime_status", "realtimeStatus")
+  $tradeTapeRows = Get-Property $companyResponse @("trade_tape", "tradeTape")
+  $tradeTapeStatus = Get-Property $companyResponse @("trade_tape_status", "tradeTapeStatus")
   $news = Get-Property $companyResponse @("news")
   $financials = Get-Property $companyResponse @("financials")
   $events = Get-Property $companyResponse @("events")
@@ -386,12 +388,10 @@ if ($null -ne $companyResponse) {
 
   $companyIntradayPulse = Get-Property $intraday @("pulse")
   $companyIntradayCandles = Get-Property $intraday @("candles")
-  $companyRealtimeSnapshot = Get-Property $realtime @("snapshot")
-  $companyTradeRows = Get-Property $tradeTapeBlock @("trades")
   Assert-True (($null -eq $companyIntradayPulse) -or ($companyIntradayPulse -is [object])) "company intraday.pulse is nullable object"
   Assert-True (Test-IsList -Value $companyIntradayCandles) "company intraday.candles is a list"
-  Assert-True (($null -eq $companyRealtimeSnapshot) -or ($companyRealtimeSnapshot -is [object])) "company realtime.snapshot is nullable object"
-  Assert-True (Test-IsList -Value $companyTradeRows) "company trade_tape.trades is a list"
+  Assert-True (($null -eq $realtimeSnapshot) -or ($realtimeSnapshot -is [object])) "company realtime_snapshot is nullable object"
+  Assert-True (Test-IsList -Value $tradeTapeRows) "company trade_tape is a list"
 
   Assert-NotSsiLabeled "company news block" $news
   Assert-NotSsiLabeled "company financials block" $financials
@@ -406,11 +406,11 @@ if ($null -ne $companyResponse) {
   }
 
   Assert-PublicMessageClean "company intraday" $intraday
-  Assert-PublicMessageClean "company realtime" $realtime
-  Assert-PublicMessageClean "company trade_tape" $tradeTapeBlock
+  Assert-PublicMessageClean "company realtime_status" $realtimeStatus
+  Assert-PublicMessageClean "company trade_tape_status" $tradeTapeStatus
   Write-DiagnosticsSummary "company intraday" $intraday
-  Write-DiagnosticsSummary "company realtime" $realtime
-  Write-DiagnosticsSummary "company trade_tape" $tradeTapeBlock
+  Write-DiagnosticsSummary "company realtime_status" $realtimeStatus
+  Write-DiagnosticsSummary "company trade_tape_status" $tradeTapeStatus
 }
 
 Write-Host ""
@@ -423,8 +423,8 @@ if ($null -ne $watchlistResponse) {
 if ($null -ne $companyResponse) {
   Write-Host ("company status: {0}" -f (Get-Text $companyResponse @("status")))
   $summaryPrice = Get-Property $companyResponse @("price")
-  $summaryRealtime = Get-Property $companyResponse @("realtime")
-  $summaryTradeTape = Get-Property $companyResponse @("trade_tape", "tradeTape")
+  $summaryRealtime = Get-Property $companyResponse @("realtime_status", "realtimeStatus")
+  $summaryTradeTape = Get-Property $companyResponse @("trade_tape_status", "tradeTapeStatus")
   Write-Host ("company price source: {0}" -f (Get-Text $summaryPrice @("source")))
   Write-Host ("company realtime status: {0}" -f (Get-Text $summaryRealtime @("status")))
   Write-Host ("company trade tape status: {0}" -f (Get-Text $summaryTradeTape @("status")))

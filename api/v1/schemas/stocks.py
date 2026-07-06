@@ -745,14 +745,21 @@ class VietnamRealtimeResponse(BaseModel):
 class VietnamRealtimeTrade(BaseModel):
     """Vietnam optional realtime trade tape row."""
 
+    ticker: Optional[str] = None
+    symbol: Optional[str] = None
     time: Optional[str] = None
+    timestamp: Optional[str] = None
+    timestamp_display: Optional[str] = None
     price: Optional[float] = None
     volume: Optional[float] = None
     value: Optional[float] = None
+    side: Optional[str] = None
     side_if_available: Optional[str] = None
+    sequence: Optional[str] = None
     sequence_if_available: Optional[str] = None
     match_type: Optional[str] = None
     id: Optional[str] = None
+    raw_type: Optional[str] = None
     source: str = "SSI trade-tape contract"
 
 

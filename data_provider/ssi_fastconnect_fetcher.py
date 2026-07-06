@@ -28,6 +28,8 @@ from data_provider.ssi_streaming_realtime import (
     DEFAULT_STREAMING_REALTIME_RECONNECT_INITIAL_DELAY_SECONDS,
     DEFAULT_STREAMING_REALTIME_RECONNECT_MAX_DELAY_SECONDS,
     DEFAULT_STREAMING_REALTIME_STREAM_URL,
+    DEFAULT_TRADE_TAPE_BUFFER_SIZE,
+    DEFAULT_TRADE_TAPE_TTL_SECONDS,
     OfficialSsiRealtimeStreamClient,
     RealtimeSnapshotCache,
     SsiRealtimeStreamClient,
@@ -35,6 +37,7 @@ from data_provider.ssi_streaming_realtime import (
     SSI_STREAMING_REALTIME_CONFIG_INCOMPLETE_REASON,
     SSI_STREAMING_REALTIME_DISABLED_REASON,
     SSI_STREAMING_REALTIME_PACKAGE_UNAVAILABLE_REASON,
+    TradeTapeEventCache,
 )
 
 
@@ -625,6 +628,8 @@ class SsiFastConnectFetcher:
         streaming_realtime_reconnect_initial_delay_seconds: Optional[int] = None,
         streaming_realtime_reconnect_max_delay_seconds: Optional[int] = None,
         streaming_realtime_reconnect_max_attempts: Optional[int] = None,
+        trade_tape_buffer_size: Optional[int] = None,
+        trade_tape_ttl_seconds: Optional[int] = None,
         streaming_realtime_client_factory: Optional[Callable[[], SsiRealtimeStreamClient]] = None,
         streaming_realtime_manager: Optional[SsiStreamingRealtimeManager] = None,
         daily_ohlc_rate_limit_cooldown_seconds: Optional[int] = None,
@@ -817,6 +822,28 @@ class SsiFastConnectFetcher:
                 minimum=0,
             )
         )
+        self.trade_tape_buffer_size = int(
+            trade_tape_buffer_size
+            if trade_tape_buffer_size is not None
+            else getattr(config, "ssi_trade_tape_buffer_size", None)
+            or parse_env_int(
+                os.getenv("SSI_TRADE_TAPE_BUFFER_SIZE"),
+                DEFAULT_TRADE_TAPE_BUFFER_SIZE,
+                field_name="SSI_TRADE_TAPE_BUFFER_SIZE",
+                minimum=1,
+            )
+        )
+        self.trade_tape_ttl_seconds = int(
+            trade_tape_ttl_seconds
+            if trade_tape_ttl_seconds is not None
+            else getattr(config, "ssi_trade_tape_ttl_seconds", None)
+            or parse_env_int(
+                os.getenv("SSI_TRADE_TAPE_TTL_SECONDS"),
+                DEFAULT_TRADE_TAPE_TTL_SECONDS,
+                field_name="SSI_TRADE_TAPE_TTL_SECONDS",
+                minimum=1,
+            )
+        )
         self._streaming_realtime_client_factory_supplied = streaming_realtime_client_factory is not None
         self._streaming_realtime_manager_supplied = streaming_realtime_manager is not None
         if streaming_realtime_client_factory is None and self.streaming_realtime_enabled:
@@ -824,6 +851,10 @@ class SsiFastConnectFetcher:
         self.streaming_realtime_manager = streaming_realtime_manager or SsiStreamingRealtimeManager(
             enabled=self.streaming_realtime_enabled,
             cache=RealtimeSnapshotCache(self.streaming_realtime_cache_ttl_seconds),
+            trade_tape_cache=TradeTapeEventCache(
+                self.trade_tape_buffer_size,
+                self.trade_tape_ttl_seconds,
+            ),
             parser=self.normalize_streaming_realtime_messages,
             client_factory=streaming_realtime_client_factory,
             channel_template=self.streaming_realtime_channel_template,
@@ -1619,7 +1650,9 @@ class SsiFastConnectFetcher:
                 "time": _safe_text(time_value),
                 "stream_timestamp": stream_timestamp,
                 "last_volume": _to_float(_first_value(row, "LastVol", "LastVolume", "MatchedVolume", "MatchVolume")),
+                "last_value": _to_float(_first_value(row, "LastValue", "LastVal", "MatchedValue", "MatchValue", "lastValue", "matchedValue")),
                 "side_if_available": _safe_text(_first_value(row, "Side", "MatchType", "BuySell", "side", "matchType", "buySell")),
+                "sequence_if_available": _safe_text(_first_value(row, "Sequence", "Seq", "Id", "ID", "sequence", "seq", "id")),
             }
         )
         return mapped
@@ -1645,9 +1678,14 @@ class SsiFastConnectFetcher:
         return merged
 
     def get_trade_tape(self, symbol: str, limit: int = 100) -> Dict[str, Any]:
-        """Return SSI trade tape rows when an account exposes them."""
+        """Return SSI trade tape rows from the streaming X-TRADE buffer only.
+
+        Request-time calls must not open streams, add subscriptions, or probe
+        speculative REST endpoint names. The background streaming lifecycle is
+        the only producer for this optional trade-tape contract.
+        """
         normalized_symbol = str(symbol or "").strip().upper()
-        safe_limit = max(1, min(int(limit or 100), 500))
+        safe_limit = max(1, min(int(limit or self.trade_tape_buffer_size), self.trade_tape_buffer_size))
         if not self.trade_tape_enabled:
             return {
                 "status": "disabled",
@@ -1667,50 +1705,38 @@ class SsiFastConnectFetcher:
                 "count": 0,
             }
 
-        params = {"symbol": normalized_symbol, "pageIndex": 1, "pageSize": safe_limit}
-        endpoint_candidates = ("TradeTape", "MatchedTrades", "SecuritiesTrades")
-        first_unavailable: Optional[Dict[str, Any]] = None
-        trades: List[Dict[str, Any]] = []
-        for endpoint in endpoint_candidates:
-            payload = self._cached_normalized(
-                endpoint,
-                params,
-                safe_limit,
-                lambda row: self._map_trade_tape(row),
-                extra={"symbol": normalized_symbol},
-                param_variants=[self._alternate_param_case(params)],
-                required_any=("time", "price", "volume", "value"),
-                retry_unavailable_variants=True,
-            )
-            if payload.get("status") == "ok" and payload.get("rows"):
-                trades = list(payload.get("rows") or [])
-                break
-            if first_unavailable is None and payload.get("status") == "unavailable":
-                first_unavailable = payload
-
-        if not trades:
+        if not self.streaming_realtime_enabled:
             return {
                 "status": "unavailable",
                 "source": SSI_SOURCE,
                 "symbol": normalized_symbol,
-                "reason": _endpoint_attempt_reason(
-                    kind="trade tape",
-                    endpoints=endpoint_candidates,
-                    first_unavailable=first_unavailable,
-                ),
+                "reason": "SSI trade tape stream buffer disabled.",
                 "trades": [],
                 "count": 0,
-                "attempted_endpoints": list(endpoint_candidates),
+                "attempted_endpoints": [],
+                "candidate_endpoints": [],
+                "rest_status": "unsupported",
+                "streaming_status": "disabled",
+                "cache_status": "disabled",
+                "diagnostics": {
+                    "streaming_status": "disabled",
+                    "cache_status": "disabled",
+                    "manager_state": "disabled",
+                    "channel_type": "X-TRADE",
+                    "trade_tape_buffer_size": self.trade_tape_buffer_size,
+                    "trade_tape_ttl_seconds": self.trade_tape_ttl_seconds,
+                },
             }
 
-        trades = trades[-safe_limit:]
-        return {
-            "status": "ok",
-            "source": SSI_SOURCE,
-            "symbol": normalized_symbol,
-            "trades": trades,
-            "count": len(trades),
-        }
+        result = dict(self.streaming_realtime_manager.trade_tape(normalized_symbol, safe_limit))
+        result.setdefault("source", SSI_SOURCE)
+        result.setdefault("symbol", normalized_symbol)
+        result.setdefault("trades", [])
+        result.setdefault("count", len(result.get("trades") or []))
+        result.setdefault("attempted_endpoints", [])
+        result.setdefault("candidate_endpoints", [])
+        result.setdefault("rest_status", "unsupported")
+        return result
 
     def get_index_list(self, market: Optional[str] = None, force_refresh: bool = False) -> Dict[str, Any]:
         params = {"market": market.strip().upper()} if market else {}

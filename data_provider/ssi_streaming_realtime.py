@@ -43,6 +43,8 @@ DEFAULT_STREAMING_REALTIME_STREAM_URL = "https://fc-datahub.ssi.com.vn/"
 DEFAULT_STREAMING_REALTIME_IDLE_TIMEOUT_SECONDS = 45
 DEFAULT_STREAMING_REALTIME_RECONNECT_INITIAL_DELAY_SECONDS = 2
 DEFAULT_STREAMING_REALTIME_RECONNECT_MAX_DELAY_SECONDS = 30
+DEFAULT_TRADE_TAPE_BUFFER_SIZE = 50
+DEFAULT_TRADE_TAPE_TTL_SECONDS = 60
 
 RUNTIME_DISABLED = "disabled"
 RUNTIME_NOT_STARTED = "not_started"
@@ -202,6 +204,13 @@ class CachedRealtimeSnapshot:
     received_at: float
 
 
+@dataclass(frozen=True)
+class CachedTradeTapeEvent:
+    symbol: str
+    trade: Dict[str, Any]
+    received_at: float
+
+
 def sanitize_streaming_error(value: Any, *, max_length: int = 240) -> str:
     """Return a bounded, secret-safe error summary."""
     text = str(value or "").replace("\r", " ").replace("\n", " ").strip()
@@ -323,6 +332,99 @@ class RealtimeSnapshotCache:
         }
 
 
+class TradeTapeEventCache:
+    """Thread-safe bounded X-TRADE event buffer keyed by VN ticker."""
+
+    def __init__(
+        self,
+        max_rows_per_symbol: int = DEFAULT_TRADE_TAPE_BUFFER_SIZE,
+        ttl_seconds: int = DEFAULT_TRADE_TAPE_TTL_SECONDS,
+        *,
+        time_func: Callable[[], float] = time.time,
+    ) -> None:
+        self.max_rows_per_symbol = max(1, int(max_rows_per_symbol or DEFAULT_TRADE_TAPE_BUFFER_SIZE))
+        self.ttl_seconds = max(1, int(ttl_seconds or DEFAULT_TRADE_TAPE_TTL_SECONDS))
+        self._time_func = time_func
+        self._lock = threading.RLock()
+        self._rows: Dict[str, List[CachedTradeTapeEvent]] = {}
+
+    def clear(self) -> None:
+        with self._lock:
+            self._rows.clear()
+
+    def put_rows(self, rows: Iterable[Dict[str, Any]]) -> int:
+        now = float(self._time_func())
+        written = 0
+        with self._lock:
+            for row in rows or []:
+                if not isinstance(row, dict):
+                    continue
+                symbol = str(row.get("ticker") or row.get("symbol") or "").strip().upper()
+                price = row.get("price")
+                volume = row.get("volume")
+                timestamp = str(row.get("timestamp") or "").strip()
+                if not symbol or price is None or volume is None or not timestamp:
+                    continue
+                trade = dict(row)
+                trade["ticker"] = symbol
+                trade.setdefault("symbol", symbol)
+                trade["cached_at"] = _utc_iso_from_epoch(now)
+                trade["cache_ttl_seconds"] = self.ttl_seconds
+                events = self._rows.setdefault(symbol, [])
+                events.insert(0, CachedTradeTapeEvent(symbol=symbol, trade=trade, received_at=now))
+                del events[self.max_rows_per_symbol :]
+                written += 1
+        return written
+
+    def get(self, symbol: str, limit: int = DEFAULT_TRADE_TAPE_BUFFER_SIZE) -> Dict[str, Any]:
+        normalized = str(symbol or "").strip().upper()
+        safe_limit = max(1, min(int(limit or self.max_rows_per_symbol), self.max_rows_per_symbol))
+        now = float(self._time_func())
+        with self._lock:
+            events = list(self._rows.get(normalized) or [])
+
+        if not events:
+            return {
+                "rows": [],
+                "status": "empty",
+                "row_count": 0,
+                "buffer_row_count": 0,
+                "latest_trade_timestamp": None,
+                "latest_trade_age_seconds": None,
+            }
+
+        newest_age = max(0.0, now - events[0].received_at)
+        latest_trade_timestamp = events[0].trade.get("timestamp")
+        if newest_age > self.ttl_seconds:
+            return {
+                "rows": [],
+                "status": "stale",
+                "row_count": 0,
+                "buffer_row_count": len(events),
+                "latest_trade_timestamp": latest_trade_timestamp,
+                "latest_trade_age_seconds": int(newest_age),
+            }
+
+        rows: List[Dict[str, Any]] = []
+        for event in events[:safe_limit]:
+            age_seconds = max(0.0, now - event.received_at)
+            if age_seconds > self.ttl_seconds:
+                continue
+            trade = dict(event.trade)
+            trade["age_seconds"] = int(age_seconds)
+            trade["is_stale"] = False
+            rows.append(trade)
+
+        return {
+            "rows": rows,
+            "status": "hit" if rows else "stale",
+            "row_count": len(rows),
+            "buffer_row_count": len(events),
+            "latest_trade_timestamp": latest_trade_timestamp,
+            "latest_trade_age_seconds": int(newest_age),
+        }
+
+
 class SsiStreamingRealtimeManager:
     """Owns SSI realtime streaming lifecycle and cache handoff.
 
@@ -336,6 +438,7 @@ class SsiStreamingRealtimeManager:
         *,
         enabled: bool = False,
         cache: Optional[RealtimeSnapshotCache] = None,
+        trade_tape_cache: Optional[TradeTapeEventCache] = None,
         parser: Optional[Callable[[List[Any], List[str]], List[Dict[str, Any]]]] = None,
         client_factory: Optional[Callable[[], SsiRealtimeStreamClient]] = None,
         channel_template: str = DEFAULT_STREAMING_REALTIME_CHANNEL_TEMPLATE,
@@ -348,6 +451,7 @@ class SsiStreamingRealtimeManager:
     ) -> None:
         self.enabled = bool(enabled)
         self.cache = cache or RealtimeSnapshotCache(time_func=time_func)
+        self.trade_tape_cache = trade_tape_cache or TradeTapeEventCache(time_func=time_func)
         self._parser = parser or (lambda messages, symbols: [])
         self._client_factory = client_factory
         self.channel_template = channel_template or DEFAULT_STREAMING_REALTIME_CHANNEL_TEMPLATE
@@ -375,6 +479,7 @@ class SsiStreamingRealtimeManager:
         self._started_at_epoch: Optional[float] = None
         self._messages_observed = 0
         self._parser_rows_observed = 0
+        self._trade_rows_observed = 0
         self._bootstrap_status: Optional[str] = None
         self._bootstrap_reason: Optional[str] = None
         self._bootstrap_symbols: List[str] = []
@@ -492,9 +597,13 @@ class SsiStreamingRealtimeManager:
                 and str(row.get("ticker") or row.get("symbol") or "").strip().upper() in requested_set
             ]
             written = self.cache.put_rows(filtered_rows)
+            trade_written = self.trade_tape_cache.put_rows(
+                self._trade_events_from_streaming_rows(filtered_rows)
+            )
             with self._lock:
                 self._messages_observed += 1
                 self._parser_rows_observed += written
+                self._trade_rows_observed += trade_written
                 now = float(self._time_func())
                 self._last_message_epoch = now
                 self._last_message_at = _utc_iso_from_epoch(now)
@@ -503,6 +612,42 @@ class SsiStreamingRealtimeManager:
                 self._idle_since_epoch = None
         except Exception as exc:
             self._record_error(exc, set_errored=False)
+
+    @staticmethod
+    def _trade_events_from_streaming_rows(rows: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        events: List[Dict[str, Any]] = []
+        for row in rows or []:
+            if not isinstance(row, dict):
+                continue
+            raw_type = str(row.get("stream_data_type") or row.get("r_type") or "").strip().upper()
+            if raw_type != "X-TRADE" or not row.get("has_last_trade"):
+                continue
+            symbol = str(row.get("ticker") or row.get("symbol") or "").strip().upper()
+            price = row.get("price")
+            volume = row.get("last_volume")
+            timestamp = row.get("stream_timestamp")
+            if not symbol or price is None or volume is None or not timestamp:
+                continue
+            event = {
+                "ticker": symbol,
+                "symbol": symbol,
+                "price": price,
+                "volume": volume,
+                "value": row.get("last_value"),
+                "side": row.get("side_if_available"),
+                "side_if_available": row.get("side_if_available"),
+                "timestamp": timestamp,
+                "timestamp_display": row.get("time"),
+                "time": row.get("time"),
+                "source": "SSI trade-tape contract",
+                "sequence": row.get("sequence_if_available"),
+                "sequence_if_available": row.get("sequence_if_available"),
+                "raw_type": raw_type,
+                "match_type": row.get("side_if_available"),
+                "id": row.get("sequence_if_available"),
+            }
+            events.append(event)
+        return events
 
     def handle_error(self, error: Any) -> None:
         self._record_error(error, set_errored=True)
@@ -608,6 +753,146 @@ class SsiStreamingRealtimeManager:
             "diagnostics": diagnostics,
         }
 
+    def trade_tape(self, symbol: str, limit: int = DEFAULT_TRADE_TAPE_BUFFER_SIZE) -> Dict[str, Any]:
+        requested_symbol = str(symbol or "").strip().upper()
+        safe_limit = max(1, min(int(limit or DEFAULT_TRADE_TAPE_BUFFER_SIZE), self.trade_tape_cache.max_rows_per_symbol))
+        status = self.status()
+        diagnostics = dict(status)
+        diagnostics.update(
+            {
+                "streaming_status": "trade_tape_buffer",
+                "cache_ttl_seconds": self.trade_tape_cache.ttl_seconds,
+                "trade_tape_ttl_seconds": self.trade_tape_cache.ttl_seconds,
+                "trade_tape_buffer_size": self.trade_tape_cache.max_rows_per_symbol,
+                "channel_type": "X-TRADE",
+                "trade_rows_observed": self._trade_rows_observed,
+            }
+        )
+        base = {
+            "source": "SSI",
+            "symbol": requested_symbol,
+            "trades": [],
+            "count": 0,
+            "streaming_data_types": ["X-TRADE"],
+            "attempted_endpoints": [],
+            "candidate_endpoints": [],
+            "rest_status": "unsupported",
+        }
+
+        if not requested_symbol:
+            diagnostics["failure_class"] = "missing_symbol"
+            return {
+                **base,
+                "status": "unavailable",
+                "reason": "No symbol requested",
+                "streaming_status": "missing_symbol",
+                "cache_status": "unavailable",
+                "manager_state": status["manager_state"],
+                "diagnostics": diagnostics,
+            }
+        if not self.enabled:
+            diagnostics.update({"streaming_status": "disabled", "cache_status": "disabled"})
+            return {
+                **base,
+                "status": "unavailable",
+                "reason": SSI_STREAMING_REALTIME_DISABLED_REASON,
+                "streaming_status": "disabled",
+                "cache_status": "disabled",
+                "manager_state": MANAGER_DISABLED,
+                "diagnostics": diagnostics,
+            }
+
+        manager_state = status["manager_state"]
+        if manager_state == MANAGER_ERRORED:
+            diagnostics.update({"streaming_status": "manager_error", "cache_status": "unavailable"})
+            return {
+                **base,
+                "status": "unavailable",
+                "reason": SSI_STREAMING_REALTIME_MANAGER_ERROR_REASON,
+                "streaming_status": "manager_error",
+                "cache_status": "unavailable",
+                "manager_state": manager_state,
+                "diagnostics": diagnostics,
+            }
+        if manager_state != MANAGER_RUNNING:
+            reason = SSI_STREAMING_REALTIME_NOT_STARTED_REASON
+            streaming_status = "manager_not_started"
+            cache_status = "not_started"
+            if diagnostics.get("bootstrap_status") == "symbols_empty":
+                reason = SSI_STREAMING_REALTIME_BOOTSTRAP_EMPTY_REASON
+                streaming_status = "bootstrap_symbols_empty"
+                cache_status = "bootstrap_symbols_empty"
+            diagnostics.update({"streaming_status": streaming_status, "cache_status": cache_status})
+            return {
+                **base,
+                "status": "unavailable",
+                "reason": reason,
+                "streaming_status": streaming_status,
+                "cache_status": cache_status,
+                "manager_state": manager_state,
+                "diagnostics": diagnostics,
+            }
+
+        configured_symbols = set(normalize_streaming_symbols(status.get("requested_symbols") or []))
+        bootstrap_symbols = set(normalize_streaming_symbols(status.get("bootstrap_symbols") or []))
+        membership_symbols = configured_symbols or bootstrap_symbols
+        if membership_symbols and requested_symbol not in membership_symbols:
+            diagnostics.update(
+                {
+                    "streaming_status": "ticker_not_bootstrapped",
+                    "cache_status": "not_bootstrapped",
+                    "bootstrap_membership": "not_bootstrapped",
+                }
+            )
+            return {
+                **base,
+                "status": "unavailable",
+                "reason": "SSI trade tape stream not bootstrapped.",
+                "streaming_status": "ticker_not_bootstrapped",
+                "cache_status": "not_bootstrapped",
+                "manager_state": manager_state,
+                "diagnostics": diagnostics,
+            }
+
+        cache_result = self.trade_tape_cache.get(requested_symbol, safe_limit)
+        diagnostics.update(
+            {
+                "streaming_status": "cache_hit" if cache_result["status"] == "hit" else f"cache_{cache_result['status']}",
+                "cache_status": cache_result["status"],
+                "trade_tape_buffer_row_count": cache_result["buffer_row_count"],
+                "trade_tape_returned_row_count": cache_result["row_count"],
+                "latest_trade_timestamp": cache_result["latest_trade_timestamp"],
+                "latest_trade_age_seconds": cache_result["latest_trade_age_seconds"],
+            }
+        )
+        if cache_result["rows"]:
+            return {
+                **base,
+                "status": "ok",
+                "reason": None,
+                "trades": cache_result["rows"],
+                "count": len(cache_result["rows"]),
+                "streaming_status": "cache_hit",
+                "cache_status": "hit",
+                "manager_state": manager_state,
+                "diagnostics": diagnostics,
+            }
+
+        reason = (
+            "SSI trade tape stream buffer stale."
+            if cache_result["status"] == "stale"
+            else "SSI trade tape stream buffer empty."
+        )
+        return {
+            **base,
+            "status": "unavailable",
+            "reason": reason,
+            "streaming_status": diagnostics["streaming_status"],
+            "cache_status": cache_result["status"],
+            "manager_state": manager_state,
+            "diagnostics": diagnostics,
+        }
+
     def status(self) -> Dict[str, Any]:
         with self._lock:
             self._refresh_idle_state_locked()
@@ -622,6 +907,7 @@ class SsiStreamingRealtimeManager:
                 "last_message_at": self._last_message_at,
                 "messages_observed": self._messages_observed,
                 "parser_rows_observed": self._parser_rows_observed,
+                "trade_rows_observed": self._trade_rows_observed,
                 "bootstrap_status": self._bootstrap_status,
                 "bootstrap_reason": self._bootstrap_reason,
                 "bootstrap_symbols": list(self._bootstrap_symbols),

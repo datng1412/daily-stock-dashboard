@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [new feature] Add a bounded SSI streaming X-TRADE event buffer for optional VN trade-tape rows without request-handler streaming, REST probing, fake data, or latest-price ownership changes.
 - [fix] Split VN realtime and trade-tape public status messages from sanitized diagnostics, with company trade tape now using `trade_tape=[]` plus separate `trade_tape_status`.
 - [fix] Add a process-local SSI DailyOhlc rate-limit cooldown that suppresses token and provider calls after HTTP/provider 429 responses while preserving strict DailyOhlc price ownership and stale valid service cache behavior.
 - [test] Add a secret-safe SSI DailyOhlc diagnostic script for bounded request-shape and date-window capability checks without fallback data.

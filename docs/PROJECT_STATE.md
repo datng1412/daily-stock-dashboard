@@ -51,6 +51,7 @@ This document gives Codex and other agents enough context to resume project work
 - Phase 4.6F-Recovery-3 keeps the strict DailyOhlc path backend-only: DailyOhlc retries its existing alternate parameter casing only after non-rate-limit provider errors, all-empty DailyOhlc responses are unavailable rather than successful zero-row data, and provider `429` responses are not variant-probed further.
 - Phase 4.6F-Recovery-4 adds a manual-only, secret-safe DailyOhlc diagnostic script. A bounded 5-day FPT live probe on 2026-07-06 returned sanitized provider `code=Exception` for the primary `symbol/fromDate/toDate` shape and provider `code=429` for the existing alternate casing, with no normalized DailyOhlc rows; further probing was stopped to avoid worsening SSI throttling. DailyStockPrice, realtime cache, and VN30 IndexComponents remained separate from DailyOhlc availability.
 - Phase 4.6G adds a process-local DailyOhlc rate-limit guard configured by `SSI_DAILY_OHLC_RATE_LIMIT_COOLDOWN_SECONDS` (default 300; `0` disables). HTTP 429, provider `code=429`/`errorCode=429`, or normalized `rate_limited` DailyOhlc failures start a cooldown scoped by normalized SSI base URL and ticker. Active cooldowns suppress AccessToken and `/Market/DailyOhlc` calls even for force refresh; provider `code=Exception` remains `provider_unavailable` and does not start the guard. Cold rows stay unavailable while prior valid service-cache rows remain stale-usable with an explicit cooldown error.
+- Phase 4.7C routes SSI trade tape through the existing background streaming manager only. Parsed `X-TRADE` messages with ticker, price, last volume, and timestamp populate a bounded process-local per-symbol event buffer (`SSI_TRADE_TAPE_BUFFER_SIZE`, default 50; `SSI_TRADE_TAPE_TTL_SECONDS`, default 60). Request handlers only read the buffer; they do not start streams, subscribe dynamically, use `X:ALL`, or probe the previous unverified REST candidate names. Historical time-and-sales remains unverified.
 - Mozyfin is disabled for VN dashboard runtime. Do not use it for news, social, OHLCV, chart, reference, foreign flow, index, metadata, intraday, realtime, trade tape, or fallback behavior.
 - KBS is legacy optional only and disabled by default. It must require explicit legacy flags before any diagnostic use and must not silently replace SSI-owned data.
 - VN news is disabled until a separate NewsProvider is implemented.
@@ -78,7 +79,7 @@ This document gives Codex and other agents enough context to resume project work
 - Internal MA/RSI/Bollinger indicators are derived from SSI DailyOhlc data.
 - SSI IntradayOhlc is a compact intraday candle source. It is not a realtime matched quote and is separate from official daily close.
 - SSI realtime snapshot is a separate realtime contract. It must not overwrite `latest_price` or SSI DailyOhlc close.
-- SSI trade tape is a separate trade-list contract. It must not be used as official daily close.
+- SSI trade tape is a separate trade-list contract. Current usable rows, when present, come only from fresh background `X-TRADE` event-buffer rows and must not be used as official daily close.
 - Company metadata from SSI Securities/SecuritiesDetails may be limited to symbol/exchange/market/source; optional company name, issuer, security type, lot size, listed shares, and listed date can remain null.
 - Corporate actions, financial statements, ratios, dividends/rights/splits, and macro data require explicit external providers. Do not infer those events from price gaps.
 - Dates and times shown in the VN dashboard should use Vietnam time formatting.
@@ -108,7 +109,7 @@ Vietnam cache TTLs are process-local and should be interpreted per source block:
 | SSI IndexComponents | Explicit normalized index code; usable rows process-cached for 300 seconds, unavailable/rate-limited/no-row responses negatively cached for 60 seconds; explicit force refresh bypasses |
 | SSI IntradayOhlc | Backend cache/TTL; unavailable/stale states should not affect daily row validity |
 | SSI realtime snapshot | Separate realtime contract; unavailable state should not affect daily row validity |
-| SSI trade tape | Separate trade-tape contract; unavailable state should not affect daily row validity |
+| SSI trade tape | Separate trade-tape contract; fresh `X-TRADE` buffer rows may populate latest-event tape for bootstrapped symbols; unavailable state should not affect daily row validity |
 | News | Disabled until a separate provider is implemented |
 
 `force_refresh=true` bypasses normal cache freshness checks for the requested watchlist call. Provider 404/unavailable is not the same as cache failure.

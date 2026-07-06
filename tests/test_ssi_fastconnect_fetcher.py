@@ -84,6 +84,35 @@ class _FakeClock:
         self.current += seconds
 
 
+class _FakeStreamClient:
+    def __init__(self):
+        self.channels = []
+        self.started = False
+
+    def start(self, on_message, on_error, channels):
+        self.started = True
+        self.channels = list(channels)
+
+    def stop(self):
+        return None
+
+
+def _x_trade(symbol: str = "FPT", *, price: str = "130.5", volume: str = "1000", time: str = "10:00:00"):
+    return {
+        "DataType": "X-TRADE",
+        "Content": {
+            "RType": "X-TRADE",
+            "TradingDate": "25/06/2026",
+            "Time": time,
+            "Symbol": symbol,
+            "LastPrice": price,
+            "LastVol": volume,
+            "Side": "matched",
+            "Sequence": "1",
+        },
+    }
+
+
 def _get_call_count(session):
     return len([call for call in session.calls if call[0] == "GET"])
 
@@ -216,6 +245,8 @@ def test_config_defaults_keep_ssi_disabled(monkeypatch):
     assert config.ssi_streaming_realtime_reconnect_initial_delay_seconds == 2
     assert config.ssi_streaming_realtime_reconnect_max_delay_seconds == 30
     assert config.ssi_streaming_realtime_reconnect_max_attempts == 0
+    assert config.ssi_trade_tape_buffer_size == 50
+    assert config.ssi_trade_tape_ttl_seconds == 60
     assert config.vn_intraday_data_provider == "ssi"
     assert config.vn_realtime_data_provider == "ssi"
     assert config.vn_trade_tape_provider == "ssi"
@@ -1020,45 +1051,57 @@ def test_streaming_realtime_bootstrap_symbols_default_empty():
     assert Config().ssi_streaming_realtime_idle_timeout_seconds == 45
     assert Config().ssi_streaming_realtime_reconnect_enabled is True
     assert Config().ssi_streaming_realtime_reconnect_max_attempts == 0
+    assert Config().ssi_trade_tape_buffer_size == 50
+    assert Config().ssi_trade_tape_ttl_seconds == 60
 
 
-def test_trade_tape_maps_ssi_like_rows():
-    session = _FakeSession(
-        post_items=[_token_response()],
-        get_items=[
-            _FakeResponse(
-                payload={
-                    "data": [
-                        {
-                            "MatchedTime": "10:00:00",
-                            "MatchedPrice": "130.5",
-                            "MatchedVolume": "1000",
-                            "MatchedValue": "130500000",
-                            "Side": "matched",
-                            "Sequence": "1",
-                        }
-                    ]
-                }
-            )
-        ],
+def test_trade_tape_reads_streaming_x_trade_buffer_without_rest_probe():
+    session = _FakeSession()
+    client = _FakeStreamClient()
+    fetcher = _fetcher(
+        session=session,
+        streaming_realtime_enabled=True,
+        streaming_realtime_client_factory=lambda: client,
+        trade_tape_buffer_size=10,
+        trade_tape_ttl_seconds=60,
     )
-    fetcher = _fetcher(session=session)
+    fetcher.streaming_realtime_manager.start(["FPT"])
+    fetcher.streaming_realtime_manager.handle_message(_x_trade())
 
     payload = fetcher.get_trade_tape("fpt", limit=10)
 
     assert payload["status"] == "ok"
     assert payload["source"] == "SSI"
     assert payload["symbol"] == "FPT"
-    assert payload["trades"][0] == {
-        "time": "10:00:00",
-        "price": 130.5,
-        "volume": 1000.0,
-        "value": 130500000.0,
-        "side_if_available": "matched",
-        "sequence_if_available": "1",
-        "source": "SSI",
-    }
+    assert payload["streaming_status"] == "cache_hit"
+    assert payload["rest_status"] == "unsupported"
+    assert payload["attempted_endpoints"] == []
+    assert payload["trades"][0]["ticker"] == "FPT"
+    assert payload["trades"][0]["price"] == 130.5
+    assert payload["trades"][0]["volume"] == 1000.0
+    assert payload["trades"][0]["timestamp"] == "2026-06-25T10:00:00"
+    assert payload["trades"][0]["raw_type"] == "X-TRADE"
+    assert session.calls == []
     assert SECRET_TOKEN not in str(payload)
+
+
+def test_trade_tape_drops_x_trade_rows_missing_required_fields():
+    session = _FakeSession()
+    client = _FakeStreamClient()
+    fetcher = _fetcher(
+        session=session,
+        streaming_realtime_enabled=True,
+        streaming_realtime_client_factory=lambda: client,
+    )
+    fetcher.streaming_realtime_manager.start(["FPT"])
+    fetcher.streaming_realtime_manager.handle_message(_x_trade(volume=""))
+
+    payload = fetcher.get_trade_tape("FPT", limit=10)
+
+    assert payload["status"] == "unavailable"
+    assert payload["trades"] == []
+    assert payload["cache_status"] == "empty"
+    assert session.calls == []
 
 
 def test_trade_tape_disabled_does_not_request_token():
@@ -1073,21 +1116,20 @@ def test_trade_tape_disabled_does_not_request_token():
     assert session.calls == []
 
 
-def test_trade_tape_failure_returns_actionable_unavailable_without_secrets():
-    session = _FakeSession(
-        post_items=[_token_response()],
-        get_items=[requests.exceptions.Timeout(f"timeout {SECRET_TOKEN}") for _ in range(6)],
-    )
-    fetcher = _fetcher(session=session)
+def test_trade_tape_stream_disabled_returns_unavailable_without_rest_probe():
+    session = _FakeSession()
+    fetcher = _fetcher(session=session, streaming_realtime_enabled=False)
 
     payload = fetcher.get_trade_tape("FPT", limit=10)
 
     assert payload["status"] == "unavailable"
     assert payload["source"] == "SSI"
     assert payload["symbol"] == "FPT"
-    assert "trade tape unavailable" in payload["reason"]
-    assert "TradeTape" in payload["reason"]
-    assert payload["attempted_endpoints"] == ["TradeTape", "MatchedTrades", "SecuritiesTrades"]
+    assert payload["reason"] == "SSI trade tape stream buffer disabled."
+    assert payload["attempted_endpoints"] == []
+    assert payload["rest_status"] == "unsupported"
+    assert payload["diagnostics"]["channel_type"] == "X-TRADE"
+    assert session.calls == []
     assert SECRET_TOKEN not in str(payload)
 
 

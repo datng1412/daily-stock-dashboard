@@ -37,6 +37,7 @@ Expected protection:
 - SSI intraday provider failures are classified into sanitized diagnostics such as `rate_limited`, without raw payloads or credentials, and without changing DailyOhlc `latest_price` ownership.
 - SSI intraday provider-code/HTTP `429` starts a deterministic symbol/timeframe cooldown; active cooldown skips IntradayOhlc provider requests and remains unavailable without blocking DailyOhlc or DailyStockPrice.
 - SSI trade tape unavailable returns public `trade_tape = []`.
+- SSI trade tape rows come only from the background X-TRADE event buffer, not REST candidates, DailyOhlc, DailyStockPrice, or realtime snapshots.
 - Observability separates disabled provider, provider unavailable, and cache state.
 
 ## Required Frontend Build And Tests
@@ -114,6 +115,7 @@ Add focused tests for public contract cleanup:
 
 - Company unavailable intraday returns `pulse = null`, not `{}`.
 - Watchlist/company unavailable trade tape returns `trade_tape = []`, not a wrapper object.
+- Watchlist/company usable trade tape rows require buffered X-TRADE price, volume, and timestamp fields; missing required fields are dropped.
 - `realtime_status.message` and `trade_tape_status.message` are short and user-safe.
 - Endpoint attempts, last endpoint, HTTP status, raw provider error summary, retryable flag, and stale-date details live under diagnostics.
 - `intraday_timeframe` is not treated as actual returned cadence.

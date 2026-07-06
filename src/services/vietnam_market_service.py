@@ -631,8 +631,19 @@ LIVE_DIAGNOSTIC_KEYS = {
     "manager_state",
     "cache_status",
     "cache_ttl_seconds",
+    "trade_tape_ttl_seconds",
+    "trade_tape_buffer_size",
+    "trade_tape_buffer_row_count",
+    "trade_tape_returned_row_count",
+    "trade_rows_observed",
+    "latest_trade_timestamp",
+    "latest_trade_age_seconds",
+    "channel_type",
+    "bootstrap_membership",
     "live_adapter_status",
     "bootstrap_symbols",
+    "requested_symbols",
+    "channels",
     "messages_observed",
     "parser_rows_observed",
     "last_message_at",
@@ -678,7 +689,7 @@ def _safe_live_diagnostic_value(key: str, value: Any) -> Any:
         if isinstance(value, float) and math.isnan(value):
             return None
         return value
-    if key in {"attempted_endpoints", "bootstrap_symbols"} and isinstance(value, (list, tuple, set)):
+    if key in {"attempted_endpoints", "bootstrap_symbols", "requested_symbols", "channels"} and isinstance(value, (list, tuple, set)):
         safe_items = [
             _safe_live_diagnostic_text(item, max_length=80)
             for item in list(value)[:20]
@@ -808,9 +819,14 @@ def _status_message_from_reason(
     else:
         messages = {
             "historical_trade_tape_supported": "SSI historical trade tape ready.",
+            "streaming_trade_tape_supported": "SSI trade tape ready.",
             "latest_trade_stream_only": VN_TRADE_TAPE_UNAVAILABLE_REASON,
             "disabled": VN_TRADE_TAPE_DISABLED_REASON,
             "unavailable_no_rows": "No SSI trade rows available.",
+            "stream_not_started": VN_TRADE_TAPE_UNAVAILABLE_REASON,
+            "stream_not_bootstrapped": VN_TRADE_TAPE_UNAVAILABLE_REASON,
+            "stream_cache_empty": VN_TRADE_TAPE_UNAVAILABLE_REASON,
+            "stream_cache_stale": VN_TRADE_TAPE_UNAVAILABLE_REASON,
             "unavailable_provider_error": VN_TRADE_TAPE_UNAVAILABLE_REASON,
             "unavailable_unknown": VN_TRADE_TAPE_UNAVAILABLE_REASON,
             "not_implemented": VN_TRADE_TAPE_UNAVAILABLE_REASON,
@@ -884,9 +900,19 @@ def _classify_trade_tape_reason(
     normalized_status = _lower_text(status)
     reason_text = _lower_text(reason)
     if normalized_status == "ok":
+        if "stream" in reason_text or "x-trade" in reason_text or "cache_hit" in reason_text:
+            return "streaming_trade_tape_supported"
         return "historical_trade_tape_supported"
     if normalized_status == "disabled":
         return "disabled"
+    if "not bootstrapped" in reason_text:
+        return "stream_not_bootstrapped"
+    if "buffer stale" in reason_text or "cache stale" in reason_text:
+        return "stream_cache_stale"
+    if "buffer empty" in reason_text or "cache empty" in reason_text:
+        return "stream_cache_empty"
+    if "not started" in reason_text or "manager unavailable" in reason_text or "bootstrap symbols empty" in reason_text:
+        return "stream_not_started"
     if "no trade rows" in reason_text:
         return "unavailable_no_rows"
     if "tradetape" in reason_text or "matchedtrades" in reason_text or "securitiestrades" in reason_text:
@@ -3106,14 +3132,21 @@ class VietnamMarketService:
         side = row.get("side_if_available")
         sequence = row.get("sequence_if_available")
         return {
+            "ticker": row.get("ticker") or row.get("symbol"),
+            "symbol": row.get("symbol") or row.get("ticker"),
             "time": row.get("time"),
+            "timestamp": row.get("timestamp"),
+            "timestamp_display": row.get("timestamp_display") or row.get("time"),
             "price": _safe_float(row.get("price")),
             "volume": _safe_float(row.get("volume")),
             "value": _safe_float(row.get("value")),
+            "side": row.get("side") or side,
             "side_if_available": side,
+            "sequence": row.get("sequence") or sequence,
             "sequence_if_available": sequence,
             "match_type": side,
             "id": sequence,
+            "raw_type": row.get("raw_type"),
             "source": SSI_TRADE_TAPE_SOURCE,
         }
 
@@ -3172,12 +3205,13 @@ class VietnamMarketService:
             trades = [self._trade_row_from_ssi(row) for row in (payload.get("trades") or []) if isinstance(row, dict)]
             if trades:
                 safe_diagnostics = _live_failure_diagnostics(payload)
+                reason_code = "streaming_trade_tape_supported" if payload.get("streaming_status") else "historical_trade_tape_supported"
                 trade_tape_status = {
                     "status": "ok",
                     "source": SSI_TRADE_TAPE_SOURCE,
                     "message": None,
-                    "reason_code": "historical_trade_tape_supported",
-                    "classification": "historical_trade_tape_supported",
+                    "reason_code": reason_code,
+                    "classification": reason_code,
                     "ticker": symbol,
                     "count": len(trades),
                     "fetched_at": _utc_now().isoformat(),
@@ -4960,8 +4994,10 @@ class VietnamMarketService:
             )
         response_reason_code = _classify_trade_tape_reason(
             status=str(response.get("status") or status or "unavailable"),
-            reason=str(response.get("error_detail") or response.get("error") or payload.get("reason") or ""),
+            reason=str(response.get("error_detail") or response.get("error") or payload.get("reason") or payload.get("streaming_status") or ""),
         )
+        if response.get("status") == "ok" and payload.get("streaming_status"):
+            response_reason_code = "streaming_trade_tape_supported"
         response["reason_code"] = response_reason_code
         response["classification"] = response_reason_code
         response["status_message"] = _status_message_from_reason(

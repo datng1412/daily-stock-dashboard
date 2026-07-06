@@ -157,7 +157,7 @@ class FakeMarketFetcher:
         return self.realtime_fetcher.get_realtime_snapshot(symbols)
 
     def get_trade_tape(self, symbol: str, **kwargs):
-        return {"status": "unavailable", "source": "SSI", "symbol": symbol, "reason": "SSI trade tape unavailable", "trades": []}
+        return self.realtime_fetcher.get_trade_tape(symbol, **kwargs)
 
     def get_securities_details(self, **kwargs):
         symbol = kwargs.get("symbol") or "FPT"
@@ -347,13 +347,14 @@ def test_manager_start_error_is_sanitized():
     assert "<redacted>" in str(status)
 
 
-def test_x_trade_message_updates_cache_for_requested_symbol_without_trade_history():
+def test_x_trade_message_updates_snapshot_and_trade_tape_buffer():
     client = FakeStreamClient()
     manager = _manager(client=client)
     manager.start(["FPT"])
 
     manager.handle_message(_x_trade())
     payload = manager.snapshot(["FPT"])
+    trade_payload = manager.trade_tape("FPT", limit=10)
 
     assert payload["status"] == "ok"
     assert payload["streaming_status"] == "cache_hit"
@@ -362,6 +363,14 @@ def test_x_trade_message_updates_cache_for_requested_symbol_without_trade_histor
     assert payload["quotes"][0]["price"] == 130.5
     assert payload["quotes"][0]["has_last_trade"] is True
     assert "trades" not in payload["quotes"][0]
+    assert trade_payload["status"] == "ok"
+    assert trade_payload["streaming_status"] == "cache_hit"
+    assert trade_payload["trades"][0]["ticker"] == "FPT"
+    assert trade_payload["trades"][0]["price"] == 130.5
+    assert trade_payload["trades"][0]["volume"] == 1000.0
+    assert trade_payload["trades"][0]["timestamp"] == "2026-06-25T10:01:02"
+    assert trade_payload["trades"][0]["raw_type"] == "X-TRADE"
+    assert trade_payload["diagnostics"]["trade_tape_returned_row_count"] == 1
 
 
 def test_x_quote_message_updates_quote_context_without_inventing_last_trade():
@@ -377,6 +386,7 @@ def test_x_quote_message_updates_quote_context_without_inventing_last_trade():
     assert payload["quotes"][0]["has_last_trade"] is False
     assert payload["quotes"][0]["quote_only"] is True
     assert payload["quotes"][0]["bid_levels"][0] == {"price": 130.4, "volume": 1000.0}
+    assert manager.trade_tape("FPT")["trades"] == []
 
 
 def test_x_message_updates_snapshot_when_fields_exist():
@@ -391,6 +401,7 @@ def test_x_message_updates_snapshot_when_fields_exist():
     assert payload["quotes"][0]["stream_data_type"] == "X"
     assert payload["quotes"][0]["price"] == 130.7
     assert payload["quotes"][0]["ask_levels"][0] == {"price": 130.6, "volume": 2000.0}
+    assert manager.trade_tape("FPT")["trades"] == []
 
 
 def test_malformed_message_does_not_crash_manager():
@@ -432,6 +443,26 @@ def test_empty_and_stale_cache_return_unavailable():
     assert stale_payload["status"] == "unavailable"
     assert stale_payload["reason"] == SSI_STREAMING_REALTIME_CACHE_STALE_REASON
     assert stale_payload["cache_status"] == "stale"
+    assert manager.trade_tape("FPT")["status"] == "ok"
+    now[0] = 170.0
+    stale_trades = manager.trade_tape("FPT")
+    assert stale_trades["status"] == "unavailable"
+    assert stale_trades["trades"] == []
+    assert stale_trades["cache_status"] == "stale"
+
+
+def test_trade_tape_for_non_bootstrapped_symbol_is_unavailable_without_subscription():
+    client = FakeStreamClient()
+    manager = _manager(client=client)
+    manager.start(["FPT"])
+
+    payload = manager.trade_tape("SSI")
+
+    assert payload["status"] == "unavailable"
+    assert payload["trades"] == []
+    assert payload["streaming_status"] == "ticker_not_bootstrapped"
+    assert payload["diagnostics"]["bootstrap_membership"] == "not_bootstrapped"
+    assert client.channels == ["X:FPT"]
 
 
 def test_running_manager_with_no_messages_past_idle_timeout_reports_idle():
@@ -832,5 +863,8 @@ def test_realtime_service_reads_cache_hit_without_overwriting_daily_latest_price
     assert item["realtime_snapshot"]["price"] == 131.5
     assert item["latest_price"] == item["daily_close"]
     assert item["latest_price_source"] == "SSI DailyOhlc"
-    assert item["trade_tape"] == []
-    assert item["trade_tape_status"]["status"] == "unavailable"
+    assert item["trade_tape_status"]["status"] == "ok"
+    assert item["trade_tape_status"]["reason_code"] == "streaming_trade_tape_supported"
+    assert item["trade_tape"][0]["ticker"] == "FPT"
+    assert item["trade_tape"][0]["price"] == 131.5
+    assert item["diagnostics"]["trade_tape"]["channel_type"] == "X-TRADE"

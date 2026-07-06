@@ -479,14 +479,21 @@ export type VietnamRealtimeResponse = {
 };
 
 export type VietnamRealtimeTrade = {
+  ticker?: string | null;
+  symbol?: string | null;
   time?: string | null;
+  timestamp?: string | null;
+  timestampDisplay?: string | null;
   price?: number | null;
   volume?: number | null;
   value?: number | null;
+  side?: string | null;
   sideIfAvailable?: string | null;
+  sequence?: string | null;
   sequenceIfAvailable?: string | null;
   matchType?: string | null;
   id?: string | null;
+  rawType?: string | null;
   source: string;
 };
 

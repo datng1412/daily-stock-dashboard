@@ -40,7 +40,7 @@ Latest bounded live gate: 2026-06-29, using sanitized SSI smoke output plus loca
 | IndexComponents | `usable` | SSI available and implemented for VN30 | `GET /Market/IndexComponents`; `indexCode` first; exact nested row flattening | Optional component rows/counts with `rows=[]` when unavailable | Phase 4.4B proved exact VN30 nested `IndexComponent`/`StockSymbol` rows with 30 members; Phase 4.5C live API smoke re-confirmed 30 VN30 component rows; no hardcoded constituents | Use only real SSI component rows; do not infer breadth or membership when absent | No for VN30 rows; other index coverage unknown |
 | IntradayOhlc | `partial` | SSI available but live result partial/unavailable | `GET /Market/IntradayOhlc` | Optional `intraday_candles` and `intraday_pulse` only when rows are current and matched; otherwise `[]`/`null` | Phase 4.0B fixed paging/order; Phase 4.0B-2/3 classified provider code `429` and added cooldown; Phase 4.1A added actual cadence detection | Keep rate-limit-aware optional behavior; do not present as realtime quote | No |
 | Realtime streaming snapshot | `optional_live_dependent` | SSI available but live runtime-dependent | SSI streaming data types `X`, `X-QUOTE`, `X-TRADE`; background manager/cache only | `realtime_snapshot=null` unless explicit streaming runtime is enabled, manager is running, and cache row is fresh | Parser, official-client adapter, lifecycle bootstrap, cache bypass, and safe diagnostics exist; default runtime remains disabled | Keep background-only cache contract; no request-handler streaming, no WebSocket/SSE productization | No for SSI snapshot, but live entitlement/runtime must be proven per environment |
-| Trade tape / `X-TRADE` semantics | `unavailable_parameter_unknown` | SSI candidate path exists but true trade-history semantics are unproven | `X-TRADE` streaming latest-trade event; candidate REST trade endpoints remain unverified | Public trade tape stays `[]` unless a true list/history source returns rows; `X-TRADE` may update realtime snapshot only | Parser differentiates `X-TRADE` latest-trade context from true trade history; no verified historical trade-tape rows exist | Do not productize trade-tape history until true rows, parameters, and permissions are proven | Possibly, if SSI true trade history is not entitled/available |
+| Trade tape / `X-TRADE` semantics | `partial` | SSI streaming latest-event tape is usable only when background stream/cache is enabled, symbol bootstrapped, and fresh X-TRADE events arrive; true trade-history semantics remain unproven | `X-TRADE` streaming latest-trade event buffer; candidate REST trade endpoints remain unverified and are not probed at runtime | Public trade tape stays `[]` unless fresh buffered X-TRADE rows with price, volume, and timestamp exist | Parser and manager now separate latest-event trade rows from realtime snapshot rows; no verified historical time-and-sales rows exist | Do not call this historical trade tape; do not infer rows from DailyOhlc, DailyStockPrice, or realtime snapshot | Possibly, if SSI true historical trade tape is not entitled/available |
 | Unsupported fundamentals | `external_provider_required` | SSI endpoint not found in current repo/docs/evidence | None | No SSI-owned public contract | Current implementation exposes no SSI fundamentals endpoint | Keep unavailable/not implemented until a provider is selected | Yes |
 | Unsupported financial statements | `external_provider_required` | SSI endpoint not found in current repo/docs/evidence | None | Company `financials` placeholder | Current company research service returns `not_implemented`; no SSI statement endpoint in repo evidence | Defer behind external-provider gate | Yes |
 | Unsupported ratios | `external_provider_required` | SSI endpoint not found in current repo/docs/evidence | None | No ratio provider block | No SSI ratios endpoint in repo evidence | Defer; keep provider ratios separate from local derivations | Yes |
@@ -78,7 +78,7 @@ Phase 4.5B added no runtime providers, fallback providers, scraping, fake rows, 
 * IndexComponents remains `usable` for exact VN30: live API smoke returned 30 component rows and preserved `rows=[]` semantics for unavailable cases.
 * Phase 4.6F-4 sends explicit IndexComponents codes directly through the verified `indexCode` shape. IndexList failure no longer blocks that request; successful rows cache for 300 seconds and unavailable/rate-limited/no-row results are negatively cached for 60 seconds.
 * IntradayOhlc, realtime snapshot, and trade tape remain optional/unavailable in the local API smoke and must not affect valid DailyOhlc/DailyStockPrice rows.
-* True trade-tape history and final close/session confirmation remain unproven. Do not infer either from `X-TRADE`, DailyOhlc, DailyStockPrice, or intraday rows.
+* True trade-tape history and final close/session confirmation remain unproven. Do not infer either from DailyOhlc, DailyStockPrice, intraday rows, or realtime snapshots. Fresh `X-TRADE` messages may populate only the bounded latest-event trade-tape buffer.
 
 ## Phase 4.0B Intraday Root-Cause Result
 
@@ -207,7 +207,7 @@ Parser rules:
 - Preserve provider timestamps from `TradingDate` and `Time` when present.
 - Treat `X-QUOTE` as quote-only context. Do not synthesize `LastPrice` or a matched trade from bid/ask fields.
 - Treat `X` and `X-TRADE` as latest-trade snapshot candidates only when `LastPrice` is present.
-- Do not turn a single `X-TRADE` message into full trade-tape history.
+- Do not describe the bounded `X-TRADE` event buffer as full trade-tape history.
 
 Runtime state remained unavailable at the end of Phase 4.0C-3 because the repository did not implement a bounded SSI streaming client, subscription lifecycle, reconnection/backoff policy, or request-safe cache handoff. `SsiFastConnectFetcher.get_realtime_snapshot()` did not open a streaming connection and did not probe REST realtime candidates. It returned:
 
@@ -279,7 +279,7 @@ Phase 4.0C-5 added the internal architecture for future SSI streaming realtime w
 - `SsiFastConnectFetcher.get_realtime_snapshot()` reads only the manager/cache path when streaming runtime is enabled; it does not open a websocket and does not probe REST realtime candidates.
 - Request handlers do not start streams. Module imports do not start streams.
 - Runtime channel construction rejects `ALL` subscriptions.
-- A single `X-TRADE` message may update the realtime snapshot candidate, but it must not create trade-tape history or mark trade tape reliable.
+- A single `X-TRADE` message may update the realtime snapshot candidate and, after Phase 4.7C, may populate the bounded latest-event trade-tape buffer. It still must not be described as full historical time-and-sales or used to mark true trade-history support reliable.
 
 Default runtime response remains unavailable:
 

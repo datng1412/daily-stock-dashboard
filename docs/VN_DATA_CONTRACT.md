@@ -208,7 +208,7 @@ When SSI trade tape has usable rows:
 
 ```text
 trade_tape_status.status = ok
-trade_tape_status.reason_code = historical_trade_tape_supported
+trade_tape_status.reason_code = streaming_trade_tape_supported or historical_trade_tape_supported
 trade_tape = [ ... ]
 ```
 
@@ -216,13 +216,15 @@ When no trade rows exist:
 
 ```text
 trade_tape_status.status = unavailable or disabled
-trade_tape_status.reason_code = disabled, latest_trade_stream_only, unavailable_no_rows, unavailable_provider_error, unavailable_unknown, not_implemented, or unknown
+trade_tape_status.reason_code = disabled, stream_not_started, stream_not_bootstrapped, stream_cache_empty, stream_cache_stale, latest_trade_stream_only, unavailable_no_rows, unavailable_provider_error, unavailable_unknown, not_implemented, or unknown
 trade_tape = []
 ```
 
 `trade_tape_status.message` is short user-facing copy such as `SSI trade tape unavailable.`, `SSI trade tape disabled.`, or `No SSI trade rows available.` Technical details are not embedded in this message.
 
-The watchlist and company public contracts both use a list for `trade_tape`; company status is separate in `trade_tape_status`. Company realtime follows the same split with `realtime_snapshot` and `realtime_status`. `X-TRADE` streaming messages are latest-trade stream context only; they are not historical trade-tape/time-and-sales rows. `GET /api/v1/stocks/vn/realtime/trades` retains its top-level `trades` list plus short `status_message`; sanitized technical detail lives in its `diagnostics` object.
+The watchlist and company public contracts both use a list for `trade_tape`; company status is separate in `trade_tape_status`. Company realtime follows the same split with `realtime_snapshot` and `realtime_status`. Phase 4.7C allows only process-local, streaming-backed `X-TRADE` events to populate `trade_tape` when the background SSI streaming manager is enabled, running, symbol-bootstrapped, and the per-symbol buffer contains fresh parsed trade events. Request handlers only read this buffer; they must not start streams, add subscriptions, or use `X:ALL`.
+
+Each streaming trade row is latest-event tape data, not historical time-and-sales history. Public rows may include `ticker`, `price`, `volume`, `value`, `side`, `timestamp`, `timestamp_display`, `source`, `sequence`, and `raw_type`, plus compatibility aliases such as `time`, `side_if_available`, and `sequence_if_available`. Price, volume, and timestamp are required; rows missing any of those fields are dropped. `X-QUOTE` and `X` snapshot messages do not create trade-tape rows. `GET /api/v1/stocks/vn/realtime/trades` retains its top-level `trades` list plus short `status_message`; sanitized technical detail lives in its `diagnostics` object.
 
 ### Diagnostics
 

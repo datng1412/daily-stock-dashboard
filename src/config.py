@@ -672,6 +672,8 @@ class Config:
     ssi_streaming_realtime_reconnect_initial_delay_seconds: int = 2
     ssi_streaming_realtime_reconnect_max_delay_seconds: int = 30
     ssi_streaming_realtime_reconnect_max_attempts: int = 0
+    ssi_trade_tape_buffer_size: int = 50
+    ssi_trade_tape_ttl_seconds: int = 60
     vn_daily_data_provider: str = "ssi"
     vn_chart_data_provider: str = "ssi"
     vn_daily_stock_price_provider: str = "ssi"
@@ -1965,6 +1967,18 @@ class Config:
                 0,
                 field_name='SSI_STREAMING_REALTIME_RECONNECT_MAX_ATTEMPTS',
                 minimum=0,
+            ),
+            ssi_trade_tape_buffer_size=parse_env_int(
+                os.getenv('SSI_TRADE_TAPE_BUFFER_SIZE'),
+                50,
+                field_name='SSI_TRADE_TAPE_BUFFER_SIZE',
+                minimum=1,
+            ),
+            ssi_trade_tape_ttl_seconds=parse_env_int(
+                os.getenv('SSI_TRADE_TAPE_TTL_SECONDS'),
+                60,
+                field_name='SSI_TRADE_TAPE_TTL_SECONDS',
+                minimum=1,
             ),
             vn_daily_data_provider=parse_env_choice(
                 os.getenv('VN_DAILY_DATA_PROVIDER'),
