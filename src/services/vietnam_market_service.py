@@ -26,7 +26,10 @@ from data_provider.corporate_actions_provider import (
     normalize_provider_status,
     sanitize_corporate_actions_text,
 )
-from data_provider.ssi_fastconnect_fetcher import SsiFastConnectFetcher
+from data_provider.ssi_fastconnect_fetcher import (
+    DAILY_OHLC_RATE_LIMIT_COOLDOWN_REASON,
+    SsiFastConnectFetcher,
+)
 from data_provider.ssi_streaming_realtime import SSI_STREAMING_REALTIME_DISABLED_REASON
 from src.config import get_config
 from src.services.vietnam_observability import (
@@ -2381,6 +2384,7 @@ class VietnamMarketService:
             "SSI FastConnect disabled",
             "SSI FastConnect credentials missing",
             "SSI FastConnect request failed",
+            DAILY_OHLC_RATE_LIMIT_COOLDOWN_REASON,
         }:
             return reason
         return fallback

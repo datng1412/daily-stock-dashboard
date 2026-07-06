@@ -8,6 +8,7 @@ import pytest
 import requests
 
 from data_provider.ssi_fastconnect_fetcher import (
+    DAILY_OHLC_RATE_LIMIT_COOLDOWN_REASON,
     DISABLED_REASON,
     INTRADAY_RATE_LIMIT_COOLDOWN_REASON,
     MISSING_CREDENTIALS_REASON,
@@ -27,9 +28,11 @@ SECRET_TOKEN = "SECRET_ACCESS_TOKEN_DO_NOT_EXPOSE"
 
 
 @pytest.fixture(autouse=True)
-def clear_ssi_intraday_rate_limit_cooldowns():
+def clear_ssi_rate_limit_cooldowns():
+    SsiFastConnectFetcher.clear_daily_ohlc_rate_limit_cooldowns()
     SsiFastConnectFetcher.clear_intraday_rate_limit_cooldowns()
     yield
+    SsiFastConnectFetcher.clear_daily_ohlc_rate_limit_cooldowns()
     SsiFastConnectFetcher.clear_intraday_rate_limit_cooldowns()
 
 
@@ -198,6 +201,7 @@ def test_config_defaults_keep_ssi_disabled(monkeypatch):
     assert config.ssi_fastconnect_timeout_seconds == 10
     assert config.ssi_fastconnect_cache_ttl_seconds == 300
     assert config.ssi_fastconnect_token_ttl_seconds == 900
+    assert config.ssi_daily_ohlc_rate_limit_cooldown_seconds == 300
     assert config.ssi_fastconnect_intraday_enabled is True
     assert config.ssi_intraday_rate_limit_cooldown_seconds == 60
     assert config.ssi_fastconnect_realtime_enabled is True
@@ -217,6 +221,20 @@ def test_config_defaults_keep_ssi_disabled(monkeypatch):
     assert config.vn_trade_tape_provider == "ssi"
     assert config.kbs_enabled is False
     assert config.vn_allow_legacy_kbs_provider is False
+
+
+def test_config_allows_disabling_daily_ohlc_rate_limit_cooldown():
+    with patch.dict(
+        "os.environ",
+        {
+            "STOCK_LIST": "600519",
+            "SSI_DAILY_OHLC_RATE_LIMIT_COOLDOWN_SECONDS": "0",
+        },
+        clear=True,
+    ), patch("src.config.setup_env"), patch.object(Config, "_parse_litellm_yaml", return_value=[]):
+        config = Config._load_from_env()
+
+    assert config.ssi_daily_ohlc_rate_limit_cooldown_seconds == 0
 
 
 def test_access_token_success_stores_token_without_public_exposure():
@@ -1129,6 +1147,179 @@ def test_daily_ohlc_rate_limit_does_not_probe_alternate_param_casing():
     assert payload["status"] == "unavailable"
     assert payload["failure_class"] == "rate_limited"
     assert _get_call_count(session) == 1
+
+
+@pytest.mark.parametrize("provider_code_field", ["code", "errorCode"])
+def test_daily_ohlc_provider_rate_limit_records_cooldown_and_skips_token_and_provider(
+    provider_code_field,
+):
+    clock = _FakeClock()
+    first_session = _FakeSession(
+        post_items=[_token_response()],
+        get_items=[
+            _FakeResponse(
+                payload={
+                    "status": "error",
+                    provider_code_field: "429",
+                    "message": "provider rate-limited request",
+                }
+            )
+        ],
+    )
+    first_fetcher = _fetcher(
+        session=first_session,
+        monotonic_clock=clock.monotonic,
+        utcnow=clock.utcnow,
+    )
+
+    first = first_fetcher.get_daily_ohlcv(
+        "fpt",
+        from_date="01/01/2026",
+        to_date="17/06/2026",
+        limit=1000,
+    )
+
+    blocked_session = _FakeSession(
+        post_items=[_token_response()],
+        get_items=[_FakeResponse(payload={"data": [{"TradingDate": "2026-06-17", "Close": "124.6"}]})],
+    )
+    blocked_fetcher = _fetcher(
+        session=blocked_session,
+        monotonic_clock=clock.monotonic,
+        utcnow=clock.utcnow,
+    )
+    blocked = blocked_fetcher.get_daily_ohlcv(
+        " FPT ",
+        from_date="01/01/2026",
+        to_date="17/06/2026",
+        limit=1000,
+        force_refresh=True,
+    )
+
+    assert first["failure_class"] == "rate_limited"
+    assert first["diagnostics"]["cooldown_recorded"] is True
+    assert first["diagnostics"]["cooldown_active"] is False
+    assert first["diagnostics"]["cooldown_seconds"] == 300
+    assert first["diagnostics"]["cooldown_remaining_seconds"] == 300
+    assert blocked["status"] == "unavailable"
+    assert blocked["reason"] == DAILY_OHLC_RATE_LIMIT_COOLDOWN_REASON
+    assert blocked["failure_class"] == "rate_limited"
+    assert blocked["diagnostics"]["cooldown_active"] is True
+    assert blocked["diagnostics"]["cooldown_recorded"] is False
+    assert blocked["diagnostics"]["cooldown_remaining_seconds"] == 300
+    assert blocked_session.calls == []
+    assert SECRET_TOKEN not in str(first)
+    assert SECRET_TOKEN not in str(blocked)
+
+
+def test_daily_ohlc_http_429_records_cooldown_and_skips_next_provider_request():
+    clock = _FakeClock()
+    session = _FakeSession(
+        post_items=[_token_response()],
+        get_items=[_FakeResponse(status_code=429, payload={"message": "too many requests"})],
+    )
+    fetcher = _fetcher(session=session, monotonic_clock=clock.monotonic, utcnow=clock.utcnow)
+
+    first = fetcher.get_daily_ohlcv("FPT", from_date="01/01/2026", to_date="17/06/2026", limit=1000)
+    blocked = fetcher.get_daily_ohlcv("FPT", from_date="01/01/2026", to_date="17/06/2026", limit=1000)
+
+    assert first["failure_class"] == "rate_limited"
+    assert first["http_status"] == 429
+    assert first["diagnostics"]["cooldown_recorded"] is True
+    assert blocked["reason"] == DAILY_OHLC_RATE_LIMIT_COOLDOWN_REASON
+    assert blocked["diagnostics"]["cooldown_active"] is True
+    assert _get_call_count(session) == 1
+
+
+def test_daily_ohlc_alternate_shape_429_records_cooldown_and_suppresses_more_variants():
+    clock = _FakeClock()
+    session = _FakeSession(
+        post_items=[_token_response()],
+        get_items=[
+            _FakeResponse(payload={"status": "error", "code": "Exception", "message": "provider rejected request"}),
+            _FakeResponse(payload={"status": "error", "code": "429", "message": "provider rate-limited request"}),
+        ],
+    )
+    fetcher = _fetcher(session=session, monotonic_clock=clock.monotonic, utcnow=clock.utcnow)
+
+    first = fetcher.get_daily_ohlcv("FPT", from_date="01/01/2026", to_date="17/06/2026", limit=1000)
+    blocked = fetcher.get_daily_ohlcv("FPT", from_date="01/01/2026", to_date="17/06/2026", limit=1000)
+
+    assert first["failure_class"] == "rate_limited"
+    assert first["diagnostics"]["cooldown_recorded"] is True
+    assert blocked["reason"] == DAILY_OHLC_RATE_LIMIT_COOLDOWN_REASON
+    assert _get_call_count(session) == 2
+
+
+def test_daily_ohlc_rate_limit_cooldown_can_be_disabled():
+    session = _FakeSession(
+        post_items=[_token_response()],
+        get_items=[
+            _FakeResponse(payload={"status": "error", "code": "429", "message": "provider rate-limited request"}),
+            _FakeResponse(payload={"status": "error", "code": "429", "message": "provider rate-limited request"}),
+        ],
+    )
+    fetcher = _fetcher(session=session, daily_ohlc_rate_limit_cooldown_seconds=0)
+
+    first = fetcher.get_daily_ohlcv("FPT", from_date="01/01/2026", to_date="17/06/2026", limit=1000)
+    second = fetcher.get_daily_ohlcv("FPT", from_date="01/01/2026", to_date="17/06/2026", limit=1000)
+
+    assert first["failure_class"] == "rate_limited"
+    assert second["failure_class"] == "rate_limited"
+    assert "cooldown_active" not in first.get("diagnostics", {})
+    assert "cooldown_active" not in second.get("diagnostics", {})
+    assert _get_call_count(session) == 2
+
+
+def test_daily_ohlc_rate_limit_cooldown_expires_without_sleeping():
+    clock = _FakeClock()
+    session = _FakeSession(
+        post_items=[_token_response()],
+        get_items=[
+            _FakeResponse(payload={"status": "error", "code": "429", "message": "provider rate-limited request"}),
+            _FakeResponse(payload={"data": [{"TradingDate": "2026-06-17", "Close": "124.6"}]}),
+        ],
+    )
+    fetcher = _fetcher(session=session, monotonic_clock=clock.monotonic, utcnow=clock.utcnow)
+
+    first = fetcher.get_daily_ohlcv("FPT", from_date="01/01/2026", to_date="17/06/2026", limit=1000)
+    clock.advance(301)
+    after_expiry = fetcher.get_daily_ohlcv("FPT", from_date="01/01/2026", to_date="17/06/2026", limit=1000)
+
+    assert first["failure_class"] == "rate_limited"
+    assert after_expiry["status"] == "ok"
+    assert _get_call_count(session) == 2
+
+
+def test_daily_ohlc_provider_exception_does_not_record_rate_limit_cooldown():
+    session = _FakeSession(
+        post_items=[_token_response()],
+        get_items=[
+            _FakeResponse(payload={"status": "error", "code": "Exception", "message": "provider rejected request"}),
+            _FakeResponse(payload={"status": "error", "code": "Exception", "message": "provider rejected request"}),
+            _FakeResponse(payload={"data": [{"TradingDate": "2026-06-17", "Close": "124.6"}]}),
+        ],
+    )
+    fetcher = _fetcher(session=session)
+
+    first = fetcher.get_daily_ohlcv("FPT", from_date="01/01/2026", to_date="17/06/2026", limit=1000)
+    second = fetcher.get_daily_ohlcv("FPT", from_date="01/01/2026", to_date="17/06/2026", limit=1000)
+
+    assert first["failure_class"] == "provider_unavailable"
+    assert "cooldown_active" not in first.get("diagnostics", {})
+    assert second["status"] == "ok"
+    assert _get_call_count(session) == 3
+
+
+def test_daily_ohlc_cooldown_key_normalizes_ticker_without_secret_material():
+    fetcher = _fetcher()
+
+    key = fetcher._daily_ohlc_rate_limit_cooldown_key(" fpt ")
+
+    assert key == ("https://example.test/market", "FPT")
+    assert fetcher.consumer_id not in str(key)
+    assert fetcher.consumer_secret not in str(key)
+    assert SECRET_TOKEN not in str(key)
 
 
 def test_daily_ohlc_empty_rows_return_unavailable_without_success_payload():

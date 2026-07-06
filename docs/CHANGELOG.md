@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [fix] Add a process-local SSI DailyOhlc rate-limit cooldown that suppresses token and provider calls after HTTP/provider 429 responses while preserving strict DailyOhlc price ownership and stale valid service cache behavior.
 - [test] Add a secret-safe SSI DailyOhlc diagnostic script for bounded request-shape and date-window capability checks without fallback data.
 - [fix] Retry SSI DailyOhlc with the existing alternate documented parameter casing after non-rate-limit provider errors and classify all-empty DailyOhlc responses as unavailable instead of successful zero-row daily data.
 - [fix] Harden the VN SSI daily backend path so unavailable DailyOhlc/DailyStockPrice refreshes are not cached as successful values and DailyStockPrice enrichment remains source-labeled when DailyOhlc is unavailable.

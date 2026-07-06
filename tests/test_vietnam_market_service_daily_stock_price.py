@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
+from data_provider.ssi_fastconnect_fetcher import DAILY_OHLC_RATE_LIMIT_COOLDOWN_REASON
 from src.services.vietnam_company_research_service import VietnamCompanyResearchService
 from src.services.vietnam_market_service import (
     VietnamDashboardConfig,
@@ -396,6 +397,36 @@ def test_daily_ohlc_unavailable_exposes_daily_stock_price_without_latest_price_s
     assert "daily_ohlc_unavailable" in _issue_codes(item)
 
 
+def test_daily_ohlc_cooldown_keeps_cold_row_unavailable_with_enrichment_only():
+    item = _watch_item(
+        FakeSsiFetcher(
+            daily_ohlcv_payload={
+                "status": "unavailable",
+                "source": "SSI",
+                "reason": DAILY_OHLC_RATE_LIMIT_COOLDOWN_REASON,
+                "failure_class": "rate_limited",
+                "rows": [],
+                "count": 0,
+                "diagnostics": {"cooldown_active": True},
+            },
+            daily_stock_price_payload={
+                "status": "ok",
+                "source": "SSI",
+                "rows": [_full_daily_stock_price_row(close=987.0)],
+            },
+        )
+    )
+
+    assert item["status"] == "unavailable"
+    assert item["latest_price"] is None
+    assert item["latest_price_source"] is None
+    assert item["cache_status"]["ohlcv_cache"] == "error"
+    assert item["cache_errors"]["ohlcv"] == DAILY_OHLC_RATE_LIMIT_COOLDOWN_REASON
+    assert item["daily_stock_price"]["status"] == "ok"
+    assert item["daily_stock_price"]["close"] == 987.0
+    assert item["ssi_reference_price"] == 129.0
+
+
 def test_unavailable_daily_ohlc_cold_result_is_not_cached_as_success():
     fetcher = FakeSsiFetcher(
         daily_ohlcv_payload={
@@ -436,6 +467,30 @@ def test_stale_daily_ohlc_cache_is_preserved_when_refresh_returns_unavailable():
     assert refreshed["latest_price"] == first["latest_price"]
     assert refreshed["cache_status"]["ohlcv_cache"] == "stale"
     assert refreshed["cache_errors"]["ohlcv"] == "SSI FastConnect request failed"
+
+
+def test_stale_daily_ohlc_cache_is_preserved_when_refresh_hits_cooldown():
+    fetcher = FakeSsiFetcher()
+    service = _service(fetcher)
+
+    first = service.build_watchlist(["FPT"], force_refresh=False, include_intraday=False)["watchlist"][0]
+    fetcher.daily_ohlcv_payload = {
+        "status": "unavailable",
+        "source": "SSI",
+        "reason": DAILY_OHLC_RATE_LIMIT_COOLDOWN_REASON,
+        "failure_class": "rate_limited",
+        "rows": [],
+        "count": 0,
+        "diagnostics": {"cooldown_active": True},
+    }
+    refreshed = service.build_watchlist(["FPT"], force_refresh=True, include_intraday=False)["watchlist"][0]
+
+    assert refreshed["status"] == "ok"
+    assert refreshed["latest_price_source"] == "SSI DailyOhlc"
+    assert refreshed["latest_price"] == first["latest_price"]
+    assert refreshed["cache_status"]["ohlcv_cache"] == "stale"
+    assert refreshed["cache_errors"]["ohlcv"] == DAILY_OHLC_RATE_LIMIT_COOLDOWN_REASON
+    assert refreshed["daily_stock_price"]["status"] == "ok"
 
 
 def test_short_daily_ohlc_history_exposes_ta_missing_reasons_without_changing_latest_price():

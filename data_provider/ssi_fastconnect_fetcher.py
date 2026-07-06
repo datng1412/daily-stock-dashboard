@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from threading import RLock
 from typing import Any, Callable, Dict, List, Optional, Tuple
+from urllib.parse import urlsplit
 
 import requests
 
@@ -42,6 +43,7 @@ DEFAULT_BASE_URL = "https://fc-data.ssi.com.vn/api/v2/Market"
 DISABLED_REASON = "SSI FastConnect disabled"
 MISSING_CREDENTIALS_REASON = "SSI FastConnect credentials missing"
 REQUEST_FAILED_REASON = "SSI FastConnect request failed"
+DAILY_OHLC_RATE_LIMIT_COOLDOWN_REASON = "SSI DailyOhlc rate-limit cooldown active."
 INTRADAY_DISABLED_REASON = "SSI FastConnect IntradayOhlc disabled"
 INTRADAY_RATE_LIMIT_COOLDOWN_REASON = "SSI IntradayOhlc rate limit cooldown active."
 REALTIME_DISABLED_REASON = "SSI FastConnect realtime disabled"
@@ -53,6 +55,7 @@ SSI_REALTIME_STREAMING_DATA_TYPES = ("X", "X-QUOTE", "X-TRADE")
 SSI_CHUNK_MAX_DAYS = 29
 SSI_PAGE_SIZE = 1000
 SSI_MAX_PAGES = 20
+DEFAULT_DAILY_OHLC_RATE_LIMIT_COOLDOWN_SECONDS = 300
 DEFAULT_INTRADAY_RATE_LIMIT_COOLDOWN_SECONDS = 60
 DEFAULT_INDEX_REQUEST_DELAY_SECONDS = 1.15
 
@@ -180,7 +183,7 @@ class _CacheEntry:
 
 
 @dataclass
-class _IntradayRateLimitCooldown:
+class _RateLimitCooldown:
     expires_at: float
     cooldown_until: Optional[str]
 
@@ -595,8 +598,10 @@ def _expiry_from_payload(payload: Any, default_ttl_seconds: int) -> float:
 class SsiFastConnectFetcher:
     """Small FC Data client with secret-safe failures and row normalization."""
 
+    _daily_ohlc_rate_limit_lock = RLock()
+    _daily_ohlc_rate_limit_cooldowns: Dict[Tuple[str, str], _RateLimitCooldown] = {}
     _intraday_rate_limit_lock = RLock()
-    _intraday_rate_limit_cooldowns: Dict[Tuple[str, str], _IntradayRateLimitCooldown] = {}
+    _intraday_rate_limit_cooldowns: Dict[Tuple[str, str], _RateLimitCooldown] = {}
 
     def __init__(
         self,
@@ -622,6 +627,7 @@ class SsiFastConnectFetcher:
         streaming_realtime_reconnect_max_attempts: Optional[int] = None,
         streaming_realtime_client_factory: Optional[Callable[[], SsiRealtimeStreamClient]] = None,
         streaming_realtime_manager: Optional[SsiStreamingRealtimeManager] = None,
+        daily_ohlc_rate_limit_cooldown_seconds: Optional[int] = None,
         intraday_rate_limit_cooldown_seconds: Optional[int] = None,
         monotonic_clock: Optional[Callable[[], float]] = None,
         utcnow: Optional[Callable[[], datetime]] = None,
@@ -679,6 +685,19 @@ class SsiFastConnectFetcher:
             else getattr(config, "ssi_fastconnect_token_ttl_seconds", None)
             or parse_env_int(os.getenv("SSI_FASTCONNECT_TOKEN_TTL_SECONDS"), 900, field_name="SSI_FASTCONNECT_TOKEN_TTL_SECONDS", minimum=1)
         )
+        configured_daily_ohlc_cooldown = getattr(config, "ssi_daily_ohlc_rate_limit_cooldown_seconds", None)
+        if daily_ohlc_rate_limit_cooldown_seconds is not None:
+            daily_ohlc_cooldown_seconds = daily_ohlc_rate_limit_cooldown_seconds
+        elif configured_daily_ohlc_cooldown is not None:
+            daily_ohlc_cooldown_seconds = configured_daily_ohlc_cooldown
+        else:
+            daily_ohlc_cooldown_seconds = parse_env_int(
+                os.getenv("SSI_DAILY_OHLC_RATE_LIMIT_COOLDOWN_SECONDS"),
+                DEFAULT_DAILY_OHLC_RATE_LIMIT_COOLDOWN_SECONDS,
+                field_name="SSI_DAILY_OHLC_RATE_LIMIT_COOLDOWN_SECONDS",
+                minimum=0,
+            )
+        self.daily_ohlc_rate_limit_cooldown_seconds = max(0, int(daily_ohlc_cooldown_seconds or 0))
         self.intraday_enabled = (
             bool(intraday_enabled)
             if intraday_enabled is not None
@@ -833,6 +852,117 @@ class SsiFastConnectFetcher:
         )
 
     @classmethod
+    def clear_daily_ohlc_rate_limit_cooldowns(cls) -> None:
+        with cls._daily_ohlc_rate_limit_lock:
+            cls._daily_ohlc_rate_limit_cooldowns.clear()
+
+    def _daily_ohlc_rate_limit_cooldown_key(self, symbol: str) -> Tuple[str, str]:
+        parsed_base_url = urlsplit(str(self.base_url or "").strip())
+        host = str(parsed_base_url.hostname or "").strip().lower()
+        try:
+            port = parsed_base_url.port
+        except ValueError:
+            port = None
+        authority = f"{host}:{port}" if host and port else host
+        path = str(parsed_base_url.path or "").strip().lower().rstrip("/")
+        normalized_base_url = f"{parsed_base_url.scheme.lower()}://{authority}{path}" if authority else "ssi-fastconnect"
+        normalized_symbol = str(symbol or "").strip().upper()
+        return normalized_base_url, normalized_symbol
+
+    def _get_daily_ohlc_rate_limit_cooldown(
+        self,
+        key: Tuple[str, str],
+    ) -> Optional[_RateLimitCooldown]:
+        now = self._monotonic_clock()
+        with self._daily_ohlc_rate_limit_lock:
+            cooldown = self._daily_ohlc_rate_limit_cooldowns.get(key)
+            if cooldown and cooldown.expires_at > now:
+                return cooldown
+            if cooldown:
+                self._daily_ohlc_rate_limit_cooldowns.pop(key, None)
+        return None
+
+    def _record_daily_ohlc_rate_limit_cooldown(
+        self,
+        key: Tuple[str, str],
+    ) -> Optional[_RateLimitCooldown]:
+        cooldown_seconds = self.daily_ohlc_rate_limit_cooldown_seconds
+        if cooldown_seconds <= 0:
+            return None
+
+        now = self._monotonic_clock()
+        try:
+            cooldown_until = (self._utcnow() + timedelta(seconds=cooldown_seconds)).isoformat()
+        except Exception:
+            cooldown_until = None
+        cooldown = _RateLimitCooldown(
+            expires_at=now + cooldown_seconds,
+            cooldown_until=cooldown_until,
+        )
+        with self._daily_ohlc_rate_limit_lock:
+            self._daily_ohlc_rate_limit_cooldowns[key] = cooldown
+        return cooldown
+
+    def _daily_ohlc_cooldown_remaining_seconds(self, cooldown: _RateLimitCooldown) -> int:
+        remaining = max(0.0, cooldown.expires_at - self._monotonic_clock())
+        return int(remaining) if remaining == int(remaining) else int(remaining) + 1
+
+    def _with_daily_ohlc_cooldown_diagnostics(
+        self,
+        payload: Dict[str, Any],
+        *,
+        cooldown: _RateLimitCooldown,
+        active: bool,
+        recorded: bool,
+    ) -> Dict[str, Any]:
+        result = dict(payload)
+        diagnostics = dict(result.get("diagnostics") or {})
+        diagnostics.update(
+            {
+                "cooldown_active": bool(active),
+                "cooldown_recorded": bool(recorded),
+                "cooldown_seconds": self.daily_ohlc_rate_limit_cooldown_seconds,
+                "cooldown_remaining_seconds": self._daily_ohlc_cooldown_remaining_seconds(cooldown),
+            }
+        )
+        if cooldown.cooldown_until:
+            diagnostics["cooldown_until"] = cooldown.cooldown_until
+        result["diagnostics"] = diagnostics
+        return result
+
+    def _daily_ohlc_cooldown_payload(
+        self,
+        *,
+        symbol: str,
+        params: Dict[str, Any],
+        cooldown: _RateLimitCooldown,
+    ) -> Dict[str, Any]:
+        payload = {
+            "status": "unavailable",
+            "source": SSI_SOURCE,
+            "symbol": symbol,
+            "reason": DAILY_OHLC_RATE_LIMIT_COOLDOWN_REASON,
+            "failure_class": "rate_limited",
+            "rows": [],
+            "count": 0,
+            "diagnostics": {
+                "endpoint": "DailyOhlc",
+                "symbol": symbol,
+                "from_date": params.get("fromDate") or params.get("Fromdate"),
+                "to_date": params.get("toDate") or params.get("Todate"),
+                "pageIndex": params.get("pageIndex"),
+                "pageSize": params.get("pageSize"),
+                "ascending": params.get("ascending"),
+            },
+        }
+        return self._with_daily_ohlc_cooldown_diagnostics(
+            payload,
+            cooldown=cooldown,
+            active=True,
+            recorded=False,
+        )
+
+    @classmethod
     def clear_intraday_rate_limit_cooldowns(cls) -> None:
         with cls._intraday_rate_limit_lock:
             cls._intraday_rate_limit_cooldowns.clear()
@@ -846,7 +976,7 @@ class SsiFastConnectFetcher:
     def _get_intraday_rate_limit_cooldown(
         self,
         key: Tuple[str, str],
-    ) -> Optional[_IntradayRateLimitCooldown]:
+    ) -> Optional[_RateLimitCooldown]:
         now = self._monotonic_clock()
         with self._intraday_rate_limit_lock:
             cooldown = self._intraday_rate_limit_cooldowns.get(key)
@@ -859,7 +989,7 @@ class SsiFastConnectFetcher:
     def _record_intraday_rate_limit_cooldown(
         self,
         key: Tuple[str, str],
-    ) -> Optional[_IntradayRateLimitCooldown]:
+    ) -> Optional[_RateLimitCooldown]:
         cooldown_seconds = self.intraday_rate_limit_cooldown_seconds
         if cooldown_seconds <= 0:
             return None
@@ -869,7 +999,7 @@ class SsiFastConnectFetcher:
             cooldown_until = (self._utcnow() + timedelta(seconds=cooldown_seconds)).isoformat()
         except Exception:
             cooldown_until = None
-        cooldown = _IntradayRateLimitCooldown(
+        cooldown = _RateLimitCooldown(
             expires_at=now + cooldown_seconds,
             cooldown_until=cooldown_until,
         )
@@ -877,12 +1007,12 @@ class SsiFastConnectFetcher:
             self._intraday_rate_limit_cooldowns[key] = cooldown
         return cooldown
 
-    def _intraday_cooldown_remaining_seconds(self, cooldown: _IntradayRateLimitCooldown) -> int:
+    def _intraday_cooldown_remaining_seconds(self, cooldown: _RateLimitCooldown) -> int:
         remaining = max(0.0, cooldown.expires_at - self._monotonic_clock())
         return int(remaining) if remaining == int(remaining) else int(remaining) + 1
 
     @staticmethod
-    def _is_intraday_rate_limited_payload(payload: Dict[str, Any]) -> bool:
+    def _is_rate_limited_payload(payload: Dict[str, Any]) -> bool:
         if not isinstance(payload, dict):
             return False
         diagnostics = payload.get("diagnostics") if isinstance(payload.get("diagnostics"), dict) else {}
@@ -893,7 +1023,7 @@ class SsiFastConnectFetcher:
         self,
         payload: Dict[str, Any],
         *,
-        cooldown: _IntradayRateLimitCooldown,
+        cooldown: _RateLimitCooldown,
         active: bool,
         recorded: bool,
     ) -> Dict[str, Any]:
@@ -919,7 +1049,7 @@ class SsiFastConnectFetcher:
         params: Dict[str, Any],
         public_limit: int,
         interval: Optional[str],
-        cooldown: _IntradayRateLimitCooldown,
+        cooldown: _RateLimitCooldown,
     ) -> Dict[str, Any]:
         payload = {
             "status": "unavailable",
@@ -1028,25 +1158,41 @@ class SsiFastConnectFetcher:
         from_date: Optional[str] = None,
         to_date: Optional[str] = None,
         limit: int = 260,
+        force_refresh: bool = False,
     ) -> Dict[str, Any]:
-        params = self._date_params({"symbol": symbol.strip().upper()}, from_date, to_date, limit)
+        normalized_symbol = str(symbol or "").strip().upper()
+        params = self._date_params({"symbol": normalized_symbol}, from_date, to_date, limit)
+        if not self.enabled:
+            return _unavailable(DISABLED_REASON)
+        if not self._has_credentials():
+            return _unavailable(MISSING_CREDENTIALS_REASON)
+        cooldown_key = self._daily_ohlc_rate_limit_cooldown_key(normalized_symbol)
+        active_cooldown = self._get_daily_ohlc_rate_limit_cooldown(cooldown_key)
+        if active_cooldown:
+            return self._daily_ohlc_cooldown_payload(
+                symbol=normalized_symbol,
+                params=params,
+                cooldown=active_cooldown,
+            )
+
         payload = self._cached_normalized(
             "DailyOhlc",
             params,
             limit,
             lambda row: self._map_daily_ohlcv(row),
-            extra={"symbol": symbol.strip().upper()},
+            extra={"symbol": normalized_symbol},
             param_variants=[self._alternate_param_case(params)],
             required_any=("date", "open", "high", "low", "close", "volume", "value"),
             retry_unavailable_variants=True,
+            force_refresh=force_refresh,
         )
-        return self._empty_as_unavailable(
+        payload = self._empty_as_unavailable(
             payload,
             reason="SSI DailyOhlc returned no rows.",
             failure_class="empty_response",
             diagnostics={
                 "endpoint": "DailyOhlc",
-                "symbol": symbol.strip().upper(),
+                "symbol": normalized_symbol,
                 "from_date": params.get("fromDate") or params.get("Fromdate"),
                 "to_date": params.get("toDate") or params.get("Todate"),
                 "pageIndex": params.get("pageIndex"),
@@ -1054,6 +1200,16 @@ class SsiFastConnectFetcher:
                 "ascending": params.get("ascending"),
             },
         )
+        if self._is_rate_limited_payload(payload):
+            cooldown = self._record_daily_ohlc_rate_limit_cooldown(cooldown_key)
+            if cooldown:
+                payload = self._with_daily_ohlc_cooldown_diagnostics(
+                    payload,
+                    cooldown=cooldown,
+                    active=False,
+                    recorded=True,
+                )
+        return payload
 
     def get_daily_stock_price(
         self,
@@ -1203,7 +1359,7 @@ class SsiFastConnectFetcher:
             public_limit=public_limit,
             interval=normalized_interval,
         )
-        if self._is_intraday_rate_limited_payload(payload):
+        if self._is_rate_limited_payload(payload):
             cooldown = self._record_intraday_rate_limit_cooldown(cooldown_key)
             if cooldown:
                 payload = self._with_intraday_cooldown_diagnostics(
@@ -1830,6 +1986,8 @@ class SsiFastConnectFetcher:
                     continue
                 variant_payload = self._request(endpoint, params=variant_params)
                 if isinstance(variant_payload, dict) and variant_payload.get("status") == "unavailable":
+                    if self._is_rate_limited_payload(variant_payload):
+                        return variant_payload
                     continue
                 rows = [mapper(row) for row in extract_rows(variant_payload)]
                 rows = [row for row in rows if row and _has_required_field(row, required_any)]
