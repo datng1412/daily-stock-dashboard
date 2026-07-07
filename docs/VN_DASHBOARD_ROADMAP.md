@@ -1335,12 +1335,13 @@ Result:
 * Classified FiinGroup API Datafeed News as `preferred_after_entitlement` for the first automated NewsProvider target because official public schemas expose ticker, organization code, title, short/full content, source, source link, publication, create/update, status, and source-code fields.
 * Classified Vietstock DataFeed as `candidate_after_entitlement` because official pages list API/Sync delivery, Vietnamese/English support, 24/7 news, company news, and Vietnam news categories, but item-level ticker/source/deduplication schema and rights still need commercial review.
 * Classified WiGroup WiFeed/WiData as `candidate_after_entitlement`, likely strongest as a secondary macro/industry/company-news/report source unless a licensed API sample proves ticker-tagged stock-news rows, source URLs, deduplication fields, and display/storage rights.
+* Phase 5.1A-2 documents current access status: public docs/schema access is not legal/runtime API access; FiinGroup is `preferred_after_entitlement`, Vietstock is `candidate_after_entitlement`, and Vnstock/VNStock is `prototype_only` for research/manual comparison.
 * Classified public RSS/web pages as `blocked_pending_terms`, scraping/unofficial endpoints as `not_allowed_now`, and NewsAPI/GDELT as `secondary_macro_context_only`.
 * Left runtime unchanged: news remains disabled/not implemented with `news=[]`, no provider calls, no credentials, no fallback, no fake rows, and no change to `latest_price`.
 
 Future news phases:
 
-* Phase 5.1B - NewsProvider Entitlement Pack: obtain written entitlement, API/auth/rate-limit/SLA/pricing terms, display/storage/redistribution rights, source attribution rules, ticker mapping, historical depth, and a sanitized licensed fixture.
+* Phase 5.1B - NewsProvider Entitlement Pack: obtain written entitlement, trial credential status, API/auth/rate-limit/SLA/pricing terms, display/storage/redistribution rights, source attribution rules, ticker mapping, historical depth, and a sanitized licensed fixture.
 * Phase 5.1C - Licensed NewsProvider Adapter: implement a disabled-by-default provider adapter only after Phase 5.1B passes.
 * Phase 5.1D - News UI Cards: render source-labeled company and market news cards only after licensed API rows exist.
 

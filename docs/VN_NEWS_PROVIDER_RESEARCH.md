@@ -30,6 +30,13 @@ Reviewed official/current pages:
 * Vietstock:
   * [Vietstock DataFeed - integrated economic and financial data](https://dichvu.vietstock.vn/du-lieu-tai-chinh/datafeed---du-lieu-tai-chinh-tich-hop-chuyen-nghiep?language=EN)
   * [Vietstock service center](https://dichvu.vietstock.vn/)
+* Vnstock / VNStock:
+  * [Vnstock docs](https://vnstocks.com/docs)
+  * [Vnstock free library](https://vnstocks.com/docs/vnstock)
+  * [Vnstock market data](https://vnstocks.com/docs/vnstock/du-lieu-thi-truong-market-data)
+  * [Vnstock financial analysis](https://vnstocks.com/docs/vnstock/phan-tich-co-ban-fundamental)
+  * [Vnstock disclaimer](https://vnstocks.com/onboard/mien-tru-trach-nhiem)
+  * [Vnstock license](https://vnstocks.com/onboard/giay-phep-su-dung)
 * WiGroup:
   * [WiFeed](https://www.wigroup.vn/san-pham/wifeed)
   * [WiData](https://www.wigroup.vn/san-pham/widata)
@@ -40,6 +47,18 @@ Reviewed official/current pages:
   * [GDELT data page](https://www.gdeltproject.org/data.html)
 
 Repository `docs/resources/` provider notes were not used as authority in this phase. They remain reference-only and still require explicit approval before use.
+
+## Current access status
+
+Public docs/schema access is not legal/runtime API access.
+
+| Provider | What we can access now | Runtime access now? | Production status |
+| --- | --- | --- | --- |
+| FiinGroup API Datafeed | Public docs/schema, especially API News fields such as `NewsId`, `OrganCode`, `Ticker`, `NewsTitle`, `NewsShortContent`, `NewsFullContent`, `NewsSource`, `NewsSourceLink`, `PublicDate`, `CreateDate`, `UpdateDate`, `NewsCategoryCode`, `IcbCode`, and `ComGroupCode`. | No. Runtime is blocked until written entitlement, credentials/auth, pricing/rate limits/SLA, display rights, storage/cache rights, redistribution rights, full-text versus summary/link permission, and a licensed fixture are available. | `preferred_after_entitlement` |
+| Vietstock DataFeed | Public product/coverage page positioning DataFeed as API/Sync integration with market data, company data, financial statements, ratios, event calendar, macro, 24/7 news, and Vietnam/company/market news categories. | No. Runtime is blocked until item-level news schema, ticker-tagging proof, source URL/provenance fields, dedup keys, pricing, auth model, and legal display/storage/redistribution rights are available. | `candidate_after_entitlement` |
+| Vnstock / VNStock | Python package/docs usable for local research, prototype exploration, and manual comparison across areas such as OHLCV, quote, trades, index data, financial statements, ratios, and company info. | No production runtime. Treat as a connector/tool, not a licensed StockClock app provider for display, cache, or redistribution. | `prototype_only` |
+
+Phase 5.1A-2 records access status only. It does not authorize provider calls, adapters, scraping, credentials, config, API/schema changes, frontend UI, or fallback behavior.
 
 ## Future NewsProvider contract
 
@@ -97,7 +116,7 @@ Evidence:
 
 * FiinGroup's stock data solutions page positions API Datafeed for websites, trading boards, mobile applications, and algorithmic/research use.
 * API Datafeed has a public API News section.
-* The `News` schema documents fields directly aligned with a future NewsProvider: `NewsId`, `OrganCode`, `Ticker`, `NewsTitle`, `NewsShortContent`, `NewsFullContent`, `NewsSource`, `NewsSourceLink`, `NewsKeyword`, `PublicDate`, `CreateDate`, `UpdateDate`, and `SourceCode`.
+* The `News` schema documents fields directly aligned with a future NewsProvider: `NewsId`, `OrganCode`, `Ticker`, `NewsTitle`, `NewsShortContent`, `NewsFullContent`, `NewsSource`, `NewsSourceLink`, `NewsKeyword`, `PublicDate`, `CreateDate`, `UpdateDate`, `NewsCategoryCode`, `IcbCode`, `ComGroupCode`, and `SourceCode`.
 * The information-announcement pages provide separate Vietnamese and English announcement APIs with similar fields.
 
 Conservative assessment:
@@ -130,6 +149,22 @@ Conservative assessment:
 * Production use depends on a commercial sample/API spec and legal display/storage/redistribution terms.
 
 Recommended status: `candidate_after_entitlement`.
+
+### Vnstock / VNStock
+
+Evidence:
+
+* Vnstock is the easiest candidate to try immediately for local developer research and manual comparison.
+* Public docs cover or describe areas such as OHLCV, quote, trades, index data, financial statements, ratios, and company information.
+* Vnstock documentation positions the project as a technical connector/tooling layer rather than a StockClock production data-license grant.
+
+Conservative assessment:
+
+* Vnstock can be useful for notebooks, one-off investigation, and comparing provider outputs during research.
+* It must not be connected to StockClock app runtime unless legal/source-owner rights, automation terms, source provenance, rate limits, storage/cache rights, display rights, and redistribution rights are resolved.
+* Treat Vnstock as a tool/connector, not a licensed data provider for app display, cache, or redistribution.
+
+Recommended status: `prototype_only`.
 
 ### WiGroup WiFeed / WiData
 
@@ -165,6 +200,15 @@ Recommended first news-provider implementation target:
 2. Vietstock DataFeed, if it provides a clearer or cheaper licensed stock-news API with ticker mapping, source links, and dashboard display/storage rights.
 3. WiGroup WiFeed, if it provides a better app/API integration package for company news, macro/industry news, and reports with item-level ticker/category metadata.
 
+Current Phase 5.1A-2 decision:
+
+| Need | Best candidate |
+| --- | --- |
+| First licensed ticker-tagged VN stock news | FiinGroup API Datafeed News |
+| Backup licensed local data/news provider | Vietstock DataFeed |
+| Dev-only research/comparison | Vnstock |
+| Canonical market data | SSI |
+
 Do not choose a provider purely by brand. Rank by:
 
 1. Legal right to display/cache news in the app.
@@ -180,7 +224,7 @@ Do not choose a provider purely by brand. Rank by:
 
 ## Proposed first integration shape after entitlement
 
-This is architecture planning only. Do not implement in Phase 5.1A.
+This is architecture planning only. Do not implement NewsProvider runtime yet. The next step is Phase 5.1B - NewsProvider Entitlement Pack, not licensed adapter implementation.
 
 * `NewsProvider` interface with disabled-by-default provider selection.
 * Provider-specific adapter such as `FiinGroupNewsProvider`, disabled unless explicit config and credentials are present.
@@ -207,25 +251,31 @@ This is architecture planning only. Do not implement in Phase 5.1A.
 No live adapter should be implemented until these are written down:
 
 1. Written entitlement for the exact news package and covered exchanges.
-2. API auth method and secret-handling plan.
-3. Production endpoint docs or package access path.
-4. Pricing, rate limits, pacing, retry rules, and SLA/update frequency.
-5. Storage/cache rights for normalized metadata and any article text.
-6. Display and redistribution rights for the dashboard audience.
-7. Full-text versus headline/summary/link permission.
-8. Attribution requirements.
-9. Takedown/correction handling.
-10. Source provenance and source URL availability.
-11. Ticker mapping to SSI symbols, including renamed, delisted, and transferred securities.
-12. Historical depth and incremental update filters.
-13. Vietnamese encoding and timezone handling.
-14. Disabled-by-default config plan.
-15. Secret handling plan.
-16. Sanitized fixture plan covering success, empty, duplicate, correction/deletion, missing source URL, missing optional summary, and mixed ticker/market-wide news.
+2. Trial credential availability or another provider-approved test path.
+3. API auth method and secret-handling plan.
+4. Production endpoint docs or package access path.
+5. Pricing, rate limits, pacing, retry rules, and SLA/update frequency.
+6. Ticker-tagged company news coverage.
+7. Source name availability.
+8. Source URL/provenance availability.
+9. Title, summary, and full-content permission boundaries.
+10. Storage/cache rights for normalized metadata and any article text.
+11. Display rights for the dashboard audience.
+12. Redistribution rights or explicit redistribution prohibition.
+13. Full-text versus headline/summary/link permission.
+14. Attribution requirements.
+15. Provider item ID or deduplication key.
+16. Takedown/correction/delete handling.
+17. Historical depth and incremental update filters.
+18. Timezone and Vietnamese encoding handling.
+19. Ticker mapping to SSI symbols, including renamed, delisted, and transferred securities.
+20. Disabled-by-default config plan.
+21. Secret handling plan.
+22. Licensed sample fixture plan covering success, empty, duplicate, correction/deletion, missing source URL, missing optional summary, and mixed ticker/market-wide news.
 
 ## Future phases
 
-* Phase 5.1B - NewsProvider Entitlement Pack: collect written provider terms, sample schema, licensed fixture, and API/auth/rate-limit plan.
+* Phase 5.1B - NewsProvider Entitlement Pack: collect written provider terms, trial credential status, sample schema, licensed fixture, content-rights boundaries, and API/auth/rate-limit plan.
 * Phase 5.1C - Licensed NewsProvider Adapter: implement a disabled-by-default adapter only after Phase 5.1B passes.
 * Phase 5.1D - News UI Cards: render source-labeled company and market news cards after licensed API rows exist.
 

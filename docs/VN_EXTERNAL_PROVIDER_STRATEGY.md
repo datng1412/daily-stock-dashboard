@@ -1,6 +1,6 @@
 # Vietnam External Provider Capability Strategy
 
-Last verified: 2026-07-06
+Last verified: 2026-07-07
 
 ## Purpose
 
@@ -39,10 +39,13 @@ Phase 5.0D-2 clarifies that Vnstock, FiinQuant, FiinGroup API Datafeed, and manu
 
 Phase 5.1A reviewed current official provider pages for FiinGroup API Datafeed News, Vietstock DataFeed, and WiGroup WiFeed/WiData as a documentation-only news-provider planning pass. The detailed research record is `docs/VN_NEWS_PROVIDER_RESEARCH.md`.
 
+Phase 5.1A-2 documents current access status for FiinGroup API Datafeed, Vietstock DataFeed, and Vnstock/VNStock. Public docs/schema access is not legal/runtime API access. FiinGroup remains `preferred_after_entitlement` for the first licensed ticker-tagged NewsProvider target; Vietstock remains `candidate_after_entitlement` pending item-level schema, API, and rights proof; Vnstock remains `prototype_only` for research/manual comparison and is not a production app provider.
+
 Result:
 
 * FiinGroup API Datafeed News is the preferred first automated news candidate only after written entitlement confirms ticker-tagged VN stock/company news, source URL availability, display/storage/redistribution rights, production auth, rate limits/SLA, historical depth, and full-text versus summary/link permission.
 * Vietstock DataFeed is a serious `candidate_after_entitlement` because its public DataFeed page lists API/Sync delivery, Vietnamese/English support, 24/7 news, company news, and Vietnam news categories, but public item-level ticker/source/deduplication schema and rights still require commercial review.
+* Vnstock/VNStock is `prototype_only`: useful for local research or manual comparison, but not a licensed dashboard provider for app display, cache, or redistribution.
 * WiGroup WiFeed is a `candidate_after_entitlement`, likely strongest as a secondary macro/industry/company-news/report source unless a licensed API sample proves ticker-tagged stock-news rows, source URLs, deduplication fields, and display/storage rights.
 * Public RSS/web pages remain `blocked_pending_terms`; browser scraping and unofficial endpoints remain `not_allowed_now`; NewsAPI and GDELT are `secondary_macro_context_only`, not first VN ticker-news targets.
 * No runtime provider, credentials, config, API/schema, frontend behavior, scraping path, fallback provider, fake news row, or SSI ownership rule changed.
