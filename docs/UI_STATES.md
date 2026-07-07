@@ -83,7 +83,7 @@ Provider endpoint details, HTTP status, retryability, and raw provider summaries
 - Keep primary copy short. Put technical details in diagnostics.
 - Do not use raw provider error text in primary cards.
 - Keep compact numeric display source-neutral and truthful: raw VND/share price fields render as board-style thousand-VND values with two decimals and no suffix, share volumes use `K`/`M`, VND trading values use `K`/`M`/`B`/`T`, and unavailable values remain explicit missing states rather than fake zeros.
-- Price direction color is reference-based and UI-only: canonical daily/latest price uses SSI DailyOhlc close compared with SSI DailyStockPrice reference price. Above reference is green, below reference is red, equal is amber/yellow, and missing or non-positive price/reference stays neutral gray. Reference price itself is blue/neutral, ceiling is purple, and floor is blue. Realtime price must not drive daily price coloring.
+- Price direction color follows the SSI stock-board convention and is UI-only: reference is yellow, ceiling is purple/magenta, floor is blue/cyan, above reference is green, below reference is red, and missing or non-positive inputs stay neutral gray. Dynamic daily/latest price coloring uses SSI DailyOhlc close against SSI DailyStockPrice reference/ceiling/floor with priority `ceiling > floor > reference > above reference > below reference > neutral`. Realtime price must not drive daily price coloring.
 
 ## Implementation Notes For Progressive Workspace Phases
 

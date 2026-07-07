@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-- [improvement] Color VN dashboard and company-page daily price fields by SSI DailyOhlc close versus SSI DailyStockPrice reference price, with reference, ceiling, and floor fields using role-specific colors.
+- [improvement] Align VN dashboard and company-page price colors with SSI board convention: reference yellow, ceiling purple, floor blue/cyan, above reference green, and below reference red.
 - [improvement] Compact VN dashboard and company page numeric displays so prices render in board-style thousand-VND units with two decimals while volumes and VND values use readable K/M/B/T suffixes.
 - [fix] Correct SSI-derived VN metric value rendering for 52W high/low and 10D/3M average volume by normalizing frontend numeric-suffix field aliases and tightening backend valid-row checks.
 - [new feature] Add SSI-derived VN metrics for 52W high/low, 10D and 3M average volume, price-vs-reference percent, and daily range percent without changing DailyOhlc price ownership.

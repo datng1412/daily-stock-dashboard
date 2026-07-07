@@ -5,8 +5,9 @@ import {
   formatCompactVnPrice,
   formatFullSharesTitle,
   formatFullVndTitle,
-  getPriceReferenceDirection,
-  priceReferenceValueClass,
+  getSsiBoardPriceState,
+  getSsiBoardRoleClass,
+  ssiBoardPriceValueClass,
 } from '../vietnamNumberFormat';
 
 describe('Vietnam compact number formatters', () => {
@@ -33,19 +34,27 @@ describe('Vietnam compact number formatters', () => {
     expect(formatFullSharesTitle(9715884)).toBe('9,715,884 shares');
   });
 
-  it('classifies daily price direction against reference price', () => {
-    expect(getPriceReferenceDirection(101000, 100000)).toBe('above');
-    expect(getPriceReferenceDirection(99000, 100000)).toBe('below');
-    expect(getPriceReferenceDirection(100000, 100000)).toBe('equal');
-    expect(getPriceReferenceDirection(null, 100000)).toBe('neutral');
-    expect(getPriceReferenceDirection(100000, null)).toBe('neutral');
-    expect(getPriceReferenceDirection(100000, 0)).toBe('neutral');
+  it('classifies prices by SSI board priority', () => {
+    expect(getSsiBoardPriceState(107000, 100000, 107000, 93000)).toBe('ceiling');
+    expect(getSsiBoardPriceState(93000, 100000, 107000, 93000)).toBe('floor');
+    expect(getSsiBoardPriceState(100000, 100000, 107000, 93000)).toBe('reference');
+    expect(getSsiBoardPriceState(101000, 100000, 107000, 93000)).toBe('above_reference');
+    expect(getSsiBoardPriceState(99000, 100000, 107000, 93000)).toBe('below_reference');
+    expect(getSsiBoardPriceState(100000, null, 107000, 93000)).toBe('neutral');
+    expect(getSsiBoardPriceState(100000, 0, 107000, 93000)).toBe('neutral');
+    expect(getSsiBoardPriceState(107000, 100000, 107000, 93000)).toBe('ceiling');
+    expect(getSsiBoardPriceState(93000, 100000, 107000, 93000)).toBe('floor');
   });
 
-  it('maps reference-price direction to semantic UI classes', () => {
-    expect(priceReferenceValueClass(101000, 100000)).toBe('text-success');
-    expect(priceReferenceValueClass(99000, 100000)).toBe('text-danger');
-    expect(priceReferenceValueClass(100000, 100000)).toBe('text-warning');
-    expect(priceReferenceValueClass(null, 100000)).toBe('text-secondary-text');
+  it('maps SSI board states and static roles to board color classes', () => {
+    expect(ssiBoardPriceValueClass(107000, 100000, 107000, 93000)).toBe('text-ceiling-purple');
+    expect(ssiBoardPriceValueClass(93000, 100000, 107000, 93000)).toBe('text-cyan');
+    expect(ssiBoardPriceValueClass(100000, 100000, 107000, 93000)).toBe('text-warning');
+    expect(ssiBoardPriceValueClass(101000, 100000, 107000, 93000)).toBe('text-success');
+    expect(ssiBoardPriceValueClass(99000, 100000, 107000, 93000)).toBe('text-danger');
+    expect(ssiBoardPriceValueClass(null, 100000, 107000, 93000)).toBe('text-secondary-text');
+    expect(getSsiBoardRoleClass('reference')).toBe('text-warning');
+    expect(getSsiBoardRoleClass('ceiling')).toBe('text-ceiling-purple');
+    expect(getSsiBoardRoleClass('floor')).toBe('text-cyan');
   });
 });

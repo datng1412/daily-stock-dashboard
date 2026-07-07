@@ -14,7 +14,7 @@ import {
   formatCompactVnPrice,
   formatFullSharesTitle,
   formatFullVndTitle,
-  priceReferenceValueClass,
+  ssiBoardPriceValueClass,
   REFERENCE_PRICE_CLASS,
 } from '../utils/vietnamNumberFormat';
 
@@ -357,11 +357,15 @@ const VietnamCompanyResearchPage: React.FC = () => {
   if (!snapshot) return null;
 
   const referencePrice = snapshot.price.referencePrice;
-  const latestPriceTone = priceReferenceValueClass(snapshot.price.latestPrice, referencePrice);
-  const dailyCloseTone = priceReferenceValueClass(snapshot.price.dailyClose, referencePrice);
-  const priceVsReferenceTone = priceReferenceValueClass(
+  const ceilingPrice = snapshot.price.ceilingPrice;
+  const floorPrice = snapshot.price.floorPrice;
+  const boardPriceClass = (price?: number | string | null) => (
+    ssiBoardPriceValueClass(price, referencePrice, ceilingPrice, floorPrice)
+  );
+  const latestPriceTone = boardPriceClass(snapshot.price.latestPrice);
+  const dailyCloseTone = boardPriceClass(snapshot.price.dailyClose);
+  const priceVsReferenceTone = boardPriceClass(
     snapshot.price.dailyClose ?? snapshot.price.latestPrice,
-    referencePrice,
   );
 
   const priceRows: MetricRow[] = [
@@ -396,10 +400,10 @@ const VietnamCompanyResearchPage: React.FC = () => {
     snapshot.profile.status === 'ok' ? 'partial' : 'unavailable'
   );
   const tradingRows: MetricRow[] = [
-    { label: 'Open (VND)', value: snapshot.tradingStats.open, formatter: formatPrice, titleFormatter: formatFullVndTitle },
-    { label: 'High (VND)', value: snapshot.tradingStats.high, formatter: formatPrice, titleFormatter: formatFullVndTitle },
-    { label: 'Low (VND)', value: snapshot.tradingStats.low, formatter: formatPrice, titleFormatter: formatFullVndTitle },
-    { label: 'Close (VND)', value: snapshot.tradingStats.close, formatter: formatPrice, titleFormatter: formatFullVndTitle },
+    { label: 'Open (VND)', value: snapshot.tradingStats.open, formatter: formatPrice, titleFormatter: formatFullVndTitle, tone: boardPriceClass(snapshot.tradingStats.open), testId: 'company-open-price' },
+    { label: 'High (VND)', value: snapshot.tradingStats.high, formatter: formatPrice, titleFormatter: formatFullVndTitle, tone: boardPriceClass(snapshot.tradingStats.high), testId: 'company-high-price' },
+    { label: 'Low (VND)', value: snapshot.tradingStats.low, formatter: formatPrice, titleFormatter: formatFullVndTitle, tone: boardPriceClass(snapshot.tradingStats.low), testId: 'company-low-price' },
+    { label: 'Close (VND)', value: snapshot.tradingStats.close, formatter: formatPrice, titleFormatter: formatFullVndTitle, tone: boardPriceClass(snapshot.tradingStats.close), testId: 'company-close-price' },
     { label: 'Daily OHLCV volume (shares)', value: snapshot.tradingStats.volume, formatter: formatVolume, titleFormatter: formatFullSharesTitle },
     { label: 'Daily OHLCV value (VND)', value: snapshot.tradingStats.value, formatter: formatVndValue, titleFormatter: formatFullVndTitle },
   ];

@@ -3782,10 +3782,10 @@ describe('VietnamDashboardPage watchlist loading', () => {
     const detail = within(screen.getByText('Stock detail').closest('section') as HTMLElement);
     expect(detail.getByRole('heading', { name: 'DailyStockPrice coverage' })).toBeInTheDocument();
     expect(detail.getByText('Reference')).toBeInTheDocument();
-    expect(detail.getByTestId('selected-reference-price')).toHaveClass('text-cyan');
+    expect(detail.getByTestId('selected-reference-price')).toHaveClass('text-warning');
     expect(detail.getByTestId('selected-reference-price')).toHaveTextContent('0.10');
     expect(detail.getByText('Ceiling price')).toBeInTheDocument();
-    expect(detail.getByTestId('selected-ceiling-price')).toHaveClass('text-purple');
+    expect(detail.getByTestId('selected-ceiling-price')).toHaveClass('text-ceiling-purple');
     expect(detail.getByTestId('selected-ceiling-price')).toHaveTextContent('0.11');
     expect(detail.getByText('Floor price')).toBeInTheDocument();
     expect(detail.getByTestId('selected-floor-price')).toHaveClass('text-cyan');
@@ -3811,6 +3811,10 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(within(detail.getByText('52W high / low').closest('div') as HTMLElement).getByText('130.00 / 80.00')).toBeInTheDocument();
     expect(detail.getByText('Daily range')).toBeInTheDocument();
     expect(within(detail.getByText('Daily range').closest('div') as HTMLElement).getByText('3%')).toBeInTheDocument();
+    expect(detail.getByTestId('selected-daily-range')).toHaveClass('text-foreground');
+    expect(detail.getByTestId('selected-ma-values')).toHaveClass('text-foreground');
+    expect(detail.getByTestId('selected-bollinger-values')).toHaveClass('text-foreground');
+    expect(detail.getByTestId('selected-52w-high-low')).toHaveClass('text-foreground');
     expect(detail.getByText('Adjusted close is shown only when SSI provides it. Corporate actions are not inferred from reference or adjusted prices.')).toBeInTheDocument();
     expect(detail.getByText('Foreign net 5D')).toBeInTheDocument();
     expect(detail.getByText('Foreign net 20D')).toBeInTheDocument();
@@ -3868,11 +3872,14 @@ describe('VietnamDashboardPage watchlist loading', () => {
   });
 
   it.each([
-    { close: 98, referencePrice: 99, priceVsReferencePct: -1.01, expectedClass: 'text-danger', expectedText: '-1.01%' },
-    { close: 99, referencePrice: 99, priceVsReferencePct: 0, expectedClass: 'text-warning', expectedText: '0%' },
-    { close: null, referencePrice: 99, priceVsReferencePct: null, expectedClass: 'text-secondary-text', expectedText: 'Daily close unavailable' },
-    { close: 100, referencePrice: null, priceVsReferencePct: null, expectedClass: 'text-secondary-text', expectedText: 'Reference unavailable' },
-  ])('colors selected daily price by SSI reference direction %#', async ({ close, referencePrice, priceVsReferencePct, expectedClass, expectedText }) => {
+    { close: 100, referencePrice: 99, ceilingPrice: 106, floorPrice: 92, priceVsReferencePct: 1.01, expectedClass: 'text-success', expectedText: '+1.01%' },
+    { close: 99, referencePrice: 99, ceilingPrice: 106, floorPrice: 92, priceVsReferencePct: 0, expectedClass: 'text-warning', expectedText: '0.00%' },
+    { close: 106, referencePrice: 99, ceilingPrice: 106, floorPrice: 92, priceVsReferencePct: 7.07, expectedClass: 'text-ceiling-purple', expectedText: '+7.07%' },
+    { close: 92, referencePrice: 99, ceilingPrice: 106, floorPrice: 92, priceVsReferencePct: -7.07, expectedClass: 'text-cyan', expectedText: '-7.07%' },
+    { close: 98, referencePrice: 99, ceilingPrice: 106, floorPrice: 92, priceVsReferencePct: -1.01, expectedClass: 'text-danger', expectedText: '-1.01%' },
+    { close: null, referencePrice: 99, ceilingPrice: 106, floorPrice: 92, priceVsReferencePct: null, expectedClass: 'text-secondary-text', expectedText: 'Daily close unavailable' },
+    { close: 100, referencePrice: null, ceilingPrice: 106, floorPrice: 92, priceVsReferencePct: null, expectedClass: 'text-secondary-text', expectedText: 'Reference unavailable' },
+  ])('colors selected daily price by SSI board convention %#', async ({ close, referencePrice, ceilingPrice, floorPrice, priceVsReferencePct, expectedClass, expectedText }) => {
     const response = makeResponse(defaultTickers);
     response.watchlist[0] = {
       ...response.watchlist[0],
@@ -3883,10 +3890,14 @@ describe('VietnamDashboardPage watchlist loading', () => {
       dailyStockPrice: {
         ...response.watchlist[0].dailyStockPrice,
         referencePrice,
+        ceilingPrice,
+        floorPrice,
       },
       priceLimit: {
         ...response.watchlist[0].priceLimit,
         referencePrice,
+        ceilingPrice,
+        floorPrice,
       },
       indicators: {
         ...response.watchlist[0].indicators,

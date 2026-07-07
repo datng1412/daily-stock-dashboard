@@ -19,37 +19,55 @@ const finiteNumber = (value?: number | string | null): number | null => (
   typeof value === 'number' && Number.isFinite(value) ? value : null
 );
 
-export type PriceReferenceDirection = 'above' | 'below' | 'equal' | 'neutral';
+export type SsiBoardPriceState = 'ceiling' | 'floor' | 'reference' | 'above_reference' | 'below_reference' | 'neutral';
+export type SsiBoardPriceRole = 'reference' | 'ceiling' | 'floor';
 
-export const getPriceReferenceDirection = (
+export const getSsiBoardPriceState = (
   price?: number | string | null,
   reference?: number | string | null,
-): PriceReferenceDirection => {
+  ceiling?: number | string | null,
+  floor?: number | string | null,
+): SsiBoardPriceState => {
   const numericPrice = finiteNumber(price);
   const numericReference = finiteNumber(reference);
   if (numericPrice === null || numericReference === null || numericPrice <= 0 || numericReference <= 0) {
     return 'neutral';
   }
-  if (numericPrice > numericReference) return 'above';
-  if (numericPrice < numericReference) return 'below';
-  return 'equal';
+  const numericCeiling = finiteNumber(ceiling);
+  const numericFloor = finiteNumber(floor);
+  if (numericCeiling !== null && numericCeiling > 0 && numericPrice === numericCeiling) return 'ceiling';
+  if (numericFloor !== null && numericFloor > 0 && numericPrice === numericFloor) return 'floor';
+  if (numericPrice === numericReference) return 'reference';
+  if (numericPrice > numericReference) return 'above_reference';
+  if (numericPrice < numericReference) return 'below_reference';
+  return 'neutral';
 };
 
-export const priceReferenceDirectionClass = (direction: PriceReferenceDirection) => {
-  if (direction === 'above') return 'text-success';
-  if (direction === 'below') return 'text-danger';
-  if (direction === 'equal') return 'text-warning';
+export const ssiBoardPriceStateClass = (state: SsiBoardPriceState) => {
+  if (state === 'ceiling') return 'text-ceiling-purple';
+  if (state === 'floor') return 'text-cyan';
+  if (state === 'reference') return 'text-warning';
+  if (state === 'above_reference') return 'text-success';
+  if (state === 'below_reference') return 'text-danger';
   return 'text-secondary-text';
 };
 
-export const priceReferenceValueClass = (
+export const ssiBoardPriceValueClass = (
   price?: number | string | null,
   reference?: number | string | null,
-) => priceReferenceDirectionClass(getPriceReferenceDirection(price, reference));
+  ceiling?: number | string | null,
+  floor?: number | string | null,
+) => ssiBoardPriceStateClass(getSsiBoardPriceState(price, reference, ceiling, floor));
 
-export const REFERENCE_PRICE_CLASS = 'text-cyan';
-export const CEILING_PRICE_CLASS = 'text-purple';
-export const FLOOR_PRICE_CLASS = 'text-cyan';
+export const getSsiBoardRoleClass = (role: SsiBoardPriceRole) => {
+  if (role === 'ceiling') return 'text-ceiling-purple';
+  if (role === 'floor') return 'text-cyan';
+  return 'text-warning';
+};
+
+export const REFERENCE_PRICE_CLASS = getSsiBoardRoleClass('reference');
+export const CEILING_PRICE_CLASS = getSsiBoardRoleClass('ceiling');
+export const FLOOR_PRICE_CLASS = getSsiBoardRoleClass('floor');
 
 const signPrefix = (value: number) => {
   if (value > 0) return '+';

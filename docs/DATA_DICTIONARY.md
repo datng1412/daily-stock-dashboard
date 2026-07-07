@@ -12,7 +12,7 @@ Conventions:
 - Missing objects should be `null`.
 - Diagnostics fields are for debugging and should not become primary metric rows.
 - Frontend display formatting is UI-only. Raw API price fields remain VND/share numeric values; VN price-like fields are displayed in board-style thousand-VND units with two decimals and no suffix, for example `72,100` renders as `72.10`. Share-volume fields may render with `K`/`M` suffixes, and VND trading-value fields may render with `K`/`M`/`B`/`T` suffixes. Tooltips/titles may expose the raw VND or share count.
-- Frontend directional coloring is UI-only. Daily/latest price and `price_vs_reference_pct` are colored by comparing SSI DailyOhlc close/latest price with SSI DailyStockPrice `reference_price`: above reference is positive, below reference is negative, equal is neutral-warning, and missing/non-positive inputs are neutral. Reference, ceiling, and floor prices use role colors and do not change field ownership.
+- Frontend directional coloring is UI-only. Daily/latest price and `price_vs_reference_pct` are colored by comparing SSI DailyOhlc close/latest price with SSI DailyStockPrice `reference_price`, `ceiling_price`, and `floor_price`: ceiling is purple/magenta, floor is blue/cyan, reference is yellow, above reference is green, below reference is red, and missing/non-positive inputs are neutral. Raw API values and field ownership do not change.
 
 ## Stock Detail Panel Availability Summary
 

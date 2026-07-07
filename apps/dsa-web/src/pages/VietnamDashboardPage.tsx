@@ -46,7 +46,7 @@ import {
   formatCompactVnPrice,
   formatFullSharesTitle,
   formatFullVndTitle,
-  priceReferenceValueClass,
+  ssiBoardPriceValueClass,
   REFERENCE_PRICE_CLASS,
 } from '../utils/vietnamNumberFormat';
 
@@ -233,6 +233,17 @@ const formatSignedNumber = (value?: number | null, maximumFractionDigits = 2) =>
   if (value > 0) return `+${formatted}`;
   if (value < 0) return `-${formatted}`;
   return formatted;
+};
+
+const formatSignedPercentFixed = (value?: number | null, digits = 2) => {
+  if (value === null || value === undefined || Number.isNaN(value)) return '-';
+  const formatted = new Intl.NumberFormat('en-US', {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  }).format(Math.abs(value));
+  if (value > 0) return `+${formatted}%`;
+  if (value < 0) return `-${formatted}%`;
+  return `${formatted}%`;
 };
 
 const finiteNumber = (value?: number | null) => (
@@ -1632,7 +1643,7 @@ const WatchCard: React.FC<{ item: VietnamWatchItem; realtimeQuote?: VietnamRealt
         <div>
           <p className="text-xs text-secondary-text">Official daily close (SSI DailyOhlc)</p>
           <div className="mt-1 flex flex-wrap items-center gap-2">
-            <p className={cn('text-lg font-semibold', priceReferenceValueClass(dailyCloseValue(item), referencePriceValue(item)))}>
+            <p className={cn('text-lg font-semibold', ssiBoardPriceClass(item, dailyCloseValue(item)))}>
               {formatPrice(item.latestPrice ?? item.close)}
             </p>
             <Badge variant={priceSourceVariant(item.latestPriceSource)}>{(item.latestPriceSource ?? 'unknown').toUpperCase()}</Badge>
@@ -2317,7 +2328,7 @@ const SelectedTickerHeader: React.FC<{
               label="Daily close"
               value={formatPrice(item.latestPrice ?? item.close)}
               detail={item.latestPriceDate ?? item.priceDate ?? '-'}
-              valueClassName={priceReferenceValueClass(dailyCloseValue(item), referencePriceValue(item))}
+              valueClassName={ssiBoardPriceClass(item, dailyCloseValue(item))}
             />
             <SelectedTickerMetric
               label="% change"
@@ -2446,6 +2457,22 @@ const referencePriceValue = (item: VietnamWatchItem) => (
   finiteNumber(item.dailyStockPrice?.referencePrice)
   ?? finiteNumber(item.ssiReferencePrice)
   ?? finiteNumber(item.priceLimit?.referencePrice)
+);
+
+const ceilingPriceValue = (item: VietnamWatchItem) => (
+  finiteNumber(item.dailyStockPrice?.ceilingPrice)
+  ?? finiteNumber(item.ssiCeilingPrice)
+  ?? finiteNumber(item.priceLimit?.ceilingPrice)
+);
+
+const floorPriceValue = (item: VietnamWatchItem) => (
+  finiteNumber(item.dailyStockPrice?.floorPrice)
+  ?? finiteNumber(item.ssiFloorPrice)
+  ?? finiteNumber(item.priceLimit?.floorPrice)
+);
+
+const ssiBoardPriceClass = (item: VietnamWatchItem, price?: number | null) => (
+  ssiBoardPriceValueClass(price, referencePriceValue(item), ceilingPriceValue(item), floorPriceValue(item))
 );
 
 const rsi14Value = (item: VietnamWatchItem) => (
@@ -3002,7 +3029,7 @@ const IndicatorTable: React.FC<{
                     ) : null}
                   </td>
                   <td className="px-3 py-3 text-right tabular-nums">
-                    <div className={cn('font-medium', priceReferenceValueClass(close, referencePriceValue(item)))}>
+                    <div className={cn('font-medium', ssiBoardPriceClass(item, close))}>
                       {close === null ? missingValue(missingCellReason(item, 'dailyClose')) : formatPrice(close)}
                     </div>
                     <div className="mt-1 text-xs text-secondary-text">{close === null ? 'SSI DailyOhlc unavailable' : 'SSI DailyOhlc'}</div>
@@ -3880,10 +3907,10 @@ const StockDetailView: React.FC<{
   const ssiCeilingPrice = ssiDailyStockPrice.ceilingPrice ?? item.ssiCeilingPrice ?? item.priceLimit?.ceilingPrice ?? null;
   const ssiFloorPrice = ssiDailyStockPrice.floorPrice ?? item.ssiFloorPrice ?? item.priceLimit?.floorPrice ?? null;
   const officialDailyClose = dailyCloseValue(item);
-  const priceReferenceTone = priceReferenceValueClass(officialDailyClose, ssiReferencePrice);
+  const boardPriceTone = ssiBoardPriceValueClass(officialDailyClose, ssiReferencePrice, ssiCeilingPrice, ssiFloorPrice);
   const priceVsReferencePct = indicators.priceVsReferencePct ?? null;
   const priceVsReferenceText = priceVsReferencePct !== null && priceVsReferencePct !== undefined
-    ? `${formatSignedNumber(priceVsReferencePct, 2)}%`
+    ? formatSignedPercentFixed(priceVsReferencePct, 2)
     : indicators.priceVsReferenceStatus === 'reference_unavailable'
       ? 'Reference unavailable'
       : indicators.priceVsReferenceStatus === 'daily_close_unavailable'
@@ -4002,7 +4029,7 @@ const StockDetailView: React.FC<{
             <dt className="text-xs text-secondary-text">Daily close</dt>
             <dd
               data-testid="selected-daily-close-price"
-              className={cn('mt-1 font-medium', priceReferenceTone)}
+              className={cn('mt-1 font-medium', boardPriceTone)}
               title={[formatFullVndTitle(item.dailyClose ?? item.latestPrice ?? item.close), formatFullVndTitle(item.ohlcvClose ?? item.close)].filter(Boolean).join(' / ')}
             >
               {formatPrice(item.dailyClose ?? item.latestPrice ?? item.close)} / {formatPrice(item.ohlcvClose ?? item.close)}
@@ -4027,7 +4054,7 @@ const StockDetailView: React.FC<{
           </div>
           <div className="rounded-lg bg-card/60 p-3">
             <dt className="text-xs text-secondary-text">Vs reference</dt>
-            <dd data-testid="selected-price-vs-reference" className={cn('mt-1 font-medium', priceReferenceTone)}>
+            <dd data-testid="selected-price-vs-reference" className={cn('mt-1 font-medium', boardPriceTone)}>
               {priceVsReferenceText}
             </dd>
             <dd className="mt-1 text-xs text-secondary-text">SSI DailyOhlc + DailyStockPrice</dd>
@@ -4131,6 +4158,7 @@ const StockDetailView: React.FC<{
         <div className="rounded-lg bg-elevated/50 p-3">
           <dt className="text-xs text-secondary-text">Bollinger 20,2</dt>
           <dd
+            data-testid="selected-bollinger-values"
             className="mt-1 font-medium text-foreground"
             title={[formatFullVndTitle(indicators.bollinger?.lower), formatFullVndTitle(indicators.bollinger?.middle), formatFullVndTitle(indicators.bollinger?.upper)].filter(Boolean).join(' / ')}
           >
@@ -4144,6 +4172,7 @@ const StockDetailView: React.FC<{
         <div className="rounded-lg bg-elevated/50 p-3">
           <dt className="text-xs text-secondary-text">52W high / low</dt>
           <dd
+            data-testid="selected-52w-high-low"
             className="mt-1 font-medium text-foreground"
             title={[formatFullVndTitle(indicators.high52w), formatFullVndTitle(indicators.low52w)].filter(Boolean).join(' / ')}
           >
@@ -4161,7 +4190,7 @@ const StockDetailView: React.FC<{
         </div>
         <div className="rounded-lg bg-elevated/50 p-3">
           <dt className="text-xs text-secondary-text">Daily range</dt>
-          <dd className="mt-1 font-medium text-foreground">
+          <dd data-testid="selected-daily-range" className="mt-1 font-medium text-foreground">
             {hasDisplayValue(indicators.dailyRangePct) ? `${formatNumber(indicators.dailyRangePct, 2)}%` : 'Insufficient OHLC'}
           </dd>
           <dd className="mt-1 text-xs text-secondary-text">SSI DailyOhlc</dd>
@@ -4169,6 +4198,7 @@ const StockDetailView: React.FC<{
         <div className="rounded-lg bg-elevated/50 p-3">
           <dt className="text-xs text-secondary-text">MA20 / MA50</dt>
           <dd
+            data-testid="selected-ma-values"
             className="mt-1 font-medium text-foreground"
             title={[formatFullVndTitle(indicators.ma20), formatFullVndTitle(indicators.ma50)].filter(Boolean).join(' / ')}
           >

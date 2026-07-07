@@ -1015,6 +1015,9 @@
 .text-purple {
   color: hsl(var(--color-purple));
 }
+.text-ceiling-purple {
+  color: hsl(292 100% 68%);
+}
 .text-success {
   color: hsl(var(--color-success));
 }
