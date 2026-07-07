@@ -383,9 +383,15 @@ Select external domains and providers without changing SSI ownership. Corporate 
 
 Phase 5.0B proves a thin disabled-by-default contract with normalized event fields, empty-list behavior, and sanitized diagnostics. Entitlement, auth, limits, provenance, correction semantics, and storage/display/redistribution rights remain required before any live adapter.
 
-### Phase 5.1A - Corporate Actions and Dividends Provider
+### Phase 5.1A - News Provider Research & Planning
 
-Add verified event data only. Do not infer dividends or corporate actions from price gaps.
+Compare FiinGroup API Datafeed News, Vietstock DataFeed, and WiGroup WiFeed/WiData as candidate external news providers. Select the preferred first news-provider candidate, define the future `NewsProvider` contract, and document legal/commercial gates before runtime.
+
+This phase is planning only: no runtime provider, provider adapter, credentials, scraping, RSS ingestion, unofficial endpoint, fake news row, or fallback provider is implemented. News remains disabled with `news = []` until a later licensed provider gate passes.
+
+### Deferred external-provider track - Corporate Actions / Dividends / Rights / Splits
+
+Add verified event data only after entitlement and source-rights gates pass. FiinGroup API Datafeed remains the preferred automated candidate after commercial/legal verification, with provenance-required manual import as fallback-only. Do not infer dividends or corporate actions from price gaps.
 
 ### Phase 5.2A And Later - Financials, Metadata, Ratios, News, Macro, External Index
 
