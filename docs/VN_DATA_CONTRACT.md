@@ -309,6 +309,30 @@ news_status.source = disabled
 
 News disabled state must not be treated as a daily market-data failure. Mozyfin is not a VN runtime news fallback.
 
+Phase 5.1A defines the future `NewsProvider` planning contract only. It does not add a route, adapter, config flag, credential, provider call, or fallback provider.
+
+Future normalized news rows should include:
+
+| Field | Rule |
+| --- | --- |
+| `id` | Stable dashboard item ID derived from provider namespace and item identity. |
+| `title` | Required for a usable row. |
+| `summary` | Nullable; only populated when supplied and licensed for display. |
+| `source` | Publisher/source label. |
+| `source_url` | Nullable but preferred for attribution and deduplication. |
+| `published_at` | Provider publication timestamp; ingestion time must not replace it. |
+| `tickers` | Normalized ticker list; empty list is allowed for market-wide news. |
+| `market` | Market label such as `VN` when applicable. |
+| `category` | Normalized category such as company, market, macro, industry, policy, earnings, corporate actions, disclosure, or other. |
+| `language` | Provider language code when available. |
+| `provider` | Provider adapter label. |
+| `provider_item_id` | Provider-native ID when available. |
+| `ingested_at` | Dashboard ingestion timestamp. |
+| `sentiment` | Null unless the provider supplies a licensed methodology. |
+| `importance` | Null unless the provider supplies a licensed methodology. |
+
+Before any live news adapter is implemented, the provider must have written entitlement, production API/auth details, rate limits/SLA, display/storage/redistribution rights, full-text versus headline/summary/link rules, attribution requirements, source URL/provenance behavior, ticker mapping, historical depth, incremental update filters, Vietnamese encoding/timezone handling, and a sanitized licensed fixture.
+
 ## Future Module Contract
 
 Future enrichment modules such as financials, corporate actions, events, ownership, and richer profile details may appear as placeholder sections while implementation is pending. If they are exposed before implementation, their status may be:

@@ -35,6 +35,18 @@ Phase 5.0D reviewed the current repository docs plus current official provider d
 
 Phase 5.0D-2 clarifies that Vnstock, FiinQuant, FiinGroup API Datafeed, and manual imports are not fallback sources for SSI-owned or SSI-derived fields. Daily OHLCV, `latest_price`, chart candles, DailyStockPrice enrichment, intraday, realtime, trade tape, index discovery/components, and technical indicators remain SSI-owned or SSI-derived. External providers are limited to domain-scoped gaps such as corporate actions, dividends/rights/splits, financial statements, ratios, news, macro, and approved source-labeled metadata/index context.
 
+## Phase 5.1A News Provider Research and Planning
+
+Phase 5.1A reviewed current official provider pages for FiinGroup API Datafeed News, Vietstock DataFeed, and WiGroup WiFeed/WiData as a documentation-only news-provider planning pass. The detailed research record is `docs/VN_NEWS_PROVIDER_RESEARCH.md`.
+
+Result:
+
+* FiinGroup API Datafeed News is the preferred first automated news candidate only after written entitlement confirms ticker-tagged VN stock/company news, source URL availability, display/storage/redistribution rights, production auth, rate limits/SLA, historical depth, and full-text versus summary/link permission.
+* Vietstock DataFeed is a serious `candidate_after_entitlement` because its public DataFeed page lists API/Sync delivery, Vietnamese/English support, 24/7 news, company news, and Vietnam news categories, but public item-level ticker/source/deduplication schema and rights still require commercial review.
+* WiGroup WiFeed is a `candidate_after_entitlement`, likely strongest as a secondary macro/industry/company-news/report source unless a licensed API sample proves ticker-tagged stock-news rows, source URLs, deduplication fields, and display/storage rights.
+* Public RSS/web pages remain `blocked_pending_terms`; browser scraping and unofficial endpoints remain `not_allowed_now`; NewsAPI and GDELT are `secondary_macro_context_only`, not first VN ticker-news targets.
+* No runtime provider, credentials, config, API/schema, frontend behavior, scraping path, fallback provider, fake news row, or SSI ownership rule changed.
+
 Official docs reviewed:
 
 * [Vnstock docs](https://vnstocks.com/docs), [Vnstock free library](https://vnstocks.com/docs/vnstock), [market data](https://vnstocks.com/docs/vnstock/du-lieu-thi-truong-market-data), [financial analysis](https://vnstocks.com/docs/vnstock/phan-tich-co-ban-fundamental), [disclaimer](https://vnstocks.com/onboard/mien-tru-trach-nhiem), and [license](https://vnstocks.com/onboard/giay-phep-su-dung).
@@ -58,7 +70,7 @@ Official docs reviewed:
 | Financial statements | FiinGroup API Datafeed | FiinQuant after entitlement | `candidate_after_entitlement` | Statement coverage, period/audit/restatement semantics, source provenance, storage/display rights | No | Add only after corporate-actions provider gate proves auth/provenance patterns | Yes |
 | Financial ratios | FiinGroup API Datafeed | FiinQuant after entitlement | `candidate_after_entitlement` | Methodology, sector comparability, period semantics, licensing | No | Keep provider ratios separate from local derivations | Yes |
 | Company metadata fallback | FiinGroup API Datafeed | Vnstock for research only | `candidate_after_entitlement` | Per-field provenance, freshness, source priority, display rights | No | Only fill SSI-null fields with source labels after approval | Yes |
-| News | FiinGroup API Datafeed | Licensed exchange/RSS source after terms review | `candidate_after_entitlement` | Content copyright, retention, display, redistribution, ticker matching | No | Future NewsProvider only; no Mozyfin/KBS fallback | Yes |
+| News | FiinGroup API Datafeed News | Vietstock DataFeed or WiGroup WiFeed/WiData after entitlement; public RSS only after explicit terms review | `preferred_after_entitlement` for FiinGroup; `candidate_after_entitlement` for Vietstock/WiGroup | Content copyright, retention, display, redistribution, ticker matching, source URL availability, full-text versus summary/link permission | No | Future NewsProvider only; no Mozyfin/KBS fallback; see `docs/VN_NEWS_PROVIDER_RESEARCH.md` | Yes |
 | Macro | FiinGroup API Datafeed or series-specific official source | None selected | `deferred` | Series owner, revision semantics, timestamp, storage/display rights | No | Define a small indicator list before implementation | Yes |
 | External VNINDEX/index context | FiinGroup API Datafeed | FiinQuant research only | `candidate_after_entitlement` | Exchange-data display/redistribution rights and source labeling | No | Never label external index rows as SSI | Yes |
 | Realtime/tick/orderbook/trade tape | FiinQuant | FiinGroup trading data only after contract review | `deferred`; `candidate_after_entitlement` | Commercial live data entitlement, latency/SLA, storage/display/redistribution, stream lifecycle | No | Consider only if SSI streaming is insufficient; do not replace SSI-owned daily data | Yes |
@@ -70,11 +82,11 @@ Official docs reviewed:
 1. Corporate actions/dividends/rights/splits: highest correctness impact for event markers and dividend context. Candidate: FiinGroup API Datafeed, with manual/provenance import as offline fallback. Requires written entitlement, event coverage, correction/cancellation semantics, provenance, storage/display/redistribution rights, and a licensed fixture. No impact on SSI DailyOhlc or `latest_price`.
 2. Financial statements: unlocks company fundamentals without inferring from prices. Candidate: FiinGroup API Datafeed first; FiinQuant only after entitlement. Requires statement-type, audit, period, restatement, units, source, and display/storage proof. No impact on SSI market-data fields.
 3. Financial ratios/methodology: useful only after statements/provenance are understood. Candidate: FiinGroup ratios or FiinQuant valuation after methodology and licensing proof. Ratios must be source-labeled and not mixed silently with local calculations.
-4. NewsProvider qualification: candidate FiinGroup news or licensed exchange/disclosure feeds. Requires copyright, retention, ticker-matching, duplicate, timestamp, and redistribution proof. No Mozyfin/KBS fallback.
+4. NewsProvider qualification: FiinGroup API Datafeed News is preferred after entitlement; Vietstock DataFeed and WiGroup WiFeed/WiData are candidates after commercial/API/rights review. Requires copyright, retention, ticker-matching, source URL, duplicate, timestamp, full-text versus summary/link, and redistribution proof. No Mozyfin/KBS fallback.
 5. Macro/index context: candidate FiinGroup macro/index or series-specific official sources. Requires series-by-series rights, revision, timestamp, and source labeling. External index context must not replace or masquerade as SSI.
 6. Realtime/tick/orderbook provider qualification: candidate FiinQuant only if SSI streaming remains insufficient and commercial live-data rights are clear. It must be a separate, source-labeled live section and must not overwrite SSI DailyOhlc, DailyStockPrice, realtime, or trade tape.
 
-### Phase 5.1A entry criteria before runtime code
+### External-provider entry criteria before runtime code
 
 Before any live external provider adapter is implemented, record all of the following in this document or a linked provider proof:
 
@@ -279,7 +291,7 @@ Diagnostics must be limited to provider name, request domain, status, row count,
 
 This proof does not implement VNStocks, FiinGroup, scraping, broker APIs, production external-provider runtime, fallback providers, fake events, or changes to SSI DailyOhlc/DailyStockPrice ownership. `latest_price` remains SSI DailyOhlc.
 
-Before a live adapter is written, Phase 5.1A must still obtain and record all access, entitlement, rate-limit, historical-depth, correction, storage, display, redistribution, provenance, and symbol-mapping answers listed above.
+Before a live adapter is written, the relevant entitlement phase must still obtain and record all access, entitlement, rate-limit, historical-depth, correction, storage, display, redistribution, provenance, and symbol-mapping answers listed above.
 
 ## Verified Facts and Remaining Unknowns
 

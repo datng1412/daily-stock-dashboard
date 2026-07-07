@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [documentation] Add Phase 5.1A VN news provider research comparing FiinGroup, Vietstock, WiGroup, public RSS, scraping, NewsAPI, and GDELT without adding runtime providers.
 - [improvement] Add bounded frontend trade-tape warm-up refetch for pending SSI X-TRADE startup states and use dedicated yellow for SSI reference/equal/zero-change prices.
 - [fix] Map observed SSI `X-TRADE` side codes `BU` and `SD` to Buy/Sell while preserving raw side diagnostics and keeping trade side independent from price color or change.
 - [improvement] Render SSI `X-TRADE` rows with SSI-style `Time`, `B/S`, `Vol`, `Price`, `+/-`, and `+/-(%)` columns, using explicit trade-side data only and reference-based change fields.

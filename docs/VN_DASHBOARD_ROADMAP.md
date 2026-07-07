@@ -55,7 +55,7 @@ This roadmap is the source of truth for Vietnam dashboard provider ownership. SS
 | Realtime snapshot | SSI FastConnect Data streaming | Provider, service, API, and UI contract added; buffered `X`, `X-QUOTE`, and `X-TRADE` parser covered; config-disabled background manager/cache skeleton added; official-client adapter added behind disabled runtime flag; Phase 4.7B keeps public copy short and moves technical detail to sectioned diagnostics | Keep unavailable and separate from daily close, intraday, and official daily OHLCV until the background adapter safely populates current rows |
 | Trade tape | SSI FastConnect Data streaming or future verified trade contract | Phase 4.7C adds a bounded process-local X-TRADE event buffer populated only by the background streaming manager; Phase 4.8E adds startup-owned `X-TRADE:{symbol}` subscriptions when trade tape is enabled; Phase 4.8E-2 returns buffered timestamped rows even when stream freshness is stale; Phase 4.8E-3 shows SSI-style B/S and change columns from explicit side/reference fields; Phase 4.8E-4 maps observed `BU`/`SD` side codes while preserving raw side audit fields; true historical list/history semantics still need confirmation | Keep latest-event tape separate from official daily OHLCV, DailyStockPrice, and realtime snapshot |
 | Legacy realtime snapshot/trade tape | KBS | Disabled by default; only available behind explicit legacy flags | Do not silently fallback from SSI to KBS |
-| News | Future NewsProvider | Disabled/not implemented | Do not call Mozyfin; return explicit disabled/not_implemented state |
+| News | Future NewsProvider | Disabled/not implemented; Phase 5.1A research completed | Do not call Mozyfin; return explicit disabled/not_implemented state until a licensed NewsProvider passes entitlement |
 | Unsupported fundamentals | External provider required | Not implemented | Keep explicitly labeled; do not mix with SSI market-data fields |
 | BCTC/KQKD, financial statements, financial ratios | External provider required | Not implemented | Investigate separately |
 | Corporate actions, dividends, rights, splits | External provider required | Stub/unavailable | Events must come from explicit source data |
@@ -1321,7 +1321,30 @@ Result:
 * Added Phase 4.8A as the planned SSI-derived metrics completion phase before assigning SSI-computable metrics to external providers.
 * Did not change runtime code, schemas, frontend behavior, configuration, provider adapters, fallback behavior, fake data behavior, or `latest_price` ownership.
 
-### Phase 5.1A - Corporate Actions and Dividends Provider
+### Phase 5.1A - News Provider Research and Planning
+
+Status: completed on 2026-07-07 as a documentation-only planning pass.
+
+Goal:
+
+Select the best first VN stock/company/market news provider to implement later, without adding runtime calls, credentials, adapters, scraping, RSS ingestion, fallback providers, fake rows, frontend changes, config changes, or SSI ownership changes.
+
+Result:
+
+* Added `docs/VN_NEWS_PROVIDER_RESEARCH.md` with the future `NewsProvider` item contract, provider capability gates, FiinGroup/Vietstock/WiGroup comparison matrix, lower-priority source classification, legal gates, and recommended future architecture.
+* Classified FiinGroup API Datafeed News as `preferred_after_entitlement` for the first automated NewsProvider target because official public schemas expose ticker, organization code, title, short/full content, source, source link, publication, create/update, status, and source-code fields.
+* Classified Vietstock DataFeed as `candidate_after_entitlement` because official pages list API/Sync delivery, Vietnamese/English support, 24/7 news, company news, and Vietnam news categories, but item-level ticker/source/deduplication schema and rights still need commercial review.
+* Classified WiGroup WiFeed/WiData as `candidate_after_entitlement`, likely strongest as a secondary macro/industry/company-news/report source unless a licensed API sample proves ticker-tagged stock-news rows, source URLs, deduplication fields, and display/storage rights.
+* Classified public RSS/web pages as `blocked_pending_terms`, scraping/unofficial endpoints as `not_allowed_now`, and NewsAPI/GDELT as `secondary_macro_context_only`.
+* Left runtime unchanged: news remains disabled/not implemented with `news=[]`, no provider calls, no credentials, no fallback, no fake rows, and no change to `latest_price`.
+
+Future news phases:
+
+* Phase 5.1B - NewsProvider Entitlement Pack: obtain written entitlement, API/auth/rate-limit/SLA/pricing terms, display/storage/redistribution rights, source attribution rules, ticker mapping, historical depth, and a sanitized licensed fixture.
+* Phase 5.1C - Licensed NewsProvider Adapter: implement a disabled-by-default provider adapter only after Phase 5.1B passes.
+* Phase 5.1D - News UI Cards: render source-labeled company and market news cards only after licensed API rows exist.
+
+### Deferred corporate-actions live-provider track
 
 Goal:
 
@@ -1371,11 +1394,11 @@ Rules:
 * Do not compute ratios from incomplete statements unless a separate derivation contract is approved.
 * Keep provider methodology and calculation date visible.
 
-### Phase 5.4A - NewsProvider Implementation
+### Superseded placeholder - NewsProvider Implementation
 
 Goal:
 
-Add sourced watchlist/company news after a provider contract is selected.
+Add sourced watchlist/company news after a provider contract is selected. Phase 5.1A now owns the research/planning step, Phase 5.1B owns entitlement, Phase 5.1C owns the licensed disabled-by-default adapter, and Phase 5.1D owns UI cards.
 
 Scope:
 

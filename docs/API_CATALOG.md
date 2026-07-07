@@ -329,6 +329,31 @@ Response rules:
 - Do not infer dividends, rights, splits, or adjustment events from price/reference gaps.
 - Disabled or failed provider states do not affect SSI daily data or `latest_price`.
 
+## Planned `GET /api/v1/stocks/vn/news`
+
+Status: planned only. No route, provider adapter, credentials, config flag, scraping path, or fallback provider is implemented in Phase 5.1A.
+
+Purpose:
+
+- Return licensed, source-labeled VN market and ticker/company news after a future `NewsProvider` entitlement gate passes.
+- Keep news separate from SSI-owned market data.
+
+Potential params:
+
+| Param | Meaning | Notes |
+| --- | --- | --- |
+| `ticker` | Optional normalized VN symbol | Example future shape: `/api/v1/stocks/vn/news?ticker=FPT`. |
+| `category` | Optional normalized category | Examples: company, market, macro, industry, policy, earnings, corporate actions, disclosure. |
+| `language` | Optional language filter | Provider support must be verified. |
+| `limit` | Bounded item count | Exact bounds require future contract proof. |
+
+Planned response rules:
+
+- Current runtime remains `news=[]` and `news_status.status=disabled` until a licensed provider exists.
+- Future usable rows should include item ID, title, summary when allowed, source, source URL when available, published timestamp, tickers, market, category, language, provider, provider item ID, ingestion timestamp, and nullable sentiment/importance only if provider methodology is licensed.
+- News failure must not affect SSI DailyOhlc, DailyStockPrice, intraday, realtime, trade tape, index, or metadata sections.
+- Public RSS, public web pages, browser scraping, and unofficial endpoints are not accepted as production providers without explicit terms approval.
+
 ## `GET /api/v1/stocks/vn/realtime`
 
 Purpose:
