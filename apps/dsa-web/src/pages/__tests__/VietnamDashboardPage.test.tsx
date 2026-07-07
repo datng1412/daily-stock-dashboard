@@ -622,9 +622,17 @@ const makeTradesResponse = (symbol: string): VietnamRealtimeTradesResponse => ({
   trades: [
     {
       time: '10:16:00',
-      price: 101.7,
+      timestamp: '2026-06-11T10:16:00+07:00',
+      timestampDisplay: '10:16:00',
+      price: 101700,
       volume: 300,
+      side: 'buy',
+      sideLabel: 'Buy',
+      sideIfAvailable: 'BU',
+      change: 2700,
+      changePct: 2.73,
       matchType: 'buy',
+      rawType: 'X-TRADE',
       id: '1',
       source: 'SSI',
     },
@@ -2293,6 +2301,146 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(screen.getAllByText('0.10').length).toBeGreaterThan(0);
   });
 
+  it('renders buffered X-TRADE rows even when trade tape diagnostics are stale', async () => {
+    mockedGetVietnamRealtimeTrades.mockImplementation(async (symbol) => {
+      const response = makeTradesResponse(symbol);
+      return {
+      ...response,
+      status: 'ok',
+      reasonCode: 'buffered_rows_available',
+      classification: 'buffered_rows_available',
+      statusMessage: 'SSI trade tape ready.',
+      trades: [
+        ...response.trades,
+        {
+          time: '10:15:59',
+          timestamp: '2026-06-11T10:15:59+07:00',
+          timestampDisplay: '10:15:59',
+          price: 92,
+          volume: 1500,
+          side: 'sell',
+          sideLabel: 'Sell',
+          sideIfAvailable: 'SD',
+          change: 1500,
+          changePct: 1.66,
+          matchType: 'SD',
+          rawType: 'X-TRADE',
+          id: '2',
+          source: 'SSI',
+        },
+        {
+          time: '10:15:58',
+          timestamp: '2026-06-11T10:15:58+07:00',
+          timestampDisplay: '10:15:58',
+          price: 99,
+          volume: 4700,
+          side: null,
+          sideLabel: null,
+          change: 0,
+          changePct: 0,
+          matchType: 'matched',
+          rawType: 'X-TRADE',
+          id: '3',
+          source: 'SSI',
+        },
+      ],
+      diagnostics: {
+        streamingStatus: 'cache_stale',
+        cacheStatus: 'stale',
+        tradeTapeBufferRowCount: 50,
+        tradeTapeReturnedRowCount: 3,
+      },
+    };
+    });
+
+    render(<VietnamDashboardPage />);
+
+    const tradeHeading = await screen.findByRole('heading', { name: 'Trade tape' });
+    const tradeCard = tradeHeading.closest('div.rounded-lg') as HTMLElement | null;
+    if (!tradeCard) throw new Error('Trade tape card not found');
+    const trade = within(tradeCard);
+
+    expect(trade.getByText('10:16:00')).toBeInTheDocument();
+    expect(trade.getByRole('columnheader', { name: 'Time' })).toBeInTheDocument();
+    expect(trade.getByRole('columnheader', { name: 'B/S' })).toBeInTheDocument();
+    expect(trade.getByRole('columnheader', { name: 'Vol' })).toBeInTheDocument();
+    expect(trade.getByRole('columnheader', { name: 'Price' })).toBeInTheDocument();
+    expect(trade.getByRole('columnheader', { name: '+/-' })).toBeInTheDocument();
+    expect(trade.getByRole('columnheader', { name: '+/-(%)' })).toBeInTheDocument();
+    const side = trade.getByText('Buy');
+    expect(side).toBeInTheDocument();
+    expect(side.className).toContain('text-success');
+    expect(trade.getByText('Sell')).toHaveClass('text-danger');
+    expect(trade.getAllByText('—').some((node) => node.className.includes('text-secondary-text'))).toBe(true);
+    expect(trade.getByText('300')).toBeInTheDocument();
+    const price = trade.getByText('101.70');
+    expect(price).toBeInTheDocument();
+    expect(price.className).toContain('text-success');
+    expect(trade.getByText('0.09')).toHaveClass('text-cyan');
+    expect(trade.getByText('0.10')).toHaveClass('text-reference-yellow');
+    expect(trade.getByText('+2.70')).toHaveClass('text-success');
+    expect(trade.getByText('+2.73')).toHaveClass('text-success');
+    expect(trade.getByText('+1.50')).toHaveClass('text-success');
+    expect(trade.getByText('+1.66')).toHaveClass('text-success');
+    expect(trade.getAllByText('0.00').some((node) => node.className.includes('text-reference-yellow'))).toBe(true);
+    expect(trade.queryByText('SSI trade tape unavailable.')).not.toBeInTheDocument();
+    expect(trade.queryByText(/Loading/i)).not.toBeInTheDocument();
+    expect(trade.queryByText(/Lunch break/i)).not.toBeInTheDocument();
+    expect(trade.queryByText(/stale/i)).not.toBeInTheDocument();
+  });
+
+  it('refetches pending trade tape until X-TRADE rows arrive and then renders rows first', async () => {
+    let callCount = 0;
+    mockedGetVietnamRealtimeTrades.mockImplementation(async (symbol) => {
+      callCount += 1;
+      if (callCount === 1) {
+        return {
+          ...makeTradesResponse(symbol),
+          status: 'unavailable',
+          reasonCode: 'stream_cache_empty',
+          classification: 'stream_cache_empty',
+          statusMessage: 'No SSI trade rows available yet.',
+          trades: [],
+          diagnostics: {
+            streamingStatus: 'running',
+            managerState: 'running',
+            tradeTapeSubscriptionStatus: 'subscribed',
+            tradeTapeBufferRowCount: 0,
+          },
+        };
+      }
+      return {
+        ...makeTradesResponse(symbol),
+        status: 'unavailable',
+        reasonCode: 'buffered_rows_available',
+        classification: 'buffered_rows_available',
+        statusMessage: 'SSI trade tape ready.',
+        diagnostics: {
+          streamingStatus: 'cache_stale',
+          cacheStatus: 'stale',
+          tradeTapeReturnedRowCount: 1,
+        },
+      };
+    });
+
+    render(<VietnamDashboardPage />);
+
+    const tradeHeading = await screen.findByRole('heading', { name: 'Trade tape' });
+    const tradeCard = tradeHeading.closest('div.rounded-lg') as HTMLElement | null;
+    if (!tradeCard) throw new Error('Trade tape card not found');
+    const trade = within(tradeCard);
+
+    await waitFor(() => expect(mockedGetVietnamRealtimeTrades).toHaveBeenCalledWith('FPT', 100));
+    expect(trade.getByText('Loading SSI trade tape...')).toBeInTheDocument();
+
+    await waitFor(() => expect(mockedGetVietnamRealtimeTrades.mock.calls.length).toBeGreaterThanOrEqual(2), { timeout: 6500 });
+
+    expect(trade.getByRole('columnheader', { name: 'Time' })).toBeInTheDocument();
+    expect(trade.getByText('10:16:00')).toBeInTheDocument();
+    expect(trade.queryByText('Loading SSI trade tape...')).not.toBeInTheDocument();
+    expect(trade.queryByText('SSI trade tape unavailable.')).not.toBeInTheDocument();
+  }, 10_000);
+
   it('renders a compact selected ticker header with distinct source labels', async () => {
     render(<VietnamDashboardPage />);
 
@@ -3782,7 +3930,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     const detail = within(screen.getByText('Stock detail').closest('section') as HTMLElement);
     expect(detail.getByRole('heading', { name: 'DailyStockPrice coverage' })).toBeInTheDocument();
     expect(detail.getByText('Reference')).toBeInTheDocument();
-    expect(detail.getByTestId('selected-reference-price')).toHaveClass('text-warning');
+    expect(detail.getByTestId('selected-reference-price')).toHaveClass('text-reference-yellow');
     expect(detail.getByTestId('selected-reference-price')).toHaveTextContent('0.10');
     expect(detail.getByText('Ceiling price')).toBeInTheDocument();
     expect(detail.getByTestId('selected-ceiling-price')).toHaveClass('text-ceiling-purple');
@@ -3873,7 +4021,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
   it.each([
     { close: 100, referencePrice: 99, ceilingPrice: 106, floorPrice: 92, priceVsReferencePct: 1.01, expectedClass: 'text-success', expectedText: '+1.01%' },
-    { close: 99, referencePrice: 99, ceilingPrice: 106, floorPrice: 92, priceVsReferencePct: 0, expectedClass: 'text-warning', expectedText: '0.00%' },
+    { close: 99, referencePrice: 99, ceilingPrice: 106, floorPrice: 92, priceVsReferencePct: 0, expectedClass: 'text-reference-yellow', expectedText: '0.00%' },
     { close: 106, referencePrice: 99, ceilingPrice: 106, floorPrice: 92, priceVsReferencePct: 7.07, expectedClass: 'text-ceiling-purple', expectedText: '+7.07%' },
     { close: 92, referencePrice: 99, ceilingPrice: 106, floorPrice: 92, priceVsReferencePct: -7.07, expectedClass: 'text-cyan', expectedText: '-7.07%' },
     { close: 98, referencePrice: 99, ceilingPrice: 106, floorPrice: 92, priceVsReferencePct: -1.01, expectedClass: 'text-danger', expectedText: '-1.01%' },

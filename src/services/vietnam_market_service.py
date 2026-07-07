@@ -31,7 +31,10 @@ from data_provider.ssi_fastconnect_fetcher import (
     DAILY_OHLC_RATE_LIMIT_COOLDOWN_REASON,
     SsiFastConnectFetcher,
 )
-from data_provider.ssi_streaming_realtime import SSI_STREAMING_REALTIME_DISABLED_REASON
+from data_provider.ssi_streaming_realtime import (
+    SSI_STREAMING_REALTIME_DISABLED_REASON,
+    normalize_trade_side,
+)
 from src.config import get_config
 from src.services.vietnam_observability import (
     monotonic_ms,
@@ -645,6 +648,10 @@ LIVE_DIAGNOSTIC_KEYS = {
     "latest_trade_timestamp",
     "latest_trade_age_seconds",
     "channel_type",
+    "trade_tape_channel_type",
+    "trade_tape_channels",
+    "trade_tape_subscription_status",
+    "realtime_channels",
     "bootstrap_membership",
     "live_adapter_status",
     "bootstrap_symbols",
@@ -695,7 +702,14 @@ def _safe_live_diagnostic_value(key: str, value: Any) -> Any:
         if isinstance(value, float) and math.isnan(value):
             return None
         return value
-    if key in {"attempted_endpoints", "bootstrap_symbols", "requested_symbols", "channels"} and isinstance(value, (list, tuple, set)):
+    if key in {
+        "attempted_endpoints",
+        "bootstrap_symbols",
+        "requested_symbols",
+        "channels",
+        "realtime_channels",
+        "trade_tape_channels",
+    } and isinstance(value, (list, tuple, set)):
         safe_items = [
             _safe_live_diagnostic_text(item, max_length=80)
             for item in list(value)[:20]
@@ -826,6 +840,7 @@ def _status_message_from_reason(
         messages = {
             "historical_trade_tape_supported": "SSI historical trade tape ready.",
             "streaming_trade_tape_supported": "SSI trade tape ready.",
+            "buffered_rows_available": "SSI trade tape ready.",
             "latest_trade_stream_only": VN_TRADE_TAPE_UNAVAILABLE_REASON,
             "disabled": VN_TRADE_TAPE_DISABLED_REASON,
             "unavailable_no_rows": "No SSI trade rows available.",
@@ -833,6 +848,8 @@ def _status_message_from_reason(
             "stream_not_bootstrapped": VN_TRADE_TAPE_UNAVAILABLE_REASON,
             "stream_cache_empty": VN_TRADE_TAPE_UNAVAILABLE_REASON,
             "stream_cache_stale": VN_TRADE_TAPE_UNAVAILABLE_REASON,
+            "xtrade_not_subscribed": VN_TRADE_TAPE_UNAVAILABLE_REASON,
+            "xtrade_disabled": VN_TRADE_TAPE_DISABLED_REASON,
             "unavailable_provider_error": VN_TRADE_TAPE_UNAVAILABLE_REASON,
             "unavailable_unknown": VN_TRADE_TAPE_UNAVAILABLE_REASON,
             "not_implemented": VN_TRADE_TAPE_UNAVAILABLE_REASON,
@@ -917,6 +934,10 @@ def _classify_trade_tape_reason(
         return "stream_cache_stale"
     if "buffer empty" in reason_text or "cache empty" in reason_text:
         return "stream_cache_empty"
+    if "x-trade stream channel not subscribed" in reason_text or "xtrade_not_subscribed" in reason_text:
+        return "xtrade_not_subscribed"
+    if "x-trade stream channel disabled" in reason_text or "xtrade_disabled" in reason_text:
+        return "xtrade_disabled"
     if "not started" in reason_text or "manager unavailable" in reason_text or "bootstrap symbols empty" in reason_text:
         return "stream_not_started"
     if "no trade rows" in reason_text:
@@ -3296,26 +3317,65 @@ class VietnamMarketService:
         }
 
     @staticmethod
-    def _trade_row_from_ssi(row: Dict[str, Any]) -> Dict[str, Any]:
-        side = row.get("side_if_available")
+    def _trade_change_fields(
+        price: Optional[float],
+        reference_price: Optional[float],
+    ) -> Dict[str, Optional[float]]:
+        if price is None or price <= 0 or reference_price is None or reference_price <= 0:
+            return {"change": None, "change_pct": None}
+        change = price - reference_price
+        return {
+            "change": _round_optional(change, 2),
+            "change_pct": _round_optional((change / reference_price) * 100, 2),
+        }
+
+    @classmethod
+    def _enrich_trade_tape_rows(
+        cls,
+        rows: Iterable[Dict[str, Any]],
+        *,
+        reference_price: Optional[float],
+    ) -> List[Dict[str, Any]]:
+        enriched: List[Dict[str, Any]] = []
+        for row in rows or []:
+            if not isinstance(row, dict):
+                continue
+            trade = dict(row)
+            trade.update(cls._trade_change_fields(_safe_float(trade.get("price")), reference_price))
+            enriched.append(trade)
+        return enriched
+
+    @staticmethod
+    def _trade_row_from_ssi(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        raw_side = row.get("side_if_available") or row.get("side") or row.get("match_type")
+        side = normalize_trade_side(row.get("side")) or normalize_trade_side(raw_side)
         sequence = row.get("sequence_if_available")
+        timestamp = row.get("timestamp")
+        timestamp_display = row.get("timestamp_display") or row.get("time")
+        price = _safe_float(row.get("price"))
+        volume = _safe_float(row.get("volume"))
+        if not timestamp or price is None or volume is None:
+            return None
         return {
             "ticker": row.get("ticker") or row.get("symbol"),
             "symbol": row.get("symbol") or row.get("ticker"),
             "time": row.get("time"),
-            "timestamp": row.get("timestamp"),
-            "timestamp_display": row.get("timestamp_display") or row.get("time"),
-            "price": _safe_float(row.get("price")),
-            "volume": _safe_float(row.get("volume")),
+            "timestamp": timestamp,
+            "timestamp_display": timestamp_display,
+            "price": price,
+            "volume": volume,
             "value": _safe_float(row.get("value")),
-            "side": row.get("side") or side,
-            "side_if_available": side,
+            "side": side,
+            "side_label": "Buy" if side == "buy" else "Sell" if side == "sell" else None,
+            "side_if_available": raw_side,
             "sequence": row.get("sequence") or sequence,
             "sequence_if_available": sequence,
-            "match_type": side,
+            "match_type": raw_side,
             "id": sequence,
             "raw_type": row.get("raw_type"),
             "source": SSI_TRADE_TAPE_SOURCE,
+            "change": _safe_float(row.get("change")),
+            "change_pct": _safe_float(row.get("change_pct")),
         }
 
     def _load_ssi_realtime_payload(self, symbol: str) -> Dict[str, Any]:
@@ -3370,10 +3430,22 @@ class VietnamMarketService:
         payload = self._get_ssi_fetcher().get_trade_tape(symbol, limit=limit)
         status = str(payload.get("status") or "").lower() if isinstance(payload, dict) else ""
         if status == "ok":
-            trades = [self._trade_row_from_ssi(row) for row in (payload.get("trades") or []) if isinstance(row, dict)]
+            trades = [
+                trade
+                for row in (payload.get("trades") or [])
+                if isinstance(row, dict)
+                for trade in [self._trade_row_from_ssi(row)]
+                if trade is not None
+            ]
             if trades:
                 safe_diagnostics = _live_failure_diagnostics(payload)
-                reason_code = "streaming_trade_tape_supported" if payload.get("streaming_status") else "historical_trade_tape_supported"
+                reason_code = (
+                    "buffered_rows_available"
+                    if payload.get("streaming_status") == "cache_stale"
+                    else "streaming_trade_tape_supported"
+                    if payload.get("streaming_status")
+                    else "historical_trade_tape_supported"
+                )
                 trade_tape_status = {
                     "status": "ok",
                     "source": SSI_TRADE_TAPE_SOURCE,
@@ -5126,7 +5198,25 @@ class VietnamMarketService:
         )
         payload = result["value"] if isinstance(result.get("value"), dict) else {}
         status = str(payload.get("status") or "unavailable").lower()
-        trades = [self._trade_row_from_ssi(row) for row in payload.get("trades", []) if isinstance(row, dict)]
+        trades = [
+            trade
+            for row in payload.get("trades", [])
+            if isinstance(row, dict)
+            for trade in [self._trade_row_from_ssi(row)]
+            if trade is not None
+        ]
+        reference_price: Optional[float] = None
+        if self.config.daily_stock_price_provider == VN_PROVIDER_SSI:
+            daily_stock_price_result = self._read_latest_ssi_daily_stock_price(
+                ticker,
+                force_refresh=force_refresh,
+            )
+            daily_stock_price_value = daily_stock_price_result.get("value")
+            if isinstance(daily_stock_price_value, tuple) and daily_stock_price_value:
+                daily_stock_price_row = daily_stock_price_value[0]
+                if isinstance(daily_stock_price_row, dict):
+                    reference_price = _safe_float(daily_stock_price_row.get("reference_price"))
+        trades = self._enrich_trade_tape_rows(trades, reference_price=reference_price)
         diagnostics = _live_failure_diagnostics(
             payload,
             reason=(payload.get("reason") or payload.get("message")) if status != "ok" else None,
@@ -5165,7 +5255,11 @@ class VietnamMarketService:
             reason=str(response.get("error_detail") or response.get("error") or payload.get("reason") or payload.get("streaming_status") or ""),
         )
         if response.get("status") == "ok" and payload.get("streaming_status"):
-            response_reason_code = "streaming_trade_tape_supported"
+            response_reason_code = (
+                "buffered_rows_available"
+                if payload.get("streaming_status") == "cache_stale"
+                else "streaming_trade_tape_supported"
+            )
         response["reason_code"] = response_reason_code
         response["classification"] = response_reason_code
         response["status_message"] = _status_message_from_reason(
@@ -5556,6 +5650,10 @@ class VietnamMarketService:
             force_refresh=force_refresh,
         )
         trade_tape_payload = dict(trade_tape_result["value"])
+        trade_tape_payload["trade_tape"] = self._enrich_trade_tape_rows(
+            trade_tape_payload.get("trade_tape") or [],
+            reference_price=_safe_float((ssi_daily_stock_price or {}).get("reference_price")),
+        )
         trade_tape_status_payload = dict(trade_tape_payload.get("trade_tape_status") or {})
         trade_tape_diagnostics = _live_failure_diagnostics(trade_tape_status_payload.pop("diagnostics", {}))
         trade_tape_payload["trade_tape_status"] = trade_tape_status_payload

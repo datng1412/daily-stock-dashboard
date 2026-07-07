@@ -858,6 +858,7 @@ class SsiFastConnectFetcher:
             parser=self.normalize_streaming_realtime_messages,
             client_factory=streaming_realtime_client_factory,
             channel_template=self.streaming_realtime_channel_template,
+            trade_tape_enabled=self.trade_tape_enabled,
             idle_timeout_seconds=self.streaming_realtime_idle_timeout_seconds,
             reconnect_enabled=self.streaming_realtime_reconnect_enabled,
             reconnect_initial_delay_seconds=self.streaming_realtime_reconnect_initial_delay_seconds,

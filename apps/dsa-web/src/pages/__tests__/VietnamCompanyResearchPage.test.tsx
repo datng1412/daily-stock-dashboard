@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { stocksApi, type VietnamCompanyResearchResponse } from '../../api/stocks';
 import VietnamCompanyResearchPage from '../VietnamCompanyResearchPage';
 
@@ -167,9 +167,17 @@ const makeCompanySnapshot = (): VietnamCompanyResearchResponse => ({
   tradeTape: [
     {
       time: '10:16:00',
-      price: 124.8,
+      timestamp: '2026-06-11T10:16:00+07:00',
+      timestampDisplay: '10:16:00',
+      price: 124800,
       volume: 1000,
       value: 124_800_000,
+      side: 'sell',
+      sideLabel: 'Sell',
+      sideIfAvailable: 'SD',
+      change: 1800,
+      changePct: 1.46,
+      rawType: 'X-TRADE',
       source: 'SSI',
     },
   ],
@@ -234,7 +242,12 @@ const renderPage = () => render(
 
 describe('VietnamCompanyResearchPage', () => {
   beforeEach(() => {
+    vi.useRealTimers();
     vi.mocked(stocksApi.getVietnamCompanyResearch).mockResolvedValue(makeCompanySnapshot());
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('renders ticker header, source coverage, and not implemented placeholders', async () => {
@@ -282,11 +295,13 @@ describe('VietnamCompanyResearchPage', () => {
     expect(screen.getAllByText('SSI realtime contract').length).toBeGreaterThan(0);
     expect(screen.getAllByText('SSI trade-tape contract').length).toBeGreaterThan(0);
     expect(screen.getAllByText('SSI DailyOhlc').length).toBeGreaterThan(0);
-    expect(screen.queryByText('Volume')).not.toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Vol' })).toBeInTheDocument();
     expect(screen.queryByText('Value')).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'SSI realtime' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'SSI trade tape' })).toBeInTheDocument();
     expect(screen.getByText('Trades loaded')).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Time' })).toBeInTheDocument();
+    expect(screen.getAllByText('10:16:00').length).toBeGreaterThan(0);
     expect(screen.getByRole('heading', { name: 'News' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Financials' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Events' })).toBeInTheDocument();
@@ -297,10 +312,107 @@ describe('VietnamCompanyResearchPage', () => {
     });
   });
 
+  it('shows company trade rows when stale diagnostics accompany buffered X-TRADE data', async () => {
+    const snapshot = makeCompanySnapshot();
+    snapshot.tradeTapeStatus = {
+      status: 'unavailable',
+      source: 'SSI trade-tape contract',
+      message: 'SSI trade tape unavailable.',
+      reasonCode: 'stream_cache_stale',
+      classification: 'stream_cache_stale',
+    };
+    snapshot.diagnostics = {
+      ...snapshot.diagnostics,
+      tradeTape: {
+        streamingStatus: 'cache_stale',
+        cacheStatus: 'stale',
+        tradeTapeBufferRowCount: 50,
+        tradeTapeReturnedRowCount: 1,
+      },
+    };
+    vi.mocked(stocksApi.getVietnamCompanyResearch).mockResolvedValue(snapshot);
+
+    renderPage();
+
+    const section = (await screen.findByRole('heading', { name: 'SSI trade tape' })).closest('section');
+    if (!section) throw new Error('SSI trade tape section not found');
+    const tradeTape = within(section);
+
+    expect(tradeTape.getAllByText('10:16:00').length).toBeGreaterThan(0);
+    expect(tradeTape.getByRole('columnheader', { name: 'Time' })).toBeInTheDocument();
+    expect(tradeTape.getByRole('columnheader', { name: 'B/S' })).toBeInTheDocument();
+    expect(tradeTape.getByRole('columnheader', { name: 'Vol' })).toBeInTheDocument();
+    expect(tradeTape.getByRole('columnheader', { name: 'Price' })).toBeInTheDocument();
+    expect(tradeTape.getByRole('columnheader', { name: '+/-' })).toBeInTheDocument();
+    expect(tradeTape.getByRole('columnheader', { name: '+/-(%)' })).toBeInTheDocument();
+    const side = tradeTape.getByText('Sell');
+    expect(side).toHaveClass('text-danger');
+    const price = tradeTape.getAllByText('124.80').find((node) => node.className.includes('text-success'));
+    if (!price) throw new Error('Colored trade price cell not found');
+    expect(price.className).toContain('text-success');
+    expect(tradeTape.getAllByText('1,000').length).toBeGreaterThan(0);
+    expect(tradeTape.getByText('+1.80')).toHaveClass('text-success');
+    expect(tradeTape.getByText('+1.46')).toHaveClass('text-success');
+    expect(tradeTape.getByText('ok')).toBeInTheDocument();
+    expect(tradeTape.queryByText('SSI trade tape unavailable.')).not.toBeInTheDocument();
+  });
+
+  it('refetches pending company trade tape until rows arrive', async () => {
+    const pending = makeCompanySnapshot();
+    pending.tradeTape = [];
+    pending.tradeTapeStatus = {
+      status: 'unavailable',
+      source: 'SSI trade-tape contract',
+      message: 'No SSI trade rows available yet.',
+      reasonCode: 'stream_cache_empty',
+      classification: 'stream_cache_empty',
+    };
+    pending.diagnostics = {
+      ...pending.diagnostics,
+      tradeTape: {
+        streamingStatus: 'running',
+        managerState: 'running',
+        tradeTapeSubscriptionStatus: 'subscribed',
+        tradeTapeBufferRowCount: 0,
+      },
+    };
+    const ready = makeCompanySnapshot();
+    ready.tradeTapeStatus = {
+      status: 'unavailable',
+      source: 'SSI trade-tape contract',
+      message: 'SSI trade tape ready.',
+      reasonCode: 'buffered_rows_available',
+      classification: 'buffered_rows_available',
+    };
+    ready.diagnostics = {
+      ...ready.diagnostics,
+      tradeTape: {
+        streamingStatus: 'cache_stale',
+        cacheStatus: 'stale',
+        tradeTapeReturnedRowCount: 1,
+      },
+    };
+    vi.mocked(stocksApi.getVietnamCompanyResearch)
+      .mockResolvedValueOnce(pending)
+      .mockResolvedValueOnce(ready);
+    renderPage();
+
+    expect(await screen.findByText('Loading SSI trade tape...')).toBeInTheDocument();
+
+    const section = screen.getByRole('heading', { name: 'SSI trade tape' }).closest('section');
+    if (!section) throw new Error('SSI trade tape section not found');
+    const tradeTape = within(section);
+    await waitFor(() => expect(tradeTape.getByRole('columnheader', { name: 'Time' })).toBeInTheDocument(), { timeout: 6500 });
+    expect(vi.mocked(stocksApi.getVietnamCompanyResearch).mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(tradeTape.getAllByText('10:16:00').length).toBeGreaterThan(0);
+    expect(tradeTape.queryByText('Loading SSI trade tape...')).not.toBeInTheDocument();
+    expect(tradeTape.queryByText('SSI trade tape unavailable.')).not.toBeInTheDocument();
+  }, 10_000);
+
   it.each([
     { latestPrice: 124600, dailyClose: 124600, referencePrice: 123000, ceilingPrice: 131600, floorPrice: 114400, priceVsReferencePct: 1.3, expectedClass: 'text-success' },
     { latestPrice: 121000, dailyClose: 121000, referencePrice: 123000, ceilingPrice: 131600, floorPrice: 114400, priceVsReferencePct: -1.63, expectedClass: 'text-danger' },
-    { latestPrice: 123000, dailyClose: 123000, referencePrice: 123000, ceilingPrice: 131600, floorPrice: 114400, priceVsReferencePct: 0, expectedClass: 'text-warning' },
+    { latestPrice: 123000, dailyClose: 123000, referencePrice: 123000, ceilingPrice: 131600, floorPrice: 114400, priceVsReferencePct: 0, expectedClass: 'text-reference-yellow' },
     { latestPrice: 131600, dailyClose: 131600, referencePrice: 123000, ceilingPrice: 131600, floorPrice: 114400, priceVsReferencePct: 6.99, expectedClass: 'text-ceiling-purple' },
     { latestPrice: 114400, dailyClose: 114400, referencePrice: 123000, ceilingPrice: 131600, floorPrice: 114400, priceVsReferencePct: -6.99, expectedClass: 'text-cyan' },
     { latestPrice: null, dailyClose: null, referencePrice: 123000, ceilingPrice: 131600, floorPrice: 114400, priceVsReferencePct: null, expectedClass: 'text-secondary-text' },
@@ -336,7 +448,7 @@ describe('VietnamCompanyResearchPage', () => {
     expect(await screen.findByTestId('company-latest-price')).toHaveClass(expectedClass);
     expect(screen.getByTestId('company-daily-close')).toHaveClass(expectedClass);
     expect(screen.getByTestId('company-price-vs-reference')).toHaveClass(expectedClass);
-    expect(screen.getByTestId('company-reference-price')).toHaveClass('text-warning');
+    expect(screen.getByTestId('company-reference-price')).toHaveClass('text-reference-yellow');
     expect(screen.getByTestId('company-ceiling-price')).toHaveClass('text-ceiling-purple');
     expect(screen.getByTestId('company-floor-price')).toHaveClass('text-cyan');
   });
@@ -356,7 +468,7 @@ describe('VietnamCompanyResearchPage', () => {
 
     renderPage();
 
-    expect(await screen.findByTestId('company-open-price')).toHaveClass('text-warning');
+    expect(await screen.findByTestId('company-open-price')).toHaveClass('text-reference-yellow');
     expect(screen.getByTestId('company-high-price')).toHaveClass('text-ceiling-purple');
     expect(screen.getByTestId('company-low-price')).toHaveClass('text-cyan');
     expect(screen.getByTestId('company-close-price')).toHaveClass('text-success');

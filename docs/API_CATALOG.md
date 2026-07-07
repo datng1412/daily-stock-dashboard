@@ -84,7 +84,7 @@ Implemented contract notes:
 
 - Watchlist `trade_tape` is public list data. It returns `[]` when unavailable/no rows and trade rows when usable.
 - Realtime/trade-tape status messages are short and user-safe. Sanitized provider details appear under sectioned diagnostics such as `diagnostics.realtime` or `diagnostics.trade_tape`.
-- SSI trade tape rows are populated only from the background streaming X-TRADE event buffer when fresh rows exist for a bootstrapped symbol. Request handlers do not start streams, add subscriptions, use all-market channels, or probe unverified REST candidate names.
+- SSI trade tape rows are populated only from the background streaming X-TRADE event buffer when parsed rows exist for a bootstrapped symbol. Startup-owned streaming subscribes to `X-TRADE:{symbol}` when trade tape is enabled. Buffered rows can be returned even when stream freshness is stale; diagnostics retain stale/cache age details while row visibility is driven by the presence of real timestamped trade rows. Rows may include `side`, `side_label`, `side_if_available`, `change`, and `change_pct`; observed raw side codes `BU` and `SD` map to `buy` and `sell`, `side_if_available` preserves the raw value, and `side` comes only from explicit X-TRADE side/aggressor fields. `change` is trade price versus SSI DailyStockPrice reference. Request handlers do not start streams, add subscriptions, use all-market channels, or probe unverified REST candidate names.
 - Intraday cadence fields are public: `intraday_requested_timeframe` is the request hint, `intraday_actual_granularity` / `intraday_actual_granularity_seconds` describe detected regular provider spacing, and `intraday_cadence_status` is `matched`, `different_from_requested`, `irregular`, `unknown`, or `unavailable`.
 - Intraday unavailable status may include sanitized diagnostics such as `failure_class`, `endpoint=IntradayOhlc`, HTTP status, provider code, requested timeframe, internal page size, public limit, usable row count, date match, and cadence status.
 - DailyOhlc and DailyStockPrice can disagree on same ticker/date.
@@ -373,6 +373,6 @@ Response rules:
 
 - Missing trade rows return `[]`.
 - Trade tape is separate from daily OHLCV, intraday OHLCV, and realtime snapshot.
-- SSI trade tape is streaming-buffer backed for latest X-TRADE events only. True historical time-and-sales remains unverified; endpoint/http details belong in diagnostics if a future verified source is added.
+- SSI trade tape is streaming-buffer backed for latest X-TRADE events only. Diagnostics distinguish not-subscribed, disabled, subscribed-empty, stale, cache-hit, and `buffered_rows_available` states. Trade rows use SSI-style matched-order fields: time, B/S side when explicit, volume, price, change, and change percent. Public rows can expose `side`, `side_label`, and raw `side_if_available`; observed `BU`/`SD` codes mean Buy/Sell but side is never inferred from price color or change. True historical time-and-sales remains unverified; endpoint/http details belong in diagnostics if a future verified source is added.
 - Legacy KBS may exist behind explicit development flags, but it is not a normal VN runtime fallback.
 - Primary UI should label this section as trade tape, not KBS.

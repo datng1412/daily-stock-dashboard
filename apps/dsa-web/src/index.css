@@ -1018,6 +1018,9 @@
 .text-ceiling-purple {
   color: hsl(292 100% 68%);
 }
+.text-reference-yellow {
+  color: hsl(48 100% 58%);
+}
 .text-success {
   color: hsl(var(--color-success));
 }

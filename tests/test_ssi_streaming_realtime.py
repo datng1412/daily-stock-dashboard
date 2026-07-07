@@ -24,7 +24,9 @@ from data_provider.ssi_streaming_realtime import (
     SSI_STREAMING_REALTIME_MANAGER_ERROR_REASON,
     SSI_STREAMING_REALTIME_NOT_STARTED_REASON,
     SSI_STREAMING_REALTIME_PACKAGE_UNAVAILABLE_REASON,
+    build_streaming_channels,
     build_symbol_channel,
+    build_trade_tape_channel,
 )
 from src.services.vietnam_market_service import VietnamDashboardConfig, VietnamMarketService, clear_vietnam_cache
 
@@ -202,18 +204,21 @@ def _manager(
     return SsiStreamingRealtimeManager(**kwargs)
 
 
-def _x_trade(symbol: str = "FPT", price: str = "130.5"):
+def _x_trade(symbol: str = "FPT", price: str = "130.5", side: str | None = None):
+    content = {
+        "RType": "X-TRADE",
+        "TradingDate": "25/06/2026",
+        "Time": "10:01:02",
+        "Symbol": symbol,
+        "LastPrice": price,
+        "LastVol": "1000",
+        "TotalVol": "123456",
+    }
+    if side is not None:
+        content["Side"] = side
     return {
         "DataType": "X-TRADE",
-        "Content": {
-            "RType": "X-TRADE",
-            "TradingDate": "25/06/2026",
-            "Time": "10:01:02",
-            "Symbol": symbol,
-            "LastPrice": price,
-            "LastVol": "1000",
-            "TotalVol": "123456",
-        },
+        "Content": content,
     }
 
 
@@ -295,7 +300,20 @@ def test_importing_streaming_module_does_not_import_official_client_or_start_net
     assert not hasattr(module, "STREAMING_CLIENT")
 
 
-def test_manager_start_uses_symbol_scoped_channel_only():
+def test_streaming_channel_builder_includes_realtime_and_trade_tape_channels_without_duplicates():
+    channels = build_streaming_channels(["fpt", "FPT"])
+
+    assert channels == ["X:FPT", "X-TRADE:FPT"]
+    assert len(channels) == len(set(channels))
+    assert all("ALL" not in channel for channel in channels)
+
+
+def test_streaming_channel_builder_can_disable_trade_tape_channel():
+    assert build_streaming_channels(["fpt"], trade_tape_enabled=False) == ["X:FPT"]
+    assert build_trade_tape_channel("fpt") == "X-TRADE:FPT"
+
+
+def test_manager_start_uses_symbol_scoped_realtime_and_trade_tape_channels():
     client = FakeStreamClient()
     manager = _manager(client=client)
 
@@ -303,7 +321,10 @@ def test_manager_start_uses_symbol_scoped_channel_only():
 
     assert status["manager_state"] == MANAGER_RUNNING
     assert client.started is True
-    assert client.channels == ["X:FPT"]
+    assert client.channels == ["X:FPT", "X-TRADE:FPT"]
+    assert status["realtime_channels"] == ["X:FPT"]
+    assert status["trade_tape_channels"] == ["X-TRADE:FPT"]
+    assert status["trade_tape_subscription_status"] == "subscribed"
     assert all("ALL" not in channel for channel in client.channels)
 
 
@@ -371,6 +392,52 @@ def test_x_trade_message_updates_snapshot_and_trade_tape_buffer():
     assert trade_payload["trades"][0]["timestamp"] == "2026-06-25T10:01:02"
     assert trade_payload["trades"][0]["raw_type"] == "X-TRADE"
     assert trade_payload["diagnostics"]["trade_tape_returned_row_count"] == 1
+
+
+@pytest.mark.parametrize(
+    ("raw_side", "expected_side", "expected_label"),
+    [
+        ("B", "buy", "Buy"),
+        ("BU", "buy", "Buy"),
+        (" bu ", "buy", "Buy"),
+        ("BUY", "buy", "Buy"),
+        ("MUA", "buy", "Buy"),
+        ("1", "buy", "Buy"),
+        ("S", "sell", "Sell"),
+        ("SD", "sell", "Sell"),
+        (" sd ", "sell", "Sell"),
+        ("SELL", "sell", "Sell"),
+        ("BAN", "sell", "Sell"),
+        ("BÁN", "sell", "Sell"),
+        ("2", "sell", "Sell"),
+        ("matched", None, None),
+        ("XX", None, None),
+    ],
+)
+def test_x_trade_side_normalizes_only_explicit_side_values(raw_side, expected_side, expected_label):
+    client = FakeStreamClient()
+    manager = _manager(client=client)
+    manager.start(["FPT"])
+
+    manager.handle_message(_x_trade(side=raw_side))
+    trade = manager.trade_tape("FPT", limit=10)["trades"][0]
+
+    assert trade["side"] == expected_side
+    assert trade["side_label"] == expected_label
+    assert trade["side_if_available"] == raw_side
+
+
+def test_x_trade_side_is_not_inferred_from_price_move():
+    client = FakeStreamClient()
+    manager = _manager(client=client)
+    manager.start(["FPT"])
+
+    manager.handle_message(_x_trade(price="138.0", side=None))
+    trade = manager.trade_tape("FPT", limit=10)["trades"][0]
+
+    assert trade["price"] == 138.0
+    assert trade["side"] is None
+    assert trade["side_label"] is None
 
 
 def test_x_quote_message_updates_quote_context_without_inventing_last_trade():
@@ -446,9 +513,49 @@ def test_empty_and_stale_cache_return_unavailable():
     assert manager.trade_tape("FPT")["status"] == "ok"
     now[0] = 170.0
     stale_trades = manager.trade_tape("FPT")
-    assert stale_trades["status"] == "unavailable"
-    assert stale_trades["trades"] == []
+    assert stale_trades["status"] == "ok"
+    assert stale_trades["trades"][0]["ticker"] == "FPT"
+    assert stale_trades["trades"][0]["price"] == 130.5
+    assert stale_trades["trades"][0]["volume"] == 1000.0
+    assert stale_trades["trades"][0]["timestamp"] == "2026-06-25T10:01:02"
+    assert stale_trades["trades"][0]["is_stale"] is True
+    assert stale_trades["streaming_status"] == "cache_stale"
     assert stale_trades["cache_status"] == "stale"
+    assert stale_trades["diagnostics"]["trade_tape_buffer_row_count"] == 1
+    assert stale_trades["diagnostics"]["trade_tape_returned_row_count"] == 1
+
+
+def test_trade_tape_skips_xtrade_rows_missing_required_trade_fields():
+    client = FakeStreamClient()
+    manager = _manager(client=client)
+    manager.start(["FPT"])
+
+    manager.handle_message({
+        "DataType": "X-TRADE",
+        "Content": {
+            "RType": "X-TRADE",
+            "TradingDate": "25/06/2026",
+            "Time": "10:01:02",
+            "Symbol": "FPT",
+            "LastPrice": "130.5",
+        },
+    })
+    manager.handle_message({
+        "DataType": "X-TRADE",
+        "Content": {
+            "RType": "X-TRADE",
+            "TradingDate": "25/06/2026",
+            "Time": "10:01:03",
+            "Symbol": "FPT",
+            "LastVol": "1000",
+        },
+    })
+
+    payload = manager.trade_tape("FPT")
+
+    assert payload["status"] == "unavailable"
+    assert payload["trades"] == []
+    assert payload["diagnostics"]["trade_tape_buffer_row_count"] == 0
 
 
 def test_trade_tape_for_non_bootstrapped_symbol_is_unavailable_without_subscription():
@@ -462,7 +569,39 @@ def test_trade_tape_for_non_bootstrapped_symbol_is_unavailable_without_subscript
     assert payload["trades"] == []
     assert payload["streaming_status"] == "ticker_not_bootstrapped"
     assert payload["diagnostics"]["bootstrap_membership"] == "not_bootstrapped"
+    assert client.channels == ["X:FPT", "X-TRADE:FPT"]
+
+
+def test_trade_tape_disabled_does_not_subscribe_xtrade_channel():
+    client = FakeStreamClient()
+    manager = _manager(client=client, trade_tape_enabled=False)
+
+    status = manager.start(["FPT"])
+    payload = manager.trade_tape("FPT")
+
+    assert status["realtime_channels"] == ["X:FPT"]
+    assert status["trade_tape_channels"] == []
+    assert status["trade_tape_subscription_status"] == "disabled"
     assert client.channels == ["X:FPT"]
+    assert payload["status"] == "unavailable"
+    assert payload["streaming_status"] == "xtrade_disabled"
+    assert payload["trades"] == []
+
+
+def test_trade_tape_reports_not_subscribed_when_xtrade_channel_is_missing():
+    client = FakeStreamClient()
+    manager = _manager(client=client)
+    manager.start(["FPT"])
+    with manager._lock:
+        manager._channels = ["X:FPT"]
+
+    payload = manager.trade_tape("FPT")
+
+    assert payload["status"] == "unavailable"
+    assert payload["streaming_status"] == "xtrade_not_subscribed"
+    assert payload["cache_status"] == "not_subscribed"
+    assert payload["trades"] == []
+    assert payload["diagnostics"]["trade_tape_channels"] == []
 
 
 def test_running_manager_with_no_messages_past_idle_timeout_reports_idle():
@@ -868,3 +1007,4 @@ def test_realtime_service_reads_cache_hit_without_overwriting_daily_latest_price
     assert item["trade_tape"][0]["ticker"] == "FPT"
     assert item["trade_tape"][0]["price"] == 131.5
     assert item["diagnostics"]["trade_tape"]["channel_type"] == "X-TRADE"
+    assert item["diagnostics"]["trade_tape"]["trade_tape_channels"] == ["X-TRADE:FPT"]

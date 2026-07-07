@@ -772,7 +772,10 @@ class VietnamRealtimeTrade(BaseModel):
     volume: Optional[float] = None
     value: Optional[float] = None
     side: Optional[str] = None
+    side_label: Optional[str] = None
     side_if_available: Optional[str] = None
+    change: Optional[float] = None
+    change_pct: Optional[float] = None
     sequence: Optional[str] = None
     sequence_if_available: Optional[str] = None
     match_type: Optional[str] = None

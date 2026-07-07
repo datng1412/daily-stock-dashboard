@@ -142,11 +142,14 @@ class FakeSsiFetcher:
             "trades": [
                 {
                     "time": "10:00:00",
+                    "timestamp": "2026-06-30T10:00:00+07:00",
+                    "timestamp_display": "10:00:00",
                     "price": 130.5,
                     "volume": 1000,
                     "value": 130_500_000,
                     "side_if_available": None,
                     "sequence_if_available": "1",
+                    "raw_type": "X-TRADE",
                     "source": "SSI",
                 }
             ],

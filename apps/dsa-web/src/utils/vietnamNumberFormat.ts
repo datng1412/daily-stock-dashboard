@@ -46,7 +46,7 @@ export const getSsiBoardPriceState = (
 export const ssiBoardPriceStateClass = (state: SsiBoardPriceState) => {
   if (state === 'ceiling') return 'text-ceiling-purple';
   if (state === 'floor') return 'text-cyan';
-  if (state === 'reference') return 'text-warning';
+  if (state === 'reference') return 'text-reference-yellow';
   if (state === 'above_reference') return 'text-success';
   if (state === 'below_reference') return 'text-danger';
   return 'text-secondary-text';
@@ -62,7 +62,7 @@ export const ssiBoardPriceValueClass = (
 export const getSsiBoardRoleClass = (role: SsiBoardPriceRole) => {
   if (role === 'ceiling') return 'text-ceiling-purple';
   if (role === 'floor') return 'text-cyan';
-  return 'text-warning';
+  return 'text-reference-yellow';
 };
 
 export const REFERENCE_PRICE_CLASS = getSsiBoardRoleClass('reference');

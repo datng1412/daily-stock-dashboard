@@ -13,6 +13,7 @@ import {
   type VietnamObservabilityResponse,
   type VietnamRealtimeQuote,
   type VietnamRealtimeTrade,
+  type VietnamRealtimeTradesResponse,
   type VietnamWatchItem,
   type VietnamWatchlistResponse,
 } from '../api/stocks';
@@ -54,6 +55,8 @@ const CUSTOM_WATCHLIST_STORAGE_KEY = 'vnDashboard.customWatchlist.v1';
 const AUTO_REFRESH_INTERVALS = [60, 180, 300];
 const REALTIME_SNAPSHOT_REFRESH_INTERVALS = [2, 3, 5, 10, 15];
 const TRADE_TAPE_REFRESH_INTERVALS = [5, 10, 15];
+const TRADE_TAPE_STARTUP_REFETCH_INTERVAL_MS = 4_000;
+const TRADE_TAPE_STARTUP_REFETCH_MAX_WAIT_MS = 60_000;
 const FILTER_SLOW_LOADING_MS = 3_000;
 const FILTER_VERY_SLOW_LOADING_MS = 8_000;
 const VN30_COMPONENTS_REQUEST_TIMEOUT_MS = 15_000;
@@ -235,6 +238,14 @@ const formatSignedNumber = (value?: number | null, maximumFractionDigits = 2) =>
   return formatted;
 };
 
+const formatSignedPriceChange = (value?: number | null) => {
+  if (value === null || value === undefined || Number.isNaN(value)) return '-';
+  const formatted = formatCompactVnPrice(Math.abs(value), '-');
+  if (value > 0) return `+${formatted}`;
+  if (value < 0) return `-${formatted}`;
+  return formatted;
+};
+
 const formatSignedPercentFixed = (value?: number | null, digits = 2) => {
   if (value === null || value === undefined || Number.isNaN(value)) return '-';
   const formatted = new Intl.NumberFormat('en-US', {
@@ -366,13 +377,44 @@ const neutralizeRecommendationText = (value?: string | null) => (
   value ? value.replace(RECOMMENDATION_WORD_RE, 'source term') : value
 );
 
-const neutralTradeType = (value?: string | null) => {
-  const normalized = String(value ?? '').trim().toLowerCase();
-  if (!normalized) return '-';
-  if (normalized === 'buy') return 'Bid-side';
-  if (normalized === 'sell') return 'Offer-side';
-  if (normalized === 'unknown') return 'Unknown';
-  return neutralizeRecommendationText(String(value)) ?? '-';
+const tradeSideLabel = (trade: VietnamRealtimeTrade) => {
+  const normalized = String(trade.side ?? '').trim().toLowerCase();
+  if (normalized === 'buy') return 'Buy';
+  if (normalized === 'sell') return 'Sell';
+  return '—';
+};
+
+const tradeSideClass = (trade: VietnamRealtimeTrade) => {
+  const normalized = String(trade.side ?? '').trim().toLowerCase();
+  if (normalized === 'buy') return 'text-success';
+  if (normalized === 'sell') return 'text-danger';
+  return 'text-secondary-text';
+};
+
+const tradeChangeValue = (trade: VietnamRealtimeTrade, referencePrice?: number | null) => {
+  const explicit = finiteNumber(trade.change ?? null);
+  if (explicit !== null) return explicit;
+  const price = finiteNumber(trade.price ?? null);
+  const reference = finiteNumber(referencePrice ?? null);
+  if (price === null || price <= 0 || reference === null || reference <= 0) return null;
+  return price - reference;
+};
+
+const tradeChangePctValue = (trade: VietnamRealtimeTrade, referencePrice?: number | null) => {
+  const explicit = finiteNumber(trade.changePct ?? null);
+  if (explicit !== null) return explicit;
+  const change = tradeChangeValue(trade, referencePrice);
+  const reference = finiteNumber(referencePrice ?? null);
+  if (change === null || reference === null || reference <= 0) return null;
+  return (change / reference) * 100;
+};
+
+const tradeChangeClass = (value?: number | null) => {
+  const numeric = finiteNumber(value ?? null);
+  if (numeric === null) return 'text-secondary-text';
+  if (numeric > 0) return 'text-success';
+  if (numeric < 0) return 'text-danger';
+  return REFERENCE_PRICE_CLASS;
 };
 
 const hasEncodingArtifacts = (value?: string | null) => Boolean(value && /(?:Ã|Â|â€|�)/.test(value));
@@ -1407,6 +1449,76 @@ const optionalLiveReasonCode = (block?: OptionalLiveStatusBlock | null) => (
   ?? optionalStatusDiagnosticValue(block, 'reasonCode')
   ?? optionalStatusDiagnosticValue(block, 'reason_code')
 );
+
+const optionalStatusValue = (block: OptionalLiveStatusBlock | null | undefined, key: string) => (
+  safeLiveStatusString((block as Record<string, unknown> | null | undefined)?.[key])
+  ?? optionalStatusDiagnosticValue(block, key)
+);
+
+const TRADE_TAPE_PENDING_REASON_CODES = new Set([
+  'stream_not_started',
+  'manager_not_started',
+  'xtrade_not_subscribed',
+  'stream_cache_empty',
+  'xtrade_cache_empty',
+  'cache_empty',
+  'subscribed_empty',
+  'streaming_trade_tape_supported',
+  'unknown',
+]);
+
+const TRADE_TAPE_PENDING_STATUSES = new Set([
+  'loading',
+  'starting',
+  'pending',
+  'not_started',
+  'cache_empty',
+  'subscribed_empty',
+  'xtrade_not_subscribed',
+  'running_idle',
+]);
+
+const TRADE_TAPE_TERMINAL_REASON_CODES = new Set([
+  'disabled',
+  'config_disabled',
+  'not_implemented',
+  'latest_trade_stream_only',
+  'unavailable_provider_error',
+  'historical_trade_tape_unavailable',
+  'auth_or_entitlement_failure',
+]);
+
+const isTradeTapeWarmupPending = (block?: OptionalLiveStatusBlock | null) => {
+  const status = normalizedStatus(block?.status);
+  const reasonCode = normalizedStatus(optionalLiveReasonCode(block));
+  if (status === 'disabled' || status === 'not_implemented' || TRADE_TAPE_TERMINAL_REASON_CODES.has(reasonCode)) {
+    return false;
+  }
+  const candidates = [
+    status,
+    reasonCode,
+    normalizedStatus(optionalStatusValue(block, 'managerState')),
+    normalizedStatus(optionalStatusValue(block, 'manager_state')),
+    normalizedStatus(optionalStatusValue(block, 'runtimeStatus')),
+    normalizedStatus(optionalStatusValue(block, 'runtime_status')),
+    normalizedStatus(optionalStatusValue(block, 'streamingStatus')),
+    normalizedStatus(optionalStatusValue(block, 'streaming_status')),
+    normalizedStatus(optionalStatusValue(block, 'cacheStatus')),
+    normalizedStatus(optionalStatusValue(block, 'cache_status')),
+    normalizedStatus(optionalStatusValue(block, 'tradeTapeSubscriptionStatus')),
+    normalizedStatus(optionalStatusValue(block, 'trade_tape_subscription_status')),
+  ].filter(Boolean);
+  const bufferCount = Number(
+    (block?.diagnostics?.tradeTapeBufferRowCount ?? block?.diagnostics?.trade_tape_buffer_row_count) ?? Number.NaN,
+  );
+  const subscriptionStatus = normalizedStatus(optionalStatusValue(block, 'tradeTapeSubscriptionStatus'))
+    || normalizedStatus(optionalStatusValue(block, 'trade_tape_subscription_status'));
+  if (subscriptionStatus === 'subscribed' && (!Number.isFinite(bufferCount) || bufferCount === 0)) return true;
+  return candidates.some((candidate) => (
+    TRADE_TAPE_PENDING_STATUSES.has(candidate)
+    || TRADE_TAPE_PENDING_REASON_CODES.has(candidate)
+  ));
+};
 
 const optionalLiveMessage = (block?: OptionalLiveStatusBlock | null) => safeLiveStatusString(block?.message);
 
@@ -3817,6 +3929,7 @@ const StockDetailView: React.FC<{
   fixtureMode?: boolean;
   realtimeQuote?: VietnamRealtimeQuote | null;
   realtimeTrades?: VietnamRealtimeTrade[];
+  realtimeTradesResponse?: VietnamRealtimeTradesResponse | null;
   corporateActions?: VietnamCorporateActionsResponse | null;
   corporateActionsLoading?: boolean;
   corporateActionsError?: string | null;
@@ -3828,6 +3941,7 @@ const StockDetailView: React.FC<{
   fixtureMode = false,
   realtimeQuote,
   realtimeTrades = [],
+  realtimeTradesResponse = null,
   corporateActions = null,
   corporateActionsLoading = false,
   corporateActionsError,
@@ -3856,7 +3970,11 @@ const StockDetailView: React.FC<{
   const realtimeState = realtimeSnapshotState(realtimeQuote, marketPhase.code);
   const hasRealtimeSnapshot = hasRealtimeSnapshotData(realtimeQuote);
   const hasCurrentIntraday = hasCurrentIntradayData(item);
-  const hasTradeTape = hasTradeTapeData(realtimeTrades);
+  const tradeTapeDisplayRows = hasTradeTapeData(realtimeTrades) ? realtimeTrades : item.tradeTape ?? [];
+  const hasTradeTape = hasTradeTapeData(tradeTapeDisplayRows);
+  const responseSymbol = normalizeVietnamTicker(realtimeTradesResponse?.symbol ?? '');
+  const tradeTapeStatusBlock = responseSymbol === item.ticker ? realtimeTradesResponse : item.tradeTapeStatus;
+  const tradeTapePending = !hasTradeTape && isTradeTapeWarmupPending(tradeTapeStatusBlock);
   const intradayReasonCode = optionalLiveReasonCode(item.intradayStatus);
   const intradaySectionState: SectionState = hasCurrentIntraday
     ? intradayReasonCode === 'cadence_mismatch' || ['different_from_requested', 'irregular'].includes(intradayCadenceStatus(item) ?? '')
@@ -3870,10 +3988,10 @@ const StockDetailView: React.FC<{
     : realtimeQuote?.status === 'disabled' || item.realtimeStatus?.status === 'disabled'
       ? 'Disabled'
       : 'Unavailable';
-  const tradeTapeSectionState: SectionState = tradesLoading
-    ? 'Loading'
-    : hasTradeTape
-      ? 'Ready'
+  const tradeTapeSectionState: SectionState = hasTradeTape
+    ? 'Ready'
+    : tradesLoading || tradeTapePending
+      ? 'Loading'
       : item.tradeTapeStatus?.status === 'disabled'
         ? 'Disabled'
         : 'Unavailable';
@@ -4516,7 +4634,10 @@ const StockDetailView: React.FC<{
         <p className="mt-2 text-xs text-secondary-text">
           Historical trade tape is separate from X-TRADE latest-trade stream context.
         </p>
-        {tradesError || (!tradesLoading && !hasTradeTape) ? (
+        {!hasTradeTape && (tradesLoading || tradeTapePending) ? (
+          <p className="mt-3 text-sm text-secondary-text">Loading SSI trade tape...</p>
+        ) : null}
+        {!hasTradeTape && !tradeTapePending && (tradesError || !tradesLoading) ? (
           <div className="mt-3 rounded-lg border border-warning/20 bg-warning/10 p-2 text-xs text-warning">
             {optionalLiveStatusText('tradeTape', item.tradeTapeStatus)}
           </div>
@@ -4527,22 +4648,30 @@ const StockDetailView: React.FC<{
               <thead className="border-b border-border/70 uppercase text-secondary-text">
                 <tr>
                   <th className="py-2 pr-3">Time</th>
-                  <th className="px-3 py-2 text-right">Trade tape price</th>
-                  <th className="px-3 py-2 text-right">Trade tape volume</th>
-                  <th className="px-3 py-2">Trade type</th>
-                  <th className="px-3 py-2">Source</th>
+                  <th className="px-3 py-2">B/S</th>
+                  <th className="px-3 py-2 text-right">Vol</th>
+                  <th className="px-3 py-2 text-right">Price</th>
+                  <th className="px-3 py-2 text-right">+/-</th>
+                  <th className="px-3 py-2 text-right">+/-(%)</th>
                 </tr>
               </thead>
               <tbody>
-                {realtimeTrades.slice(0, 8).map((trade, index) => (
-                  <tr key={`${trade.id ?? index}-${trade.time ?? 'time'}`} className="border-b border-border/40 text-secondary-text">
-                    <td className="py-2 pr-3">{trade.time ?? '-'}</td>
-                    <td className="px-3 py-2 text-right text-foreground">{formatPrice(trade.price)}</td>
-                    <td className="px-3 py-2 text-right" title={formatFullSharesTitle(trade.volume)}>{formatVolume(trade.volume)}</td>
-                    <td className="px-3 py-2">{neutralTradeType(trade.matchType)}</td>
-                    <td className="px-3 py-2">{trade.source}</td>
-                  </tr>
-                ))}
+                {tradeTapeDisplayRows.slice(0, 8).map((trade, index) => {
+                  const change = tradeChangeValue(trade, ssiReferencePrice);
+                  const changePct = tradeChangePctValue(trade, ssiReferencePrice);
+                  return (
+                    <tr key={`${trade.id ?? index}-${trade.time ?? 'time'}`} className="border-b border-border/40 text-secondary-text">
+                      <td className="py-2 pr-3">{trade.timestampDisplay ?? trade.time ?? trade.timestamp ?? '-'}</td>
+                      <td className={cn('px-3 py-2 font-medium', tradeSideClass(trade))}>{tradeSideLabel(trade)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums text-secondary-text" title={formatFullSharesTitle(trade.volume)}>{formatNumber(trade.volume, 0)}</td>
+                      <td className={cn('px-3 py-2 text-right font-medium tabular-nums', ssiBoardPriceValueClass(trade.price, ssiReferencePrice, ssiCeilingPrice, ssiFloorPrice))}>
+                        {formatPrice(trade.price)}
+                      </td>
+                      <td className={cn('px-3 py-2 text-right font-medium tabular-nums', tradeChangeClass(change))}>{formatSignedPriceChange(change)}</td>
+                      <td className={cn('px-3 py-2 text-right font-medium tabular-nums', tradeChangeClass(changePct))}>{formatSignedNumber(changePct, 2)}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -4662,6 +4791,7 @@ const VietnamDashboardPage: React.FC = () => {
   const [realtimeLoading, setRealtimeLoading] = useState(false);
   const [realtimeError, setRealtimeError] = useState<string | null>(null);
   const [realtimeTrades, setRealtimeTrades] = useState<VietnamRealtimeTrade[]>([]);
+  const [realtimeTradesResponse, setRealtimeTradesResponse] = useState<VietnamRealtimeTradesResponse | null>(null);
   const [tradesLoading, setTradesLoading] = useState(false);
   const [tradesError, setTradesError] = useState<string | null>(null);
   const [corporateActions, setCorporateActions] = useState<VietnamCorporateActionsResponse | null>(null);
@@ -4734,6 +4864,7 @@ const VietnamDashboardPage: React.FC = () => {
   const tradeTapeNextRefreshAtRef = useRef(0);
   const realtimeSnapshotRefreshInFlightRef = useRef(false);
   const tradeTapeRefreshInFlightRef = useRef(false);
+  const tradeTapeWarmupStartedAtRef = useRef<{ symbol: string; startedAt: number } | null>(null);
   const pendingRealtimeSnapshotTickersRef = useRef<string[] | null>(null);
   const pendingTradeTapeSymbolRef = useRef<string | null>(null);
   const unmountedRef = useRef(false);
@@ -4814,6 +4945,7 @@ const VietnamDashboardPage: React.FC = () => {
   const loadRealtimeTrades = useCallback(async (symbol: string | null) => {
     if (!symbol) {
       setRealtimeTrades([]);
+      setRealtimeTradesResponse(null);
       return;
     }
     const requestId = tradesRequestIdRef.current + 1;
@@ -4825,6 +4957,7 @@ const VietnamDashboardPage: React.FC = () => {
       if (requestId !== tradesRequestIdRef.current || unmountedRef.current) return;
       if (symbol !== selectedTickerRef.current) return;
       setRealtimeTrades(response.trades);
+      setRealtimeTradesResponse(response);
       setLastTradeTapeRefreshAt(new Date().toISOString());
       setTradesError(response.status === 'ok' ? null : realtimeErrorMessage(response.statusMessage ?? response.error) ?? 'Trade tape unavailable');
       if (response.status !== 'ok') {
@@ -4834,6 +4967,7 @@ const VietnamDashboardPage: React.FC = () => {
     } catch (err) {
       if (requestId !== tradesRequestIdRef.current || unmountedRef.current) return;
       setLastRealtimeErrorAt(new Date().toISOString());
+      setRealtimeTradesResponse(null);
       setTradesError(realtimeErrorMessage(err instanceof Error ? err.message : null) ?? (err instanceof Error ? err.message : 'Trade tape unavailable'));
       void loadObservability();
     } finally {
@@ -5045,6 +5179,7 @@ const VietnamDashboardPage: React.FC = () => {
       setRealtimeError(null);
       setRealtimeTrades([]);
       setTradesError(null);
+      setRealtimeTradesResponse(null);
       if (commitIntent) {
         setWatchlist(commitIntent.tickers);
         setActivePresetId(commitIntent.presetId);
@@ -5430,6 +5565,7 @@ const VietnamDashboardPage: React.FC = () => {
     setRealtimeError(null);
     setRealtimeTrades([]);
     setTradesError(null);
+    setRealtimeTradesResponse(null);
     setCorporateActions(null);
     setCorporateActionsError(null);
     setLoading(false);
@@ -5651,6 +5787,45 @@ const VietnamDashboardPage: React.FC = () => {
     () => (data?.watchlist ?? []).find((item) => item.ticker === selectedTicker) ?? data?.watchlist?.[0] ?? null,
     [data, selectedTicker],
   );
+  useEffect(() => {
+    const normalizedSelectedTicker = normalizeVietnamTicker(selectedTicker ?? '');
+    const responseSymbol = normalizeVietnamTicker(realtimeTradesResponse?.symbol ?? '');
+    const selectedTradeResponse = normalizedSelectedTicker && responseSymbol === normalizedSelectedTicker
+      ? realtimeTradesResponse
+      : null;
+    const displayRows = hasTradeTapeData(realtimeTrades) ? realtimeTrades : selectedItem?.tradeTape ?? [];
+    const statusBlock = selectedTradeResponse ?? selectedItem?.tradeTapeStatus ?? null;
+    if (
+      !normalizedSelectedTicker
+      || hasTradeTapeData(displayRows)
+      || isTabHidden
+      || !isTradeTapeWarmupPending(statusBlock)
+    ) {
+      if (!normalizedSelectedTicker || hasTradeTapeData(displayRows) || !isTradeTapeWarmupPending(statusBlock)) {
+        tradeTapeWarmupStartedAtRef.current = null;
+      }
+      return undefined;
+    }
+    if (tradeTapeWarmupStartedAtRef.current?.symbol !== normalizedSelectedTicker) {
+      tradeTapeWarmupStartedAtRef.current = { symbol: normalizedSelectedTicker, startedAt: Date.now() };
+    }
+    const startedAt = tradeTapeWarmupStartedAtRef.current.startedAt;
+    const timer = window.setInterval(() => {
+      if (Date.now() - startedAt >= TRADE_TAPE_STARTUP_REFETCH_MAX_WAIT_MS) {
+        window.clearInterval(timer);
+        return;
+      }
+      void refreshTradeTape(normalizedSelectedTicker);
+    }, TRADE_TAPE_STARTUP_REFETCH_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [
+    isTabHidden,
+    realtimeTrades,
+    realtimeTradesResponse,
+    refreshTradeTape,
+    selectedItem,
+    selectedTicker,
+  ]);
   const hasCommittedData = Boolean(data);
   const hasCommittedRows = (data?.watchlist.length ?? 0) > 0;
   const isEmptyStart = !hasActiveWatchlist && !hasCommittedData && !loading && !error;
@@ -6254,6 +6429,7 @@ const VietnamDashboardPage: React.FC = () => {
             fixtureMode={data?.fixtureMode}
             realtimeQuote={selectedItem ? realtimeQuotes[selectedItem.ticker] : null}
             realtimeTrades={realtimeTrades}
+            realtimeTradesResponse={realtimeTradesResponse}
             corporateActions={corporateActions}
             corporateActionsLoading={corporateActionsLoading}
             corporateActionsError={corporateActionsError}

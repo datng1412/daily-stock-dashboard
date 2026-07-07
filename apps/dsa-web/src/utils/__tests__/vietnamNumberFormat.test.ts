@@ -49,11 +49,11 @@ describe('Vietnam compact number formatters', () => {
   it('maps SSI board states and static roles to board color classes', () => {
     expect(ssiBoardPriceValueClass(107000, 100000, 107000, 93000)).toBe('text-ceiling-purple');
     expect(ssiBoardPriceValueClass(93000, 100000, 107000, 93000)).toBe('text-cyan');
-    expect(ssiBoardPriceValueClass(100000, 100000, 107000, 93000)).toBe('text-warning');
+    expect(ssiBoardPriceValueClass(100000, 100000, 107000, 93000)).toBe('text-reference-yellow');
     expect(ssiBoardPriceValueClass(101000, 100000, 107000, 93000)).toBe('text-success');
     expect(ssiBoardPriceValueClass(99000, 100000, 107000, 93000)).toBe('text-danger');
     expect(ssiBoardPriceValueClass(null, 100000, 107000, 93000)).toBe('text-secondary-text');
-    expect(getSsiBoardRoleClass('reference')).toBe('text-warning');
+    expect(getSsiBoardRoleClass('reference')).toBe('text-reference-yellow');
     expect(getSsiBoardRoleClass('ceiling')).toBe('text-ceiling-purple');
     expect(getSsiBoardRoleClass('floor')).toBe('text-cyan');
   });

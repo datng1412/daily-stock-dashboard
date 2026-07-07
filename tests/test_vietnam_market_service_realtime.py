@@ -111,11 +111,14 @@ class FakeSsiFetcher:
             "trades": [
                 {
                     "time": "10:00:00",
+                    "timestamp": "2026-06-30T10:00:00+07:00",
+                    "timestamp_display": "10:00:00",
                     "price": 130.5,
                     "volume": 1000,
                     "value": 130_500_000,
-                    "side_if_available": "matched",
+                    "side_if_available": "BU",
                     "sequence_if_available": "1",
+                    "raw_type": "X-TRADE",
                     "source": "SSI",
                 }
             ],
@@ -223,6 +226,13 @@ class IntradayAvailableRealtimeUnavailableFetcher(FakeSsiFetcher):
         }
 
 
+class ZeroReferenceTradeTapeFetcher(FakeSsiFetcher):
+    def get_daily_stock_price(self, symbol: str, **kwargs):
+        payload = super().get_daily_stock_price(symbol, **kwargs)
+        payload["rows"][0]["reference_price"] = 0
+        return payload
+
+
 def test_realtime_unavailable_is_not_inferred_from_intraday_or_daily_ohlcv():
     fetcher = IntradayAvailableRealtimeUnavailableFetcher(
         realtime_payload={
@@ -256,11 +266,155 @@ def test_ssi_trade_tape_success_returns_normalized_trades():
     assert endpoint_payload["trades"][0]["price"] == 130.5
     assert endpoint_payload["trades"][0]["source"] == "SSI trade-tape contract"
     assert endpoint_payload["trades"][0]["value"] == 130_500_000
+    assert endpoint_payload["trades"][0]["side"] == "buy"
+    assert endpoint_payload["trades"][0]["side_label"] == "Buy"
+    assert endpoint_payload["trades"][0]["side_if_available"] == "BU"
+    assert endpoint_payload["trades"][0]["change"] == 1.5
+    assert endpoint_payload["trades"][0]["change_pct"] == 1.16
     assert item["trade_tape_source"] == "SSI trade-tape contract"
     assert item["trade_tape_status"]["status"] == "ok"
     assert item["trade_tape_status"]["source"] == "SSI trade-tape contract"
     assert item["trade_tape"][0]["source"] == "SSI trade-tape contract"
+    assert item["trade_tape"][0]["timestamp"] == "2026-06-30T10:00:00+07:00"
     assert item["trade_tape"][0]["sequence_if_available"] == "1"
+    assert item["trade_tape"][0]["side"] == "buy"
+    assert item["trade_tape"][0]["side_if_available"] == "BU"
+    assert item["trade_tape"][0]["change"] == 1.5
+    assert item["trade_tape"][0]["change_pct"] == 1.16
+
+
+def test_ssi_trade_tape_sd_remains_sell_with_positive_change():
+    fetcher = FakeSsiFetcher(
+        trade_payload={
+            "status": "ok",
+            "source": "SSI",
+            "symbol": "FPT",
+            "trades": [
+                {
+                    "time": "10:15:00",
+                    "timestamp": "2026-06-30T10:15:00+07:00",
+                    "timestamp_display": "10:15:00",
+                    "price": 130.5,
+                    "volume": 1000,
+                    "value": 130_500_000,
+                    "side_if_available": "SD",
+                    "sequence_if_available": "2",
+                    "raw_type": "X-TRADE",
+                    "source": "SSI",
+                }
+            ],
+        }
+    )
+
+    item = _service(fetcher).build_watchlist(["FPT"], force_refresh=True)["watchlist"][0]
+
+    assert item["status"] == "ok"
+    assert item["latest_price_source"] == "SSI DailyOhlc"
+    assert item["trade_tape"][0]["side"] == "sell"
+    assert item["trade_tape"][0]["side_label"] == "Sell"
+    assert item["trade_tape"][0]["side_if_available"] == "SD"
+    assert item["trade_tape"][0]["change"] == 1.5
+    assert item["trade_tape"][0]["change_pct"] == 1.16
+
+
+def test_ssi_trade_tape_bu_remains_buy_with_negative_change():
+    fetcher = FakeSsiFetcher(
+        trade_payload={
+            "status": "ok",
+            "source": "SSI",
+            "symbol": "FPT",
+            "trades": [
+                {
+                    "time": "10:15:01",
+                    "timestamp": "2026-06-30T10:15:01+07:00",
+                    "timestamp_display": "10:15:01",
+                    "price": 128.0,
+                    "volume": 1000,
+                    "value": 128_000_000,
+                    "side_if_available": "BU",
+                    "sequence_if_available": "3",
+                    "raw_type": "X-TRADE",
+                    "source": "SSI",
+                }
+            ],
+        }
+    )
+
+    item = _service(fetcher).build_watchlist(["FPT"], force_refresh=True)["watchlist"][0]
+
+    assert item["status"] == "ok"
+    assert item["latest_price_source"] == "SSI DailyOhlc"
+    assert item["trade_tape"][0]["side"] == "buy"
+    assert item["trade_tape"][0]["side_label"] == "Buy"
+    assert item["trade_tape"][0]["side_if_available"] == "BU"
+    assert item["trade_tape"][0]["change"] == -1.0
+    assert item["trade_tape"][0]["change_pct"] == -0.78
+
+
+def test_ssi_trade_tape_change_is_null_when_reference_unavailable():
+    item = _service(ZeroReferenceTradeTapeFetcher()).build_watchlist(["FPT"], force_refresh=True)["watchlist"][0]
+
+    assert item["status"] == "ok"
+    assert item["latest_price_source"] == "SSI DailyOhlc"
+    assert item["trade_tape_status"]["status"] == "ok"
+    assert item["trade_tape"][0]["price"] == 130.5
+    assert item["trade_tape"][0]["side"] == "buy"
+    assert item["trade_tape"][0]["change"] is None
+    assert item["trade_tape"][0]["change_pct"] is None
+
+
+def test_ssi_trade_tape_stale_buffer_rows_remain_public_and_daily_stays_ok():
+    fetcher = FakeSsiFetcher(
+        trade_payload={
+            "status": "ok",
+            "source": "SSI",
+            "symbol": "FPT",
+            "reason": "Buffered SSI X-TRADE rows available.",
+            "streaming_status": "cache_stale",
+            "cache_status": "stale",
+            "trades": [
+                {
+                    "ticker": "FPT",
+                    "symbol": "FPT",
+                    "time": "11:29:58",
+                    "timestamp": "2026-06-30T11:29:58+07:00",
+                    "timestamp_display": "11:29:58",
+                    "price": 130.5,
+                    "volume": 5000,
+                    "value": 652_500_000,
+                    "sequence_if_available": "4776",
+                    "raw_type": "X-TRADE",
+                    "source": "SSI",
+                    "is_stale": True,
+                }
+            ],
+            "diagnostics": {
+                "streaming_status": "cache_stale",
+                "cache_status": "stale",
+                "trade_tape_subscription_status": "subscribed",
+                "trade_tape_buffer_row_count": 50,
+                "trade_tape_returned_row_count": 1,
+            },
+        }
+    )
+
+    endpoint_payload = _service(fetcher).build_trade_tape("FPT", force_refresh=True)
+    item = _service(fetcher).build_watchlist(["FPT"], force_refresh=True)["watchlist"][0]
+
+    assert endpoint_payload["status"] == "ok"
+    assert endpoint_payload["trades"][0]["timestamp"] == "2026-06-30T11:29:58+07:00"
+    assert endpoint_payload["reason_code"] == "buffered_rows_available"
+    assert item["status"] == "ok"
+    assert item["latest_price_source"] == "SSI DailyOhlc"
+    assert item["trade_tape_status"]["status"] == "ok"
+    assert item["trade_tape_status"]["reason_code"] == "buffered_rows_available"
+    assert item["trade_tape"][0]["price"] == 130.5
+    assert item["trade_tape"][0]["volume"] == 5000.0
+    assert item["trade_tape"][0]["side"] is None
+    assert item["trade_tape"][0]["change"] == 1.5
+    assert item["trade_tape"][0]["change_pct"] == 1.16
+    assert item["diagnostics"]["trade_tape"]["streaming_status"] == "cache_stale"
+    assert item["diagnostics"]["trade_tape"]["trade_tape_returned_row_count"] == 1
 
 
 def test_ssi_trade_tape_failure_is_separate_from_daily_row():

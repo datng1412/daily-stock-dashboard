@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [improvement] Add bounded frontend trade-tape warm-up refetch for pending SSI X-TRADE startup states and use dedicated yellow for SSI reference/equal/zero-change prices.
+- [fix] Map observed SSI `X-TRADE` side codes `BU` and `SD` to Buy/Sell while preserving raw side diagnostics and keeping trade side independent from price color or change.
+- [improvement] Render SSI `X-TRADE` rows with SSI-style `Time`, `B/S`, `Vol`, `Price`, `+/-`, and `+/-(%)` columns, using explicit trade-side data only and reference-based change fields.
+- [fix] Return buffered SSI `X-TRADE` rows even when stream freshness is stale and render them as matched-order rows with traded time, volume, and SSI board price colors.
+- [fix] Subscribe SSI streaming runtime to symbol-scoped `X-TRADE:{symbol}` channels when trade tape is enabled and expose not-subscribed versus cache-empty diagnostics without changing DailyOhlc price ownership.
 - [improvement] Align VN dashboard and company-page price colors with SSI board convention: reference yellow, ceiling purple, floor blue/cyan, above reference green, and below reference red.
 - [improvement] Compact VN dashboard and company page numeric displays so prices render in board-style thousand-VND units with two decimals while volumes and VND values use readable K/M/B/T suffixes.
 - [fix] Correct SSI-derived VN metric value rendering for 52W high/low and 10D/3M average volume by normalizing frontend numeric-suffix field aliases and tightening backend valid-row checks.

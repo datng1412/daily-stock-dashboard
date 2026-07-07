@@ -506,7 +506,10 @@ export type VietnamRealtimeTrade = {
   volume?: number | null;
   value?: number | null;
   side?: string | null;
+  sideLabel?: string | null;
   sideIfAvailable?: string | null;
+  change?: number | null;
+  changePct?: number | null;
   sequence?: string | null;
   sequenceIfAvailable?: string | null;
   matchType?: string | null;
@@ -526,6 +529,10 @@ export type VietnamRealtimeTradesResponse = {
   reasonCode?: string | null;
   classification?: string | null;
   statusMessage?: string | null;
+  streamingStatus?: string | null;
+  managerState?: string | null;
+  runtimeStatus?: string | null;
+  cacheStatus?: string | null;
   trades: VietnamRealtimeTrade[];
   note?: string | null;
   cache: Record<string, unknown>;

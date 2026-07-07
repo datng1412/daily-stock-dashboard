@@ -223,9 +223,24 @@ When SSI trade tape has usable rows:
 
 ```text
 trade_tape_status.status = ok
-trade_tape_status.reason_code = streaming_trade_tape_supported or historical_trade_tape_supported
+trade_tape_status.reason_code = buffered_rows_available, streaming_trade_tape_supported, or historical_trade_tape_supported
 trade_tape = [ ... ]
 ```
+
+Buffered SSI `X-TRADE:{symbol}` rows remain visible even when stream freshness is stale. In that case, diagnostics can still report `streaming_status=cache_stale`, `cache_status=stale`, `latest_trade_age_seconds`, `trade_tape_buffer_row_count`, and `trade_tape_returned_row_count`, but stale freshness is not a visibility gate because every trade row carries its own traded timestamp.
+
+Usable trade rows expose the current matched-order fields:
+
+* `timestamp` and `timestamp_display`
+* `side` as `buy`, `sell`, or `null`
+* `side_label` as `Buy`, `Sell`, or `null`
+* `price`
+* `volume`
+* `change`
+* `change_pct`
+* `source`
+
+`side` is normalized only from explicit SSI `X-TRADE` side/aggressor fields such as `Side`, `MatchType`, or `BuySell`. Observed SSI raw codes include `BU = buy` and `SD = sell`; legacy/localized explicit codes such as `B`, `BUY`, `MUA`, `1`, `S`, `SELL`, `BAN`, `BÁN`, and `2` remain supported. Unknown side values remain `null`, and the raw candidate is preserved in `side_if_available` for audit. The backend and UI must not infer Buy/Sell from SSI board price color or positive/negative `change`; a `sell` row can still have positive price-vs-reference change. `change` and `change_pct` are calculated from trade price versus positive SSI DailyStockPrice `reference_price`; they remain null when reference is missing or non-positive.
 
 When no trade rows exist:
 
@@ -237,7 +252,7 @@ trade_tape = []
 
 `trade_tape_status.message` is short user-facing copy such as `SSI trade tape unavailable.`, `SSI trade tape disabled.`, or `No SSI trade rows available.` Technical details are not embedded in this message.
 
-The watchlist and company public contracts both use a list for `trade_tape`; company status is separate in `trade_tape_status`. Company realtime follows the same split with `realtime_snapshot` and `realtime_status`. Phase 4.7C allows only process-local, streaming-backed `X-TRADE` events to populate `trade_tape` when the background SSI streaming manager is enabled, running, symbol-bootstrapped, and the per-symbol buffer contains fresh parsed trade events. Request handlers only read this buffer; they must not start streams, add subscriptions, or use `X:ALL`.
+The watchlist and company public contracts both use a list for `trade_tape`; company status is separate in `trade_tape_status`. Company realtime follows the same split with `realtime_snapshot` and `realtime_status`. Phase 4.7C allows only process-local, streaming-backed `X-TRADE` events to populate `trade_tape` when the background SSI streaming manager is enabled, running, symbol-bootstrapped, and the per-symbol buffer contains parsed trade events. Phase 4.8E registers `X-TRADE:{symbol}` at startup alongside realtime `X:{symbol}` when trade tape is enabled and exposes diagnostics for not-subscribed, subscribed-empty, stale, and cache-hit states. Phase 4.8E-2 makes freshness diagnostic-only when buffered rows exist. Request handlers only read this buffer; they must not start streams, add subscriptions, or use `X:ALL`.
 
 Each streaming trade row is latest-event tape data, not historical time-and-sales history. Public rows may include `ticker`, `price`, `volume`, `value`, `side`, `timestamp`, `timestamp_display`, `source`, `sequence`, and `raw_type`, plus compatibility aliases such as `time`, `side_if_available`, and `sequence_if_available`. Price, volume, and timestamp are required; rows missing any of those fields are dropped. `X-QUOTE` and `X` snapshot messages do not create trade-tape rows. `GET /api/v1/stocks/vn/realtime/trades` retains its top-level `trades` list plus short `status_message`; sanitized technical detail lives in its `diagnostics` object.
 
