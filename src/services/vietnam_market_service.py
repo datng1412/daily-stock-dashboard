@@ -183,6 +183,12 @@ VN_DASHBOARD_UNITS = {
     "low_20d": "VND",
     "distance_to_20d_high_pct": "percent",
     "distance_to_20d_low_pct": "percent",
+    "high_52w": "VND",
+    "low_52w": "VND",
+    "avg_volume_10d": "shares",
+    "avg_volume_3m": "shares",
+    "price_vs_reference_pct": "percent",
+    "daily_range_pct": "percent",
     "foreign_net_5d": "row-specific",
     "foreign_net_20d": "row-specific",
     "foreign_net_5d_latest_available": "row-specific",
@@ -1725,6 +1731,158 @@ def calculate_foreign_history_summary(history: Optional[List[Dict[str, Any]]]) -
     }
 
 
+def _history_frame(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or df.empty:
+        return pd.DataFrame()
+    history = df.copy()
+    if "date" in history.columns:
+        parsed_dates = pd.to_datetime(history["date"], errors="coerce")
+        history = history.assign(_parsed_date=parsed_dates)
+        dated = history[history["_parsed_date"].notna()]
+        if not dated.empty:
+            history = dated.sort_values("_parsed_date")
+        history = history.drop(columns=["_parsed_date"], errors="ignore")
+    return history.reset_index(drop=True)
+
+
+def _coverage_status(count: int, *, complete: int, partial: int) -> str:
+    if count >= complete:
+        return "complete"
+    if count >= partial:
+        return "partial"
+    return "insufficient"
+
+
+def _calculate_52w_high_low(df: pd.DataFrame) -> Dict[str, Any]:
+    history = _history_frame(df).tail(252).copy()
+    if "date" not in history.columns or "high" not in history.columns or "low" not in history.columns:
+        valid_mask = pd.Series(False, index=history.index)
+        valid_count = 0
+    else:
+        dates = pd.to_datetime(history["date"], errors="coerce")
+        high = pd.to_numeric(history["high"], errors="coerce")
+        low = pd.to_numeric(history["low"], errors="coerce")
+        valid_mask = dates.notna() & high.notna() & low.notna() & (high > 0) & (low > 0)
+        valid_count = int(valid_mask.sum())
+    coverage_status = _coverage_status(valid_count, complete=240, partial=120)
+    result = {
+        "high_52w": None,
+        "high_52w_date": None,
+        "low_52w": None,
+        "low_52w_date": None,
+        "high_low_52w_history_count": valid_count,
+        "high_low_52w_coverage_status": coverage_status,
+    }
+    if coverage_status == "insufficient":
+        return result
+
+    valid_history = history.loc[valid_mask].copy()
+    high = pd.to_numeric(history["high"], errors="coerce")
+    low = pd.to_numeric(history["low"], errors="coerce")
+    valid_high = high.loc[valid_mask]
+    valid_low = low.loc[valid_mask]
+    if valid_history.empty:
+        return result
+
+    max_high = valid_high.max()
+    min_low = valid_low.min()
+    high_idx = valid_high[valid_high == max_high].index[-1]
+    low_idx = valid_low[valid_low == min_low].index[-1]
+    result.update(
+        {
+            "high_52w": _round_optional(_safe_float(max_high)),
+            "high_52w_date": _valid_date_string(valid_history.loc[high_idx].get("date")),
+            "low_52w": _round_optional(_safe_float(min_low)),
+            "low_52w_date": _valid_date_string(valid_history.loc[low_idx].get("date")),
+        }
+    )
+    return result
+
+
+def _calculate_average_volume_windows(df: pd.DataFrame) -> Dict[str, Any]:
+    history = _history_frame(df)
+    if "volume" not in history.columns:
+        volume = pd.Series(dtype="float64")
+    else:
+        volume = pd.to_numeric(history["volume"], errors="coerce")
+        volume = volume[volume.notna() & (volume >= 0)]
+    latest_10d = volume.tail(10)
+    latest_3m = volume.tail(63)
+    count_10d = int(len(latest_10d))
+    count_3m = int(len(latest_3m))
+    coverage_10d = "complete" if count_10d >= 10 else "insufficient"
+    coverage_3m = _coverage_status(count_3m, complete=60, partial=30)
+    return {
+        "avg_volume_10d": _round_optional(_safe_float(latest_10d.mean()), 0)
+        if coverage_10d == "complete"
+        else None,
+        "avg_volume_10d_history_count": count_10d,
+        "avg_volume_10d_coverage_status": coverage_10d,
+        "avg_volume_3m": _round_optional(_safe_float(latest_3m.mean()), 0)
+        if coverage_3m != "insufficient"
+        else None,
+        "avg_volume_3m_history_count": count_3m,
+        "avg_volume_3m_coverage_status": coverage_3m,
+    }
+
+
+def _calculate_price_vs_reference_pct(
+    daily_close: Optional[float],
+    reference_price: Optional[float],
+) -> Dict[str, Any]:
+    if daily_close is None or daily_close <= 0:
+        return {
+            "price_vs_reference_pct": None,
+            "price_vs_reference_status": "daily_close_unavailable",
+        }
+    if reference_price is None or reference_price <= 0:
+        return {
+            "price_vs_reference_pct": None,
+            "price_vs_reference_status": "reference_unavailable",
+        }
+    return {
+        "price_vs_reference_pct": _round_optional((daily_close - reference_price) / reference_price * 100, 2),
+        "price_vs_reference_status": "ok",
+    }
+
+
+def _calculate_daily_range_pct(
+    latest_high: Optional[float],
+    latest_low: Optional[float],
+    daily_close: Optional[float],
+) -> Dict[str, Any]:
+    if (
+        latest_high is None
+        or latest_low is None
+        or daily_close is None
+        or daily_close <= 0
+        or latest_high < latest_low
+    ):
+        return {
+            "daily_range_pct": None,
+            "daily_range_status": "insufficient",
+        }
+    return {
+        "daily_range_pct": _round_optional((latest_high - latest_low) / daily_close * 100, 2),
+        "daily_range_status": "ok",
+    }
+
+
+def _ssi_derived_metrics_status(metrics: Dict[str, Any]) -> str:
+    statuses = [
+        str(metrics.get("high_low_52w_coverage_status") or "insufficient"),
+        str(metrics.get("avg_volume_10d_coverage_status") or "insufficient"),
+        str(metrics.get("avg_volume_3m_coverage_status") or "insufficient"),
+        str(metrics.get("price_vs_reference_status") or "reference_unavailable"),
+        str(metrics.get("daily_range_status") or "insufficient"),
+    ]
+    if all(status in {"complete", "ok"} for status in statuses):
+        return "ok"
+    if any(status in {"complete", "partial", "ok"} for status in statuses):
+        return "partial"
+    return "insufficient"
+
+
 def _status_detail(label: str, severity: str, reason: str, inputs: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     if label not in VN_ALLOWED_STATUS_LABELS:
         raise ValueError(f"Unsupported Vietnam status label: {label}")
@@ -2335,6 +2493,7 @@ def calculate_vietnam_indicators(
     df: pd.DataFrame,
     foreign_latest: Optional[Dict[str, Any]] = None,
     foreign_history: Optional[List[Dict[str, Any]]] = None,
+    reference_price: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Calculate neutral Vietnam watchlist indicators for the latest row."""
     if df is None or df.empty:
@@ -2363,6 +2522,14 @@ def calculate_vietnam_indicators(
     foreign_net_5d = _foreign_sum(df, 5)
     foreign_net_20d = _foreign_sum(df, 20)
     foreign_history_summary = calculate_foreign_history_summary(foreign_history)
+    ssi_derived_metrics = {
+        **_calculate_52w_high_low(df),
+        **_calculate_average_volume_windows(df),
+        **_calculate_price_vs_reference_pct(latest_close, _safe_float(reference_price)),
+        **_calculate_daily_range_pct(_safe_float(high.iloc[-1]), _safe_float(low.iloc[-1]), latest_close),
+        "ssi_derived_metrics_source": "SSI DailyOhlc + SSI DailyStockPrice",
+    }
+    ssi_derived_metrics["ssi_derived_metrics_status"] = _ssi_derived_metrics_status(ssi_derived_metrics)
 
     return {
         "close": _round_optional(latest_close),
@@ -2386,6 +2553,7 @@ def calculate_vietnam_indicators(
         "foreign_net_5d": _round_optional(foreign_net_5d, 0),
         "foreign_net_20d": _round_optional(foreign_net_20d, 0),
         "foreign_net_latest": _round_optional(_safe_float((foreign_latest or {}).get("net")), 0),
+        **ssi_derived_metrics,
         **foreign_history_summary,
     }
 
@@ -5397,7 +5565,12 @@ class VietnamMarketService:
         if trade_tape_result["error"]:
             cache_errors["trade_tape"] = trade_tape_result["error"]
         validation = validate_vietnam_row(latest, foreign)
-        indicators = calculate_vietnam_indicators(df, foreign, foreign_history)
+        indicators = calculate_vietnam_indicators(
+            df,
+            foreign,
+            foreign_history,
+            reference_price=_safe_float((ssi_daily_stock_price or {}).get("reference_price")),
+        )
         candle_status = "unknown"
         final_close_status = "unknown"
         adjusted_price_status = price_adjustment_status

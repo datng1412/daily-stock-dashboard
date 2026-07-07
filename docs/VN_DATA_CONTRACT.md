@@ -66,6 +66,7 @@ Status values:
 
 * `Available now`: already exposed by the current strict SSI runtime/API/schema/frontend data model when the source returns the field.
 * `Present internally, not exposed`: normalized internally but not part of the current public contract.
+* `SSI-derived implemented`: calculated internally from SSI-owned fields with null/coverage semantics.
 * `SSI-derived later, not implemented`: can be derived from SSI-owned data, but the current code does not compute this exact metric.
 * `Deferred pending methodology/semantics`: should not be treated as external-provider-required until SSI inputs, share-count semantics, or methodology are verified.
 * `Not available / future provider required`: requires a future fundamentals, corporate-actions, or other external provider contract.
@@ -77,9 +78,9 @@ Status values:
 | Average | Average trading price | Ambiguous, needs provider confirmation | Optional SSI realtime schema placeholder only | `realtime_snapshot.average_price` / realtime quote `average_price` exists in schema/types but current provider mapping does not populate it | Do not show as available stock-detail data until SSI realtime payload semantics and mapping are verified. |
 | Matched val | Matched trading value | Available now | SSI DailyStockPrice | `daily_stock_price.matched_value`; compatibility `ssi_matched_value` | Do not fill from DailyOhlc `amount`/`value`; source label must remain DailyStockPrice. |
 | PT val | Put-through trading value | Available now | SSI DailyStockPrice | `daily_stock_price.put_through_value`; compatibility `ssi_put_through_value` | Null means SSI did not provide the field; zero remains a real provider value. |
-| High 52W | 52-week high | SSI-derived later, not implemented | Would be derived from SSI DailyOhlc history | No current 52W field | Phase 4.8A candidate; return null/unavailable when SSI history is insufficient. |
-| Avg. vol. 3M | Three-month average volume | SSI-derived later, not implemented | Would be derived from SSI DailyOhlc volume history | No current 3M average-volume field | Phase 4.8A candidate; define the trading-day window before implementation. |
-| Avg. vol. 10D | Ten-day average volume | SSI-derived later, not implemented | Would be derived from SSI DailyOhlc volume history | No current 10D average-volume field | Phase 4.8A candidate; current code exposes 20-day average volume and chart `volume_ma20`/`volume_ma50`, not 10D. |
+| High 52W | 52-week high | SSI-derived implemented | SSI DailyOhlc high history | `indicators.high_52w`; company `technical.high_52w`; date `high_52w_date` | Uses the latest 252 returned DailyOhlc rows; null when fewer than 120 usable high/low rows are available. |
+| Avg. vol. 3M | Three-month average volume | SSI-derived implemented | SSI DailyOhlc volume history | `indicators.avg_volume_3m`; company `technical.avg_volume_3m` | Uses up to 63 latest usable volume rows; `complete` at >=60, `partial` at >=30, null below 30. |
+| Avg. vol. 10D | Ten-day average volume | SSI-derived implemented | SSI DailyOhlc volume history | `indicators.avg_volume_10d`; company `technical.avg_volume_10d` | Requires 10 usable volume rows; null below 10. |
 | EPS (TTM) | Trailing-twelve-month earnings per share | Not available / future provider required | Future fundamentals provider | No current EPS field | Not implemented in SSI runtime; do not infer from price data. |
 | P/E (TTM) | Price-to-earnings ratio | Not available / future provider required | Future fundamentals/ratios provider | No current P/E field | Do not compute from missing EPS. |
 | P/B | Price-to-book ratio | Not available / future provider required | Future fundamentals/ratios provider | No current P/B field | Requires book-value/fundamentals source. |
@@ -88,7 +89,7 @@ Status values:
 | FR. sell vol | Foreign sell volume | Available now | SSI DailyStockPrice | `daily_stock_price.foreign_sell_volume`; `foreign.sell`; raw-field marker `foreign_sell_raw_field` | Unit is shares when quantity fields exist. |
 | FR. room | Foreign ownership room/remaining room | Ambiguous, needs provider confirmation | Optional SSI realtime schema placeholder only | Realtime quote `foreign_room` / `foreignRoom` exists in schema/types but current provider mapping does not populate it | Do not present as available DailyStockPrice or stock-detail data today. |
 | PT vol | Put-through trading volume | Available now | SSI DailyStockPrice | `daily_stock_price.put_through_volume`; compatibility `ssi_put_through_volume` | Do not substitute DailyOhlc volume or matched volume. |
-| Low 52W | 52-week low | SSI-derived later, not implemented | Would be derived from SSI DailyOhlc history | No current 52W field | Phase 4.8A candidate; return null/unavailable when SSI history is insufficient. |
+| Low 52W | 52-week low | SSI-derived implemented | SSI DailyOhlc low history | `indicators.low_52w`; company `technical.low_52w`; date `low_52w_date` | Uses the latest 252 returned DailyOhlc rows; null when fewer than 120 usable high/low rows are available. |
 | Outs. qty | Outstanding quantity / share count | Ambiguous, needs provider confirmation | SSI SecuritiesDetails/Securities metadata when provider returns share-count fields | `symbol_metadata.listed_shares`; watchlist/company `listed_shares`; profile `listed_shares` | Exposed field is listed shares / provider share-count metadata. Do not label it as exact outstanding quantity until SSI semantics are confirmed. |
 | Market cap | Equity market capitalization | Deferred pending methodology/semantics | SSI or verified external share-count semantics plus canonical price rule | No current market-cap field | Do not compute from `latest_price * listed_shares` until share-count basis and product behavior are verified. |
 | Dividend ratio | Cash/stock dividend ratio | Not available / future provider required | Future CorporateActionsProvider | Future contract fields may include `cash_dividend_per_share` and `stock_dividend_ratio`, but default provider returns empty lists | Corporate actions are disabled/not configured by default and must not be inferred from price gaps. |
@@ -118,6 +119,19 @@ missing_tickers = requested normalized tickers not represented by a row
 ```
 
 The same counters may appear under `data_quality` for diagnostics. A complete response should include one row per normalized requested ticker. If a row is partial or unavailable, it should stay visible and explain why through `data_quality_summary.issues` rather than disappearing.
+
+## SSI-Derived Metrics Contract
+
+Phase 4.8A adds these additive fields under watchlist `indicators` and company `technical`. They are calculated internally and never change row status or canonical `latest_price`.
+
+| Field | Formula / source | Null and coverage behavior |
+| --- | --- | --- |
+| `high_52w`, `low_52w` | Max high / min low from the latest 252 returned SSI DailyOhlc rows | `high_low_52w_coverage_status` is `complete` at >=240 usable high/low rows, `partial` at >=120, and `insufficient` below 120. A usable row requires a valid date plus positive numeric high and low. Values and dates are both null when insufficient. Dates are `high_52w_date` and `low_52w_date`. |
+| `avg_volume_10d` | Average volume from the latest 10 usable SSI DailyOhlc volume rows | Requires 10 usable rows; otherwise null with `avg_volume_10d_coverage_status=insufficient`. A usable volume row is numeric and >=0. |
+| `avg_volume_3m` | Average volume from up to the latest 63 usable SSI DailyOhlc volume rows | `avg_volume_3m_coverage_status` is `complete` at >=60 rows, `partial` at >=30, and `insufficient` below 30. Value is null when insufficient. A usable volume row is numeric and >=0. |
+| `price_vs_reference_pct` | `(DailyOhlc close - DailyStockPrice reference_price) / reference_price * 100` | Requires positive DailyOhlc close and positive DailyStockPrice reference. Status is `ok`, `daily_close_unavailable`, or `reference_unavailable`. |
+| `daily_range_pct` | `(DailyOhlc high - DailyOhlc low) / DailyOhlc close * 100` | Requires numeric DailyOhlc high/low, positive close, and high >= low. Status is `ok` or `insufficient`. |
+| `ssi_derived_metrics_status`, `ssi_derived_metrics_source` | Aggregate source/status for the fields above | Source is `SSI DailyOhlc + SSI DailyStockPrice`; status is `ok`, `partial`, or `insufficient`. |
 
 Reason codes used for row-level partial/missing explanations include:
 
@@ -337,8 +351,7 @@ The SSI-first rule is: if SSI can provide a market-data field, SSI owns it; if a
 | Put-through volume/value | SSI DailyStockPrice | Use when available |
 | Latest foreign flow | SSI DailyStockPrice | Use latest matched-date row when available |
 | Foreign 5D/20D flow | SSI DailyStockPrice | Compute only from returned recent DailyStockPrice `foreign_net_volume` rows; null when history is insufficient |
-| Technical indicators | SSI-derived internal | MA20/MA50, RSI14, Bollinger 20,2, 20D average volume, 20D high/low, and volume ratio are derived from SSI DailyOhlc and must not use external provider substitutes |
-| Future SSI-derived metrics | SSI-derived internal | 52W high/low, 10D average volume, 3M average volume, price-vs-reference %, and daily range % should be computed from SSI DailyOhlc and DailyStockPrice inputs when implemented |
+| Technical indicators and SSI-derived metrics | SSI-derived internal | MA20/MA50, RSI14, Bollinger 20,2, 20D average volume, 20D high/low, volume ratio, 52W high/low, 10D average volume, 3M average volume, price-vs-reference %, and daily range % are derived from SSI DailyOhlc and DailyStockPrice inputs and must not use external provider substitutes |
 | Deferred beta / market cap | SSI-derived or source-labeled after proof | Beta requires verified SSI index data and methodology; market cap requires verified share-count semantics before calculation |
 | Index list | SSI IndexList | Use SSI-returned index codes and identifiers |
 | Daily index | SSI DailyIndex | Optional index value/change/liquidity/breadth rows only after exact IndexList resolution |
@@ -412,6 +425,8 @@ External provider rules:
 ### Daily Data
 
 Render daily data when the row has valid SSI DailyOhlc fields and daily status is OK. Optional section failures should not hide daily close, chart, or DailyStockPrice fields.
+
+Frontend compact numeric formatting is presentation-only. API price fields remain raw VND/share values, but VN price-like values are displayed in board-style thousand-VND units with two decimals and no suffix, for example `72,100` becomes `72.10`. Share volumes may use `K`/`M`; VND trading values may use `K`/`M`/`B`/`T`. This formatting must not change `latest_price`, source labels, API payloads, or missing-data semantics.
 
 The dashboard top summary `Foreign net volume` aggregates `ssi_foreign_net_volume` from the latest successful complete watchlist response and labels the unit as shares. It must not aggregate legacy `foreign_net` fallbacks, incomplete refresh rows, auxiliary realtime/trade/index/corporate-action responses, or mix volume with `ssi_foreign_net_value` in VND.
 

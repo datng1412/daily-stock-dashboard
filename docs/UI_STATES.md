@@ -82,6 +82,7 @@ Provider endpoint details, HTTP status, retryability, and raw provider summaries
 - Prefer section-level unavailable copy over per-field placeholders.
 - Keep primary copy short. Put technical details in diagnostics.
 - Do not use raw provider error text in primary cards.
+- Keep compact numeric display source-neutral and truthful: raw VND/share price fields render as board-style thousand-VND values with two decimals and no suffix, share volumes use `K`/`M`, VND trading values use `K`/`M`/`B`/`T`, and unavailable values remain explicit missing states rather than fake zeros.
 
 ## Implementation Notes For Progressive Workspace Phases
 

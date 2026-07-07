@@ -20,7 +20,7 @@ SSI_SECURITIES_DETAILS_SOURCE = "SSI SecuritiesDetails"
 SSI_INTRADAY_SOURCE = "SSI IntradayOhlc"
 SSI_REALTIME_SOURCE = "SSI realtime contract"
 SSI_TRADE_TAPE_SOURCE = "SSI trade-tape contract"
-TECHNICAL_DAILY_OHLC_SOURCE = "derived from SSI DailyOhlc"
+SSI_DERIVED_SOURCE = "SSI-derived"
 NEWS_FUTURE_SOURCE = "NewsProvider future"
 EXTERNAL_FUTURE_SOURCE = "external provider future"
 
@@ -192,7 +192,25 @@ class VietnamCompanyResearchService:
             "bollinger_upper": bollinger.get("upper"),
             "bollinger_middle": bollinger.get("middle"),
             "bollinger_lower": bollinger.get("lower"),
-            "source": TECHNICAL_DAILY_OHLC_SOURCE,
+            "high_52w": indicators.get("high_52w"),
+            "high_52w_date": indicators.get("high_52w_date"),
+            "low_52w": indicators.get("low_52w"),
+            "low_52w_date": indicators.get("low_52w_date"),
+            "high_low_52w_history_count": indicators.get("high_low_52w_history_count"),
+            "high_low_52w_coverage_status": indicators.get("high_low_52w_coverage_status"),
+            "avg_volume_10d": indicators.get("avg_volume_10d"),
+            "avg_volume_10d_history_count": indicators.get("avg_volume_10d_history_count"),
+            "avg_volume_10d_coverage_status": indicators.get("avg_volume_10d_coverage_status"),
+            "avg_volume_3m": indicators.get("avg_volume_3m"),
+            "avg_volume_3m_history_count": indicators.get("avg_volume_3m_history_count"),
+            "avg_volume_3m_coverage_status": indicators.get("avg_volume_3m_coverage_status"),
+            "price_vs_reference_pct": indicators.get("price_vs_reference_pct"),
+            "price_vs_reference_status": indicators.get("price_vs_reference_status"),
+            "daily_range_pct": indicators.get("daily_range_pct"),
+            "daily_range_status": indicators.get("daily_range_status"),
+            "ssi_derived_metrics_status": indicators.get("ssi_derived_metrics_status"),
+            "ssi_derived_metrics_source": indicators.get("ssi_derived_metrics_source"),
+            "source": SSI_DERIVED_SOURCE,
         }
         technical["status"] = _status_for(
             technical["ma20"],
@@ -201,6 +219,12 @@ class VietnamCompanyResearchService:
             technical["bollinger_upper"],
             technical["bollinger_middle"],
             technical["bollinger_lower"],
+            technical["high_52w"],
+            technical["low_52w"],
+            technical["avg_volume_10d"],
+            technical["avg_volume_3m"],
+            technical["price_vs_reference_pct"],
+            technical["daily_range_pct"],
         )
         intraday_status = _dict(row.get("intraday_status"))
         intraday_diagnostics = _dict(intraday_status.get("diagnostics"))
@@ -417,7 +441,25 @@ class VietnamCompanyResearchService:
             "bollinger_upper": None,
             "bollinger_middle": None,
             "bollinger_lower": None,
-            "source": TECHNICAL_DAILY_OHLC_SOURCE,
+            "high_52w": None,
+            "high_52w_date": None,
+            "low_52w": None,
+            "low_52w_date": None,
+            "high_low_52w_history_count": 0,
+            "high_low_52w_coverage_status": "insufficient",
+            "avg_volume_10d": None,
+            "avg_volume_10d_history_count": 0,
+            "avg_volume_10d_coverage_status": "insufficient",
+            "avg_volume_3m": None,
+            "avg_volume_3m_history_count": 0,
+            "avg_volume_3m_coverage_status": "insufficient",
+            "price_vs_reference_pct": None,
+            "price_vs_reference_status": "daily_close_unavailable",
+            "daily_range_pct": None,
+            "daily_range_status": "insufficient",
+            "ssi_derived_metrics_status": "insufficient",
+            "ssi_derived_metrics_source": "SSI DailyOhlc + SSI DailyStockPrice",
+            "source": SSI_DERIVED_SOURCE,
             "status": "missing",
         }
         missing_intraday = {

@@ -138,6 +138,24 @@ export type VietnamWatchItem = {
     low20d?: number | null;
     distanceTo20dHighPct?: number | null;
     distanceTo20dLowPct?: number | null;
+    high52w?: number | null;
+    high52wDate?: string | null;
+    low52w?: number | null;
+    low52wDate?: string | null;
+    highLow52wHistoryCount?: number | null;
+    highLow52wCoverageStatus?: string | null;
+    avgVolume10d?: number | null;
+    avgVolume10dHistoryCount?: number | null;
+    avgVolume10dCoverageStatus?: string | null;
+    avgVolume3m?: number | null;
+    avgVolume3mHistoryCount?: number | null;
+    avgVolume3mCoverageStatus?: string | null;
+    priceVsReferencePct?: number | null;
+    priceVsReferenceStatus?: string | null;
+    dailyRangePct?: number | null;
+    dailyRangeStatus?: string | null;
+    ssiDerivedMetricsStatus?: string | null;
+    ssiDerivedMetricsSource?: string | null;
     foreignNet5D?: number | null;
     foreignNet20D?: number | null;
     foreignNetLatest?: number | null;
@@ -616,6 +634,24 @@ export type VietnamCompanyTechnical = {
   bollingerUpper?: number | null;
   bollingerMiddle?: number | null;
   bollingerLower?: number | null;
+  high52w?: number | null;
+  high52wDate?: string | null;
+  low52w?: number | null;
+  low52wDate?: string | null;
+  highLow52wHistoryCount?: number | null;
+  highLow52wCoverageStatus?: string | null;
+  avgVolume10d?: number | null;
+  avgVolume10dHistoryCount?: number | null;
+  avgVolume10dCoverageStatus?: string | null;
+  avgVolume3m?: number | null;
+  avgVolume3mHistoryCount?: number | null;
+  avgVolume3mCoverageStatus?: string | null;
+  priceVsReferencePct?: number | null;
+  priceVsReferenceStatus?: string | null;
+  dailyRangePct?: number | null;
+  dailyRangeStatus?: string | null;
+  ssiDerivedMetricsStatus?: string | null;
+  ssiDerivedMetricsSource?: string | null;
   source?: string | null;
   status: 'ok' | 'missing' | string;
 };
@@ -939,6 +975,44 @@ export type VietnamObservabilityResponse = {
   };
 };
 
+const normalizeVietnamSsiDerivedMetricKeys = <T extends Record<string, unknown> | null | undefined>(metrics: T): T => {
+  if (!metrics) return metrics;
+  const normalized = { ...metrics };
+  const aliases: Array<[source: string, target: string]> = [
+    ['high52W', 'high52w'],
+    ['low52W', 'low52w'],
+    ['avgVolume10D', 'avgVolume10d'],
+    ['avgVolume3M', 'avgVolume3m'],
+  ];
+
+  aliases.forEach(([source, target]) => {
+    if (normalized[target] === undefined && normalized[source] !== undefined) {
+      normalized[target] = normalized[source];
+    }
+  });
+
+  return normalized as T;
+};
+
+const normalizeVietnamWatchlistResponse = (response: VietnamWatchlistResponse): VietnamWatchlistResponse => ({
+  ...response,
+  watchlist: (response.watchlist ?? []).map((item) => ({
+    ...item,
+    indicators: normalizeVietnamSsiDerivedMetricKeys(
+      item.indicators as unknown as Record<string, unknown>,
+    ) as VietnamWatchItem['indicators'],
+  })),
+});
+
+const normalizeVietnamCompanyResearchResponse = (
+  response: VietnamCompanyResearchResponse,
+): VietnamCompanyResearchResponse => ({
+  ...response,
+  technical: normalizeVietnamSsiDerivedMetricKeys(
+    response.technical as unknown as Record<string, unknown>,
+  ) as VietnamCompanyTechnical,
+});
+
 export const stocksApi = {
   async extractFromImage(file: File): Promise<ExtractFromImageResponse> {
     const formData = new FormData();
@@ -995,7 +1069,7 @@ export const stocksApi = {
       timeout: 120000,
     });
     const { toCamelCase } = await import('./utils');
-    return toCamelCase<VietnamWatchlistResponse>(response.data);
+    return normalizeVietnamWatchlistResponse(toCamelCase<VietnamWatchlistResponse>(response.data));
   },
 
   async getVietnamWatchlistHealth(tickers?: string[]): Promise<VietnamWatchlistHealthResponse> {
@@ -1022,7 +1096,7 @@ export const stocksApi = {
       timeout: 120000,
     });
     const { toCamelCase } = await import('./utils');
-    return toCamelCase<VietnamCompanyResearchResponse>(response.data);
+    return normalizeVietnamCompanyResearchResponse(toCamelCase<VietnamCompanyResearchResponse>(response.data));
   },
 
   async getVietnamIndexList(market = 'HOSE'): Promise<VietnamIndexListResponse> {

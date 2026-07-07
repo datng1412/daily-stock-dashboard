@@ -257,6 +257,24 @@ const makeItem = (ticker: string): VietnamWatchItem => ({
     foreignNet20dLatestAvailable: 30,
     foreignNetLatestAvailableDate: '2026-06-10',
     foreignNetHistoryCount: 20,
+    high52w: 130000,
+    high52wDate: '2026-06-01',
+    low52w: 80000,
+    low52wDate: '2025-12-01',
+    highLow52wHistoryCount: 252,
+    highLow52wCoverageStatus: 'complete',
+    avgVolume10d: 1100,
+    avgVolume10dHistoryCount: 10,
+    avgVolume10dCoverageStatus: 'complete',
+    avgVolume3m: 1050,
+    avgVolume3mHistoryCount: 63,
+    avgVolume3mCoverageStatus: 'complete',
+    priceVsReferencePct: 1.01,
+    priceVsReferenceStatus: 'ok',
+    dailyRangePct: 3,
+    dailyRangeStatus: 'ok',
+    ssiDerivedMetricsStatus: 'ok',
+    ssiDerivedMetricsSource: 'SSI DailyOhlc + SSI DailyStockPrice',
   },
   statusLabels: ['Watch'],
   statusDetails: [],
@@ -2271,8 +2289,8 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(await screen.findByRole('heading', { name: 'Trade tape' })).toBeInTheDocument();
     expect(screen.getByText('Historical trade tape is separate from X-TRADE latest-trade stream context.')).toBeInTheDocument();
     expect(screen.getByText('SSI realtime snapshot; may differ from trade tape')).toBeInTheDocument();
-    expect(screen.getAllByText(/OHLCV close 100/).length).toBeGreaterThan(0);
-    expect(screen.getAllByText('101.5').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/OHLCV close 0\.10/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('0.10').length).toBeGreaterThan(0);
   });
 
   it('renders a compact selected ticker header with distinct source labels', async () => {
@@ -2335,7 +2353,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     const foreignNetCard = foreignNetVolumeSummaryCard();
     expect(foreignNetCard.getByText('Foreign net volume')).toBeInTheDocument();
-    expect(foreignNetCard.getByText('-7,169,016')).toBeInTheDocument();
+    expect(foreignNetCard.getByText('-7.17M')).toBeInTheDocument();
     expect(foreignNetCard.getByText('SSI DailyStockPrice · shares')).toBeInTheDocument();
   });
 
@@ -2364,14 +2382,14 @@ describe('VietnamDashboardPage watchlist loading', () => {
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
-    expect(foreignNetVolumeSummaryCard().getByText('210')).toBeInTheDocument();
+    expect(foreignNetVolumeSummaryCard().getByText('+210')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /force live refresh/i }));
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, true));
     expect(await screen.findByText('Last update failed')).toBeInTheDocument();
     expect(screen.getByText('Showing previous data')).toBeInTheDocument();
-    expect(foreignNetVolumeSummaryCard().getByText('210')).toBeInTheDocument();
+    expect(foreignNetVolumeSummaryCard().getByText('+210')).toBeInTheDocument();
     expect(foreignNetVolumeSummaryCard().queryByText('999,999')).not.toBeInTheDocument();
   });
 
@@ -2387,7 +2405,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     render(<VietnamDashboardPage />);
 
-    await waitFor(() => expect(foreignNetVolumeSummaryCard().getByText('21')).toBeInTheDocument());
+    await waitFor(() => expect(foreignNetVolumeSummaryCard().getByText('+21')).toBeInTheDocument());
     clickIndicatorSort(/Sort by Ticker/i);
     expect(indicatorRowOrder()).toEqual(['ACB', 'ACV', 'FPT', 'MSB', 'SCS', 'VPB']);
 
@@ -2396,7 +2414,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(2));
     expect(screen.getAllByText('Updating...').length).toBeGreaterThan(0);
     expect(screen.getByText('Showing previous data')).toBeInTheDocument();
-    expect(foreignNetVolumeSummaryCard().getByText('21')).toBeInTheDocument();
+    expect(foreignNetVolumeSummaryCard().getByText('+21')).toBeInTheDocument();
     expect(indicatorRowOrder()).toEqual(['ACB', 'ACV', 'FPT', 'MSB', 'SCS', 'VPB']);
     expect(dataReadinessStrip().getByRole('heading', { name: 'Data readiness' })).toBeInTheDocument();
 
@@ -2404,7 +2422,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
       resolveRefresh?.(latest);
     });
 
-    await waitFor(() => expect(foreignNetVolumeSummaryCard().getByText('300')).toBeInTheDocument());
+    await waitFor(() => expect(foreignNetVolumeSummaryCard().getByText('+300')).toBeInTheDocument());
     expect(screen.queryAllByText('Updating...')).toHaveLength(0);
     expect(indicatorRowOrder()).toEqual(['ACB', 'ACV', 'FPT', 'MSB', 'SCS', 'VPB']);
   });
@@ -2426,7 +2444,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     render(<VietnamDashboardPage />);
 
-    await waitFor(() => expect(foreignNetVolumeSummaryCard().getByText('21')).toBeInTheDocument());
+    await waitFor(() => expect(foreignNetVolumeSummaryCard().getByText('+21')).toBeInTheDocument());
 
     fireEvent.click(screen.getByRole('button', { name: /force live refresh/i }));
     fireEvent.click(screen.getByRole('button', { name: /^refresh$/i }));
@@ -2435,12 +2453,12 @@ describe('VietnamDashboardPage watchlist loading', () => {
     await act(async () => {
       resolveLatest?.(latest);
     });
-    await waitFor(() => expect(foreignNetVolumeSummaryCard().getByText('300')).toBeInTheDocument());
+    await waitFor(() => expect(foreignNetVolumeSummaryCard().getByText('+300')).toBeInTheDocument());
 
     await act(async () => {
       resolveStale?.(stale);
     });
-    expect(foreignNetVolumeSummaryCard().getByText('300')).toBeInTheDocument();
+    expect(foreignNetVolumeSummaryCard().getByText('+300')).toBeInTheDocument();
     expect(foreignNetVolumeSummaryCard().queryByText('-600')).not.toBeInTheDocument();
   });
 
@@ -2452,13 +2470,13 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     render(<VietnamDashboardPage />);
 
-    await waitFor(() => expect(foreignNetVolumeSummaryCard().getByText('210')).toBeInTheDocument());
+    await waitFor(() => expect(foreignNetVolumeSummaryCard().getByText('+210')).toBeInTheDocument());
 
     fireEvent.click(screen.getByRole('button', { name: /force live refresh/i }));
 
     expect(await screen.findByText('Last update failed')).toBeInTheDocument();
     expect(screen.getByText('Showing previous data')).toBeInTheDocument();
-    expect(foreignNetVolumeSummaryCard().getByText('210')).toBeInTheDocument();
+    expect(foreignNetVolumeSummaryCard().getByText('+210')).toBeInTheDocument();
   });
 
   it('keeps previous committed rows and selection when a preset request fails', async () => {
@@ -2634,14 +2652,14 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     render(<VietnamDashboardPage />);
 
-    await waitFor(() => expect(foreignNetVolumeSummaryCard().getByText('210')).toBeInTheDocument());
+    await waitFor(() => expect(foreignNetVolumeSummaryCard().getByText('+210')).toBeInTheDocument());
     const watchlistCalls = mockedGetVietnamWatchlist.mock.calls.length;
 
     fireEvent.click(screen.getByRole('button', { name: /refresh realtime/i }));
 
     await waitFor(() => expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledTimes(2));
     expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistCalls);
-    expect(foreignNetVolumeSummaryCard().getByText('210')).toBeInTheDocument();
+    expect(foreignNetVolumeSummaryCard().getByText('+210')).toBeInTheDocument();
   });
 
   it('renders selected ticker data quality summary when present', async () => {
@@ -3763,26 +3781,34 @@ describe('VietnamDashboardPage watchlist loading', () => {
     const detail = within(screen.getByText('Stock detail').closest('section') as HTMLElement);
     expect(detail.getByRole('heading', { name: 'DailyStockPrice coverage' })).toBeInTheDocument();
     expect(detail.getByText('Reference')).toBeInTheDocument();
-    expect(within(detail.getByText('Reference').closest('div') as HTMLElement).getByText('99 VND')).toBeInTheDocument();
+    expect(within(detail.getByText('Reference').closest('div') as HTMLElement).getByText('0.10')).toBeInTheDocument();
     expect(detail.getByText('Ceiling / floor')).toBeInTheDocument();
-    expect(detail.getByText('106 / 92 VND')).toBeInTheDocument();
+    expect(detail.getByText('0.11 / 0.09')).toBeInTheDocument();
     expect(detail.getByText('Foreign net')).toBeInTheDocument();
-    expect(within(detail.getByText('Foreign net').closest('div') as HTMLElement).getByText('5 shares')).toBeInTheDocument();
+    expect(within(detail.getByText('Foreign net').closest('div') as HTMLElement).getByText('+5')).toBeInTheDocument();
     expect(detail.getByText('Foreign net value')).toBeInTheDocument();
-    expect(detail.getByText('200,000 VND')).toBeInTheDocument();
+    expect(detail.getByText('+200K')).toBeInTheDocument();
     expect(detail.getByText('Matched value')).toBeInTheDocument();
-    expect(detail.getByText('123,456,789,000 VND')).toBeInTheDocument();
+    expect(detail.getByText('123.5B')).toBeInTheDocument();
     expect(detail.getByText('Put-through value')).toBeInTheDocument();
-    expect(detail.getByText('25,000,000 VND')).toBeInTheDocument();
+    expect(detail.getByText('25.0M')).toBeInTheDocument();
     expect(detail.getByText('Adjusted close')).toBeInTheDocument();
-    expect(detail.getByText('100 VND')).toBeInTheDocument();
+    expect(detail.getAllByText('0.10').length).toBeGreaterThan(0);
     expect(detail.getByText('Vs reference')).toBeInTheDocument();
-    expect(within(detail.getByText('Vs reference').closest('div') as HTMLElement).getByText('+1 / +1.01%')).toBeInTheDocument();
+    expect(within(detail.getByText('Vs reference').closest('div') as HTMLElement).getByText('+1.01%')).toBeInTheDocument();
+    expect(detail.getByText('10D avg volume')).toBeInTheDocument();
+    expect(within(detail.getByText('10D avg volume').closest('div') as HTMLElement).getByText('1.1K')).toBeInTheDocument();
+    expect(detail.getByText('3M avg volume')).toBeInTheDocument();
+    expect(within(detail.getByText('3M avg volume').closest('div') as HTMLElement).getByText('1.05K')).toBeInTheDocument();
+    expect(detail.getByText('52W high / low')).toBeInTheDocument();
+    expect(within(detail.getByText('52W high / low').closest('div') as HTMLElement).getByText('130.00 / 80.00')).toBeInTheDocument();
+    expect(detail.getByText('Daily range')).toBeInTheDocument();
+    expect(within(detail.getByText('Daily range').closest('div') as HTMLElement).getByText('3%')).toBeInTheDocument();
     expect(detail.getByText('Adjusted close is shown only when SSI provides it. Corporate actions are not inferred from reference or adjusted prices.')).toBeInTheDocument();
     expect(detail.getByText('Foreign net 5D')).toBeInTheDocument();
     expect(detail.getByText('Foreign net 20D')).toBeInTheDocument();
-    expect(within(detail.getByText('Foreign net 5D').closest('div') as HTMLElement).getByText('15')).toBeInTheDocument();
-    expect(within(detail.getByText('Foreign net 20D').closest('div') as HTMLElement).getByText('30')).toBeInTheDocument();
+    expect(within(detail.getByText('Foreign net 5D').closest('div') as HTMLElement).getByText('+15')).toBeInTheDocument();
+    expect(within(detail.getByText('Foreign net 20D').closest('div') as HTMLElement).getByText('+30')).toBeInTheDocument();
     expect(detail.queryByText('Need 5 foreign rows')).not.toBeInTheDocument();
     expect(detail.queryByText('Need 20 foreign rows')).not.toBeInTheDocument();
     expect(detail.getByRole('heading', { name: 'Corporate actions' })).toBeInTheDocument();
@@ -3790,7 +3816,48 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(detail.getByText('Corporate action history/calendar unavailable.')).toBeInTheDocument();
     expect(detail.getByText('No verified Vietnam corporate-action event provider is configured.')).toBeInTheDocument();
     expect(detail.getByText('Daily close')).toBeInTheDocument();
-    expect(detail.getByText('100 / 100')).toBeInTheDocument();
+    expect(detail.getAllByText('0.10 / 0.10').length).toBeGreaterThan(0);
+  });
+
+  it('shows source-aware unavailable copy for null SSI-derived metrics', async () => {
+    const response = makeResponse(defaultTickers);
+    response.watchlist[0] = {
+      ...response.watchlist[0],
+      dailyStockPrice: {
+        ...response.watchlist[0].dailyStockPrice,
+        referencePrice: null,
+      },
+      indicators: {
+        ...response.watchlist[0].indicators,
+        high52w: null,
+        low52w: null,
+        highLow52wHistoryCount: 9,
+        highLow52wCoverageStatus: 'insufficient',
+        avgVolume10d: null,
+        avgVolume10dHistoryCount: 9,
+        avgVolume10dCoverageStatus: 'insufficient',
+        avgVolume3m: null,
+        avgVolume3mHistoryCount: 9,
+        avgVolume3mCoverageStatus: 'insufficient',
+        priceVsReferencePct: null,
+        priceVsReferenceStatus: 'reference_unavailable',
+        dailyRangePct: null,
+        dailyRangeStatus: 'insufficient',
+        ssiDerivedMetricsStatus: 'insufficient',
+      },
+    };
+    mockedGetVietnamWatchlist.mockResolvedValue(response);
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
+
+    const detail = within(screen.getByText('Stock detail').closest('section') as HTMLElement);
+    expect(within(detail.getByText('Vs reference').closest('div') as HTMLElement).getByText('Reference unavailable')).toBeInTheDocument();
+    expect(within(detail.getByText('10D avg volume').closest('div') as HTMLElement).getByText('Need 10 daily rows')).toBeInTheDocument();
+    expect(within(detail.getByText('3M avg volume').closest('div') as HTMLElement).getByText('Need 30 daily rows')).toBeInTheDocument();
+    expect(within(detail.getByText('52W high / low').closest('div') as HTMLElement).getByText('Need 120 daily rows')).toBeInTheDocument();
+    expect(within(detail.getByText('Daily range').closest('div') as HTMLElement).getByText('Insufficient OHLC')).toBeInTheDocument();
   });
 
   it('renders SSI symbol metadata compactly when provided', async () => {
@@ -3916,6 +3983,11 @@ describe('VietnamDashboardPage watchlist loading', () => {
         floorPrice: 24200,
         close: 26500,
       },
+      indicators: {
+        ...response.watchlist[0].indicators,
+        priceVsReferencePct: 1.92,
+        priceVsReferenceStatus: 'ok',
+      },
     };
     mockedGetVietnamWatchlist.mockResolvedValue(response);
     mockedGetVietnamCorporateActions.mockImplementation(async (tickers) => makeCorporateActionsResponse(tickers, {
@@ -3984,9 +4056,9 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     const detail = within(screen.getByText('Stock detail').closest('section') as HTMLElement);
     expect(detail.getByText('Daily close')).toBeInTheDocument();
-    expect(detail.getByText('26,500 / 26,500')).toBeInTheDocument();
-    expect(within(detail.getByText('Reference').closest('div') as HTMLElement).getByText('26,000 VND')).toBeInTheDocument();
-    expect(within(detail.getByText('Vs reference').closest('div') as HTMLElement).getByText('+500 / +1.92%')).toBeInTheDocument();
+    expect(detail.getByText('26.50 / 26.50')).toBeInTheDocument();
+    expect(within(detail.getByText('Reference').closest('div') as HTMLElement).getByText('26.00')).toBeInTheDocument();
+    expect(within(detail.getByText('Vs reference').closest('div') as HTMLElement).getByText('+1.92%')).toBeInTheDocument();
     expect(detail.getByRole('heading', { name: 'Corporate actions' })).toBeInTheDocument();
     expect(detail.getByText('Recent and upcoming events')).toBeInTheDocument();
     expect(detail.getByText('Upcoming')).toBeInTheDocument();
@@ -4352,10 +4424,10 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(screen.getAllByText('Realtime volume').length).toBeGreaterThan(0);
     expect(screen.getByText('SSI IntradayOhlc candles are separate from SSI realtime board and trade tape context.')).toBeInTheDocument();
     expect(screen.getAllByText(/Returned cadence differs from requested 1h: 1m/).length).toBeGreaterThan(0);
-    expect(screen.getAllByText('1,234,567').length).toBeGreaterThanOrEqual(2);
-    expect(screen.getAllByText('3,456,000').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('1.23M').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText('3.46M').length).toBeGreaterThan(0);
     expect(screen.getAllByText('0.72x').length).toBeGreaterThan(0);
-    expect(screen.getByText('103 / 99')).toBeInTheDocument();
+    expect(screen.getAllByText('0.10 / 0.10').length).toBeGreaterThan(0);
     expect(screen.getByText('4%')).toBeInTheDocument();
     const sessionCandlesLabel = screen.getByText('Session candles');
     expect(within(sessionCandlesLabel.closest('div') as HTMLElement).getByText('5')).toBeInTheDocument();
@@ -4603,7 +4675,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
 
     expect(screen.getAllByText('20D avg volume').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('1,234,567').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('1.23M').length).toBeGreaterThan(0);
   });
 
   it('falls back to liquidity 20D average volume when indicator value is missing', async () => {
@@ -4622,7 +4694,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false));
 
-    expect(screen.getAllByText('7,654,321').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('7.65M').length).toBeGreaterThan(0);
   });
 
   it('displays final close as not confirmed instead of unknown', async () => {
@@ -4666,8 +4738,8 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     expect(screen.getByText('Foreign net 5D')).toBeInTheDocument();
     expect(screen.getByText('Foreign net 20D')).toBeInTheDocument();
-    expect(screen.getByText('12,345')).toBeInTheDocument();
-    expect(screen.getByText('-67,890')).toBeInTheDocument();
+    expect(screen.getByText('+12.35K')).toBeInTheDocument();
+    expect(screen.getByText('-67.89K')).toBeInTheDocument();
     expect(screen.getByText('Foreign data as of 2026-06-11; OHLCV date 2026-06-12.')).toBeInTheDocument();
   });
 
@@ -4845,7 +4917,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     const detail = within(await screen.findByText('Stock detail').then((node) => node.closest('section') as HTMLElement));
     expect(detail.getByText('DailyStockPrice date differs from DailyOhlc.')).toBeInTheDocument();
     expect(detail.getByText('Daily close')).toBeInTheDocument();
-    expect(detail.getByText('100 / 100')).toBeInTheDocument();
+    expect(detail.getAllByText('0.10 / 0.10').length).toBeGreaterThan(0);
     expect(detail.getByText('partial')).toBeInTheDocument();
     expect(detail.getByText('mismatched')).toBeInTheDocument();
   });
@@ -4854,7 +4926,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     render(<VietnamDashboardPage />);
 
     await waitFor(() => expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledWith(defaultTickers));
-    expect(screen.getAllByText('101.5').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('0.10').length).toBeGreaterThan(0);
     const watchlistCalls = mockedGetVietnamWatchlist.mock.calls.length;
     const chartCalls = mockedGetVietnamChart.mock.calls.length;
     const corporateActionsCalls = mockedGetVietnamCorporateActions.mock.calls.length;
@@ -4867,7 +4939,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     fireEvent.click(screen.getByRole('button', { name: /refresh realtime/i }));
 
     await waitFor(() => expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledTimes(2));
-    expect(screen.getAllByText('101.5').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('0.10').length).toBeGreaterThan(0);
     expect(screen.getAllByText('SSI realtime unavailable. Daily SSI data is still available.').length).toBeGreaterThan(0);
     expect(screen.queryByText('Last update failed')).not.toBeInTheDocument();
     expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistCalls);

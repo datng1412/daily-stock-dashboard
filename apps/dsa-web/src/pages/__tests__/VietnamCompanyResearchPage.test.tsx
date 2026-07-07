@@ -39,11 +39,11 @@ const makeCompanySnapshot = (): VietnamCompanyResearchResponse => ({
     },
   },
   price: {
-    latestPrice: 124.6,
-    dailyClose: 124.6,
-    referencePrice: 123,
-    ceilingPrice: 131.6,
-    floorPrice: 114.4,
+    latestPrice: 124600,
+    dailyClose: 124600,
+    referencePrice: 123000,
+    ceilingPrice: 131600,
+    floorPrice: 114400,
     priceDate: '2026-06-17',
     source: 'SSI DailyOhlc',
     canonicalSource: 'SSI DailyOhlc',
@@ -51,10 +51,10 @@ const makeCompanySnapshot = (): VietnamCompanyResearchResponse => ({
     status: 'ok',
   },
   tradingStats: {
-    open: 123.4,
-    high: 125,
-    low: 122.8,
-    close: 124.6,
+    open: 123400,
+    high: 125000,
+    low: 122800,
+    close: 124600,
     volume: 1_234_567,
     value: 123_456_789_000,
     source: 'SSI DailyOhlc',
@@ -66,10 +66,10 @@ const makeCompanySnapshot = (): VietnamCompanyResearchResponse => ({
     source: 'SSI DailyStockPrice',
     date: '2026-06-17',
     dateMatch: 'matched',
-    referencePrice: 123,
-    ceilingPrice: 131.6,
-    floorPrice: 114.4,
-    adjustedClose: 124.6,
+    referencePrice: 123000,
+    ceilingPrice: 131600,
+    floorPrice: 114400,
+    adjustedClose: 124600,
     matchedVolume: 1_234_567,
     matchedValue: 123_456_789_000,
     putThroughVolume: 1_000,
@@ -101,13 +101,31 @@ const makeCompanySnapshot = (): VietnamCompanyResearchResponse => ({
     status: 'ok',
   },
   technical: {
-    ma20: 120,
-    ma50: 118,
+    ma20: 120000,
+    ma50: 118000,
     rsi14: 55.5,
-    bollingerUpper: 130,
-    bollingerMiddle: 120,
-    bollingerLower: 110,
-    source: 'derived from SSI DailyOhlc',
+    bollingerUpper: 130000,
+    bollingerMiddle: 120000,
+    bollingerLower: 110000,
+    high52w: 140000,
+    high52wDate: '2026-06-01',
+    low52w: 90000,
+    low52wDate: '2025-12-01',
+    highLow52wHistoryCount: 252,
+    highLow52wCoverageStatus: 'complete',
+    avgVolume10d: 1_100_000,
+    avgVolume10dHistoryCount: 10,
+    avgVolume10dCoverageStatus: 'complete',
+    avgVolume3m: 1_050_000,
+    avgVolume3mHistoryCount: 63,
+    avgVolume3mCoverageStatus: 'complete',
+    priceVsReferencePct: 1.3,
+    priceVsReferenceStatus: 'ok',
+    dailyRangePct: 1.77,
+    dailyRangeStatus: 'ok',
+    ssiDerivedMetricsStatus: 'ok',
+    ssiDerivedMetricsSource: 'SSI DailyOhlc + SSI DailyStockPrice',
+    source: 'SSI-derived',
     status: 'ok',
   },
   intraday: {
@@ -240,6 +258,21 @@ describe('VietnamCompanyResearchPage', () => {
     expect(screen.getByText('Put-through volume (shares)')).toBeInTheDocument();
     expect(screen.getByText('Foreign net volume (shares)')).toBeInTheDocument();
     expect(screen.getByText('Foreign net value (VND)')).toBeInTheDocument();
+    expect(screen.getByText('52W high (VND)')).toBeInTheDocument();
+    expect(screen.getByText('140.00')).toBeInTheDocument();
+    expect(screen.getByText('52W low (VND)')).toBeInTheDocument();
+    expect(screen.getByText('90.00')).toBeInTheDocument();
+    expect(screen.getByText('Avg volume 10D')).toBeInTheDocument();
+    expect(screen.getByText('1.1M')).toBeInTheDocument();
+    expect(screen.getByText('Avg volume 3M')).toBeInTheDocument();
+    expect(screen.getByText('1.05M')).toBeInTheDocument();
+    expect(screen.getAllByText('1.23M').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('123.5B').length).toBeGreaterThan(0);
+    expect(screen.getByText('Price vs reference %')).toBeInTheDocument();
+    expect(screen.getByText('+1.30%')).toBeInTheDocument();
+    expect(screen.getByText('Daily range %')).toBeInTheDocument();
+    expect(screen.getByText('1.77%')).toBeInTheDocument();
+    expect(screen.getAllByText('SSI-derived').length).toBeGreaterThan(0);
     expect(screen.getByText('SSI realtime/session volume')).toBeInTheDocument();
     expect(screen.getByText('Latest trade tape volume')).toBeInTheDocument();
     expect(screen.getByText('Latest trade tape price')).toBeInTheDocument();
@@ -262,6 +295,39 @@ describe('VietnamCompanyResearchPage', () => {
     await waitFor(() => {
       expect(stocksApi.getVietnamCompanyResearch).toHaveBeenCalledWith('FPT', false);
     });
+  });
+
+  it('renders unavailable SSI-derived company metrics without fake values', async () => {
+    const snapshot = makeCompanySnapshot();
+    snapshot.technical = {
+      ...snapshot.technical,
+      high52w: null,
+      high52wDate: null,
+      low52w: null,
+      low52wDate: null,
+      highLow52wHistoryCount: 9,
+      highLow52wCoverageStatus: 'insufficient',
+      avgVolume10d: null,
+      avgVolume10dHistoryCount: 9,
+      avgVolume10dCoverageStatus: 'insufficient',
+      avgVolume3m: null,
+      avgVolume3mHistoryCount: 9,
+      avgVolume3mCoverageStatus: 'insufficient',
+      priceVsReferencePct: null,
+      priceVsReferenceStatus: 'reference_unavailable',
+      dailyRangePct: null,
+      dailyRangeStatus: 'insufficient',
+      ssiDerivedMetricsStatus: 'insufficient',
+    };
+    vi.mocked(stocksApi.getVietnamCompanyResearch).mockResolvedValue(snapshot);
+
+    renderPage();
+
+    expect(await screen.findByRole('heading', { name: 'Technical snapshot' })).toBeInTheDocument();
+    expect(screen.getByText('52W high (VND)')).toBeInTheDocument();
+    expect(screen.getByText('Avg volume 10D')).toBeInTheDocument();
+    expect(screen.getAllByText('Unavailable').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('insufficient').length).toBeGreaterThan(0);
   });
 
   it('renders concise unavailable live sections without fake metric rows', async () => {

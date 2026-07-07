@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [improvement] Compact VN dashboard and company page numeric displays so prices render in board-style thousand-VND units with two decimals while volumes and VND values use readable K/M/B/T suffixes.
+- [fix] Correct SSI-derived VN metric value rendering for 52W high/low and 10D/3M average volume by normalizing frontend numeric-suffix field aliases and tightening backend valid-row checks.
+- [new feature] Add SSI-derived VN metrics for 52W high/low, 10D and 3M average volume, price-vs-reference percent, and daily range percent without changing DailyOhlc price ownership.
 - [documentation] Document the SSI-first VN data ownership matrix and planned Phase 4.8A SSI-derived metrics completion without runtime or provider changes.
 - [documentation] Qualify Vnstock, FiinQuant, FiinGroup API Datafeed, and manual import for future VN external-provider domains without adding runtime providers or changing SSI ownership.
 - [new feature] Add a bounded SSI streaming X-TRADE event buffer for optional VN trade-tape rows without request-handler streaming, REST probing, fake data, or latest-price ownership changes.

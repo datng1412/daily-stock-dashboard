@@ -38,6 +38,13 @@ import {
   chunkVietnamWatchlistTickers,
   resolveVietnamWatchlistBatchSize,
 } from '../utils/vietnamWatchlistBatching';
+import {
+  formatCompactShareVolume,
+  formatCompactVndValue,
+  formatCompactVnPrice,
+  formatFullSharesTitle,
+  formatFullVndTitle,
+} from '../utils/vietnamNumberFormat';
 
 const CUSTOM_WATCHLIST_STORAGE_KEY = 'vnDashboard.customWatchlist.v1';
 const AUTO_REFRESH_INTERVALS = [60, 180, 300];
@@ -205,7 +212,11 @@ const formatNumber = (value?: number | null, maximumFractionDigits = 0) => {
   return new Intl.NumberFormat('en-US', { maximumFractionDigits }).format(value);
 };
 
-const formatPrice = (value?: number | null) => formatNumber(value, 2);
+const formatPrice = (value?: number | null) => formatCompactVnPrice(value, '-');
+const formatVolume = (value?: number | null) => formatCompactShareVolume(value, '-');
+const formatSignedVolume = (value?: number | null) => formatCompactShareVolume(value, '-', true);
+const formatVndValue = (value?: number | null) => formatCompactVndValue(value, '-');
+const formatSignedVndValue = (value?: number | null) => formatCompactVndValue(value, '-', true);
 
 const formatRatio = (value?: number | null) => {
   if (value === null || value === undefined || Number.isNaN(value)) return '-';
@@ -223,13 +234,6 @@ const formatSignedNumber = (value?: number | null, maximumFractionDigits = 2) =>
 const finiteNumber = (value?: number | null) => (
   typeof value === 'number' && Number.isFinite(value) ? value : null
 );
-
-const formatReferenceDelta = (value?: number | null, percent?: number | null) => {
-  if (value === null || value === undefined || percent === null || percent === undefined) {
-    return 'Unavailable';
-  }
-  return `${formatSignedNumber(value, 2)} / ${formatSignedNumber(percent, 2)}%`;
-};
 
 const hasDisplayValue = (value?: number | string | null) => (
   value !== null && value !== undefined && value !== '' && !(typeof value === 'number' && Number.isNaN(value))
@@ -1644,7 +1648,9 @@ const WatchCard: React.FC<{ item: VietnamWatchItem; realtimeQuote?: VietnamRealt
         ) : null}
         <div>
           <p className="text-xs text-secondary-text">Daily OHLCV volume</p>
-          <p className="text-lg font-semibold text-foreground">{formatNumber(item.volume)}</p>
+          <p className="text-lg font-semibold text-foreground" title={formatFullSharesTitle(item.volume)}>
+            {formatVolume(item.volume)}
+          </p>
         </div>
         <div>
           <p className="text-xs text-secondary-text">20D liquidity</p>
@@ -1675,7 +1681,9 @@ const WatchCard: React.FC<{ item: VietnamWatchItem; realtimeQuote?: VietnamRealt
         </div>
         <div className="flex items-center justify-between gap-2">
           <span className="text-secondary-text">{foreignLabel(item.foreign.signal)} ({item.foreignNetUnit ?? 'unknown'})</span>
-          <span className={cn('font-medium', signalTone(item.foreign.net))}>{formatNumber(item.foreign.net)}</span>
+          <span className={cn('font-medium', signalTone(item.foreign.net))} title={formatFullSharesTitle(item.foreign.net)}>
+            {formatSignedVolume(item.foreign.net)}
+          </span>
         </div>
         <div className="flex items-center justify-between gap-2">
           <span className="text-secondary-text">Price / foreign dates</span>
@@ -1725,7 +1733,9 @@ const WatchCard: React.FC<{ item: VietnamWatchItem; realtimeQuote?: VietnamRealt
             <span className={signalTone(intradayChange(item))}>Change {formatPrice(intradayChange(item))} ({formatNumber(intradayChangePercent(item), 2)}%)</span>
             <span>Time {formatVietnamTime(item.intradayCandles?.at(-1)?.dateTime ?? item.intradayCandles?.at(-1)?.timestamp)}</span>
             <span>Range {formatNumber(item.intradayPulse?.rangePercent, 2)}%</span>
-            <span>Latest intraday volume {formatNumber(intradayLatestVolume(item))}</span>
+            <span title={formatFullSharesTitle(intradayLatestVolume(item))}>
+              Latest intraday volume {formatVolume(intradayLatestVolume(item))}
+            </span>
           </div>
         </div>
       ) : null}
@@ -2211,11 +2221,12 @@ const SelectedTickerMetric: React.FC<{
   label: string;
   value: React.ReactNode;
   detail?: React.ReactNode;
+  title?: string;
   valueClassName?: string;
-}> = ({ label, value, detail, valueClassName }) => (
+}> = ({ label, value, detail, title, valueClassName }) => (
   <div className="min-w-0 rounded-lg border border-border/50 bg-elevated/35 p-3">
     <dt className="text-xs text-secondary-text">{label}</dt>
-    <dd className={cn('mt-1 truncate text-sm font-semibold text-foreground', valueClassName)}>{value}</dd>
+    <dd className={cn('mt-1 truncate text-sm font-semibold text-foreground', valueClassName)} title={title}>{value}</dd>
     {detail ? <dd className="mt-1 truncate text-xs text-secondary-text">{detail}</dd> : null}
   </div>
 );
@@ -2309,14 +2320,19 @@ const SelectedTickerHeader: React.FC<{
             />
             <SelectedTickerMetric
               label="Foreign net"
-              value={hasDisplayValue(foreignNetVolume) ? formatNumber(foreignNetVolume) : '-'}
+              value={hasDisplayValue(foreignNetVolume) ? formatSignedVolume(foreignNetVolume) : '-'}
               detail="shares"
+              title={formatFullSharesTitle(foreignNetVolume)}
               valueClassName={signalTone(foreignNetVolume)}
             />
             <SelectedTickerMetric
               label="Volume / 20D"
-              value={`${formatNumber(item.volume)} / ${formatNumber(avgVolume20D)}`}
+              value={`${formatVolume(item.volume)} / ${formatVolume(avgVolume20D)}`}
               detail={dailyVolumeRatio == null ? 'Ratio unavailable' : formatRatio(dailyVolumeRatio)}
+              title={[
+                formatFullSharesTitle(item.volume),
+                formatFullSharesTitle(avgVolume20D),
+              ].filter(Boolean).join(' / ') || undefined}
             />
             <SelectedTickerMetric
               label="RSI14 / MA state"
@@ -3282,11 +3298,11 @@ const BrokerInspectChartSvg: React.FC<{
             <dt>High</dt><dd className="text-right text-foreground">{formatPrice(hoverPoint.high)}</dd>
             <dt>Low</dt><dd className="text-right text-foreground">{formatPrice(hoverPoint.low)}</dd>
             <dt>Close</dt><dd className="text-right text-foreground">{formatPrice(hoverPoint.close)}</dd>
-            <dt>Daily volume</dt><dd className="text-right text-foreground">{formatNumber(hoverPoint.volume)}</dd>
+            <dt>Daily volume</dt><dd className="text-right text-foreground" title={formatFullSharesTitle(hoverPoint.volume)}>{formatVolume(hoverPoint.volume)}</dd>
             <dt>MA20</dt><dd className="text-right text-foreground">{formatPrice(hoverPoint.ma20)}</dd>
             <dt>MA50</dt><dd className="text-right text-foreground">{formatPrice(hoverPoint.ma50)}</dd>
-            <dt>Daily volume MA20</dt><dd className="text-right text-foreground">{formatNumber(hoverPoint.volumeMa20)}</dd>
-            <dt>Daily volume MA50</dt><dd className="text-right text-foreground">{formatNumber(hoverPoint.volumeMa50)}</dd>
+            <dt>Daily volume MA20</dt><dd className="text-right text-foreground" title={formatFullSharesTitle(hoverPoint.volumeMa20)}>{formatVolume(hoverPoint.volumeMa20)}</dd>
+            <dt>Daily volume MA50</dt><dd className="text-right text-foreground" title={formatFullSharesTitle(hoverPoint.volumeMa50)}>{formatVolume(hoverPoint.volumeMa50)}</dd>
             <dt>RSI14</dt><dd className="text-right text-foreground">{formatNumber(hoverPoint.rsi14, 2)}</dd>
             {showBollinger ? (
               <>
@@ -3843,15 +3859,21 @@ const StockDetailView: React.FC<{
   const foreignNet5dLatestAvailable = indicators.foreignNet5dLatestAvailable;
   const foreignNet20dLatestAvailable = indicators.foreignNet20dLatestAvailable;
   const foreignHistoryCount = indicators.foreignNetHistoryCount ?? 0;
+  const ssiDerivedMetricsSource = indicators.ssiDerivedMetricsSource ?? 'SSI-derived';
   const detailNewsItems = item.news ?? [];
   const newsContextStatus = newsContextStatusLabel(item, detailNewsItems.length);
   const ssiDailyStockPrice = item.dailyStockPrice ?? {};
   const ssiReferencePrice = ssiDailyStockPrice.referencePrice ?? item.ssiReferencePrice ?? item.priceLimit?.referencePrice ?? null;
   const ssiCeilingPrice = ssiDailyStockPrice.ceilingPrice ?? item.ssiCeilingPrice ?? item.priceLimit?.ceilingPrice ?? null;
   const ssiFloorPrice = ssiDailyStockPrice.floorPrice ?? item.ssiFloorPrice ?? item.priceLimit?.floorPrice ?? null;
-  const ssiDailyClose = item.latestPrice ?? item.close ?? null;
-  const priceVsReference = ssiDailyClose != null && ssiReferencePrice != null ? ssiDailyClose - ssiReferencePrice : null;
-  const priceVsReferencePct = priceVsReference != null && ssiReferencePrice ? priceVsReference / ssiReferencePrice * 100 : null;
+  const priceVsReferencePct = indicators.priceVsReferencePct ?? null;
+  const priceVsReferenceText = priceVsReferencePct !== null && priceVsReferencePct !== undefined
+    ? `${formatSignedNumber(priceVsReferencePct, 2)}%`
+    : indicators.priceVsReferenceStatus === 'reference_unavailable'
+      ? 'Reference unavailable'
+      : indicators.priceVsReferenceStatus === 'daily_close_unavailable'
+        ? 'Daily close unavailable'
+        : 'Unavailable';
   const ssiDailyHasCoreValues = [
     ssiReferencePrice,
     ssiCeilingPrice,
@@ -3880,20 +3902,32 @@ const StockDetailView: React.FC<{
     hasDisplayValue(foreignNet5dLatestAvailable) ||
     hasDisplayValue(foreignNet20dLatestAvailable)
   );
+  const foreignNetVolume = ssiDailyStockPrice.foreignNetVolume ?? item.ssiForeignNetVolume ?? item.foreign?.net;
+  const foreignNetValue = ssiDailyStockPrice.foreignNetValue ?? item.ssiForeignNetValue ?? item.foreign?.netValue;
+  const matchedVolume = ssiDailyStockPrice.matchedVolume ?? item.ssiMatchedVolume;
+  const matchedValue = ssiDailyStockPrice.matchedValue ?? item.ssiMatchedValue;
+  const putThroughVolume = ssiDailyStockPrice.putThroughVolume ?? item.ssiPutThroughVolume;
+  const putThroughValue = ssiDailyStockPrice.putThroughValue ?? item.ssiPutThroughValue;
+  const adjustedClose = ssiDailyStockPrice.adjustedClose ?? item.ssiAdjustedClose;
   const ssiDailyRows = [
-    { label: 'Reference price', value: `${formatPrice(ssiReferencePrice)} VND`, show: hasDisplayValue(ssiReferencePrice) },
-    { label: 'Ceiling price / floor price', value: `${formatPrice(ssiCeilingPrice)} / ${formatPrice(ssiFloorPrice)} VND`, show: hasDisplayValue(ssiCeilingPrice) && hasDisplayValue(ssiFloorPrice) },
-    { label: 'Ceiling price', value: `${formatPrice(ssiCeilingPrice)} VND`, show: hasDisplayValue(ssiCeilingPrice) && !hasDisplayValue(ssiFloorPrice) },
-    { label: 'Floor price', value: `${formatPrice(ssiFloorPrice)} VND`, show: hasDisplayValue(ssiFloorPrice) && !hasDisplayValue(ssiCeilingPrice) },
-    { label: 'Foreign buy', value: `${formatNumber(ssiDailyStockPrice.foreignBuyVolume)} shares`, show: hasDisplayValue(ssiDailyStockPrice.foreignBuyVolume) },
-    { label: 'Foreign sell', value: `${formatNumber(ssiDailyStockPrice.foreignSellVolume)} shares`, show: hasDisplayValue(ssiDailyStockPrice.foreignSellVolume) },
-    { label: 'Foreign net volume', value: `${formatNumber(ssiDailyStockPrice.foreignNetVolume ?? item.ssiForeignNetVolume ?? item.foreign?.net)} shares`, tone: signalTone(ssiDailyStockPrice.foreignNetVolume ?? item.ssiForeignNetVolume ?? item.foreign?.net), show: hasDisplayValue(ssiDailyStockPrice.foreignNetVolume ?? item.ssiForeignNetVolume ?? item.foreign?.net) },
-    { label: 'Foreign net value', value: `${formatNumber(ssiDailyStockPrice.foreignNetValue ?? item.ssiForeignNetValue ?? item.foreign?.netValue)} VND`, tone: signalTone(ssiDailyStockPrice.foreignNetValue ?? item.ssiForeignNetValue ?? item.foreign?.netValue), show: hasDisplayValue(ssiDailyStockPrice.foreignNetValue ?? item.ssiForeignNetValue ?? item.foreign?.netValue) },
-    { label: 'Matched volume', value: `${formatNumber(ssiDailyStockPrice.matchedVolume ?? item.ssiMatchedVolume)} shares`, show: hasDisplayValue(ssiDailyStockPrice.matchedVolume ?? item.ssiMatchedVolume) },
-    { label: 'Matched value', value: `${formatNumber(ssiDailyStockPrice.matchedValue ?? item.ssiMatchedValue)} VND`, show: hasDisplayValue(ssiDailyStockPrice.matchedValue ?? item.ssiMatchedValue) },
-    { label: 'Put-through volume', value: `${formatNumber(ssiDailyStockPrice.putThroughVolume ?? item.ssiPutThroughVolume)} shares`, show: hasDisplayValue(ssiDailyStockPrice.putThroughVolume ?? item.ssiPutThroughVolume) },
-    { label: 'Put-through value', value: `${formatNumber(ssiDailyStockPrice.putThroughValue ?? item.ssiPutThroughValue)} VND`, show: hasDisplayValue(ssiDailyStockPrice.putThroughValue ?? item.ssiPutThroughValue) },
-    { label: 'Adjusted close', value: `${formatPrice(ssiDailyStockPrice.adjustedClose ?? item.ssiAdjustedClose)} VND`, show: hasDisplayValue(ssiDailyStockPrice.adjustedClose ?? item.ssiAdjustedClose) },
+    { label: 'Reference price', value: formatPrice(ssiReferencePrice), title: formatFullVndTitle(ssiReferencePrice), show: hasDisplayValue(ssiReferencePrice) },
+    {
+      label: 'Ceiling price / floor price',
+      value: `${formatPrice(ssiCeilingPrice)} / ${formatPrice(ssiFloorPrice)}`,
+      title: [formatFullVndTitle(ssiCeilingPrice), formatFullVndTitle(ssiFloorPrice)].filter(Boolean).join(' / '),
+      show: hasDisplayValue(ssiCeilingPrice) && hasDisplayValue(ssiFloorPrice),
+    },
+    { label: 'Ceiling price', value: formatPrice(ssiCeilingPrice), title: formatFullVndTitle(ssiCeilingPrice), show: hasDisplayValue(ssiCeilingPrice) && !hasDisplayValue(ssiFloorPrice) },
+    { label: 'Floor price', value: formatPrice(ssiFloorPrice), title: formatFullVndTitle(ssiFloorPrice), show: hasDisplayValue(ssiFloorPrice) && !hasDisplayValue(ssiCeilingPrice) },
+    { label: 'Foreign buy', value: formatVolume(ssiDailyStockPrice.foreignBuyVolume), title: formatFullSharesTitle(ssiDailyStockPrice.foreignBuyVolume), show: hasDisplayValue(ssiDailyStockPrice.foreignBuyVolume) },
+    { label: 'Foreign sell', value: formatVolume(ssiDailyStockPrice.foreignSellVolume), title: formatFullSharesTitle(ssiDailyStockPrice.foreignSellVolume), show: hasDisplayValue(ssiDailyStockPrice.foreignSellVolume) },
+    { label: 'Foreign net volume', value: formatSignedVolume(foreignNetVolume), title: formatFullSharesTitle(foreignNetVolume), tone: signalTone(foreignNetVolume), show: hasDisplayValue(foreignNetVolume) },
+    { label: 'Foreign net value', value: formatSignedVndValue(foreignNetValue), title: formatFullVndTitle(foreignNetValue), tone: signalTone(foreignNetValue), show: hasDisplayValue(foreignNetValue) },
+    { label: 'Matched volume', value: formatVolume(matchedVolume), title: formatFullSharesTitle(matchedVolume), show: hasDisplayValue(matchedVolume) },
+    { label: 'Matched value', value: formatVndValue(matchedValue), title: formatFullVndTitle(matchedValue), show: hasDisplayValue(matchedValue) },
+    { label: 'Put-through volume', value: formatVolume(putThroughVolume), title: formatFullSharesTitle(putThroughVolume), show: hasDisplayValue(putThroughVolume) },
+    { label: 'Put-through value', value: formatVndValue(putThroughValue), title: formatFullVndTitle(putThroughValue), show: hasDisplayValue(putThroughValue) },
+    { label: 'Adjusted close', value: formatPrice(adjustedClose), title: formatFullVndTitle(adjustedClose), show: hasDisplayValue(adjustedClose) },
   ].filter((row) => row.show);
   const symbolMetadata = item.symbolMetadata ?? {};
   const metadataExchangeMarket = [
@@ -3957,7 +3991,12 @@ const StockDetailView: React.FC<{
         <dl className="grid gap-3 text-sm md:grid-cols-3 xl:grid-cols-4">
           <div className="rounded-lg bg-card/60 p-3">
             <dt className="text-xs text-secondary-text">Daily close</dt>
-            <dd className="mt-1 font-medium text-foreground">{formatPrice(item.dailyClose ?? item.latestPrice ?? item.close)} / {formatPrice(item.ohlcvClose ?? item.close)}</dd>
+            <dd
+              className="mt-1 font-medium text-foreground"
+              title={[formatFullVndTitle(item.dailyClose ?? item.latestPrice ?? item.close), formatFullVndTitle(item.ohlcvClose ?? item.close)].filter(Boolean).join(' / ')}
+            >
+              {formatPrice(item.dailyClose ?? item.latestPrice ?? item.close)} / {formatPrice(item.ohlcvClose ?? item.close)}
+            </dd>
           </div>
           <div className="rounded-lg bg-card/60 p-3">
             <dt className="text-xs text-secondary-text">Price source</dt>
@@ -3978,14 +4017,15 @@ const StockDetailView: React.FC<{
           </div>
           <div className="rounded-lg bg-card/60 p-3">
             <dt className="text-xs text-secondary-text">Vs reference</dt>
-            <dd className={cn('mt-1 font-medium', signalTone(priceVsReference))}>
-              {formatReferenceDelta(priceVsReference, priceVsReferencePct)}
+            <dd className={cn('mt-1 font-medium', signalTone(priceVsReferencePct))}>
+              {priceVsReferenceText}
             </dd>
+            <dd className="mt-1 text-xs text-secondary-text">SSI DailyOhlc + DailyStockPrice</dd>
           </div>
           {ssiDailyRows.filter((row) => ['Reference price', 'Ceiling price / floor price', 'Ceiling price', 'Floor price', 'Adjusted close'].includes(row.label)).map((row) => (
             <div key={`${item.ticker}-price-context-${row.label}`} className="rounded-lg bg-card/60 p-3">
               <dt className="text-xs text-secondary-text">{row.label === 'Reference price' ? 'Reference' : row.label === 'Ceiling price / floor price' ? 'Ceiling / floor' : row.label}</dt>
-              <dd className={cn('mt-1 font-medium text-foreground', row.tone)}>{row.value}</dd>
+              <dd className={cn('mt-1 font-medium text-foreground', row.tone)} title={row.title}>{row.value}</dd>
             </div>
           ))}
           {ssiDailyStockPrice.date ? (
@@ -4009,7 +4049,21 @@ const StockDetailView: React.FC<{
         <dl className="grid gap-3 text-sm md:grid-cols-3 xl:grid-cols-4">
           <div className="rounded-lg bg-card/60 p-3">
             <dt className="text-xs text-secondary-text">20D avg volume</dt>
-            <dd className="mt-1 font-medium text-foreground">{formatNumber(avgVolume20D)}</dd>
+            <dd className="mt-1 font-medium text-foreground" title={formatFullSharesTitle(avgVolume20D)}>{formatVolume(avgVolume20D)}</dd>
+          </div>
+          <div className="rounded-lg bg-card/60 p-3">
+            <dt className="text-xs text-secondary-text">10D avg volume</dt>
+            <dd className="mt-1 font-medium text-foreground" title={formatFullSharesTitle(indicators.avgVolume10d)}>
+              {hasDisplayValue(indicators.avgVolume10d) ? formatVolume(indicators.avgVolume10d) : 'Need 10 daily rows'}
+            </dd>
+            <dd className="mt-1 text-xs text-secondary-text">{ssiDerivedMetricsSource}</dd>
+          </div>
+          <div className="rounded-lg bg-card/60 p-3">
+            <dt className="text-xs text-secondary-text">3M avg volume</dt>
+            <dd className="mt-1 font-medium text-foreground" title={formatFullSharesTitle(indicators.avgVolume3m)}>
+              {hasDisplayValue(indicators.avgVolume3m) ? formatVolume(indicators.avgVolume3m) : 'Need 30 daily rows'}
+            </dd>
+            <dd className="mt-1 text-xs text-secondary-text">{indicators.avgVolume3mCoverageStatus ?? 'insufficient'} · {ssiDerivedMetricsSource}</dd>
           </div>
           {sessionVolumeRatioText ? (
           <div className="rounded-lg bg-card/60 p-3">
@@ -4020,21 +4074,21 @@ const StockDetailView: React.FC<{
           {ssiDailyRows.filter((row) => ['Foreign buy', 'Foreign sell', 'Foreign net volume', 'Foreign net value', 'Matched volume', 'Matched value', 'Put-through volume', 'Put-through value'].includes(row.label)).map((row) => (
             <div key={`${item.ticker}-flow-context-${row.label}`} className="rounded-lg bg-card/60 p-3">
               <dt className="text-xs text-secondary-text">{row.label === 'Foreign net volume' ? 'Foreign net' : row.label}</dt>
-              <dd className={cn('mt-1 font-medium text-foreground', row.tone)}>{row.value}</dd>
+              <dd className={cn('mt-1 font-medium text-foreground', row.tone)} title={row.title}>{row.value}</dd>
             </div>
           ))}
           {hasForeignNetHistory || !hasSsiDailyStockPrice ? (
             <>
               <div className="rounded-lg bg-card/60 p-3">
                 <dt className="text-xs text-secondary-text">Foreign net 5D</dt>
-                <dd className={cn('mt-1 font-medium', signalTone(foreignNet5dLatestAvailable))}>
-                  {foreignNet5dLatestAvailable == null && foreignHistoryCount < 5 ? 'Need 5 foreign rows' : formatNumber(foreignNet5dLatestAvailable)}
+                <dd className={cn('mt-1 font-medium', signalTone(foreignNet5dLatestAvailable))} title={formatFullSharesTitle(foreignNet5dLatestAvailable)}>
+                  {foreignNet5dLatestAvailable == null && foreignHistoryCount < 5 ? 'Need 5 foreign rows' : formatSignedVolume(foreignNet5dLatestAvailable)}
                 </dd>
               </div>
               <div className="rounded-lg bg-card/60 p-3">
                 <dt className="text-xs text-secondary-text">Foreign net 20D</dt>
-                <dd className={cn('mt-1 font-medium', signalTone(foreignNet20dLatestAvailable))}>
-                  {foreignNet20dLatestAvailable == null && foreignHistoryCount < 20 ? 'Need 20 foreign rows' : formatNumber(foreignNet20dLatestAvailable)}
+                <dd className={cn('mt-1 font-medium', signalTone(foreignNet20dLatestAvailable))} title={formatFullSharesTitle(foreignNet20dLatestAvailable)}>
+                  {foreignNet20dLatestAvailable == null && foreignHistoryCount < 20 ? 'Need 20 foreign rows' : formatSignedVolume(foreignNet20dLatestAvailable)}
                 </dd>
               </div>
               <div className="rounded-lg bg-card/60 p-3">
@@ -4066,7 +4120,10 @@ const StockDetailView: React.FC<{
       <dl className="mt-4 grid gap-3 text-sm md:grid-cols-4">
         <div className="rounded-lg bg-elevated/50 p-3">
           <dt className="text-xs text-secondary-text">Bollinger 20,2</dt>
-          <dd className="mt-1 font-medium text-foreground">
+          <dd
+            className="mt-1 font-medium text-foreground"
+            title={[formatFullVndTitle(indicators.bollinger?.lower), formatFullVndTitle(indicators.bollinger?.middle), formatFullVndTitle(indicators.bollinger?.upper)].filter(Boolean).join(' / ')}
+          >
             {formatPrice(indicators.bollinger?.lower)} / {formatPrice(indicators.bollinger?.middle)} / {formatPrice(indicators.bollinger?.upper)}
           </dd>
         </div>
@@ -4075,12 +4132,38 @@ const StockDetailView: React.FC<{
           <dd className="mt-1 font-medium text-foreground">{formatNumber(indicators.distanceTo20dHighPct, 2)}%</dd>
         </div>
         <div className="rounded-lg bg-elevated/50 p-3">
+          <dt className="text-xs text-secondary-text">52W high / low</dt>
+          <dd
+            className="mt-1 font-medium text-foreground"
+            title={[formatFullVndTitle(indicators.high52w), formatFullVndTitle(indicators.low52w)].filter(Boolean).join(' / ')}
+          >
+            {hasDisplayValue(indicators.high52w) || hasDisplayValue(indicators.low52w)
+              ? `${formatPrice(indicators.high52w)} / ${formatPrice(indicators.low52w)}`
+              : 'Need 120 daily rows'}
+          </dd>
+          <dd className="mt-1 text-xs text-secondary-text">
+            {indicators.highLow52wCoverageStatus ?? 'insufficient'} · {indicators.highLow52wHistoryCount ?? 0} rows
+          </dd>
+        </div>
+        <div className="rounded-lg bg-elevated/50 p-3">
           <dt className="text-xs text-secondary-text">To 20D low</dt>
           <dd className="mt-1 font-medium text-foreground">{formatNumber(indicators.distanceTo20dLowPct, 2)}%</dd>
         </div>
         <div className="rounded-lg bg-elevated/50 p-3">
+          <dt className="text-xs text-secondary-text">Daily range</dt>
+          <dd className="mt-1 font-medium text-foreground">
+            {hasDisplayValue(indicators.dailyRangePct) ? `${formatNumber(indicators.dailyRangePct, 2)}%` : 'Insufficient OHLC'}
+          </dd>
+          <dd className="mt-1 text-xs text-secondary-text">SSI DailyOhlc</dd>
+        </div>
+        <div className="rounded-lg bg-elevated/50 p-3">
           <dt className="text-xs text-secondary-text">MA20 / MA50</dt>
-          <dd className="mt-1 font-medium text-foreground">{formatPrice(indicators.ma20)} / {formatPrice(indicators.ma50)}</dd>
+          <dd
+            className="mt-1 font-medium text-foreground"
+            title={[formatFullVndTitle(indicators.ma20), formatFullVndTitle(indicators.ma50)].filter(Boolean).join(' / ')}
+          >
+            {formatPrice(indicators.ma20)} / {formatPrice(indicators.ma50)}
+          </dd>
         </div>
         <div className="rounded-lg bg-elevated/50 p-3">
           <dt className="text-xs text-secondary-text">RSI14</dt>
@@ -4250,7 +4333,9 @@ const StockDetailView: React.FC<{
           </div>
           <div className="rounded-lg bg-card/60 p-3">
             <dt className="text-xs text-secondary-text">Intraday volume</dt>
-            <dd className="mt-1 font-medium text-foreground">{formatNumber(intradayLatestVolume(item))}</dd>
+            <dd className="mt-1 font-medium text-foreground" title={formatFullSharesTitle(intradayLatestVolume(item))}>
+              {formatVolume(intradayLatestVolume(item))}
+            </dd>
           </div>
           <div className="rounded-lg bg-card/60 p-3">
             <dt className="text-xs text-secondary-text">Session high / low from intraday</dt>
@@ -4268,8 +4353,11 @@ const StockDetailView: React.FC<{
           </div>
           <div className="rounded-lg bg-card/60 p-3">
             <dt className="text-xs text-secondary-text">Session intraday volume</dt>
-            <dd className="mt-1 font-medium text-foreground" title={hasSessionVolumeFromIntraday ? undefined : missingSessionVolumeTitle}>
-              {hasSessionVolumeFromIntraday ? formatNumber(intradaySessionVolume(item)) : missingSessionMetricText}
+            <dd
+              className="mt-1 font-medium text-foreground"
+              title={hasSessionVolumeFromIntraday ? formatFullSharesTitle(intradaySessionVolume(item)) : missingSessionVolumeTitle}
+            >
+              {hasSessionVolumeFromIntraday ? formatVolume(intradaySessionVolume(item)) : missingSessionMetricText}
             </dd>
           </div>
           {hasVolumeVsAverage ? (
@@ -4355,7 +4443,9 @@ const StockDetailView: React.FC<{
           </div>
           <div>
             <dt className="text-xs text-secondary-text">Realtime volume</dt>
-            <dd className="mt-1 font-medium text-foreground">{formatNumber(realtimeQuote?.volumeAccumulated)}</dd>
+            <dd className="mt-1 font-medium text-foreground" title={formatFullSharesTitle(realtimeQuote?.volumeAccumulated)}>
+              {formatVolume(realtimeQuote?.volumeAccumulated)}
+            </dd>
           </div>
         </dl>
         ) : (
@@ -4408,7 +4498,7 @@ const StockDetailView: React.FC<{
                   <tr key={`${trade.id ?? index}-${trade.time ?? 'time'}`} className="border-b border-border/40 text-secondary-text">
                     <td className="py-2 pr-3">{trade.time ?? '-'}</td>
                     <td className="px-3 py-2 text-right text-foreground">{formatPrice(trade.price)}</td>
-                    <td className="px-3 py-2 text-right">{formatNumber(trade.volume)}</td>
+                    <td className="px-3 py-2 text-right" title={formatFullSharesTitle(trade.volume)}>{formatVolume(trade.volume)}</td>
                     <td className="px-3 py-2">{neutralTradeType(trade.matchType)}</td>
                     <td className="px-3 py-2">{trade.source}</td>
                   </tr>
@@ -6068,7 +6158,12 @@ const VietnamDashboardPage: React.FC = () => {
         <div className="rounded-lg border border-border/70 bg-card p-4" data-testid="foreign-net-volume-summary-card">
           <ShieldAlert className="mb-3 h-5 w-5 text-purple" />
           <p className="text-xs text-secondary-text">Foreign net volume</p>
-          <p className={cn('text-2xl font-semibold', signalTone(summary.foreignNetVolume))}>{formatNumber(summary.foreignNetVolume)}</p>
+          <p
+            className={cn('text-2xl font-semibold', signalTone(summary.foreignNetVolume))}
+            title={formatFullSharesTitle(summary.foreignNetVolume)}
+          >
+            {formatSignedVolume(summary.foreignNetVolume)}
+          </p>
           <p className="mt-1 text-xs text-secondary-text">SSI DailyStockPrice · shares</p>
         </div>
       </section>

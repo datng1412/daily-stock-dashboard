@@ -295,7 +295,7 @@ def test_company_research_uses_ssi_and_not_implemented_placeholders():
     assert snapshot["price"]["reference_source"] == "SSI DailyStockPrice"
     assert snapshot["trading_stats"]["source"] == "SSI DailyOhlc"
     assert snapshot["foreign_flow"]["source"] == "SSI DailyStockPrice"
-    assert snapshot["technical"]["source"] == "derived from SSI DailyOhlc"
+    assert snapshot["technical"]["source"] == "SSI-derived"
     assert snapshot["news"]["source"] != "SSI"
     assert snapshot["financials"]["source"] != "SSI"
     assert snapshot["events"]["source"] != "SSI"

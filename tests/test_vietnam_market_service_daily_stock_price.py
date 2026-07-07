@@ -48,6 +48,30 @@ def _full_daily_stock_price_row(**overrides):
     return row
 
 
+def _daily_ohlcv_payload(rows):
+    return {"status": "ok", "source": "SSI", "rows": rows}
+
+
+def _daily_ohlcv_rows(row_count: int, *, end: date = date(2026, 6, 30)):
+    start = end - timedelta(days=row_count - 1)
+    rows = []
+    for index in range(row_count):
+        row_date = start + timedelta(days=index)
+        rows.append(
+            {
+                "date": row_date.isoformat(),
+                "open": 126.0,
+                "high": 132.0,
+                "low": 128.0,
+                "close": 130.0,
+                "volume": 1_000_000 + index * 10,
+                "value": 130_000_000_000 + index,
+                "source": "SSI",
+            }
+        )
+    return rows
+
+
 class FakeSsiFetcher:
     def __init__(self, daily_stock_price_payload=None, daily_ohlcv_payload=None, *, daily_row_count: int = 30):
         self.daily_stock_price_payload = daily_stock_price_payload or {
@@ -223,6 +247,158 @@ def test_daily_stock_price_history_populates_latest_available_foreign_flow_windo
     assert fetcher.daily_stock_price_calls[0]["kwargs"]["limit"] == 260
     assert fetcher.daily_stock_price_calls[0]["kwargs"]["from_date"]
     assert fetcher.daily_stock_price_calls[0]["kwargs"]["to_date"]
+
+
+def test_ssi_derived_metrics_compute_from_daily_ohlc_and_reference_price():
+    rows = _daily_ohlcv_rows(252)
+    rows[120]["high"] = 500.0
+    rows[120]["date"] = "2026-02-18"
+    rows[40]["low"] = 80.0
+    rows[40]["date"] = "2025-11-30"
+    fetcher = FakeSsiFetcher(daily_ohlcv_payload=_daily_ohlcv_payload(rows))
+    item = _watch_item(fetcher)
+    indicators = item["indicators"]
+
+    assert item["status"] == "ok"
+    assert item["latest_price"] == 130.0
+    assert item["latest_price_source"] == "SSI DailyOhlc"
+    assert indicators["high_52w"] == 500.0
+    assert indicators["high_52w_date"] == "2026-02-18"
+    assert indicators["low_52w"] == 80.0
+    assert indicators["low_52w_date"] == "2025-11-30"
+    assert indicators["high_low_52w_history_count"] == 252
+    assert indicators["high_low_52w_coverage_status"] == "complete"
+    assert indicators["avg_volume_10d"] == round(sum(row["volume"] for row in rows[-10:]) / 10, 0)
+    assert indicators["avg_volume_10d_history_count"] == 10
+    assert indicators["avg_volume_10d_coverage_status"] == "complete"
+    assert indicators["avg_volume_3m"] == round(sum(row["volume"] for row in rows[-63:]) / 63, 0)
+    assert indicators["avg_volume_3m_history_count"] == 63
+    assert indicators["avg_volume_3m_coverage_status"] == "complete"
+    assert indicators["price_vs_reference_pct"] == 0.78
+    assert indicators["price_vs_reference_status"] == "ok"
+    assert indicators["daily_range_pct"] == 3.08
+    assert indicators["daily_range_status"] == "ok"
+    assert indicators["ssi_derived_metrics_status"] == "ok"
+    assert indicators["ssi_derived_metrics_source"] == "SSI DailyOhlc + SSI DailyStockPrice"
+
+
+def test_ssi_derived_52w_and_3m_partial_coverage_are_labeled():
+    rows = _daily_ohlcv_rows(130)
+    fetcher = FakeSsiFetcher(daily_ohlcv_payload=_daily_ohlcv_payload(rows))
+    indicators = _watch_item(fetcher)["indicators"]
+
+    assert indicators["high_52w"] == 132.0
+    assert indicators["low_52w"] == 128.0
+    assert indicators["high_low_52w_history_count"] == 130
+    assert indicators["high_low_52w_coverage_status"] == "partial"
+    assert indicators["avg_volume_3m_coverage_status"] == "complete"
+    assert indicators["ssi_derived_metrics_status"] == "partial"
+
+
+def test_ssi_derived_metrics_return_null_when_history_or_reference_insufficient():
+    rows = _daily_ohlcv_rows(9)
+    item = _watch_item(
+        FakeSsiFetcher(
+            daily_ohlcv_payload=_daily_ohlcv_payload(rows),
+            daily_stock_price_payload={
+                "status": "ok",
+                "source": "SSI",
+                "rows": [_full_daily_stock_price_row(reference_price=0)],
+            },
+        )
+    )
+    indicators = item["indicators"]
+
+    assert item["status"] == "ok"
+    assert item["latest_price"] == 130.0
+    assert item["latest_price_source"] == "SSI DailyOhlc"
+    assert indicators["high_52w"] is None
+    assert indicators["low_52w"] is None
+    assert indicators["high_low_52w_history_count"] == 9
+    assert indicators["high_low_52w_coverage_status"] == "insufficient"
+    assert indicators["avg_volume_10d"] is None
+    assert indicators["avg_volume_10d_history_count"] == 9
+    assert indicators["avg_volume_10d_coverage_status"] == "insufficient"
+    assert indicators["avg_volume_3m"] is None
+    assert indicators["avg_volume_3m_history_count"] == 9
+    assert indicators["avg_volume_3m_coverage_status"] == "insufficient"
+    assert indicators["price_vs_reference_pct"] is None
+    assert indicators["price_vs_reference_status"] == "reference_unavailable"
+    assert indicators["daily_range_pct"] == 3.08
+    assert indicators["daily_range_status"] == "ok"
+    assert indicators["ssi_derived_metrics_status"] == "partial"
+
+
+def test_ssi_derived_52w_value_and_date_are_null_when_valid_high_low_rows_insufficient():
+    rows = _daily_ohlcv_rows(130)
+    for row in rows[:11]:
+        row["high"] = 0
+    item = _watch_item(FakeSsiFetcher(daily_ohlcv_payload=_daily_ohlcv_payload(rows)))
+    indicators = item["indicators"]
+
+    assert item["status"] == "ok"
+    assert item["latest_price_source"] == "SSI DailyOhlc"
+    assert indicators["high_52w"] is None
+    assert indicators["high_52w_date"] is None
+    assert indicators["low_52w"] is None
+    assert indicators["low_52w_date"] is None
+    assert indicators["high_low_52w_history_count"] == 119
+    assert indicators["high_low_52w_coverage_status"] == "insufficient"
+
+
+def test_ssi_derived_average_volume_coverage_uses_valid_numeric_volume_rows():
+    rows = _daily_ohlcv_rows(63)
+    for row in rows[:-9]:
+        row["volume"] = -1
+    item = _watch_item(FakeSsiFetcher(daily_ohlcv_payload=_daily_ohlcv_payload(rows)))
+    indicators = item["indicators"]
+
+    assert item["status"] == "ok"
+    assert item["latest_price_source"] == "SSI DailyOhlc"
+    assert indicators["avg_volume_10d"] is None
+    assert indicators["avg_volume_10d_history_count"] == 9
+    assert indicators["avg_volume_10d_coverage_status"] == "insufficient"
+    assert indicators["avg_volume_3m"] is None
+    assert indicators["avg_volume_3m_history_count"] == 9
+    assert indicators["avg_volume_3m_coverage_status"] == "insufficient"
+
+
+def test_ssi_derived_average_volume_complete_implies_numeric_values():
+    rows = _daily_ohlcv_rows(63)
+    item = _watch_item(FakeSsiFetcher(daily_ohlcv_payload=_daily_ohlcv_payload(rows)))
+    indicators = item["indicators"]
+
+    assert indicators["avg_volume_10d_coverage_status"] == "complete"
+    assert isinstance(indicators["avg_volume_10d"], float)
+    assert indicators["avg_volume_3m_coverage_status"] == "complete"
+    assert isinstance(indicators["avg_volume_3m"], float)
+
+
+def test_ssi_derived_daily_range_null_when_ohlc_inputs_missing():
+    rows = _daily_ohlcv_rows(30)
+    rows[-1]["high"] = None
+    item = _watch_item(FakeSsiFetcher(daily_ohlcv_payload=_daily_ohlcv_payload(rows)))
+    indicators = item["indicators"]
+
+    assert item["status"] == "ok"
+    assert item["latest_price"] == 130.0
+    assert item["latest_price_source"] == "SSI DailyOhlc"
+    assert indicators["daily_range_pct"] is None
+    assert indicators["daily_range_status"] == "insufficient"
+    assert indicators["avg_volume_10d"] is not None
+
+
+def test_ssi_derived_daily_range_null_when_high_is_below_low():
+    rows = _daily_ohlcv_rows(30)
+    rows[-1]["high"] = 120.0
+    rows[-1]["low"] = 128.0
+    item = _watch_item(FakeSsiFetcher(daily_ohlcv_payload=_daily_ohlcv_payload(rows)))
+    indicators = item["indicators"]
+
+    assert item["status"] == "ok"
+    assert item["latest_price_source"] == "SSI DailyOhlc"
+    assert indicators["daily_range_pct"] is None
+    assert indicators["daily_range_status"] == "insufficient"
 
 
 def test_daily_stock_price_enrichment_cache_is_reused_across_request_scoped_services():
@@ -525,8 +701,9 @@ def test_daily_stock_price_close_mismatch_is_diagnostic_only_and_volume_stays_se
 
 
 def test_company_snapshot_preserves_daily_stock_price_block_and_units():
+    rows = _daily_ohlcv_rows(252)
     snapshot = VietnamCompanyResearchService(
-        market_service=_service(FakeSsiFetcher())
+        market_service=_service(FakeSsiFetcher(daily_ohlcv_payload=_daily_ohlcv_payload(rows)))
     ).get_company_research_snapshot("FPT", force_refresh=True)
 
     assert snapshot["price"]["canonical_source"] == "SSI DailyOhlc"
@@ -536,3 +713,11 @@ def test_company_snapshot_preserves_daily_stock_price_block_and_units():
     assert snapshot["foreign_flow"]["volume_unit"] == "shares"
     assert snapshot["foreign_flow"]["value_unit"] == "VND"
     assert snapshot["foreign_flow"]["date_match"] == "matched"
+    assert snapshot["technical"]["source"] == "SSI-derived"
+    assert snapshot["technical"]["high_52w"] == 132.0
+    assert snapshot["technical"]["low_52w"] == 128.0
+    assert snapshot["technical"]["avg_volume_10d"] is not None
+    assert snapshot["technical"]["avg_volume_3m"] is not None
+    assert snapshot["technical"]["price_vs_reference_pct"] == 0.78
+    assert snapshot["technical"]["daily_range_pct"] == 3.08
+    assert snapshot["technical"]["ssi_derived_metrics_source"] == "SSI DailyOhlc + SSI DailyStockPrice"

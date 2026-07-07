@@ -11,6 +11,7 @@ Conventions:
 - Missing lists should be `[]`.
 - Missing objects should be `null`.
 - Diagnostics fields are for debugging and should not become primary metric rows.
+- Frontend display formatting is UI-only. Raw API price fields remain VND/share numeric values; VN price-like fields are displayed in board-style thousand-VND units with two decimals and no suffix, for example `72,100` renders as `72.10`. Share-volume fields may render with `K`/`M` suffixes, and VND trading-value fields may render with `K`/`M`/`B`/`T` suffixes. Tooltips/titles may expose the raw VND or share count.
 
 ## Stock Detail Panel Availability Summary
 
@@ -22,9 +23,9 @@ The stock-detail screenshot labels map to the current dictionary as follows. Thi
 | Average | `realtime_snapshot.average_price` placeholder | Ambiguous, needs provider confirmation | Schema/type exists for optional realtime, but current SSI mapping does not populate it. |
 | Matched val | `daily_stock_price.matched_value`, `ssi_matched_value` | Available now | SSI DailyStockPrice. |
 | PT val | `daily_stock_price.put_through_value`, `ssi_put_through_value` | Available now | SSI DailyStockPrice. |
-| High 52W | none | SSI-derived later, not implemented | Phase 4.8A candidate from SSI DailyOhlc high history; null/unavailable when history is insufficient. |
-| Avg. vol. 3M | none | SSI-derived later, not implemented | Phase 4.8A candidate from SSI DailyOhlc volume history; current indicators expose 20-day average volume, not 3M. |
-| Avg. vol. 10D | none | SSI-derived later, not implemented | Phase 4.8A candidate from SSI DailyOhlc volume history; current indicators expose 20-day average volume, not 10D. |
+| High 52W | `indicators.high_52w`, company `technical.high_52w` | SSI-derived implemented | Calculated from SSI DailyOhlc high history; null when fewer than 120 usable high/low rows are available. |
+| Avg. vol. 3M | `indicators.avg_volume_3m`, company `technical.avg_volume_3m` | SSI-derived implemented | Calculated from up to 63 SSI DailyOhlc volume rows; null below 30 usable rows. |
+| Avg. vol. 10D | `indicators.avg_volume_10d`, company `technical.avg_volume_10d` | SSI-derived implemented | Calculated from 10 SSI DailyOhlc volume rows; null below 10 usable rows. |
 | EPS (TTM) | none | Not available / future provider required | Future fundamentals provider. |
 | P/E (TTM) | none | Not available / future provider required | Future ratios/fundamentals provider. |
 | P/B | none | Not available / future provider required | Future ratios/fundamentals provider. |
@@ -33,7 +34,7 @@ The stock-detail screenshot labels map to the current dictionary as follows. Thi
 | FR. sell vol | `daily_stock_price.foreign_sell_volume`, `foreign.sell` | Available now | SSI DailyStockPrice shares quantity when present. |
 | FR. room | `realtime_snapshot.foreign_room` placeholder | Ambiguous, needs provider confirmation | Schema/type exists for optional realtime, but current SSI mapping does not populate it. |
 | PT vol | `daily_stock_price.put_through_volume`, `ssi_put_through_volume` | Available now | SSI DailyStockPrice. |
-| Low 52W | none | SSI-derived later, not implemented | Phase 4.8A candidate from SSI DailyOhlc low history; null/unavailable when history is insufficient. |
+| Low 52W | `indicators.low_52w`, company `technical.low_52w` | SSI-derived implemented | Calculated from SSI DailyOhlc low history; null when fewer than 120 usable high/low rows are available. |
 | Outs. qty | `symbol_metadata.listed_shares`, `listed_shares`, profile `listed_shares` | Ambiguous, needs provider confirmation | Current field is listed shares/provider share-count metadata; do not relabel as exact outstanding quantity without provider confirmation. |
 | Market cap | none | Deferred pending share-basis verification | Do not compute from `latest_price * listed_shares` until share-count semantics and product behavior are designed. |
 | Dividend ratio | future `events[].stock_dividend_ratio` / `cash_dividend_per_share` contract only | Not available / future provider required | CorporateActionsProvider is disabled/not configured by default. |
@@ -67,6 +68,21 @@ The stock-detail screenshot labels map to the current dictionary as follows. Thi
 | `put_through_volume` | Put-through trading volume | SSI DailyStockPrice | shares | yes | source-specific | Trading stats | Do not fill from DailyOhlc volume. |
 | `put_through_value` | Put-through trading value | SSI DailyStockPrice | VND | yes | source-specific | Trading stats | Null remains unavailable; provider zero remains zero. |
 | `amount` / `value` | Daily trading value/amount from OHLCV or provider | SSI DailyOhlc or normalized source field | VND | yes | source-specific | Chart/daily core | Label source to avoid mixing with matched value. |
+
+## SSI-Derived Metric Fields
+
+These fields are additive Phase 4.8A metrics. They live under watchlist `indicators` and company `technical`, are source-labeled SSI-derived, and never change `latest_price`.
+
+| Field | Meaning | Source | Unit | Nullable | Canonical | UI placement | Known caveat |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `high_52w` / `low_52w` | Highest high and lowest low from latest returned 52-week-style history | SSI DailyOhlc high/low history | VND | yes | no | Selected ticker technical context, company technical snapshot | Uses up to 252 returned rows; a usable row needs a valid date plus positive numeric high and low; null when fewer than 120 usable rows exist. |
+| `high_52w_date` / `low_52w_date` | Dates of the returned high/low observations | SSI DailyOhlc row dates | date | yes | no | Detail/diagnostics | Null when 52W values are null; a date must not appear without its value. |
+| `high_low_52w_history_count` | Usable high/low row count in the 252-row window | SSI DailyOhlc | rows | no | no | Detail/diagnostics | `complete` >=240, `partial` >=120, `insufficient` below 120. |
+| `avg_volume_10d` | Ten-row average daily volume | SSI DailyOhlc volume | shares | yes | no | Selected ticker flow context, company technical snapshot | Requires 10 usable numeric volume rows; negative volumes are not usable. |
+| `avg_volume_3m` | Three-month approximate average daily volume | SSI DailyOhlc volume | shares | yes | no | Selected ticker flow context, company technical snapshot | Uses up to 63 usable numeric volume rows; `complete` >=60, `partial` >=30, `insufficient` below 30. |
+| `price_vs_reference_pct` | Daily close versus reference price percentage | SSI DailyOhlc close plus SSI DailyStockPrice reference | percent | yes | no | Selected ticker price context, company technical snapshot | Null when DailyOhlc close is unavailable/non-positive or reference is missing/non-positive. |
+| `daily_range_pct` | Daily high/low range as percentage of close | SSI DailyOhlc high/low/close | percent | yes | no | Selected ticker technical context, company technical snapshot | Formula: `(high - low) / close * 100`; null when high/low/close are incomplete, close is non-positive, or high is below low. |
+| `ssi_derived_metrics_status` / `ssi_derived_metrics_source` | Aggregate status/source label for Phase 4.8A metrics | Service-derived from SSI inputs | text | no | no | Source/status copy | Source is `SSI DailyOhlc + SSI DailyStockPrice`. |
 
 ## Foreign Flow Fields
 
@@ -192,7 +208,7 @@ The stock-detail screenshot labels map to the current dictionary as follows. Thi
 - `SSI DailyOhlc`: canonical daily OHLCV, daily close, chart candles, daily volume, and daily trading value.
 - `SSI DailyStockPrice`: reference, ceiling, floor, matched/put-through, adjusted-close, and foreign-flow fields.
 - `derived from SSI DailyOhlc`: technical indicators computed from canonical daily OHLCV.
-- `SSI-derived/internal`: metrics calculated from SSI-owned inputs, including existing MA/RSI/Bollinger/20D indicators and future Phase 4.8A candidates such as 52W high/low, 10D/3M average volume, price-vs-reference %, and daily range %.
+- `SSI-derived/internal`: metrics calculated from SSI-owned inputs, including existing MA/RSI/Bollinger/20D indicators and Phase 4.8A metrics such as 52W high/low, 10D/3M average volume, price-vs-reference %, and daily range %.
 - `SSI Securities` / `SSI SecuritiesDetails`: security metadata and profile fields when available.
 - `SSI IntradayOhlc`: intraday candles and derived intraday pulse.
 - `SSI realtime contract`: optional FastConnect streaming realtime snapshot contract; live support is not confirmed by this label or by parser/cache/adapter test presence.

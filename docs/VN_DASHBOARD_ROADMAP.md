@@ -1174,7 +1174,7 @@ Result:
 * Inspected the current backend schemas, SSI fetcher mappings, Vietnam market service normalization, frontend API types, dashboard rendering, and existing docs for stock-detail labels such as open, average, matched/put-through value, foreign buy/sell/room, 52-week high/low, average volume, EPS, valuation ratios, beta, share count, market cap, dividends, ROE, and ROA.
 * Documented the exact current availability matrix in `docs/VN_DATA_CONTRACT.md` and `docs/DATA_DICTIONARY.md`.
 * Confirmed available-now fields remain source-owned: SSI DailyOhlc for daily open/high/low/close/volume/value and SSI DailyStockPrice for reference/limits, matched value/volume, put-through value/volume, and latest foreign buy/sell/net volume/value.
-* Recorded non-implemented but computable future metrics: 52-week high/low and 10D/3M average volume. Phase 5.0D-2 later classified price-vs-reference % and daily range % as SSI-derived candidates as well. Current code only computes 20-day average volume and 20-day high/low indicators.
+* Recorded non-implemented but computable future metrics at the time of the audit: 52-week high/low and 10D/3M average volume. Phase 5.0D-2 later identified price-vs-reference % and daily range % as SSI-derivable metrics as well. Phase 4.8A has since implemented this safe SSI-derived subset with explicit null/coverage statuses.
 * Recorded ambiguous fields needing provider-semantics confirmation before display: average price, foreign room, and exact outstanding quantity. Current `listed_shares` is metadata, not an approved market-cap/outstanding-share basis.
 * Recorded future-provider-required fields: EPS TTM, P/E TTM, P/B, dividend ratio/date, ROE, and ROA. Corporate-action contract fields remain disabled/not configured by default and must not be inferred from price gaps.
 * Deferred beta pending SSI index data and methodology; deferred market cap pending share-basis verification.
@@ -1182,7 +1182,7 @@ Result:
 
 ### Phase 4.8A - SSI-Derived Metrics Completion
 
-Status: planned.
+Status: completed on 2026-07-06.
 
 Goal:
 
@@ -1194,7 +1194,7 @@ Scope:
 * 10D average volume from SSI DailyOhlc volume history.
 * 3M average volume from SSI DailyOhlc volume history.
 * Price vs reference % from SSI DailyOhlc close plus SSI DailyStockPrice reference price.
-* Daily range % from SSI DailyOhlc open/high/low/close.
+* Daily range % from SSI DailyOhlc high/low/close.
 * Optional beta only after SSI index data and beta methodology are verified.
 
 Rules:
@@ -1213,6 +1213,15 @@ Acceptance criteria:
 * Insufficient history returns null/unavailable, not guessed values.
 * DailyOhlc remains canonical.
 * External providers are not used for any metric that SSI can provide or that can be calculated from SSI-owned data.
+
+Result:
+
+* Added SSI-derived metrics to watchlist `indicators` and company `technical`: `high_52w`, `low_52w`, `avg_volume_10d`, `avg_volume_3m`, `price_vs_reference_pct`, and `daily_range_pct`.
+* Added coverage/status fields for 52W high/low, 10D/3M average volume, price-vs-reference, daily range, and aggregate SSI-derived metric status/source.
+* Implemented formulas from SSI DailyOhlc and SSI DailyStockPrice only. `latest_price` remains SSI DailyOhlc, DailyStockPrice remains enrichment/reference owner, and no external provider/fallback path was added.
+* Added compact dashboard/company rendering for the new metrics with source-aware unavailable copy.
+* Phase 4.8A-Fix corrected frontend API adapter mapping for numeric-suffix fields (`52w`, `10d`, `3m`) so values render with their dates/statuses, and tightened backend valid-row rules for 52W, volume, reference, and daily-range formulas.
+* Left beta deferred pending SSI index data and methodology verification.
 
 ### Phase 5.0A - External Provider Contract Design
 

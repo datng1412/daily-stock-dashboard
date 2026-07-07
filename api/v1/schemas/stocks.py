@@ -511,7 +511,7 @@ class VietnamCompanyForeignFlow(BaseModel):
 
 
 class VietnamCompanyTechnical(BaseModel):
-    """Technical snapshot derived from SSI daily OHLCV."""
+    """Technical and SSI-derived metrics from SSI DailyOhlc/DailyStockPrice."""
 
     ma20: Optional[float] = None
     ma50: Optional[float] = None
@@ -519,6 +519,24 @@ class VietnamCompanyTechnical(BaseModel):
     bollinger_upper: Optional[float] = None
     bollinger_middle: Optional[float] = None
     bollinger_lower: Optional[float] = None
+    high_52w: Optional[float] = None
+    high_52w_date: Optional[str] = None
+    low_52w: Optional[float] = None
+    low_52w_date: Optional[str] = None
+    high_low_52w_history_count: Optional[int] = None
+    high_low_52w_coverage_status: Optional[str] = None
+    avg_volume_10d: Optional[float] = None
+    avg_volume_10d_history_count: Optional[int] = None
+    avg_volume_10d_coverage_status: Optional[str] = None
+    avg_volume_3m: Optional[float] = None
+    avg_volume_3m_history_count: Optional[int] = None
+    avg_volume_3m_coverage_status: Optional[str] = None
+    price_vs_reference_pct: Optional[float] = None
+    price_vs_reference_status: Optional[str] = None
+    daily_range_pct: Optional[float] = None
+    daily_range_status: Optional[str] = None
+    ssi_derived_metrics_status: Optional[str] = None
+    ssi_derived_metrics_source: Optional[str] = None
     source: Optional[str] = None
     status: str = "missing"
 

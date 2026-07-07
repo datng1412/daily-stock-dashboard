@@ -6,6 +6,13 @@ import { stocksApi, type VietnamCompanyResearchResponse } from '../api/stocks';
 import { AppPage, Badge, Button, Loading } from '../components/common';
 import { DataQualitySummary } from '../components/dashboard';
 import { cn } from '../utils/cn';
+import {
+  formatCompactShareVolume,
+  formatCompactVndValue,
+  formatCompactVnPrice,
+  formatFullSharesTitle,
+  formatFullVndTitle,
+} from '../utils/vietnamNumberFormat';
 
 type StatusVariant = React.ComponentProps<typeof Badge>['variant'];
 
@@ -13,6 +20,7 @@ type MetricRow = {
   label: string;
   value?: number | string | null;
   formatter?: (value?: number | string | null) => string;
+  titleFormatter?: (value?: number | string | null) => string | undefined;
   tone?: string;
 };
 
@@ -45,12 +53,34 @@ const formatNumber = (value?: number | string | null, digits = 0) => {
   return 'Unavailable';
 };
 
-const formatPrice = (value?: number | string | null) => formatNumber(value, 2);
+const formatPrice = (value?: number | string | null) => formatCompactVnPrice(value);
+const formatVolume = (value?: number | string | null) => formatCompactShareVolume(value);
+const formatSignedVolume = (value?: number | string | null) => formatCompactShareVolume(value, 'Unavailable', true);
+const formatVndValue = (value?: number | string | null) => formatCompactVndValue(value);
+const formatSignedVndValue = (value?: number | string | null) => formatCompactVndValue(value, 'Unavailable', true);
 
 const formatSignedNumber = (value?: number | string | null) => {
   if (typeof value === 'number' && Number.isFinite(value)) {
     const sign = value > 0 ? '+' : '';
     return `${sign}${formatNumber(value)}`;
+  }
+  return formatNumber(value);
+};
+
+const formatPercent = (value?: number | string | null, signed = false) => {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const formatted = new Intl.NumberFormat('en-US', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(Math.abs(value));
+    if (signed) {
+      const sign = value > 0 ? '+' : value < 0 ? '-' : '';
+      return `${sign}${formatted}%`;
+    }
+    return `${new Intl.NumberFormat('en-US', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(value)}%`;
   }
   return formatNumber(value);
 };
@@ -164,7 +194,10 @@ const MetricGrid: React.FC<{ rows: MetricRow[] }> = ({ rows }) => (
     {rows.map((row) => (
       <div key={row.label} className="rounded-lg border border-border/50 bg-elevated/35 p-3">
         <dt className="text-xs uppercase tracking-normal text-secondary-text">{row.label}</dt>
-        <dd className={cn('mt-1 text-sm font-semibold text-foreground', row.tone)}>
+        <dd
+          className={cn('mt-1 text-sm font-semibold text-foreground', row.tone)}
+          title={row.titleFormatter?.(row.value)}
+        >
           {row.formatter ? row.formatter(row.value) : formatNumber(row.value)}
         </dd>
       </div>
@@ -318,11 +351,11 @@ const VietnamCompanyResearchPage: React.FC = () => {
   if (!snapshot) return null;
 
   const priceRows: MetricRow[] = [
-    { label: 'Canonical latest price (VND)', value: snapshot.price.latestPrice, formatter: formatPrice },
-    { label: 'Daily close (VND)', value: snapshot.price.dailyClose, formatter: formatPrice },
-    { label: 'Reference price (VND)', value: snapshot.price.referencePrice, formatter: formatPrice },
-    { label: 'Ceiling price (VND)', value: snapshot.price.ceilingPrice, formatter: formatPrice },
-    { label: 'Floor price (VND)', value: snapshot.price.floorPrice, formatter: formatPrice },
+    { label: 'Canonical latest price (VND)', value: snapshot.price.latestPrice, formatter: formatPrice, titleFormatter: formatFullVndTitle },
+    { label: 'Daily close (VND)', value: snapshot.price.dailyClose, formatter: formatPrice, titleFormatter: formatFullVndTitle },
+    { label: 'Reference price (VND)', value: snapshot.price.referencePrice, formatter: formatPrice, titleFormatter: formatFullVndTitle },
+    { label: 'Ceiling price (VND)', value: snapshot.price.ceilingPrice, formatter: formatPrice, titleFormatter: formatFullVndTitle },
+    { label: 'Floor price (VND)', value: snapshot.price.floorPrice, formatter: formatPrice, titleFormatter: formatFullVndTitle },
     { label: 'Price date', value: snapshot.price.priceDate, formatter: (value) => formatNumber(value) },
   ];
   const profileRows: MetricRow[] = [
@@ -349,48 +382,60 @@ const VietnamCompanyResearchPage: React.FC = () => {
     snapshot.profile.status === 'ok' ? 'partial' : 'unavailable'
   );
   const tradingRows: MetricRow[] = [
-    { label: 'Open (VND)', value: snapshot.tradingStats.open, formatter: formatPrice },
-    { label: 'High (VND)', value: snapshot.tradingStats.high, formatter: formatPrice },
-    { label: 'Low (VND)', value: snapshot.tradingStats.low, formatter: formatPrice },
-    { label: 'Close (VND)', value: snapshot.tradingStats.close, formatter: formatPrice },
-    { label: 'Daily OHLCV volume (shares)', value: snapshot.tradingStats.volume },
-    { label: 'Daily OHLCV value (VND)', value: snapshot.tradingStats.value },
+    { label: 'Open (VND)', value: snapshot.tradingStats.open, formatter: formatPrice, titleFormatter: formatFullVndTitle },
+    { label: 'High (VND)', value: snapshot.tradingStats.high, formatter: formatPrice, titleFormatter: formatFullVndTitle },
+    { label: 'Low (VND)', value: snapshot.tradingStats.low, formatter: formatPrice, titleFormatter: formatFullVndTitle },
+    { label: 'Close (VND)', value: snapshot.tradingStats.close, formatter: formatPrice, titleFormatter: formatFullVndTitle },
+    { label: 'Daily OHLCV volume (shares)', value: snapshot.tradingStats.volume, formatter: formatVolume, titleFormatter: formatFullSharesTitle },
+    { label: 'Daily OHLCV value (VND)', value: snapshot.tradingStats.value, formatter: formatVndValue, titleFormatter: formatFullVndTitle },
   ];
   const dailyStockPriceRows: MetricRow[] = [
-    { label: 'Matched volume (shares)', value: snapshot.dailyStockPrice?.matchedVolume },
-    { label: 'Matched value (VND)', value: snapshot.dailyStockPrice?.matchedValue },
-    { label: 'Put-through volume (shares)', value: snapshot.dailyStockPrice?.putThroughVolume },
-    { label: 'Put-through value (VND)', value: snapshot.dailyStockPrice?.putThroughValue },
-    { label: 'Adjusted close (VND)', value: snapshot.dailyStockPrice?.adjustedClose, formatter: formatPrice },
+    { label: 'Matched volume (shares)', value: snapshot.dailyStockPrice?.matchedVolume, formatter: formatVolume, titleFormatter: formatFullSharesTitle },
+    { label: 'Matched value (VND)', value: snapshot.dailyStockPrice?.matchedValue, formatter: formatVndValue, titleFormatter: formatFullVndTitle },
+    { label: 'Put-through volume (shares)', value: snapshot.dailyStockPrice?.putThroughVolume, formatter: formatVolume, titleFormatter: formatFullSharesTitle },
+    { label: 'Put-through value (VND)', value: snapshot.dailyStockPrice?.putThroughValue, formatter: formatVndValue, titleFormatter: formatFullVndTitle },
+    { label: 'Adjusted close (VND)', value: snapshot.dailyStockPrice?.adjustedClose, formatter: formatPrice, titleFormatter: formatFullVndTitle },
     { label: 'DailyStockPrice date', value: snapshot.dailyStockPrice?.date, formatter: (value?: number | string | null) => formatNumber(value) },
   ].filter((row: MetricRow) => hasMetricValue(row.value));
   const dailyStockPriceStatus = snapshot.dailyStockPrice?.qualityStatus ?? snapshot.dailyStockPrice?.status ?? 'unavailable';
   const dailyStockPriceDateMatch = snapshot.dailyStockPrice?.dateMatch ?? snapshot.foreignFlow.dateMatch ?? 'unknown';
   const foreignRows: MetricRow[] = [
-    { label: 'Foreign buy volume (shares)', value: snapshot.foreignFlow.foreignBuyVolume },
-    { label: 'Foreign sell volume (shares)', value: snapshot.foreignFlow.foreignSellVolume },
+    { label: 'Foreign buy volume (shares)', value: snapshot.foreignFlow.foreignBuyVolume, formatter: formatVolume, titleFormatter: formatFullSharesTitle },
+    { label: 'Foreign sell volume (shares)', value: snapshot.foreignFlow.foreignSellVolume, formatter: formatVolume, titleFormatter: formatFullSharesTitle },
     {
       label: 'Foreign net volume (shares)',
       value: snapshot.foreignFlow.foreignNetVolume,
-      formatter: formatSignedNumber,
+      formatter: formatSignedVolume,
+      titleFormatter: formatFullSharesTitle,
       tone: typeof snapshot.foreignFlow.foreignNetVolume === 'number' && snapshot.foreignFlow.foreignNetVolume < 0 ? 'text-danger' : 'text-success',
     },
-    { label: 'Foreign buy value (VND)', value: snapshot.foreignFlow.foreignBuyValue },
-    { label: 'Foreign sell value (VND)', value: snapshot.foreignFlow.foreignSellValue },
+    { label: 'Foreign buy value (VND)', value: snapshot.foreignFlow.foreignBuyValue, formatter: formatVndValue, titleFormatter: formatFullVndTitle },
+    { label: 'Foreign sell value (VND)', value: snapshot.foreignFlow.foreignSellValue, formatter: formatVndValue, titleFormatter: formatFullVndTitle },
     {
       label: 'Foreign net value (VND)',
       value: snapshot.foreignFlow.foreignNetValue,
-      formatter: formatSignedNumber,
+      formatter: formatSignedVndValue,
+      titleFormatter: formatFullVndTitle,
       tone: typeof snapshot.foreignFlow.foreignNetValue === 'number' && snapshot.foreignFlow.foreignNetValue < 0 ? 'text-danger' : 'text-success',
     },
   ].filter((row: MetricRow) => hasMetricValue(row.value));
   const technicalRows: MetricRow[] = [
-    { label: 'MA20', value: snapshot.technical.ma20, formatter: formatPrice },
-    { label: 'MA50', value: snapshot.technical.ma50, formatter: formatPrice },
+    { label: 'MA20', value: snapshot.technical.ma20, formatter: formatPrice, titleFormatter: formatFullVndTitle },
+    { label: 'MA50', value: snapshot.technical.ma50, formatter: formatPrice, titleFormatter: formatFullVndTitle },
     { label: 'RSI14', value: snapshot.technical.rsi14, formatter: (value) => formatNumber(value, 2) },
-    { label: 'Bollinger upper', value: snapshot.technical.bollingerUpper, formatter: formatPrice },
-    { label: 'Bollinger middle', value: snapshot.technical.bollingerMiddle, formatter: formatPrice },
-    { label: 'Bollinger lower', value: snapshot.technical.bollingerLower, formatter: formatPrice },
+    { label: 'Bollinger upper', value: snapshot.technical.bollingerUpper, formatter: formatPrice, titleFormatter: formatFullVndTitle },
+    { label: 'Bollinger middle', value: snapshot.technical.bollingerMiddle, formatter: formatPrice, titleFormatter: formatFullVndTitle },
+    { label: 'Bollinger lower', value: snapshot.technical.bollingerLower, formatter: formatPrice, titleFormatter: formatFullVndTitle },
+    { label: '52W high (VND)', value: snapshot.technical.high52w, formatter: formatPrice, titleFormatter: formatFullVndTitle },
+    { label: '52W high date', value: snapshot.technical.high52wDate },
+    { label: '52W low (VND)', value: snapshot.technical.low52w, formatter: formatPrice, titleFormatter: formatFullVndTitle },
+    { label: '52W low date', value: snapshot.technical.low52wDate },
+    { label: '52W coverage', value: snapshot.technical.highLow52wCoverageStatus },
+    { label: 'Avg volume 10D', value: snapshot.technical.avgVolume10d, formatter: formatVolume, titleFormatter: formatFullSharesTitle },
+    { label: 'Avg volume 3M', value: snapshot.technical.avgVolume3m, formatter: formatVolume, titleFormatter: formatFullSharesTitle },
+    { label: '3M volume coverage', value: snapshot.technical.avgVolume3mCoverageStatus },
+    { label: 'Price vs reference %', value: snapshot.technical.priceVsReferencePct, formatter: (value) => formatPercent(value, true) },
+    { label: 'Daily range %', value: snapshot.technical.dailyRangePct, formatter: (value) => formatPercent(value) },
   ];
   const hasIntradayData = hasCompanyIntradayData(snapshot);
   const hasRealtimeData = hasCompanyRealtimeData(snapshot);
@@ -398,7 +443,7 @@ const VietnamCompanyResearchPage: React.FC = () => {
   const intradayPulse = snapshot.intraday?.pulse;
   const latestIntradayChange = intradayPulse?.intradayChange ?? intradayPulse?.latest1hChange;
   const intradayRows: MetricRow[] = [
-    { label: 'Latest intraday close', value: intradayPulse?.latestIntradayClose ?? intradayPulse?.latest1hClose, formatter: formatPrice },
+    { label: 'Latest intraday close', value: intradayPulse?.latestIntradayClose ?? intradayPulse?.latest1hClose, formatter: formatPrice, titleFormatter: formatFullVndTitle },
     {
       label: 'Intraday change',
       value: latestIntradayChange,
@@ -406,25 +451,25 @@ const VietnamCompanyResearchPage: React.FC = () => {
       tone: typeof latestIntradayChange === 'number' && latestIntradayChange < 0 ? 'text-danger' : 'text-success',
     },
     { label: 'Intraday change %', value: intradayPulse?.intradayChangePercent ?? intradayPulse?.latest1hChangePercent, formatter: (value) => `${formatNumber(value, 2)}%` },
-    { label: 'Latest intraday volume', value: intradayPulse?.latestIntradayVolume ?? intradayPulse?.latest1hVolume },
-    { label: 'Session volume from intraday', value: intradayPulse?.sessionVolumeFromIntraday ?? intradayPulse?.sessionVolumeFrom1H },
+    { label: 'Latest intraday volume', value: intradayPulse?.latestIntradayVolume ?? intradayPulse?.latest1hVolume, formatter: formatVolume, titleFormatter: formatFullSharesTitle },
+    { label: 'Session volume from intraday', value: intradayPulse?.sessionVolumeFromIntraday ?? intradayPulse?.sessionVolumeFrom1H, formatter: formatVolume, titleFormatter: formatFullSharesTitle },
     { label: 'Provider cadence', value: companyIntradayCadenceText(snapshot), formatter: (value) => formatNumber(value) },
     { label: 'Candles loaded', value: snapshot.intraday?.candles?.length ?? 0 },
   ];
   const realtimeRows: MetricRow[] = [
-    { label: 'Realtime snapshot price', value: snapshot.realtimeSnapshot?.price ?? snapshot.realtimeSnapshot?.realtimePrice, formatter: formatPrice },
+    { label: 'Realtime snapshot price', value: snapshot.realtimeSnapshot?.price ?? snapshot.realtimeSnapshot?.realtimePrice, formatter: formatPrice, titleFormatter: formatFullVndTitle },
     { label: 'Realtime change', value: snapshot.realtimeSnapshot?.change ?? snapshot.realtimeSnapshot?.priceChange, formatter: formatSignedNumber },
     { label: 'Realtime change %', value: snapshot.realtimeSnapshot?.changePct ?? snapshot.realtimeSnapshot?.percentChange, formatter: (value) => `${formatNumber(value, 2)}%` },
-    { label: 'Realtime reference price', value: snapshot.realtimeSnapshot?.referencePrice, formatter: formatPrice },
-    { label: 'SSI realtime/session volume', value: snapshot.realtimeSnapshot?.volume ?? snapshot.realtimeSnapshot?.volumeAccumulated },
+    { label: 'Realtime reference price', value: snapshot.realtimeSnapshot?.referencePrice, formatter: formatPrice, titleFormatter: formatFullVndTitle },
+    { label: 'SSI realtime/session volume', value: snapshot.realtimeSnapshot?.volume ?? snapshot.realtimeSnapshot?.volumeAccumulated, formatter: formatVolume, titleFormatter: formatFullSharesTitle },
     { label: 'Fetched at', value: snapshot.realtimeSnapshot?.fetchedAt, formatter: (value) => formatNumber(value) },
   ];
   const tradeTapeRows: MetricRow[] = [
     { label: 'Trades loaded', value: snapshot.tradeTape?.length ?? 0 },
     { label: 'Latest time', value: snapshot.tradeTape?.[0]?.time, formatter: (value) => formatNumber(value) },
-    { label: 'Latest trade tape price', value: snapshot.tradeTape?.[0]?.price, formatter: formatPrice },
-    { label: 'Latest trade tape volume', value: snapshot.tradeTape?.[0]?.volume },
-    { label: 'Latest trade tape value', value: snapshot.tradeTape?.[0]?.value },
+    { label: 'Latest trade tape price', value: snapshot.tradeTape?.[0]?.price, formatter: formatPrice, titleFormatter: formatFullVndTitle },
+    { label: 'Latest trade tape volume', value: snapshot.tradeTape?.[0]?.volume, formatter: formatVolume, titleFormatter: formatFullSharesTitle },
+    { label: 'Latest trade tape value', value: snapshot.tradeTape?.[0]?.value, formatter: formatVndValue, titleFormatter: formatFullVndTitle },
     { label: 'Source', value: snapshot.tradeTapeStatus?.source, formatter: (value) => formatNumber(value) },
   ];
 
@@ -480,6 +525,9 @@ const VietnamCompanyResearchPage: React.FC = () => {
           )}
         </SectionShell>
         <SectionShell title="Technical snapshot" source={snapshot.technical.source} status={snapshot.technical.status}>
+          <p className="mb-3 text-xs text-secondary-text">
+            SSI-derived metrics are calculated from SSI DailyOhlc; price-vs-reference also uses SSI DailyStockPrice reference.
+          </p>
           <MetricGrid rows={technicalRows} />
         </SectionShell>
         <SectionShell title="Intraday pulse" source={snapshot.intraday?.source ?? 'SSI IntradayOhlc'} status={snapshot.intraday?.status ?? 'unavailable'}>
