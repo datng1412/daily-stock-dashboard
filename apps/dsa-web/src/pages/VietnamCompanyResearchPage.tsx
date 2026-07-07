@@ -7,11 +7,15 @@ import { AppPage, Badge, Button, Loading } from '../components/common';
 import { DataQualitySummary } from '../components/dashboard';
 import { cn } from '../utils/cn';
 import {
+  CEILING_PRICE_CLASS,
+  FLOOR_PRICE_CLASS,
   formatCompactShareVolume,
   formatCompactVndValue,
   formatCompactVnPrice,
   formatFullSharesTitle,
   formatFullVndTitle,
+  priceReferenceValueClass,
+  REFERENCE_PRICE_CLASS,
 } from '../utils/vietnamNumberFormat';
 
 type StatusVariant = React.ComponentProps<typeof Badge>['variant'];
@@ -22,6 +26,7 @@ type MetricRow = {
   formatter?: (value?: number | string | null) => string;
   titleFormatter?: (value?: number | string | null) => string | undefined;
   tone?: string;
+  testId?: string;
 };
 
 type DiagnosticRow = {
@@ -196,6 +201,7 @@ const MetricGrid: React.FC<{ rows: MetricRow[] }> = ({ rows }) => (
         <dt className="text-xs uppercase tracking-normal text-secondary-text">{row.label}</dt>
         <dd
           className={cn('mt-1 text-sm font-semibold text-foreground', row.tone)}
+          data-testid={row.testId}
           title={row.titleFormatter?.(row.value)}
         >
           {row.formatter ? row.formatter(row.value) : formatNumber(row.value)}
@@ -350,12 +356,20 @@ const VietnamCompanyResearchPage: React.FC = () => {
 
   if (!snapshot) return null;
 
+  const referencePrice = snapshot.price.referencePrice;
+  const latestPriceTone = priceReferenceValueClass(snapshot.price.latestPrice, referencePrice);
+  const dailyCloseTone = priceReferenceValueClass(snapshot.price.dailyClose, referencePrice);
+  const priceVsReferenceTone = priceReferenceValueClass(
+    snapshot.price.dailyClose ?? snapshot.price.latestPrice,
+    referencePrice,
+  );
+
   const priceRows: MetricRow[] = [
-    { label: 'Canonical latest price (VND)', value: snapshot.price.latestPrice, formatter: formatPrice, titleFormatter: formatFullVndTitle },
-    { label: 'Daily close (VND)', value: snapshot.price.dailyClose, formatter: formatPrice, titleFormatter: formatFullVndTitle },
-    { label: 'Reference price (VND)', value: snapshot.price.referencePrice, formatter: formatPrice, titleFormatter: formatFullVndTitle },
-    { label: 'Ceiling price (VND)', value: snapshot.price.ceilingPrice, formatter: formatPrice, titleFormatter: formatFullVndTitle },
-    { label: 'Floor price (VND)', value: snapshot.price.floorPrice, formatter: formatPrice, titleFormatter: formatFullVndTitle },
+    { label: 'Canonical latest price (VND)', value: snapshot.price.latestPrice, formatter: formatPrice, titleFormatter: formatFullVndTitle, tone: latestPriceTone, testId: 'company-latest-price' },
+    { label: 'Daily close (VND)', value: snapshot.price.dailyClose, formatter: formatPrice, titleFormatter: formatFullVndTitle, tone: dailyCloseTone, testId: 'company-daily-close' },
+    { label: 'Reference price (VND)', value: snapshot.price.referencePrice, formatter: formatPrice, titleFormatter: formatFullVndTitle, tone: REFERENCE_PRICE_CLASS, testId: 'company-reference-price' },
+    { label: 'Ceiling price (VND)', value: snapshot.price.ceilingPrice, formatter: formatPrice, titleFormatter: formatFullVndTitle, tone: CEILING_PRICE_CLASS, testId: 'company-ceiling-price' },
+    { label: 'Floor price (VND)', value: snapshot.price.floorPrice, formatter: formatPrice, titleFormatter: formatFullVndTitle, tone: FLOOR_PRICE_CLASS, testId: 'company-floor-price' },
     { label: 'Price date', value: snapshot.price.priceDate, formatter: (value) => formatNumber(value) },
   ];
   const profileRows: MetricRow[] = [
@@ -434,7 +448,7 @@ const VietnamCompanyResearchPage: React.FC = () => {
     { label: 'Avg volume 10D', value: snapshot.technical.avgVolume10d, formatter: formatVolume, titleFormatter: formatFullSharesTitle },
     { label: 'Avg volume 3M', value: snapshot.technical.avgVolume3m, formatter: formatVolume, titleFormatter: formatFullSharesTitle },
     { label: '3M volume coverage', value: snapshot.technical.avgVolume3mCoverageStatus },
-    { label: 'Price vs reference %', value: snapshot.technical.priceVsReferencePct, formatter: (value) => formatPercent(value, true) },
+    { label: 'Price vs reference %', value: snapshot.technical.priceVsReferencePct, formatter: (value) => formatPercent(value, true), tone: priceVsReferenceTone, testId: 'company-price-vs-reference' },
     { label: 'Daily range %', value: snapshot.technical.dailyRangePct, formatter: (value) => formatPercent(value) },
   ];
   const hasIntradayData = hasCompanyIntradayData(snapshot);

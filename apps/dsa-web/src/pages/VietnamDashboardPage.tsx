@@ -39,11 +39,15 @@ import {
   resolveVietnamWatchlistBatchSize,
 } from '../utils/vietnamWatchlistBatching';
 import {
+  CEILING_PRICE_CLASS,
+  FLOOR_PRICE_CLASS,
   formatCompactShareVolume,
   formatCompactVndValue,
   formatCompactVnPrice,
   formatFullSharesTitle,
   formatFullVndTitle,
+  priceReferenceValueClass,
+  REFERENCE_PRICE_CLASS,
 } from '../utils/vietnamNumberFormat';
 
 const CUSTOM_WATCHLIST_STORAGE_KEY = 'vnDashboard.customWatchlist.v1';
@@ -1628,7 +1632,9 @@ const WatchCard: React.FC<{ item: VietnamWatchItem; realtimeQuote?: VietnamRealt
         <div>
           <p className="text-xs text-secondary-text">Official daily close (SSI DailyOhlc)</p>
           <div className="mt-1 flex flex-wrap items-center gap-2">
-            <p className="text-lg font-semibold text-foreground">{formatPrice(item.latestPrice ?? item.close)}</p>
+            <p className={cn('text-lg font-semibold', priceReferenceValueClass(dailyCloseValue(item), referencePriceValue(item)))}>
+              {formatPrice(item.latestPrice ?? item.close)}
+            </p>
             <Badge variant={priceSourceVariant(item.latestPriceSource)}>{(item.latestPriceSource ?? 'unknown').toUpperCase()}</Badge>
           </div>
           <p className="text-xs text-secondary-text">OHLCV close {formatPrice(item.ohlcvClose ?? item.close)}</p>
@@ -2311,6 +2317,7 @@ const SelectedTickerHeader: React.FC<{
               label="Daily close"
               value={formatPrice(item.latestPrice ?? item.close)}
               detail={item.latestPriceDate ?? item.priceDate ?? '-'}
+              valueClassName={priceReferenceValueClass(dailyCloseValue(item), referencePriceValue(item))}
             />
             <SelectedTickerMetric
               label="% change"
@@ -2433,6 +2440,12 @@ const dailyCloseValue = (item: VietnamWatchItem) => (
   ?? finiteNumber(item.ohlcvClose)
   ?? finiteNumber(item.latestPrice)
   ?? finiteNumber(item.close)
+);
+
+const referencePriceValue = (item: VietnamWatchItem) => (
+  finiteNumber(item.dailyStockPrice?.referencePrice)
+  ?? finiteNumber(item.ssiReferencePrice)
+  ?? finiteNumber(item.priceLimit?.referencePrice)
 );
 
 const rsi14Value = (item: VietnamWatchItem) => (
@@ -2989,7 +3002,7 @@ const IndicatorTable: React.FC<{
                     ) : null}
                   </td>
                   <td className="px-3 py-3 text-right tabular-nums">
-                    <div className="font-medium text-foreground">
+                    <div className={cn('font-medium', priceReferenceValueClass(close, referencePriceValue(item)))}>
                       {close === null ? missingValue(missingCellReason(item, 'dailyClose')) : formatPrice(close)}
                     </div>
                     <div className="mt-1 text-xs text-secondary-text">{close === null ? 'SSI DailyOhlc unavailable' : 'SSI DailyOhlc'}</div>
@@ -3866,6 +3879,8 @@ const StockDetailView: React.FC<{
   const ssiReferencePrice = ssiDailyStockPrice.referencePrice ?? item.ssiReferencePrice ?? item.priceLimit?.referencePrice ?? null;
   const ssiCeilingPrice = ssiDailyStockPrice.ceilingPrice ?? item.ssiCeilingPrice ?? item.priceLimit?.ceilingPrice ?? null;
   const ssiFloorPrice = ssiDailyStockPrice.floorPrice ?? item.ssiFloorPrice ?? item.priceLimit?.floorPrice ?? null;
+  const officialDailyClose = dailyCloseValue(item);
+  const priceReferenceTone = priceReferenceValueClass(officialDailyClose, ssiReferencePrice);
   const priceVsReferencePct = indicators.priceVsReferencePct ?? null;
   const priceVsReferenceText = priceVsReferencePct !== null && priceVsReferencePct !== undefined
     ? `${formatSignedNumber(priceVsReferencePct, 2)}%`
@@ -3910,15 +3925,9 @@ const StockDetailView: React.FC<{
   const putThroughValue = ssiDailyStockPrice.putThroughValue ?? item.ssiPutThroughValue;
   const adjustedClose = ssiDailyStockPrice.adjustedClose ?? item.ssiAdjustedClose;
   const ssiDailyRows = [
-    { label: 'Reference price', value: formatPrice(ssiReferencePrice), title: formatFullVndTitle(ssiReferencePrice), show: hasDisplayValue(ssiReferencePrice) },
-    {
-      label: 'Ceiling price / floor price',
-      value: `${formatPrice(ssiCeilingPrice)} / ${formatPrice(ssiFloorPrice)}`,
-      title: [formatFullVndTitle(ssiCeilingPrice), formatFullVndTitle(ssiFloorPrice)].filter(Boolean).join(' / '),
-      show: hasDisplayValue(ssiCeilingPrice) && hasDisplayValue(ssiFloorPrice),
-    },
-    { label: 'Ceiling price', value: formatPrice(ssiCeilingPrice), title: formatFullVndTitle(ssiCeilingPrice), show: hasDisplayValue(ssiCeilingPrice) && !hasDisplayValue(ssiFloorPrice) },
-    { label: 'Floor price', value: formatPrice(ssiFloorPrice), title: formatFullVndTitle(ssiFloorPrice), show: hasDisplayValue(ssiFloorPrice) && !hasDisplayValue(ssiCeilingPrice) },
+    { label: 'Reference price', value: formatPrice(ssiReferencePrice), title: formatFullVndTitle(ssiReferencePrice), tone: REFERENCE_PRICE_CLASS, testId: 'selected-reference-price', show: hasDisplayValue(ssiReferencePrice) },
+    { label: 'Ceiling price', value: formatPrice(ssiCeilingPrice), title: formatFullVndTitle(ssiCeilingPrice), tone: CEILING_PRICE_CLASS, testId: 'selected-ceiling-price', show: hasDisplayValue(ssiCeilingPrice) },
+    { label: 'Floor price', value: formatPrice(ssiFloorPrice), title: formatFullVndTitle(ssiFloorPrice), tone: FLOOR_PRICE_CLASS, testId: 'selected-floor-price', show: hasDisplayValue(ssiFloorPrice) },
     { label: 'Foreign buy', value: formatVolume(ssiDailyStockPrice.foreignBuyVolume), title: formatFullSharesTitle(ssiDailyStockPrice.foreignBuyVolume), show: hasDisplayValue(ssiDailyStockPrice.foreignBuyVolume) },
     { label: 'Foreign sell', value: formatVolume(ssiDailyStockPrice.foreignSellVolume), title: formatFullSharesTitle(ssiDailyStockPrice.foreignSellVolume), show: hasDisplayValue(ssiDailyStockPrice.foreignSellVolume) },
     { label: 'Foreign net volume', value: formatSignedVolume(foreignNetVolume), title: formatFullSharesTitle(foreignNetVolume), tone: signalTone(foreignNetVolume), show: hasDisplayValue(foreignNetVolume) },
@@ -3992,7 +4001,8 @@ const StockDetailView: React.FC<{
           <div className="rounded-lg bg-card/60 p-3">
             <dt className="text-xs text-secondary-text">Daily close</dt>
             <dd
-              className="mt-1 font-medium text-foreground"
+              data-testid="selected-daily-close-price"
+              className={cn('mt-1 font-medium', priceReferenceTone)}
               title={[formatFullVndTitle(item.dailyClose ?? item.latestPrice ?? item.close), formatFullVndTitle(item.ohlcvClose ?? item.close)].filter(Boolean).join(' / ')}
             >
               {formatPrice(item.dailyClose ?? item.latestPrice ?? item.close)} / {formatPrice(item.ohlcvClose ?? item.close)}
@@ -4017,15 +4027,15 @@ const StockDetailView: React.FC<{
           </div>
           <div className="rounded-lg bg-card/60 p-3">
             <dt className="text-xs text-secondary-text">Vs reference</dt>
-            <dd className={cn('mt-1 font-medium', signalTone(priceVsReferencePct))}>
+            <dd data-testid="selected-price-vs-reference" className={cn('mt-1 font-medium', priceReferenceTone)}>
               {priceVsReferenceText}
             </dd>
             <dd className="mt-1 text-xs text-secondary-text">SSI DailyOhlc + DailyStockPrice</dd>
           </div>
-          {ssiDailyRows.filter((row) => ['Reference price', 'Ceiling price / floor price', 'Ceiling price', 'Floor price', 'Adjusted close'].includes(row.label)).map((row) => (
+          {ssiDailyRows.filter((row) => ['Reference price', 'Ceiling price', 'Floor price', 'Adjusted close'].includes(row.label)).map((row) => (
             <div key={`${item.ticker}-price-context-${row.label}`} className="rounded-lg bg-card/60 p-3">
-              <dt className="text-xs text-secondary-text">{row.label === 'Reference price' ? 'Reference' : row.label === 'Ceiling price / floor price' ? 'Ceiling / floor' : row.label}</dt>
-              <dd className={cn('mt-1 font-medium text-foreground', row.tone)} title={row.title}>{row.value}</dd>
+              <dt className="text-xs text-secondary-text">{row.label === 'Reference price' ? 'Reference' : row.label}</dt>
+              <dd data-testid={row.testId} className={cn('mt-1 font-medium', row.tone ?? 'text-foreground')} title={row.title}>{row.value}</dd>
             </div>
           ))}
           {ssiDailyStockPrice.date ? (

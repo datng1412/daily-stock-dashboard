@@ -2330,7 +2330,8 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(screen.getByText('Diagnostics')).toBeInTheDocument();
 
     expect(selectedDisclosure('selected-disclosure-price-context').getByText('Reference')).toBeInTheDocument();
-    expect(selectedDisclosure('selected-disclosure-price-context').getByText('Ceiling / floor')).toBeInTheDocument();
+    expect(selectedDisclosure('selected-disclosure-price-context').getByText('Ceiling price')).toBeInTheDocument();
+    expect(selectedDisclosure('selected-disclosure-price-context').getByText('Floor price')).toBeInTheDocument();
     expect(selectedDisclosure('selected-disclosure-flow-context').getByText('Matched value')).toBeInTheDocument();
     expect(selectedDisclosure('selected-disclosure-flow-context').getByText('Foreign buy')).toBeInTheDocument();
     expect(selectedDisclosure('selected-disclosure-flow-context').getByText('Foreign sell')).toBeInTheDocument();
@@ -3781,9 +3782,14 @@ describe('VietnamDashboardPage watchlist loading', () => {
     const detail = within(screen.getByText('Stock detail').closest('section') as HTMLElement);
     expect(detail.getByRole('heading', { name: 'DailyStockPrice coverage' })).toBeInTheDocument();
     expect(detail.getByText('Reference')).toBeInTheDocument();
-    expect(within(detail.getByText('Reference').closest('div') as HTMLElement).getByText('0.10')).toBeInTheDocument();
-    expect(detail.getByText('Ceiling / floor')).toBeInTheDocument();
-    expect(detail.getByText('0.11 / 0.09')).toBeInTheDocument();
+    expect(detail.getByTestId('selected-reference-price')).toHaveClass('text-cyan');
+    expect(detail.getByTestId('selected-reference-price')).toHaveTextContent('0.10');
+    expect(detail.getByText('Ceiling price')).toBeInTheDocument();
+    expect(detail.getByTestId('selected-ceiling-price')).toHaveClass('text-purple');
+    expect(detail.getByTestId('selected-ceiling-price')).toHaveTextContent('0.11');
+    expect(detail.getByText('Floor price')).toBeInTheDocument();
+    expect(detail.getByTestId('selected-floor-price')).toHaveClass('text-cyan');
+    expect(detail.getByTestId('selected-floor-price')).toHaveTextContent('0.09');
     expect(detail.getByText('Foreign net')).toBeInTheDocument();
     expect(within(detail.getByText('Foreign net').closest('div') as HTMLElement).getByText('+5')).toBeInTheDocument();
     expect(detail.getByText('Foreign net value')).toBeInTheDocument();
@@ -3795,7 +3801,8 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(detail.getByText('Adjusted close')).toBeInTheDocument();
     expect(detail.getAllByText('0.10').length).toBeGreaterThan(0);
     expect(detail.getByText('Vs reference')).toBeInTheDocument();
-    expect(within(detail.getByText('Vs reference').closest('div') as HTMLElement).getByText('+1.01%')).toBeInTheDocument();
+    expect(detail.getByTestId('selected-price-vs-reference')).toHaveClass('text-success');
+    expect(detail.getByTestId('selected-price-vs-reference')).toHaveTextContent('+1.01%');
     expect(detail.getByText('10D avg volume')).toBeInTheDocument();
     expect(within(detail.getByText('10D avg volume').closest('div') as HTMLElement).getByText('1.1K')).toBeInTheDocument();
     expect(detail.getByText('3M avg volume')).toBeInTheDocument();
@@ -3858,6 +3865,43 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(within(detail.getByText('3M avg volume').closest('div') as HTMLElement).getByText('Need 30 daily rows')).toBeInTheDocument();
     expect(within(detail.getByText('52W high / low').closest('div') as HTMLElement).getByText('Need 120 daily rows')).toBeInTheDocument();
     expect(within(detail.getByText('Daily range').closest('div') as HTMLElement).getByText('Insufficient OHLC')).toBeInTheDocument();
+  });
+
+  it.each([
+    { close: 98, referencePrice: 99, priceVsReferencePct: -1.01, expectedClass: 'text-danger', expectedText: '-1.01%' },
+    { close: 99, referencePrice: 99, priceVsReferencePct: 0, expectedClass: 'text-warning', expectedText: '0%' },
+    { close: null, referencePrice: 99, priceVsReferencePct: null, expectedClass: 'text-secondary-text', expectedText: 'Daily close unavailable' },
+    { close: 100, referencePrice: null, priceVsReferencePct: null, expectedClass: 'text-secondary-text', expectedText: 'Reference unavailable' },
+  ])('colors selected daily price by SSI reference direction %#', async ({ close, referencePrice, priceVsReferencePct, expectedClass, expectedText }) => {
+    const response = makeResponse(defaultTickers);
+    response.watchlist[0] = {
+      ...response.watchlist[0],
+      latestPrice: close,
+      ohlcvClose: close,
+      dailyClose: close,
+      close,
+      dailyStockPrice: {
+        ...response.watchlist[0].dailyStockPrice,
+        referencePrice,
+      },
+      priceLimit: {
+        ...response.watchlist[0].priceLimit,
+        referencePrice,
+      },
+      indicators: {
+        ...response.watchlist[0].indicators,
+        priceVsReferencePct,
+        priceVsReferenceStatus: close === null ? 'daily_close_unavailable' : referencePrice === null ? 'reference_unavailable' : 'ok',
+      },
+    };
+    mockedGetVietnamWatchlist.mockResolvedValue(response);
+
+    render(<VietnamDashboardPage />);
+
+    const detail = within((await screen.findByText('Stock detail')).closest('section') as HTMLElement);
+    expect(detail.getByTestId('selected-daily-close-price')).toHaveClass(expectedClass);
+    expect(detail.getByTestId('selected-price-vs-reference')).toHaveClass(expectedClass);
+    expect(detail.getByTestId('selected-price-vs-reference')).toHaveTextContent(expectedText);
   });
 
   it('renders SSI symbol metadata compactly when provided', async () => {
@@ -3953,7 +3997,8 @@ describe('VietnamDashboardPage watchlist loading', () => {
     const detail = within(screen.getByText('Stock detail').closest('section') as HTMLElement);
     expect(detail.getByRole('heading', { name: 'DailyStockPrice coverage' })).toBeInTheDocument();
     expect(detail.getByText('Reference')).toBeInTheDocument();
-    expect(detail.getByText('Ceiling / floor')).toBeInTheDocument();
+    expect(detail.getByText('Ceiling price')).toBeInTheDocument();
+    expect(detail.getByText('Floor price')).toBeInTheDocument();
     expect(detail.queryByText('Foreign net value')).not.toBeInTheDocument();
     expect(detail.queryByText('Matched value')).not.toBeInTheDocument();
     expect(detail.queryByText('Put-through value')).not.toBeInTheDocument();

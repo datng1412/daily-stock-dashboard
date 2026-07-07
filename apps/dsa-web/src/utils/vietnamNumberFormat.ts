@@ -19,6 +19,38 @@ const finiteNumber = (value?: number | string | null): number | null => (
   typeof value === 'number' && Number.isFinite(value) ? value : null
 );
 
+export type PriceReferenceDirection = 'above' | 'below' | 'equal' | 'neutral';
+
+export const getPriceReferenceDirection = (
+  price?: number | string | null,
+  reference?: number | string | null,
+): PriceReferenceDirection => {
+  const numericPrice = finiteNumber(price);
+  const numericReference = finiteNumber(reference);
+  if (numericPrice === null || numericReference === null || numericPrice <= 0 || numericReference <= 0) {
+    return 'neutral';
+  }
+  if (numericPrice > numericReference) return 'above';
+  if (numericPrice < numericReference) return 'below';
+  return 'equal';
+};
+
+export const priceReferenceDirectionClass = (direction: PriceReferenceDirection) => {
+  if (direction === 'above') return 'text-success';
+  if (direction === 'below') return 'text-danger';
+  if (direction === 'equal') return 'text-warning';
+  return 'text-secondary-text';
+};
+
+export const priceReferenceValueClass = (
+  price?: number | string | null,
+  reference?: number | string | null,
+) => priceReferenceDirectionClass(getPriceReferenceDirection(price, reference));
+
+export const REFERENCE_PRICE_CLASS = 'text-cyan';
+export const CEILING_PRICE_CLASS = 'text-purple';
+export const FLOOR_PRICE_CLASS = 'text-cyan';
+
 const signPrefix = (value: number) => {
   if (value > 0) return '+';
   if (value < 0) return '-';

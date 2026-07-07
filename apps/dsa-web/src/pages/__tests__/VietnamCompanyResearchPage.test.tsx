@@ -297,6 +297,44 @@ describe('VietnamCompanyResearchPage', () => {
     });
   });
 
+  it.each([
+    { latestPrice: 124600, dailyClose: 124600, referencePrice: 123000, priceVsReferencePct: 1.3, expectedClass: 'text-success' },
+    { latestPrice: 121000, dailyClose: 121000, referencePrice: 123000, priceVsReferencePct: -1.63, expectedClass: 'text-danger' },
+    { latestPrice: 123000, dailyClose: 123000, referencePrice: 123000, priceVsReferencePct: 0, expectedClass: 'text-warning' },
+    { latestPrice: null, dailyClose: null, referencePrice: 123000, priceVsReferencePct: null, expectedClass: 'text-secondary-text' },
+    { latestPrice: 124600, dailyClose: 124600, referencePrice: null, priceVsReferencePct: null, expectedClass: 'text-secondary-text' },
+  ])('colors company price metrics by SSI reference direction %#', async ({
+    latestPrice,
+    dailyClose,
+    referencePrice,
+    priceVsReferencePct,
+    expectedClass,
+  }) => {
+    const snapshot = makeCompanySnapshot();
+    vi.mocked(stocksApi.getVietnamCompanyResearch).mockResolvedValue({
+      ...snapshot,
+      price: {
+        ...snapshot.price,
+        latestPrice,
+        dailyClose,
+        referencePrice,
+      },
+      technical: {
+        ...snapshot.technical,
+        priceVsReferencePct,
+      },
+    });
+
+    renderPage();
+
+    expect(await screen.findByTestId('company-latest-price')).toHaveClass(expectedClass);
+    expect(screen.getByTestId('company-daily-close')).toHaveClass(expectedClass);
+    expect(screen.getByTestId('company-price-vs-reference')).toHaveClass(expectedClass);
+    expect(screen.getByTestId('company-reference-price')).toHaveClass('text-cyan');
+    expect(screen.getByTestId('company-ceiling-price')).toHaveClass('text-purple');
+    expect(screen.getByTestId('company-floor-price')).toHaveClass('text-cyan');
+  });
+
   it('renders unavailable SSI-derived company metrics without fake values', async () => {
     const snapshot = makeCompanySnapshot();
     snapshot.technical = {
