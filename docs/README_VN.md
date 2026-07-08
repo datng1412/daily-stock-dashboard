@@ -55,8 +55,9 @@ The active dashboard uses source-specific labels:
 - `Matched volume` for SSI `DailyStockPrice` matched quantity.
 - `Realtime snapshot` / `SSI realtime` for realtime board snapshot data.
 - `Trade tape` for the selected ticker trade-tape rows.
+- `Order book` / `SSI X-QUOTE order book` for optional bid/ask ladder context when backend/API data exists.
 
-The dashboard must not present SSI realtime or trade-tape features as KBS, and must not mix DailyOhlc and DailyStockPrice labels into a single source.
+The dashboard must not present SSI realtime, trade-tape, or order-book features as KBS, and must not mix DailyOhlc and DailyStockPrice labels into a single source.
 
 Board-style price formatting and SSI price-color convention are implemented: price-like VND/share values display in thousand-VND units with two decimals, reference/equal prices use yellow, ceiling uses purple, floor uses blue/cyan, above-reference uses green, and below-reference uses red.
 
@@ -69,11 +70,14 @@ The current strict SSI runtime can already show these stock-detail metrics when 
 - SSI-derived metrics from current SSI inputs: 52W high/low, 10D average volume, 3M average volume, price-vs-reference percent, and daily range percent. These remain null/status-labeled when SSI inputs are insufficient and do not change `latest_price` ownership.
 - Limited symbol metadata such as exchange, market, security type, issuer, lot size, listed shares, and listed date when SSI `SecuritiesDetails` or `Securities` returns exact ticker fields.
 - VN30/index component lists from SSI IndexComponents where available.
+- Backend/API support for optional SSI `X-QUOTE:{symbol}` order-book context when the background stream has a usable cache row. Public rows may expose `order_book_source`, `order_book`, `order_book_status`, and sanitized `diagnostics.order_book`.
 
-Remaining SSI-backed candidates need runtime proof before exposure:
+`X-QUOTE` order book is a separate optional live context. It does not affect `latest_price`, does not replace DailyOhlc or DailyStockPrice, and does not replace realtime `X:{symbol}` snapshots, trade tape `X-TRADE:{symbol}`, or session/status `F:{symbol}`. Malformed bid/ask levels are dropped, no fake order-book rows are synthesized, and empty/unavailable state is explicit through status/diagnostics. Live market proof and frontend order-book UI are still deferred.
 
-- `F` trading session/status, including possible `TradingSession` / `TradingStatus` fields after payload proof.
-- `X-QUOTE` order book ladder.
+Remaining SSI-backed candidates or deferred productization need further proof before exposure:
+
+- `F` trading session/status live market proof and UI, including possible `TradingSession` / `TradingStatus` labels after payload proof.
+- `X-QUOTE` order-book live proof and frontend UI; backend/API support exists.
 - `R` realtime foreign room.
 - `MI` realtime market index pulse.
 - `B` realtime bars.
@@ -82,7 +86,7 @@ Remaining SSI-backed candidates need runtime proof before exposure:
 
 See `docs/SSI_REMAINING_DATA_AUDIT.md` for the remaining SSI-backed data backlog.
 
-SSI-owned data must not be externalized or silently overwritten: prices, daily OHLCV, SSI-backed intraday OHLCV, realtime price snapshots, trade tape, order book when implemented, reference/ceiling/floor, SSI-backed foreign flow/foreign room, SSI-backed index components/realtime index data, and SSI-backed instrument metadata.
+SSI-owned data must not be externalized or silently overwritten: prices, daily OHLCV, SSI-backed intraday OHLCV, realtime price snapshots, trade tape, SSI X-QUOTE order book, reference/ceiling/floor, SSI-backed foreign flow/foreign room, SSI-backed index components/realtime index data, and SSI-backed instrument metadata.
 
 `external-provider-required` gaps are limited to domains SSI does not provide or cannot support sufficiently, such as news, corporate actions/dividends/rights/splits, financial statements, EPS/P/E/P/B/ROE/ROA, macro data, research reports, and ownership/shareholder data when not SSI-backed or insufficient. These fields must remain unavailable until a qualified provider contract exists.
 
