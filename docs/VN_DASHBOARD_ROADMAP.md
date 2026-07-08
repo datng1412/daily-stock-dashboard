@@ -1223,6 +1223,32 @@ Result:
 * Phase 4.8A-Fix corrected frontend API adapter mapping for numeric-suffix fields (`52w`, `10d`, `3m`) so values render with their dates/statuses, and tightened backend valid-row rules for 52W, volume, reference, and daily-range formulas.
 * Left beta deferred pending SSI index data and methodology verification.
 
+### Phase 4.8F - SSI Remaining Data Capability Audit
+
+Status: completed on 2026-07-08 as a documentation-only audit.
+
+Goal:
+
+Document SSI FastConnect capabilities that StockClock already uses, capabilities that SSI can still likely power but StockClock does not fully expose yet, and the boundary between SSI-owned data and external-provider-required gaps.
+
+Result:
+
+* Added `docs/SSI_REMAINING_DATA_AUDIT.md` with a capability matrix covering DailyOhlc, DailyStockPrice, IntradayOhlc, Securities/SecuritiesDetails, IndexList, IndexComponents, DailyIndex, realtime `X`, trade tape `X-TRADE`, `X-QUOTE`, `F`, `R`, `MI`, `B`, and instrument metadata candidates.
+* Classified the strongest missing SSI-backed runtime-proof targets as trading session/status from `F`, order book from `X-QUOTE`, realtime foreign room from `R`, realtime market index pulse from `MI`, DailyStockPrice unused fields, and SecuritiesDetails extended metadata.
+* Kept realtime OHLCV `B`, derivatives/futures, covered warrants, ETF/fund, and bond metadata as later instrument/streaming tracks.
+* Reconfirmed `latest_price` remains SSI DailyOhlc and external providers must not overwrite SSI-owned prices, OHLCV, DailyStockPrice enrichment, intraday, realtime, trade tape, order book, foreign room, index data, or metadata.
+* No runtime provider, backend endpoint, frontend UI, schema, tests, config/env, credentials, streaming subscription code, fallback provider, scraping, fake data, commit, or push was added.
+
+Recommended next SSI-backed runtime-proof order:
+
+1. Phase 4.8G - Trading Session/Status from SSI `F`, if live proof confirms stable fields and code mappings.
+2. Phase 4.8H - `X-QUOTE` Order Book Ladder.
+3. Phase 4.8I - Realtime Foreign Room from SSI `R`.
+4. Phase 4.8J - Realtime Market Index Pulse from SSI `MI`.
+5. Phase 4.8K - DailyStockPrice Unused Field Audit/Exposure.
+6. Phase 4.8L - SecuritiesDetails Extended Metadata.
+7. Later - Realtime OHLCV `B`, derivatives/futures, covered warrant, ETF/fund, and bond modules.
+
 ### Phase 5.0A - External Provider Contract Design
 
 Status: completed on 2026-06-29.

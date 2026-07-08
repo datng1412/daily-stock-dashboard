@@ -10,6 +10,7 @@ The current application contract remains unchanged:
 
 * SSI-first rule: if SSI can provide a market-data field, SSI owns it; if a metric can be calculated from SSI-owned data, it should be calculated internally and source-labeled as SSI-derived.
 * SSI owns daily OHLCV, DailyStockPrice enrichment including bounded recent foreign-flow history, intraday candles, optional realtime, IndexList, DailyIndex where valid, IndexComponents, and SSI-returned metadata.
+* Phase 4.8F extends the SSI-owned candidate boundary to proven future `F` trading status, `X-QUOTE` order book, `R` foreign room, `MI` realtime market index, `B` realtime bars, and SecuritiesDetails/Securities instrument metadata. These must not be replaced by external providers while SSI can provide them.
 * External providers must use separate source labels and must not overwrite SSI-owned fields.
 * `latest_price` remains SSI DailyOhlc close when SSI daily rows exist.
 * External-provider failures must not break SSI daily rows.
@@ -79,6 +80,24 @@ Official docs reviewed:
 | Realtime/tick/orderbook/trade tape | FiinQuant | FiinGroup trading data only after contract review | `deferred`; `candidate_after_entitlement` | Commercial live data entitlement, latency/SLA, storage/display/redistribution, stream lifecycle | No | Consider only if SSI streaming is insufficient; do not replace SSI-owned daily data | Yes |
 | Historical OHLCV fallback | None for production | Vnstock or FiinQuant for research comparison | `not_allowed_now` | Would need explicit source-ownership decision and exchange/vendor rights | No | SSI DailyOhlc remains canonical; do not add silent fallback | Yes |
 | Research/prototype-only data | Vnstock | FiinQuant sandbox after entitlement | `prototype_only` | Must not be redistributed or promoted into runtime without qualification | No | Useful for analyst exploration, not production dashboard data | Yes |
+
+### Phase 4.8F SSI-owned boundary before external providers
+
+SSI-owned or SSI-candidate fields must stay out of external-provider runtime replacement:
+
+* prices, `latest_price`, daily OHLCV, and chart candles;
+* DailyStockPrice reference/ceiling/floor, matched/put-through, adjusted close when present, total trading fields when proven, and foreign-flow fields;
+* intraday OHLCV if SSI-backed;
+* realtime price snapshot;
+* order book / bid-ask ladder from `X-QUOTE` if proven;
+* trade tape / latest-event tape from `X-TRADE`, and any future verified SSI trade-history source;
+* trading session/status from `F` if proven;
+* foreign room / realtime foreign trading context from `R` if proven;
+* realtime market index from `MI` and DailyIndex/IndexList/IndexComponents where SSI rows are usable;
+* realtime OHLCV bars from `B` if proven;
+* Securities/SecuritiesDetails metadata where SSI returns exact fields, including future derivative, covered warrant, ETF/fund, and bond metadata tracks.
+
+External-provider-required domains remain news, corporate actions/dividends/rights/splits when SSI does not provide explicit structured events, financial statements, EPS/P/E/P/B/ROE/ROA, macro, research reports, ownership/shareholder data when not SSI-backed or insufficient, and approved source-labeled metadata only for SSI-null fields after per-field priority and rights proof.
 
 ### Recommended qualification and integration order
 

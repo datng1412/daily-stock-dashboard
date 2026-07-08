@@ -1,6 +1,6 @@
 # Project State
 
-Last updated: 2026-07-07
+Last updated: 2026-07-08
 
 ## Purpose
 
@@ -57,6 +57,7 @@ This document gives Codex and other agents enough context to resume project work
 - Phase 4.8E-3 renders SSI trade tape rows with SSI-style `Time`, `B/S`, `Vol`, `Price`, `+/-`, and `+/-(%)` columns. B/S is normalized only from explicit SSI X-TRADE side/aggressor fields and remains unknown when absent; change fields are trade price versus SSI DailyStockPrice reference and do not affect `latest_price`.
 - Phase 4.8E-4 maps observed SSI X-TRADE raw side codes `BU=buy` and `SD=sell`, preserves `side_if_available`, and keeps B/S independent from price color or positive/negative change. A sell row can still have positive reference-based change.
 - Phase 4.8E-5 adds frontend-only trade-tape warm-up refetch for selected dashboard/company tickers while SSI X-TRADE status is starting, subscribed-empty, or cache-empty. Rows remain the highest-priority render state, and reference/equal/zero-change price coloring now uses dedicated yellow rather than warning/orange.
+- Phase 4.8F completed a documentation-only SSI remaining data capability audit in `docs/SSI_REMAINING_DATA_AUDIT.md`. Missing SSI-backed candidates are prioritized as `F` trading session/status, `X-QUOTE` order book, `R` realtime foreign room, `MI` realtime market index pulse, DailyStockPrice unused fields, SecuritiesDetails extended metadata, and later `B` bars plus derivative/covered warrant/ETF/fund/bond metadata. No runtime code changed; the next recommended runtime-proof target is SSI `F` trading session/status.
 - Phase 4.6F-Recovery-2 hardened the backend daily SSI path after live diagnostics found DailyOhlc returning sanitized provider `code=Exception` while DailyStockPrice and VN30 IndexComponents remained reachable. Unavailable DailyOhlc/DailyStockPrice refreshes are no longer cached as successful daily values. If DailyOhlc is unavailable but DailyStockPrice returns usable enrichment, the row remains unavailable for canonical daily price/OHLCV, keeps `latest_price=null`, and exposes only source-labeled DailyStockPrice fields.
 - Phase 4.6F-Recovery-3 keeps the strict DailyOhlc path backend-only: DailyOhlc retries its existing alternate parameter casing only after non-rate-limit provider errors, all-empty DailyOhlc responses are unavailable rather than successful zero-row data, and provider `429` responses are not variant-probed further.
 - Phase 4.6F-Recovery-4 adds a manual-only, secret-safe DailyOhlc diagnostic script. A bounded 5-day FPT live probe on 2026-07-06 returned sanitized provider `code=Exception` for the primary `symbol/fromDate/toDate` shape and provider `code=429` for the existing alternate casing, with no normalized DailyOhlc rows; further probing was stopped to avoid worsening SSI throttling. DailyStockPrice, realtime cache, and VN30 IndexComponents remained separate from DailyOhlc availability.

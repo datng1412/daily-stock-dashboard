@@ -399,6 +399,8 @@ The SSI-first rule is: if SSI can provide a market-data field, SSI owns it; if a
 | Intraday candles | SSI IntradayOhlc | Strict source; no fallback |
 | Realtime snapshot | SSI FastConnect streaming realtime contract | Parser, manager/cache, official-client adapter, and FastAPI startup bootstrap exist behind disabled-by-default config; request handlers read process-local cache only |
 | Trade tape / latest trade events | SSI streaming X-TRADE event buffer | Fresh bootstrapped X-TRADE rows may populate latest-event tape; full historical time-and-sales remains unverified |
+| Future SSI `F`, `X-QUOTE`, `R`, `MI`, `B` streams | SSI streaming after runtime proof | Trading status, order book, foreign room, realtime index, and realtime bars must remain separate source-labeled blocks; no fake placeholders and no request-handler stream starts |
+| Future SSI extended instrument metadata | SSI SecuritiesDetails/Securities after runtime proof | Derivative, covered warrant, ETF/fund, and bond fields require exact row-key evidence and instrument-specific semantics before exposure |
 | News | Future NewsProvider | Disabled now |
 | Financials | Future external provider | Not implemented |
 | Corporate actions | `CorporateActionsProvider` future external boundary | Disabled/not configured by default; no inference |
@@ -406,6 +408,8 @@ The SSI-first rule is: if SSI can provide a market-data field, SSI owns it; if a
 | KBS | Legacy optional only | Disabled by default |
 
 Compatibility aliases must stay within the same source owner. Do not use SSI DailyStockPrice close to overwrite `latest_price`, do not use DailyOhlc volume to fill matched volume, and do not use realtime, trade-tape, Mozyfin, or KBS values to fill daily fields.
+
+Future SSI-backed fields from Phase 4.8F must be additive and explicit. Public rows need source labels, availability status, missing-field/null semantics, and sanitized diagnostics. Missing streaming data must stay `null` or `[]` rather than placeholder metrics, and external providers must not fill order book, trading status, foreign room, realtime index, realtime bars, or SSI-returned instrument metadata while SSI can provide those fields.
 
 ## Index Data Contract
 

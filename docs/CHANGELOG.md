@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [documentation] Add SSI remaining data capability audit and prioritize future SSI-backed proof targets without runtime changes.
 - [documentation] Document current access status for VN news/data provider candidates and keep FiinGroup, Vietstock, and Vnstock behind entitlement/prototype gates.
 - [documentation] Align product spec Phase 5.1A with News Provider Research & Planning and move corporate actions/dividends to deferred external-provider track.
 - [documentation] Add Phase 5.1A VN news provider research comparing FiinGroup, Vietstock, WiGroup, public RSS, scraping, NewsAPI, and GDELT without adding runtime providers.

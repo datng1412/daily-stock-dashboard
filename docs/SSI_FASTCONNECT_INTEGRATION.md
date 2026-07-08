@@ -79,7 +79,7 @@ External providers are still required for BCTC/KQKD, financial statements, finan
 | DailyStockPrice | SSI FastConnect Data REST | Implemented and wired | Use for reference, ceiling/floor, adjusted close, matched, put-through, latest foreign flow, and bounded recent 5D/20D foreign net volume when enough rows exist |
 | Realtime snapshot | SSI FastConnect Data streaming | Provider/service/API/UI contract added; parser coverage for buffered `X`, `X-QUOTE`, and `X-TRADE`; config-disabled background manager/cache skeleton added; official client adapter is available only behind `SSI_STREAMING_REALTIME_ENABLED=true`; FastAPI startup can start a process-local manager only when `SSI_STREAMING_REALTIME_BOOTSTRAP_SYMBOLS` is non-empty; default channel template is `X:{symbol}` | Show SSI unavailable until the backend lifecycle cache safely populates current rows; no request-handler streaming and no KBS fallback |
 | Trade tape | SSI FastConnect Data streaming or future verified trade contract | Provider/service/API/UI contract added; live history/list semantics still need confirmation | Keep separate from realtime latest-trade messages and official daily OHLCV |
-| Realtime best bid/ask, matched data, foreign room, index stream, realtime bars/OHLC | SSI streaming/protocol hardening later | Parser/cache skeleton exists only for realtime quote/trade snapshot messages; live official stream is not connected | Keep semantics explicit and unavailable until SSI behavior is proven stable |
+| Realtime best bid/ask, matched data, foreign room, index stream, realtime bars/OHLC | SSI streaming/protocol hardening later | Parser/cache skeleton exists only for realtime quote/trade snapshot messages; live official stream is not connected | Phase 4.8F documents `F`, `X-QUOTE`, `R`, `MI`, and `B` as SSI-owned candidates that need runtime proof before exposure |
 | News | Future NewsProvider | Disabled/not implemented | Do not call Mozyfin; keep separate from SSI-owned market data |
 | BCTC/KQKD, financial statements, ratios | External provider | Unsupported/future provider | Do not infer fundamentals from price fields |
 | Corporate actions, dividends, rights, splits | External provider through future `CorporateActionsProvider` | Disabled/not configured by default; contract proof only | Do not infer events from reference or adjusted-close gaps |
@@ -98,6 +98,7 @@ External providers are still required for BCTC/KQKD, financial statements, finan
 | Realtime snapshot | SSI FastConnect streaming data types `X`, `X-QUOTE`, `X-TRADE` | Parser covered; config-disabled manager/cache skeleton exists; official client adapter is config-gated; FastAPI startup bootstrap is config-gated and symbol-list gated | Phase 4.0C verified the route/service/fetcher wiring and config gate. Phase 4.0C-2 found no supported SSI REST realtime endpoint, SDK method, enum, or hidden repo contract. Phase 4.0C-3 confirmed the realtime direction is streaming. Phase 4.0C-5 added a request-safe cache read path that stays disabled by default. Phase 4.0C-6 added a lazy official-client adapter. Phase 4.0C-7E changed the default channel to the live-verified no-space form `X:{symbol}`; spaced forms are retained only for diagnostics/custom overrides. Phase 4.0C-8 added FastAPI lifecycle bootstrap that starts the process-local manager only when `SSI_STREAMING_REALTIME_ENABLED=true` and explicit bootstrap symbols are configured. Phase 4.0C-9 makes the realtime endpoint bypass the generic backend response cache so fresh process-local stream-cache rows can surface immediately. Previous candidate names `RealtimeQuote`, `RealtimePrice`, `RealtimeSnapshot`, and `SecuritiesRealtime` are discovery evidence only and are no longer probed at runtime. The dashboard must not claim realtime is live unless `realtime_snapshot` is non-null and `realtime_status.status = ok`. |
 | Trade tape | SSI streaming `X-TRADE` event buffer; future verified REST/history contract if SSI documents one | Phase 4.7C adds a bounded process-local per-symbol X-TRADE buffer populated only by the background streaming manager. Phase 4.8E subscribes the startup-owned manager to `X-TRADE:{symbol}` alongside `X:{symbol}` when trade tape is enabled. Phase 4.8E-2 returns buffered rows even when stream freshness is stale. Phase 4.8E-3 normalizes explicit X-TRADE side/aggressor fields to `buy`/`sell`/null and adds reference-based `change`/`change_pct`. Phase 4.8E-4 maps observed raw SSI side codes `BU=buy` and `SD=sell` while preserving `side_if_available`. Watchlist/company unavailable rows remain `trade_tape=[]` plus separate `trade_tape_status` only when no usable rows exist. | Returns rows only for configured/bootstrap symbols with parsed X-TRADE events carrying price, volume, and timestamp. Request handlers only read the buffer and never start streams, subscribe dynamically, or probe previous REST candidates. B/S must not be inferred from price color or change. Historical time-and-sales history remains unverified. |
 | Securities/SecuritiesDetails | `GET /Market/Securities`, `GET /Market/SecuritiesDetails` | Partial metadata | Optional company name, issuer, security type, lot size, listed shares, and listed date may remain null. |
+| SSI remaining data audit | `docs/SSI_REMAINING_DATA_AUDIT.md` | Docs-only Phase 4.8F audit | Recommended runtime-proof order: `F` trading session/status, `X-QUOTE` order book, `R` foreign room, `MI` realtime market index, DailyStockPrice unused fields, SecuritiesDetails extended metadata, then `B` bars and instrument modules. |
 | News | Not SSI | Disabled until separate provider exists | Mozyfin is not used for VN runtime news. |
 | FC Trading/order/account APIs | Not used | Not supported | No order placement, account actions, cash transfer, stock transfer, or portfolio trading actions are in scope. |
 
@@ -110,6 +111,22 @@ If data is realtime snapshot or trade tape and SSI is unavailable: show unavaila
 If data is news/fundamentals/corporate actions/macro: use external provider.
 If SSI-owned data is unavailable: show unavailable, do not silently fallback.
 ```
+
+## Phase 4.8F Remaining SSI Data Capability Audit
+
+Phase 4.8F adds `docs/SSI_REMAINING_DATA_AUDIT.md` as the current docs-only backlog for SSI-owned capabilities that are not fully exposed yet.
+
+Highest-value missing SSI-backed candidates:
+
+1. Trading session/status from SSI `F`, if runtime proof confirms stable channel, code mappings, scope, timestamp, and finality semantics.
+2. Dedicated `X-QUOTE` order book ladder, after field keys, level counts, price/volume units, and stale-cache behavior are proven.
+3. Realtime foreign room from SSI `R`, separate from DailyStockPrice daily foreign-flow fields.
+4. Realtime market index pulse from SSI `MI`, separate from stock watchlist rows and optional DailyIndex REST context.
+5. DailyStockPrice unused fields such as average price, total buy/sell trade counts, total buy/sell volume, and foreign current room only after field-key and unit proof.
+6. SecuritiesDetails extended metadata for derivatives, covered warrants, ETF/fund, and bond instruments as separate instrument metadata tracks.
+7. Realtime OHLCV bars from SSI `B` later, after streaming lifecycle and bar interval/correction semantics are proven.
+
+These are SSI-owned candidates. They must not be filled by external providers while SSI can provide or derive them. External providers remain limited to true gaps such as news, corporate actions/dividends/rights/splits, financial statements, ratios/fundamentals, macro, research reports, ownership/shareholder data when not SSI-backed, and approved source-labeled metadata only for SSI-null fields.
 
 ## Phase 4.5C Live Gate Findings
 
