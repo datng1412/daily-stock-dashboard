@@ -4,12 +4,13 @@ This page is the current entry point for VN dashboard setup. The active runtime 
 
 ## Current Runtime
 
-- Daily OHLCV, canonical daily close, and daily chart data come from SSI `DailyOhlc`.
-- Reference prices, price limits, matched/put-through fields, and foreign-flow fields come from SSI `DailyStockPrice`.
+- Daily OHLCV, daily chart candles, and canonical `latest_price` come from SSI `DailyOhlc` close when DailyOhlc rows exist.
+- SSI `DailyStockPrice` is enrichment only: reference prices, ceiling/floor, adjusted close when present, matched/put-through fields, and foreign-flow fields. It must not overwrite `latest_price`.
 - Intraday candles come from SSI `IntradayOhlc`.
-- Realtime snapshots come from the SSI realtime contract.
-- Trade tape comes from the SSI trade-tape contract.
-- News is disabled / `not_implemented` until a separate VN news provider is added.
+- Realtime snapshots come from the optional SSI `X:{symbol}` live contract and stay separate from daily prices.
+- Trade tape comes from the optional SSI `X-TRADE:{symbol}` latest-event stream context and stays separate from daily prices.
+- VN30/index components are SSI-backed where available.
+- News, fundamentals, financial statements, ratios, macro data, research reports, and corporate actions/dividends/rights/splits are disabled / `not_implemented` until a separate qualified provider is added for those gaps.
 - Missing object data is represented as `null`; missing list data is represented as `[]`.
 
 Mozyfin owns no normal VN dashboard runtime path. KBS is legacy-only, disabled by default, and should appear only in explicitly labeled legacy diagnostics or historical notes.
@@ -57,15 +58,33 @@ The active dashboard uses source-specific labels:
 
 The dashboard must not present SSI realtime or trade-tape features as KBS, and must not mix DailyOhlc and DailyStockPrice labels into a single source.
 
+Board-style price formatting and SSI price-color convention are implemented: price-like VND/share values display in thousand-VND units with two decimals, reference/equal prices use yellow, ceiling uses purple, floor uses blue/cyan, above-reference uses green, and below-reference uses red.
+
 ## Current Stock Detail Data
 
 The current strict SSI runtime can already show these stock-detail metrics when provider rows contain values:
 
 - Daily open/high/low/close, daily volume, daily trading value, and chart OHLCV from SSI `DailyOhlc`.
 - Reference, ceiling, floor, adjusted close when present, matched value/volume, put-through value/volume, and foreign buy/sell/net volume/value from SSI `DailyStockPrice`.
+- SSI-derived metrics from current SSI inputs: 52W high/low, 10D average volume, 3M average volume, price-vs-reference percent, and daily range percent. These remain null/status-labeled when SSI inputs are insufficient and do not change `latest_price` ownership.
 - Limited symbol metadata such as exchange, market, security type, issuer, lot size, listed shares, and listed date when SSI `SecuritiesDetails` or `Securities` returns exact ticker fields.
+- VN30/index component lists from SSI IndexComponents where available.
 
-The dashboard does not currently implement 52-week high/low, 10-day or 3-month average volume, EPS, P/E, P/B, beta, ROE, ROA, market cap, dividend ratio, or next dividend date. Some of these are computable future metrics from DailyOhlc, but they are not implemented today. Fundamentals and dividend/corporate-action fields require a future provider contract and must remain unavailable rather than inferred.
+Remaining SSI-backed candidates need runtime proof before exposure:
+
+- `F` trading session/status, including possible `TradingSession` / `TradingStatus` fields after payload proof.
+- `X-QUOTE` order book ladder.
+- `R` realtime foreign room.
+- `MI` realtime market index pulse.
+- `B` realtime bars.
+- Unused SSI `DailyStockPrice` fields after field-key, unit, and date-alignment proof.
+- Extended SSI `SecuritiesDetails` metadata after exact-field proof.
+
+See `docs/SSI_REMAINING_DATA_AUDIT.md` for the remaining SSI-backed data backlog.
+
+SSI-owned data must not be externalized or silently overwritten: prices, daily OHLCV, SSI-backed intraday OHLCV, realtime price snapshots, trade tape, order book when implemented, reference/ceiling/floor, SSI-backed foreign flow/foreign room, SSI-backed index components/realtime index data, and SSI-backed instrument metadata.
+
+`external-provider-required` gaps are limited to domains SSI does not provide or cannot support sufficiently, such as news, corporate actions/dividends/rights/splits, financial statements, EPS/P/E/P/B/ROE/ROA, macro data, research reports, and ownership/shareholder data when not SSI-backed or insufficient. These fields must remain unavailable until a qualified provider contract exists.
 
 ## Data Quality
 
