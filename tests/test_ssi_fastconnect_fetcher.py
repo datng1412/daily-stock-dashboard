@@ -14,6 +14,7 @@ from data_provider.ssi_fastconnect_fetcher import (
     MISSING_CREDENTIALS_REASON,
     REQUEST_FAILED_REASON,
     SSI_REALTIME_ENDPOINT_CANDIDATES,
+    SSI_REALTIME_QUOTE_STREAMING_DATA_TYPES,
     SSI_REALTIME_STREAMING_DATA_TYPES,
     SSI_CHUNK_MAX_DAYS,
     SsiFastConnectFetcher,
@@ -1024,7 +1025,7 @@ def test_realtime_snapshot_returns_streaming_disabled_state_without_http_calls()
     assert payload["discovery_status"] == "streaming_manager_disabled"
     assert payload["rest_status"] == "unsupported"
     assert payload["streaming_status"] == "disabled"
-    assert payload["streaming_data_types"] == list(SSI_REALTIME_STREAMING_DATA_TYPES)
+    assert payload["streaming_data_types"] == list(SSI_REALTIME_QUOTE_STREAMING_DATA_TYPES)
     assert payload["parsed_streaming_rows"] == 0
     assert payload["cache_status"] == "disabled"
     assert payload["manager_state"] == "disabled"

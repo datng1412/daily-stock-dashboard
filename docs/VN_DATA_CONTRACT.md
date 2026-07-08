@@ -256,6 +256,30 @@ The watchlist and company public contracts both use a list for `trade_tape`; com
 
 Each streaming trade row is latest-event tape data, not historical time-and-sales history. Public rows may include `ticker`, `price`, `volume`, `value`, `side`, `timestamp`, `timestamp_display`, `source`, `sequence`, and `raw_type`, plus compatibility aliases such as `time`, `side_if_available`, and `sequence_if_available`. Price, volume, and timestamp are required; rows missing any of those fields are dropped. `X-QUOTE` and `X` snapshot messages do not create trade-tape rows. `GET /api/v1/stocks/vn/realtime/trades` retains its top-level `trades` list plus short `status_message`; sanitized technical detail lives in its `diagnostics` object.
 
+### Order Book / Bid-Ask Ladder
+
+SSI `X-QUOTE:{symbol}` order-book context is an optional live watchlist block. It is produced only by the background streaming lifecycle and a dedicated process-local latest-row cache.
+
+When SSI `X-QUOTE` has a usable cached row:
+
+```text
+order_book_status.status = ok
+order_book_status.reason_code = cache_hit
+order_book = { ... }
+```
+
+The `order_book` object may include `ticker`, `symbol`, `exchange`, `bids`, `asks`, `trading_date`, `time`, `stream_timestamp`, `stream_data_type=X-QUOTE`, `r_type`, `age_seconds`, `is_stale`, `stale_reason`, `cached_at`, and `cache_ttl_seconds`. Each `bids[]` / `asks[]` level may include `level`, `price`, and `volume`. A usable level requires positive `price` and nonnegative `volume`; malformed or empty levels are dropped and never replaced with fake placeholders.
+
+When no usable row exists:
+
+```text
+order_book_status.status = unavailable or disabled
+order_book_status.reason_code = disabled, stream_not_started, stream_not_bootstrapped, stream_cache_empty, stream_cache_stale, xquote_not_subscribed, xquote_disabled, unavailable_unknown, or unknown
+order_book = null
+```
+
+`X-QUOTE` rows must not populate `latest_price`, `realtime_snapshot`, `trade_tape`, `session_status`, DailyOhlc, DailyStockPrice, or indicators. Request handlers must not start streams, add dynamic subscriptions, or use all-market channels. Price/volume units, market-specific level counts, empty-book behavior, and UI product rendering still require live evidence before stronger product claims.
+
 ### Trading Session / Status
 
 SSI `F:{symbol}` session/status context is an optional live watchlist block. It is produced only by the background streaming lifecycle and a dedicated process-local cache.
@@ -299,6 +323,7 @@ Watchlist/company live diagnostics use:
 diagnostics.realtime = { ... }
 diagnostics.trade_tape = { ... }
 diagnostics.session_status = { ... }
+diagnostics.order_book = { ... }
 ```
 
 Status blocks do not carry endpoint dumps or raw provider messages. Diagnostics must not contain tokens, Authorization headers, cookies, account IDs, consumer credentials, full provider bodies, or stack traces. Secret-like diagnostic strings are redacted and URLs in provider summaries are collapsed.

@@ -78,6 +78,7 @@ VN_CACHE_TTL_SECONDS = {
     "quote": 60,
     "intraday_ohlcv": 60,
     "realtime_snapshot": 10,
+    "order_book": 5,
     "trade_tape": 5,
     "session_status": 5,
     "news": 1800,
@@ -95,6 +96,7 @@ SSI_SECURITIES_SOURCE = "SSI Securities"
 SSI_SECURITIES_DETAILS_SOURCE = "SSI SecuritiesDetails"
 SSI_INTRADAY_SOURCE = "SSI IntradayOhlc"
 SSI_REALTIME_SOURCE = "SSI realtime contract"
+SSI_ORDER_BOOK_SOURCE = "SSI X-QUOTE order-book stream"
 SSI_TRADE_TAPE_SOURCE = "SSI trade-tape contract"
 SSI_SESSION_STATUS_SOURCE = "SSI F trading session/status stream"
 SSI_INDEX_LIST_SOURCE = "SSI IndexList"
@@ -107,6 +109,8 @@ VN_INTRADAY_DISABLED_REASON = "SSI IntradayOhlc is disabled."
 VN_INTRADAY_UNAVAILABLE_REASON = "SSI intraday unavailable."
 VN_REALTIME_DISABLED_REASON = "SSI realtime is disabled."
 VN_REALTIME_UNAVAILABLE_REASON = "SSI realtime unavailable."
+VN_ORDER_BOOK_DISABLED_REASON = "SSI order book stream is disabled."
+VN_ORDER_BOOK_UNAVAILABLE_REASON = "SSI order book unavailable."
 VN_TRADE_TAPE_DISABLED_REASON = "SSI trade tape is disabled."
 VN_TRADE_TAPE_UNAVAILABLE_REASON = "SSI trade tape unavailable."
 VN_SESSION_STATUS_DISABLED_REASON = "SSI trading session/status stream is disabled."
@@ -644,6 +648,14 @@ LIVE_DIAGNOSTIC_KEYS = {
     "manager_state",
     "cache_status",
     "cache_ttl_seconds",
+    "order_book_ttl_seconds",
+    "order_book_max_levels",
+    "order_book_rows_observed",
+    "latest_order_book_timestamp",
+    "latest_order_book_age_seconds",
+    "order_book_channel_type",
+    "order_book_channels",
+    "order_book_subscription_status",
     "trade_tape_ttl_seconds",
     "trade_tape_buffer_size",
     "trade_tape_buffer_row_count",
@@ -719,6 +731,7 @@ def _safe_live_diagnostic_value(key: str, value: Any) -> Any:
         "requested_symbols",
         "channels",
         "realtime_channels",
+        "order_book_channels",
         "trade_tape_channels",
         "session_status_channels",
     } and isinstance(value, (list, tuple, set)):
@@ -860,7 +873,19 @@ def _status_message_from_reason(
             "f_disabled": VN_SESSION_STATUS_DISABLED_REASON,
             "unavailable_unknown": VN_SESSION_STATUS_UNAVAILABLE_REASON,
         }
-    else:
+    elif section == "order_book":
+        messages = {
+            "cache_hit": "SSI order book ready.",
+            "disabled": VN_ORDER_BOOK_DISABLED_REASON,
+            "stream_not_started": VN_ORDER_BOOK_UNAVAILABLE_REASON,
+            "stream_not_bootstrapped": VN_ORDER_BOOK_UNAVAILABLE_REASON,
+            "stream_cache_empty": VN_ORDER_BOOK_UNAVAILABLE_REASON,
+            "stream_cache_stale": "SSI order book stale.",
+            "xquote_not_subscribed": VN_ORDER_BOOK_UNAVAILABLE_REASON,
+            "xquote_disabled": VN_ORDER_BOOK_DISABLED_REASON,
+            "unavailable_unknown": VN_ORDER_BOOK_UNAVAILABLE_REASON,
+        }
+    elif section == "trade_tape":
         messages = {
             "historical_trade_tape_supported": "SSI historical trade tape ready.",
             "streaming_trade_tape_supported": "SSI trade tape ready.",
@@ -878,6 +903,8 @@ def _status_message_from_reason(
             "unavailable_unknown": VN_TRADE_TAPE_UNAVAILABLE_REASON,
             "not_implemented": VN_TRADE_TAPE_UNAVAILABLE_REASON,
         }
+    else:
+        messages = {}
     if reason_code in messages:
         return messages[reason_code]
     if status == "disabled":
@@ -970,6 +997,34 @@ def _classify_trade_tape_reason(
         return "latest_trade_stream_only"
     if normalized_status == "not_implemented":
         return "not_implemented"
+    if normalized_status == "unavailable":
+        return "unavailable_unknown"
+    return "unknown"
+
+
+def _classify_order_book_reason(
+    *,
+    status: str,
+    reason: Optional[str],
+) -> str:
+    normalized_status = _lower_text(status)
+    reason_text = _lower_text(reason)
+    if normalized_status == "ok":
+        return "cache_hit"
+    if normalized_status == "disabled":
+        return "disabled"
+    if "not bootstrapped" in reason_text:
+        return "stream_not_bootstrapped"
+    if "cache stale" in reason_text:
+        return "stream_cache_stale"
+    if "cache empty" in reason_text:
+        return "stream_cache_empty"
+    if "x-quote stream channel not subscribed" in reason_text or "xquote_not_subscribed" in reason_text:
+        return "xquote_not_subscribed"
+    if "x-quote stream channel disabled" in reason_text or "xquote_disabled" in reason_text:
+        return "xquote_disabled"
+    if "not started" in reason_text or "bootstrap symbols empty" in reason_text:
+        return "stream_not_started"
     if normalized_status == "unavailable":
         return "unavailable_unknown"
     return "unknown"
@@ -1101,9 +1156,11 @@ def build_vietnam_data_quality_summary(row: Dict[str, Any]) -> Dict[str, Any]:
     daily_stock_date = _valid_date_string(daily_stock_price.get("date"))
     intraday_status = _status_from_block(row.get("intraday_status"))
     realtime_status = _status_from_block(row.get("realtime_status"))
+    order_book_status = _status_from_block(row.get("order_book_status"))
     trade_tape_status = _status_from_block(row.get("trade_tape_status"))
     intraday_block = row.get("intraday_status") if isinstance(row.get("intraday_status"), dict) else {}
     realtime_block = row.get("realtime_status") if isinstance(row.get("realtime_status"), dict) else {}
+    order_book_block = row.get("order_book_status") if isinstance(row.get("order_book_status"), dict) else {}
     trade_tape_block = row.get("trade_tape_status") if isinstance(row.get("trade_tape_status"), dict) else {}
     news_status = _status_from_block(row.get("news_status"), default="disabled")
     final_close_status = str(row.get("final_close_status") or "unknown")
@@ -1184,6 +1241,14 @@ def build_vietnam_data_quality_summary(row: Dict[str, Any]) -> Dict[str, Any]:
         or _classify_trade_tape_reason(
             status=trade_tape_status,
             reason=trade_tape_block.get("message"),
+        )
+    )
+    order_book_reason_code = str(
+        order_book_block.get("reason_code")
+        or order_book_block.get("classification")
+        or _classify_order_book_reason(
+            status=order_book_status,
+            reason=order_book_block.get("message"),
         )
     )
 
@@ -1416,6 +1481,23 @@ def build_vietnam_data_quality_summary(row: Dict[str, Any]) -> Dict[str, Any]:
                 },
             }
         )
+    if order_book_status in {"unavailable", "disabled"}:
+        issues.append(
+            {
+                "code": "order_book_disabled" if order_book_status == "disabled" else f"order_book_{order_book_reason_code}",
+                "severity": "info",
+                "message": _status_message_from_reason(
+                    section="order_book",
+                    status=order_book_status,
+                    reason_code=order_book_reason_code,
+                    fallback=f"SSI order book is {order_book_status}.",
+                ),
+                "fields": {
+                    "status": order_book_status,
+                    "reason_code": order_book_reason_code,
+                },
+            }
+        )
     if profile_status == "partial":
         issues.append(
             {
@@ -1439,6 +1521,7 @@ def build_vietnam_data_quality_summary(row: Dict[str, Any]) -> Dict[str, Any]:
         "daily_stock_price": daily_stock_price_check,
         "intraday": intraday_check,
         "realtime": realtime_status,
+        "order_book": order_book_status,
         "trade_tape": trade_tape_status,
         "profile": profile_status,
         "news": news_status,
@@ -1465,6 +1548,7 @@ def build_vietnam_data_quality_summary(row: Dict[str, Any]) -> Dict[str, Any]:
             "adjusted_price_status": adjusted_price_status,
             "intraday": intraday_check,
             "realtime": realtime_status,
+            "order_book": order_book_status,
             "trade_tape": trade_tape_status,
             "profile": profile_status,
             "news": news_status,
@@ -3178,6 +3262,7 @@ class VietnamMarketService:
             "quote_cache": "disabled",
             "intraday_cache": "disabled",
             "realtime_cache": "disabled",
+            "order_book_cache": "disabled",
             "trade_tape_cache": "disabled",
             "news_cache": "disabled",
         }
@@ -3188,6 +3273,7 @@ class VietnamMarketService:
             "quote": None,
             "intraday_ohlcv": None,
             "realtime_snapshot": None,
+            "order_book": None,
             "trade_tape": None,
             "news": None,
         }
@@ -3225,6 +3311,21 @@ class VietnamMarketService:
                 "status": "disabled",
                 "source": None,
                 "message": VN_TRADE_TAPE_DISABLED_REASON,
+                "reason_code": "disabled",
+                "classification": "disabled",
+                "ticker": symbol,
+            },
+        }
+
+    @staticmethod
+    def _disabled_order_book_payload(symbol: str) -> Dict[str, Any]:
+        return {
+            "order_book_source": None,
+            "order_book": None,
+            "order_book_status": {
+                "status": "disabled",
+                "source": None,
+                "message": VN_ORDER_BOOK_DISABLED_REASON,
                 "reason_code": "disabled",
                 "classification": "disabled",
                 "ticker": symbol,
@@ -3327,6 +3428,42 @@ class VietnamMarketService:
         }
 
     @staticmethod
+    def _ssi_order_book_unavailable_payload(
+        symbol: str,
+        *,
+        status: str = "unavailable",
+        reason: Optional[str] = None,
+        diagnostics: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        reason_text = reason or VN_ORDER_BOOK_UNAVAILABLE_REASON
+        public_status = _public_live_status(status)
+        reason_code = _classify_order_book_reason(status=public_status, reason=reason_text)
+        status_payload = {
+            "status": public_status,
+            "source": SSI_ORDER_BOOK_SOURCE,
+            "message": _status_message_from_reason(
+                section="order_book",
+                status=public_status,
+                reason_code=reason_code,
+                fallback=VN_ORDER_BOOK_UNAVAILABLE_REASON,
+            ),
+            "reason_code": reason_code,
+            "classification": reason_code,
+            "ticker": symbol,
+        }
+        safe_diagnostics = _live_failure_diagnostics(
+            diagnostics,
+            reason=reason_text if reason_text != VN_ORDER_BOOK_UNAVAILABLE_REASON else None,
+        )
+        if safe_diagnostics:
+            status_payload["diagnostics"] = safe_diagnostics
+        return {
+            "order_book_source": SSI_ORDER_BOOK_SOURCE,
+            "order_book": None,
+            "order_book_status": status_payload,
+        }
+
+    @staticmethod
     def _ssi_session_status_unavailable_payload(
         symbol: str,
         *,
@@ -3417,6 +3554,53 @@ class VietnamMarketService:
             "bid_vol_1": _safe_float(first_bid.get("volume")),
             "ask_price_1": _safe_float(first_ask.get("price")),
             "ask_vol_1": _safe_float(first_ask.get("volume")),
+        }
+
+    @staticmethod
+    def _order_book_from_ssi(row: Dict[str, Any], symbol: str) -> Optional[Dict[str, Any]]:
+        if not isinstance(row, dict):
+            return None
+
+        def _levels(values: Any) -> List[Dict[str, Any]]:
+            output: List[Dict[str, Any]] = []
+            if not isinstance(values, list):
+                return output
+            for item in values:
+                if not isinstance(item, dict):
+                    continue
+                level = _safe_int(item.get("level"))
+                price = _safe_float(item.get("price"))
+                volume = _safe_float(item.get("volume"))
+                if level is None or level < 1 or price is None or price <= 0 or volume is None or volume < 0:
+                    continue
+                output.append({"level": level, "price": price, "volume": volume})
+            return sorted(output, key=lambda level: level["level"])
+
+        ticker = str(row.get("ticker") or row.get("symbol") or symbol or "").strip().upper()
+        if ticker != symbol:
+            return None
+        bids = _levels(row.get("bids"))
+        asks = _levels(row.get("asks"))
+        if not bids and not asks:
+            return None
+        return {
+            "ticker": ticker,
+            "symbol": ticker,
+            "source": SSI_ORDER_BOOK_SOURCE,
+            "exchange": row.get("exchange"),
+            "bids": bids,
+            "asks": asks,
+            "trading_date": _valid_date_string(row.get("trading_date")),
+            "time": row.get("time"),
+            "received_at": row.get("received_at") or row.get("cached_at"),
+            "stream_timestamp": row.get("stream_timestamp"),
+            "stream_data_type": "X-QUOTE",
+            "r_type": row.get("r_type") or "X-QUOTE",
+            "age_seconds": _safe_int(row.get("age_seconds")),
+            "is_stale": row.get("is_stale") if isinstance(row.get("is_stale"), bool) else None,
+            "stale_reason": row.get("stale_reason"),
+            "cached_at": row.get("cached_at"),
+            "cache_ttl_seconds": _safe_int(row.get("cache_ttl_seconds")),
         }
 
     @staticmethod
@@ -3609,6 +3793,70 @@ class VietnamMarketService:
         if status == "disabled":
             return self._disabled_trade_tape_payload(symbol)
         return self._ssi_trade_tape_unavailable_payload(
+            symbol,
+            status=status or "unavailable",
+            reason=(payload.get("reason") or payload.get("message")) if isinstance(payload, dict) else None,
+            diagnostics=payload if isinstance(payload, dict) else None,
+        )
+
+    def _load_ssi_order_book_payload(self, symbol: str) -> Dict[str, Any]:
+        if not self.config.ssi_streaming_realtime_enabled:
+            return self._ssi_order_book_unavailable_payload(
+                symbol,
+                status="disabled",
+                reason=VN_ORDER_BOOK_DISABLED_REASON,
+                diagnostics={
+                    "streaming_status": "disabled",
+                    "manager_state": "disabled",
+                    "cache_status": "disabled",
+                    "live_adapter_status": "not_enabled",
+                },
+            )
+
+        fetcher = self._get_ssi_fetcher()
+        get_order_book = getattr(fetcher, "get_order_book", None)
+        if not callable(get_order_book):
+            return self._ssi_order_book_unavailable_payload(
+                symbol,
+                reason="SSI X-QUOTE order-book method unavailable.",
+                diagnostics={
+                    "streaming_status": "method_unavailable",
+                    "cache_status": "unavailable",
+                    "failure_class": "method_unavailable",
+                },
+            )
+
+        payload = get_order_book(symbol)
+        status = str(payload.get("status") or "").lower() if isinstance(payload, dict) else ""
+        if status == "ok":
+            order_book = self._order_book_from_ssi(payload.get("order_book") or {}, symbol)
+            if order_book:
+                safe_diagnostics = _live_failure_diagnostics(payload)
+                order_book_status = {
+                    "status": "ok",
+                    "source": SSI_ORDER_BOOK_SOURCE,
+                    "message": None,
+                    "reason_code": "cache_hit",
+                    "classification": "cache_hit",
+                    "ticker": symbol,
+                    "bid_levels": len(order_book.get("bids") or []),
+                    "ask_levels": len(order_book.get("asks") or []),
+                    "diagnostics": safe_diagnostics,
+                }
+                if not safe_diagnostics:
+                    order_book_status.pop("diagnostics", None)
+                return {
+                    "order_book_source": SSI_ORDER_BOOK_SOURCE,
+                    "order_book": order_book,
+                    "order_book_status": order_book_status,
+                }
+            return self._ssi_order_book_unavailable_payload(
+                symbol,
+                reason="SSI X-QUOTE stream returned no usable order-book levels.",
+            )
+        if status == "disabled":
+            return self._disabled_order_book_payload(symbol)
+        return self._ssi_order_book_unavailable_payload(
             symbol,
             status=status or "unavailable",
             reason=(payload.get("reason") or payload.get("message")) if isinstance(payload, dict) else None,
@@ -5635,10 +5883,12 @@ class VietnamMarketService:
                 "news_status": self._news_status_block(),
                 **self._disabled_intraday_payload(intraday_timeframe),
                 **self._disabled_realtime_payload(symbol),
+                **self._disabled_order_book_payload(symbol),
                 **self._disabled_trade_tape_payload(symbol),
                 **self._disabled_session_status_payload(symbol),
                 "diagnostics": {
                     "realtime": {},
+                    "order_book": {},
                     "trade_tape": {},
                     "session_status": {},
                 },
@@ -5837,6 +6087,31 @@ class VietnamMarketService:
         cache_next_refresh_at["realtime_snapshot"] = _iso(realtime_result["entry"].expires_at)
         if realtime_result["error"]:
             cache_errors["realtime_snapshot"] = realtime_result["error"]
+
+        order_book_payload = self._disabled_order_book_payload(symbol)
+        order_book_key = _cache_key(
+            "order_book",
+            symbol,
+            provider=VN_PROVIDER_SSI,
+            streaming_enabled=self.config.ssi_streaming_realtime_enabled,
+        )
+        order_book_result = _read_cache(
+            order_book_key,
+            "order_book",
+            lambda: self._load_ssi_order_book_payload(symbol),
+            force_refresh=force_refresh,
+        )
+        order_book_payload = dict(order_book_result["value"])
+        order_book_status_payload = dict(order_book_payload.get("order_book_status") or {})
+        order_book_diagnostics = _live_failure_diagnostics(
+            order_book_status_payload.pop("diagnostics", {})
+        )
+        order_book_payload["order_book_status"] = order_book_status_payload
+        cache_status["order_book_cache"] = order_book_result["status"]
+        cache_last_fetched_at["order_book"] = _iso(order_book_result["entry"].fetched_at)
+        cache_next_refresh_at["order_book"] = _iso(order_book_result["entry"].expires_at)
+        if order_book_result["error"]:
+            cache_errors["order_book"] = order_book_result["error"]
 
         trade_tape_payload = self._disabled_trade_tape_payload(symbol)
         trade_tape_key = _cache_key(
@@ -6052,10 +6327,12 @@ class VietnamMarketService:
             "news_status": self._news_status_block(),
             **intraday_payload,
             **realtime_payload,
+            **order_book_payload,
             **trade_tape_payload,
             **session_status_payload,
             "diagnostics": {
                 "realtime": realtime_diagnostics,
+                "order_book": order_book_diagnostics,
                 "trade_tape": trade_tape_diagnostics,
                 "session_status": session_status_diagnostics,
             },

@@ -48,7 +48,7 @@ These capabilities are SSI-owned candidates but not fully exposed as product fea
 | DailyIndex | REST `DailyIndex` | Optional VN30 index context where rows are usable. | Broader VNINDEX/HNX/UPCOM index values, breadth, liquidity, trading session. | Medium after identifier proof. | Exact identifiers, positive index values, exchange, breadth field semantics. | Optional index context; not a stock price source. |
 | Realtime `X:{symbol}` | Streaming channel `X:{symbol}` | Optional snapshot cache through background manager. | Stronger public realtime board metrics only when current cache rows exist. | Maintain; no new expansion until stability proof. | Live entitlement, manager lifecycle, stale/idle classification, timestamp semantics. | Request handlers must only read cache. |
 | Trade tape `X-TRADE:{symbol}` | Streaming channel `X-TRADE:{symbol}` | Bounded latest-event rows, B/S from explicit side codes, change versus SSI reference. | True historical time-and-sales remains unproven. | Maintain; defer history claims. | Continued live row evidence, side-code coverage, sequence semantics. | Do not infer trades from daily/realtime rows. |
-| `X-QUOTE` order book | Streaming channel `X-QUOTE:{symbol}` | Parser can preserve quote-only context/bid-ask levels in realtime snapshot; no dedicated order-book product yet. | Dedicated bid/ask ladder, best bid/ask, level count by market. | High after `F`; likely Phase 4.8H. | Confirm field keys, price/volume units, 3-level HOSE and 10-level HNX/UPCOM/DER claims before UI/API exposure. | Separate from latest price and trade tape. |
+| `X-QUOTE` order book | Streaming channel `X-QUOTE:{symbol}` | Phase 4.8H adds background-lifecycle subscription, parser routing, a dedicated latest order-book cache, optional watchlist fields, and diagnostics. | Live payload proof, UI bid/ask ladder, level-count/unit semantics, and empty-book behavior remain deferred. | Runtime proof path implemented; live smoke/UI proof next. | Confirm field keys, price/volume units, 3-level HOSE and 10-level HNX/UPCOM/DER claims before UI exposure. | Separate from latest price, realtime snapshot, trade tape, and session/status. |
 | `F` trading session/status | SSI streaming channel `F:{symbol}`. | Phase 4.8G adds a background-lifecycle subscription, parser, dedicated cache, watchlist fields, and diagnostics for raw `TradingSession` / `TradingStatus` context. | Final UI/product component, business-code label mapping, halt/suspend/closed semantics, and final close/finality support remain deferred until live payload evidence proves meanings. | Runtime proof completed; keep as optional context while code mapping remains unproven. | Live entitlement/tick availability, complete code mapping, timestamp behavior, exchange/ticker scope, and finality semantics. | Do not guess status-code meanings; do not use this to replace DailyOhlc, realtime snapshot, or trade tape. |
 | `R` foreign room | SSI realtime foreign-room/foreign-flow stream, exact channel/fields not implemented. | Not wired; realtime schema has placeholder `foreign_room` but current mapping does not populate it. | Total room, current room, realtime foreign buy/sell volume/value. | Medium-high after order book. | Exact fields such as current/total room, units, exchange-specific semantics, approximate value caveats. | Separate from DailyStockPrice end-of-day/daily foreign flow. |
 | `MI` realtime market index | SSI realtime market index stream, exact channel/fields not implemented. | Not wired. | VNINDEX/VN30/HNX/UPCOM realtime index pulse, change/change %, value/volume, advances/unchanged/declines. | Medium. | Channel identifiers, index code mapping, field units, breadth semantics, timestamp/freshness. | Separate from stock watchlist rows. |
@@ -87,20 +87,28 @@ Do not implement by guessing status codes from names or UI color conventions.
 
 ### B. `X-QUOTE` order book
 
+Phase 4.8H backend/API status:
+
+* StockClock now subscribes to symbol-scoped `X-QUOTE:{symbol}` channels through the same background SSI streaming lifecycle used for `X:{symbol}`, `X-TRADE:{symbol}`, and `F:{symbol}`.
+* The backend parser stores only safe order-book fields in a dedicated latest cache: ticker/symbol, exchange, bid/ask levels, trading date, time, stream timestamp/type, cache age, and source.
+* Watchlist rows may expose `order_book_source`, `order_book`, and `order_book_status`, with technical details under `diagnostics.order_book`.
+* Request handlers only read the process-local cache. They do not start streams, add dynamic subscriptions, use all-market channels, call trading/order APIs, or synthesize unavailable bid/ask levels.
+* The proof intentionally does not claim market-specific level counts, price/volume units, empty-book behavior, or UI readiness until live payload evidence proves those meanings.
+
 Potential value:
 
 * Bid/ask ladder and best bid/ask for selected ticker.
 * Better separation between quote liquidity and matched trade data.
 * Possible 3 levels for HOSE and 10 levels for HNX/UPCOM/DER only if current SSI payloads prove those limits.
 
-Runtime proof required:
+Live proof still required:
 
 * Bid/ask field keys and level counts by market.
 * Price and volume units.
 * Timestamp and stale-cache rules.
 * Empty-book and auction/halt behavior.
 
-Order book rows must be separate from `latest_price`, DailyStockPrice, and trade tape.
+Order book rows must be separate from `latest_price`, DailyStockPrice, realtime snapshot, trade tape, and session/status.
 
 ### C. `R` foreign room
 
@@ -238,7 +246,7 @@ External providers must use separate source labels and must not silently fill or
 
 1. Phase 4.8F - SSI Remaining Data Capability Audit: docs-only; this document.
 2. Phase 4.8G - Trading Session/Status from SSI `F:{symbol}` runtime proof is now implemented as optional cache-backed context; code mappings and final UI remain deferred.
-3. Phase 4.8H - `X-QUOTE` Order Book Ladder.
+3. Phase 4.8H - `X-QUOTE` Order Book Ladder is now implemented as optional cache-backed context; live payload proof and UI remain deferred.
 4. Phase 4.8I - Realtime Foreign Room from SSI `R`.
 5. Phase 4.8J - Realtime Market Index Pulse from SSI `MI`.
 6. Phase 4.8K - DailyStockPrice Unused Field Audit/Exposure.

@@ -1243,7 +1243,7 @@ Result:
 Recommended next SSI-backed runtime-proof order:
 
 1. Phase 4.8G - Trading Session/Status from SSI `F:{symbol}` runtime proof. Implemented as optional cache-backed watchlist context; code mapping and UI productization remain deferred.
-2. Phase 4.8H - `X-QUOTE` Order Book Ladder.
+2. Phase 4.8H - `X-QUOTE` Order Book Ladder. Implemented as optional cache-backed watchlist context; live payload proof and UI productization remain deferred.
 3. Phase 4.8I - Realtime Foreign Room from SSI `R`.
 4. Phase 4.8J - Realtime Market Index Pulse from SSI `MI`.
 5. Phase 4.8K - DailyStockPrice Unused Field Audit/Exposure.
@@ -1266,6 +1266,24 @@ Boundaries:
 
 * Request handlers remain cache readers only and must not start streams, subscribe dynamically, use all-market channels, or call trading/order/account APIs.
 * `F` session/status context must not replace SSI DailyOhlc, DailyStockPrice, realtime snapshot, trade tape, or `latest_price`.
+
+### Phase 4.8H - SSI X-QUOTE Order Book Ladder
+
+Status: implemented on 2026-07-08 as a backend/API runtime-proof path.
+
+Result:
+
+* Startup-owned SSI streaming now includes symbol-scoped `X-QUOTE:{symbol}` subscriptions alongside `X:{symbol}`, `X-TRADE:{symbol}`, and `F:{symbol}` for configured bootstrap symbols.
+* Parsed `X-QUOTE` rows are stored in a dedicated latest order-book cache, not in the realtime quote cache, trade-tape buffer, or session/status cache.
+* Watchlist rows can expose `order_book_source`, `order_book`, and `order_book_status`; technical state lives under `diagnostics.order_book`.
+* Safe fields only are surfaced: ticker/symbol, exchange, bid/ask levels, trading date, time, stream timestamp/type, cache age, and source. Bid/ask levels require positive price and nonnegative volume; malformed levels are dropped rather than filled.
+* No UI bid/ask ladder is productized yet. Level-count claims, price/volume unit labels, empty-book behavior, and market-specific semantics remain deferred until live payload evidence proves exact meanings.
+
+Boundaries:
+
+* Request handlers remain cache readers only and must not start streams, subscribe dynamically, use all-market channels, or call trading/order/account APIs.
+* `X-QUOTE` order-book context must not replace SSI DailyOhlc, DailyStockPrice, realtime snapshot, trade tape, session/status, intraday, indicators, or `latest_price`.
+* `latest_price_source` remains `SSI DailyOhlc`.
 
 ### Phase 5.0A - External Provider Contract Design
 

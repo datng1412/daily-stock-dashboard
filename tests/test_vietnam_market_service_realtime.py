@@ -20,11 +20,13 @@ class ExplodingManager:
 
 
 class FakeSsiFetcher:
-    def __init__(self, realtime_payload=None, trade_payload=None, session_status_payload=None):
+    def __init__(self, realtime_payload=None, order_book_payload=None, trade_payload=None, session_status_payload=None):
         self.realtime_payload = realtime_payload
+        self.order_book_payload = order_book_payload
         self.trade_payload = trade_payload
         self.session_status_payload = session_status_payload
         self.realtime_calls = 0
+        self.order_book_calls = 0
         self.trade_calls = 0
         self.session_status_calls = 0
 
@@ -124,6 +126,26 @@ class FakeSsiFetcher:
                     "source": "SSI",
                 }
             ],
+        }
+
+    def get_order_book(self, symbol: str):
+        self.order_book_calls += 1
+        if self.order_book_payload is not None:
+            return self.order_book_payload
+        return {
+            "status": "unavailable",
+            "source": "SSI",
+            "symbol": symbol,
+            "reason": "SSI X-QUOTE stream cache empty.",
+            "order_book": None,
+            "streaming_status": "subscribed_no_event",
+            "cache_status": "empty",
+            "diagnostics": {
+                "streaming_status": "subscribed_no_event",
+                "cache_status": "empty",
+                "manager_state": "running",
+                "order_book_channels": [f"X-QUOTE:{symbol}"],
+            },
         }
 
     def get_session_status(self, symbol: str):
@@ -302,6 +324,93 @@ def test_ssi_trade_tape_success_returns_normalized_trades():
     assert item["trade_tape"][0]["side_if_available"] == "BU"
     assert item["trade_tape"][0]["change"] == 1.5
     assert item["trade_tape"][0]["change_pct"] == 1.16
+
+
+def test_ssi_order_book_success_is_separate_from_daily_price_and_live_contexts():
+    fetcher = FakeSsiFetcher(
+        order_book_payload={
+            "status": "ok",
+            "source": "SSI",
+            "symbol": "FPT",
+            "order_book": {
+                "ticker": "FPT",
+                "symbol": "FPT",
+                "exchange": "HOSE",
+                "bids": [
+                    {"level": 1, "price": 130.4, "volume": 1000},
+                    {"level": 2, "price": 130.3, "volume": 2500},
+                ],
+                "asks": [
+                    {"level": 1, "price": 130.6, "volume": 2000},
+                ],
+                "trading_date": "2026-06-30",
+                "time": "10:00:00",
+                "stream_timestamp": "2026-06-30T10:00:00",
+                "stream_data_type": "X-QUOTE",
+                "r_type": "X-QUOTE",
+                "age_seconds": 0,
+                "cached_at": "2026-06-30T03:00:00+00:00",
+                "cache_ttl_seconds": 5,
+            },
+            "streaming_status": "cache_hit",
+            "cache_status": "hit",
+            "diagnostics": {
+                "streaming_status": "cache_hit",
+                "cache_status": "hit",
+                "manager_state": "running",
+                "order_book_channels": ["X-QUOTE:FPT"],
+                "order_book_rows_observed": 1,
+            },
+        }
+    )
+
+    item = _service(fetcher).build_watchlist(["FPT"], force_refresh=True)["watchlist"][0]
+
+    assert item["status"] == "ok"
+    assert item["latest_price_source"] == "SSI DailyOhlc"
+    assert item["realtime_status"]["status"] == "ok"
+    assert item["trade_tape_status"]["status"] == "ok"
+    assert item["order_book_source"] == "SSI X-QUOTE order-book stream"
+    assert item["order_book_status"]["status"] == "ok"
+    assert item["order_book_status"]["reason_code"] == "cache_hit"
+    assert item["order_book"]["stream_data_type"] == "X-QUOTE"
+    assert item["order_book"]["bids"][0] == {"level": 1, "price": 130.4, "volume": 1000.0}
+    assert item["order_book"]["asks"][0] == {"level": 1, "price": 130.6, "volume": 2000.0}
+    assert item["diagnostics"]["order_book"]["streaming_status"] == "cache_hit"
+    assert item["diagnostics"]["order_book"]["order_book_channels"] == ["X-QUOTE:FPT"]
+    assert fetcher.order_book_calls == 1
+
+
+def test_ssi_order_book_cache_empty_is_optional_unavailable():
+    fetcher = FakeSsiFetcher(
+        order_book_payload={
+            "status": "unavailable",
+            "source": "SSI",
+            "symbol": "FPT",
+            "reason": "SSI X-QUOTE stream cache empty.",
+            "order_book": None,
+            "streaming_status": "subscribed_no_event",
+            "cache_status": "empty",
+            "diagnostics": {
+                "streaming_status": "subscribed_no_event",
+                "cache_status": "empty",
+                "manager_state": "running",
+                "order_book_channels": ["X-QUOTE:FPT"],
+            },
+        }
+    )
+
+    item = _service(fetcher).build_watchlist(["FPT"], force_refresh=True)["watchlist"][0]
+
+    assert item["status"] == "ok"
+    assert item["latest_price_source"] == "SSI DailyOhlc"
+    assert item["order_book_source"] == "SSI X-QUOTE order-book stream"
+    assert item["order_book"] is None
+    assert item["order_book_status"]["status"] == "unavailable"
+    assert item["order_book_status"]["reason_code"] == "stream_cache_empty"
+    assert item["order_book_status"]["message"] == "SSI order book unavailable."
+    assert item["diagnostics"]["order_book"]["streaming_status"] == "subscribed_no_event"
+    assert any(issue["code"] == "order_book_stream_cache_empty" for issue in item["data_quality_summary"]["issues"])
 
 
 def test_ssi_session_status_success_is_separate_from_daily_price():

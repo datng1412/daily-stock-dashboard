@@ -22,6 +22,7 @@ import requests
 
 from src.config import get_config, parse_env_bool, parse_env_int
 from data_provider.ssi_streaming_realtime import (
+    DEFAULT_ORDER_BOOK_TTL_SECONDS,
     DEFAULT_STREAMING_REALTIME_CACHE_TTL_SECONDS,
     DEFAULT_STREAMING_REALTIME_CHANNEL_TEMPLATE,
     DEFAULT_STREAMING_REALTIME_IDLE_TIMEOUT_SECONDS,
@@ -31,6 +32,7 @@ from data_provider.ssi_streaming_realtime import (
     DEFAULT_TRADE_TAPE_BUFFER_SIZE,
     DEFAULT_TRADE_TAPE_TTL_SECONDS,
     OfficialSsiRealtimeStreamClient,
+    OrderBookCache,
     RealtimeSnapshotCache,
     SessionStatusCache,
     SsiRealtimeStreamClient,
@@ -56,6 +58,7 @@ REALTIME_STREAMING_NOT_IMPLEMENTED_REASON = "SSI realtime requires FastConnect s
 TRADE_TAPE_DISABLED_REASON = "SSI FastConnect trade tape disabled"
 SSI_REALTIME_ENDPOINT_CANDIDATES = ("RealtimeQuote", "RealtimePrice", "RealtimeSnapshot", "SecuritiesRealtime")
 SSI_REALTIME_STREAMING_DATA_TYPES = ("X", "X-QUOTE", "X-TRADE", "F")
+SSI_REALTIME_QUOTE_STREAMING_DATA_TYPES = ("X",)
 SSI_CHUNK_MAX_DAYS = 29
 SSI_PAGE_SIZE = 1000
 SSI_MAX_PAGES = 20
@@ -852,6 +855,7 @@ class SsiFastConnectFetcher:
         self.streaming_realtime_manager = streaming_realtime_manager or SsiStreamingRealtimeManager(
             enabled=self.streaming_realtime_enabled,
             cache=RealtimeSnapshotCache(self.streaming_realtime_cache_ttl_seconds),
+            order_book_cache=OrderBookCache(DEFAULT_ORDER_BOOK_TTL_SECONDS),
             trade_tape_cache=TradeTapeEventCache(
                 self.trade_tape_buffer_size,
                 self.trade_tape_ttl_seconds,
@@ -1446,7 +1450,7 @@ class SsiFastConnectFetcher:
                 "discovery_status": "streaming_manager_disabled",
                 "rest_status": "unsupported",
                 "streaming_status": "disabled",
-                "streaming_data_types": list(SSI_REALTIME_STREAMING_DATA_TYPES),
+                "streaming_data_types": list(SSI_REALTIME_QUOTE_STREAMING_DATA_TYPES),
                 "parsed_streaming_rows": 0,
                 "cache_status": "disabled",
                 "manager_state": "disabled",
@@ -1477,7 +1481,7 @@ class SsiFastConnectFetcher:
                 "discovery_status": "streaming_configuration_incomplete",
                 "rest_status": "unsupported",
                 "streaming_status": "configuration_incomplete",
-                "streaming_data_types": list(SSI_REALTIME_STREAMING_DATA_TYPES),
+                "streaming_data_types": list(SSI_REALTIME_QUOTE_STREAMING_DATA_TYPES),
                 "parsed_streaming_rows": 0,
                 "cache_status": "unavailable",
                 "manager_state": self.streaming_realtime_manager.state,
@@ -1509,7 +1513,7 @@ class SsiFastConnectFetcher:
                 "discovery_status": "streaming_package_unavailable",
                 "rest_status": "unsupported",
                 "streaming_status": "package_unavailable",
-                "streaming_data_types": list(SSI_REALTIME_STREAMING_DATA_TYPES),
+                "streaming_data_types": list(SSI_REALTIME_QUOTE_STREAMING_DATA_TYPES),
                 "parsed_streaming_rows": 0,
                 "cache_status": "unavailable",
                 "manager_state": self.streaming_realtime_manager.state,
@@ -1531,7 +1535,108 @@ class SsiFastConnectFetcher:
         result.setdefault("rest_candidate_endpoints", list(SSI_REALTIME_ENDPOINT_CANDIDATES))
         result.setdefault("endpoint_attempts", [])
         result.setdefault("discovery_status", result.get("streaming_status") or "streaming_manager")
-        result.setdefault("streaming_data_types", list(SSI_REALTIME_STREAMING_DATA_TYPES))
+        result.setdefault("streaming_data_types", list(SSI_REALTIME_QUOTE_STREAMING_DATA_TYPES))
+        result.setdefault("runtime_status", diagnostics.get("runtime_status"))
+        return result
+
+    def get_order_book(self, symbol: str) -> Dict[str, Any]:
+        """Return SSI X-QUOTE order-book rows from the streaming cache only.
+
+        Request-time calls do not open streams, add subscriptions, or infer
+        missing bid/ask levels.
+        """
+        normalized_symbol = str(symbol or "").strip().upper()
+        base = {
+            "source": SSI_SOURCE,
+            "symbol": normalized_symbol,
+            "order_book": None,
+            "count": 0,
+            "attempted_endpoints": [],
+            "candidate_endpoints": [],
+            "rest_status": "unsupported",
+            "streaming_data_types": ["X-QUOTE"],
+        }
+        if not normalized_symbol:
+            return {
+                **base,
+                "status": "unavailable",
+                "reason": "No symbol requested",
+                "streaming_status": "missing_symbol",
+                "cache_status": "unavailable",
+                "diagnostics": {
+                    "streaming_status": "missing_symbol",
+                    "cache_status": "unavailable",
+                },
+            }
+
+        if not self.streaming_realtime_enabled:
+            return {
+                **base,
+                "status": "unavailable",
+                "reason": SSI_STREAMING_REALTIME_DISABLED_REASON,
+                "streaming_status": "disabled",
+                "cache_status": "disabled",
+                "manager_state": "disabled",
+                "diagnostics": {
+                    "manager_state": "disabled",
+                    "streaming_status": "disabled",
+                    "cache_status": "disabled",
+                    "live_adapter_status": "not_enabled",
+                    "order_book_rows_observed": 0,
+                },
+            }
+
+        if (
+            not self._streaming_realtime_manager_supplied
+            and (not self.consumer_id or not self.consumer_secret or not self.streaming_realtime_stream_url)
+        ):
+            return {
+                **base,
+                "status": "unavailable",
+                "reason": SSI_STREAMING_REALTIME_CONFIG_INCOMPLETE_REASON,
+                "streaming_status": "configuration_incomplete",
+                "cache_status": "unavailable",
+                "manager_state": self.streaming_realtime_manager.state,
+                "diagnostics": {
+                    "manager_state": self.streaming_realtime_manager.state,
+                    "streaming_status": "configuration_incomplete",
+                    "cache_status": "unavailable",
+                    "live_adapter_status": "configuration_incomplete",
+                    "order_book_rows_observed": 0,
+                },
+            }
+
+        if (
+            not self._streaming_realtime_client_factory_supplied
+            and not self._streaming_realtime_manager_supplied
+            and importlib.util.find_spec("ssi_fc_data") is None
+        ):
+            return {
+                **base,
+                "status": "unavailable",
+                "reason": SSI_STREAMING_REALTIME_PACKAGE_UNAVAILABLE_REASON,
+                "streaming_status": "package_unavailable",
+                "cache_status": "unavailable",
+                "manager_state": self.streaming_realtime_manager.state,
+                "diagnostics": {
+                    "manager_state": self.streaming_realtime_manager.state,
+                    "streaming_status": "package_unavailable",
+                    "cache_status": "unavailable",
+                    "live_adapter_status": "package_unavailable",
+                    "order_book_rows_observed": 0,
+                },
+            }
+
+        result = dict(self.streaming_realtime_manager.order_book(normalized_symbol))
+        diagnostics = result.get("diagnostics") if isinstance(result.get("diagnostics"), dict) else {}
+        result.setdefault("source", SSI_SOURCE)
+        result.setdefault("symbol", normalized_symbol)
+        result.setdefault("order_book", None)
+        result.setdefault("count", 1 if result.get("order_book") else 0)
+        result.setdefault("attempted_endpoints", [])
+        result.setdefault("candidate_endpoints", [])
+        result.setdefault("rest_status", "unsupported")
+        result.setdefault("streaming_data_types", ["X-QUOTE"])
         result.setdefault("runtime_status", diagnostics.get("runtime_status"))
         return result
 
@@ -2598,24 +2703,31 @@ class SsiFastConnectFetcher:
         nested = _first_value(row, *nested_keys)
         if isinstance(nested, list):
             levels = []
-            for level in nested[:5]:
+            for index, level in enumerate(nested[:10], start=1):
                 if not isinstance(level, dict):
                     continue
+                level_number = _to_int(_first_value(level, "Level", "level", "Position", "position")) or index
                 price = _to_float(_first_value(level, "Price", "price", "BidPrice", "AskPrice", "bidPrice", "askPrice"))
                 volume = _to_float(_first_value(level, "Volume", "Vol", "volume", "vol", "BidVol", "AskVol", "bidVol", "askVol"))
-                if price is not None or volume is not None:
-                    levels.append({"price": price, "volume": volume})
+                if price is not None and price > 0 and (volume is None or volume >= 0):
+                    level = {"price": price}
+                    if volume is not None:
+                        level["volume"] = volume
+                    levels.append(level)
             return levels
 
         levels = []
         prefixes = ("Bid", "bid") if side == "bid" else ("Ask", "ask")
-        for index in range(1, 6):
+        for index in range(1, 11):
             price_keys = tuple(f"{prefix}Price{index}" for prefix in prefixes) + tuple(f"{prefix}_price_{index}" for prefix in prefixes)
             volume_keys = tuple(f"{prefix}Vol{index}" for prefix in prefixes) + tuple(f"{prefix}Volume{index}" for prefix in prefixes) + tuple(f"{prefix}_vol_{index}" for prefix in prefixes)
             price = _to_float(_first_value(row, *price_keys))
             volume = _to_float(_first_value(row, *volume_keys))
-            if price is not None or volume is not None:
-                levels.append({"price": price, "volume": volume})
+            if price is not None and price > 0 and (volume is None or volume >= 0):
+                level = {"price": price}
+                if volume is not None:
+                    level["volume"] = volume
+                levels.append(level)
         return levels
 
     def _map_trade_tape(self, row: Dict[str, Any]) -> Dict[str, Any]:
