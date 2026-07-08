@@ -299,6 +299,9 @@ class VietnamWatchItem(BaseModel):
     trade_tape_source: Optional[str] = None
     trade_tape: List[Dict[str, Any]] = Field(default_factory=list)
     trade_tape_status: Dict[str, Any] = Field(default_factory=dict)
+    session_status_source: Optional[str] = None
+    session_status: Optional[Dict[str, Any]] = None
+    session_status_status: Dict[str, Any] = Field(default_factory=dict)
     cache_status: Dict[str, Any] = Field(default_factory=dict)
     cache_last_fetched_at: Dict[str, Any] = Field(default_factory=dict)
     cache_next_refresh_at: Dict[str, Any] = Field(default_factory=dict)

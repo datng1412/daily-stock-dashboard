@@ -20,11 +20,13 @@ class ExplodingManager:
 
 
 class FakeSsiFetcher:
-    def __init__(self, realtime_payload=None, trade_payload=None):
+    def __init__(self, realtime_payload=None, trade_payload=None, session_status_payload=None):
         self.realtime_payload = realtime_payload
         self.trade_payload = trade_payload
+        self.session_status_payload = session_status_payload
         self.realtime_calls = 0
         self.trade_calls = 0
+        self.session_status_calls = 0
 
     def get_daily_ohlcv(self, symbol: str, **kwargs):
         start = date(2026, 6, 1)
@@ -122,6 +124,26 @@ class FakeSsiFetcher:
                     "source": "SSI",
                 }
             ],
+        }
+
+    def get_session_status(self, symbol: str):
+        self.session_status_calls += 1
+        if self.session_status_payload is not None:
+            return self.session_status_payload
+        return {
+            "status": "unavailable",
+            "source": "SSI",
+            "symbol": symbol,
+            "reason": "SSI F stream cache empty.",
+            "session_status": None,
+            "streaming_status": "subscribed_no_event",
+            "cache_status": "empty",
+            "diagnostics": {
+                "streaming_status": "subscribed_no_event",
+                "cache_status": "empty",
+                "manager_state": "running",
+                "session_status_channels": [f"F:{symbol}"],
+            },
         }
 
     def get_securities_details(self, **kwargs):
@@ -225,7 +247,6 @@ class IntradayAvailableRealtimeUnavailableFetcher(FakeSsiFetcher):
             ],
         }
 
-
 class ZeroReferenceTradeTapeFetcher(FakeSsiFetcher):
     def get_daily_stock_price(self, symbol: str, **kwargs):
         payload = super().get_daily_stock_price(symbol, **kwargs)
@@ -281,6 +302,84 @@ def test_ssi_trade_tape_success_returns_normalized_trades():
     assert item["trade_tape"][0]["side_if_available"] == "BU"
     assert item["trade_tape"][0]["change"] == 1.5
     assert item["trade_tape"][0]["change_pct"] == 1.16
+
+
+def test_ssi_session_status_success_is_separate_from_daily_price():
+    fetcher = FakeSsiFetcher(
+        session_status_payload={
+            "status": "ok",
+            "source": "SSI",
+            "symbol": "FPT",
+            "session_status": {
+                "ticker": "FPT",
+                "symbol": "FPT",
+                "exchange": "HOSE",
+                "trading_date": "2026-06-30",
+                "time": "10:00:00",
+                "trading_session": "CONTINUOUS",
+                "trading_status": "OPEN",
+                "stream_timestamp": "2026-06-30T10:00:00",
+                "stream_data_type": "F",
+                "r_type": "F",
+                "age_seconds": 0,
+                "cached_at": "2026-06-30T03:00:00+00:00",
+                "cache_ttl_seconds": 60,
+            },
+            "streaming_status": "cache_hit",
+            "cache_status": "hit",
+            "diagnostics": {
+                "streaming_status": "cache_hit",
+                "cache_status": "hit",
+                "manager_state": "running",
+                "session_status_channels": ["F:FPT"],
+                "session_status_rows_observed": 1,
+            },
+        }
+    )
+
+    item = _service(fetcher).build_watchlist(["FPT"], force_refresh=True)["watchlist"][0]
+
+    assert item["status"] == "ok"
+    assert item["latest_price_source"] == "SSI DailyOhlc"
+    assert item["session_status_source"] == "SSI F trading session/status stream"
+    assert item["session_status_status"]["status"] == "ok"
+    assert item["session_status_status"]["reason_code"] == "cache_hit"
+    assert item["session_status"]["trading_session"] == "CONTINUOUS"
+    assert item["session_status"]["trading_status"] == "OPEN"
+    assert item["session_status"]["stream_data_type"] == "F"
+    assert item["diagnostics"]["session_status"]["streaming_status"] == "cache_hit"
+    assert item["diagnostics"]["session_status"]["session_status_channels"] == ["F:FPT"]
+
+
+def test_ssi_session_status_cache_empty_is_optional_unavailable():
+    fetcher = FakeSsiFetcher(
+        session_status_payload={
+            "status": "unavailable",
+            "source": "SSI",
+            "symbol": "FPT",
+            "reason": "SSI F stream cache empty.",
+            "session_status": None,
+            "streaming_status": "subscribed_no_event",
+            "cache_status": "empty",
+            "diagnostics": {
+                "streaming_status": "subscribed_no_event",
+                "cache_status": "empty",
+                "manager_state": "running",
+                "session_status_channels": ["F:FPT"],
+            },
+        }
+    )
+
+    item = _service(fetcher).build_watchlist(["FPT"], force_refresh=True)["watchlist"][0]
+
+    assert item["status"] == "ok"
+    assert item["latest_price_source"] == "SSI DailyOhlc"
+    assert item["session_status_source"] == "SSI F trading session/status stream"
+    assert item["session_status"] is None
+    assert item["session_status_status"]["status"] == "unavailable"
+    assert item["session_status_status"]["reason_code"] == "stream_cache_empty"
+    assert item["session_status_status"]["message"] == "SSI trading session/status unavailable."
+    assert item["diagnostics"]["session_status"]["streaming_status"] == "subscribed_no_event"
 
 
 def test_ssi_trade_tape_sd_remains_sell_with_positive_change():

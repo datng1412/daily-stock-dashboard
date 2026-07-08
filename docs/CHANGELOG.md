@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [new feature] Add SSI `F:{symbol}` trading session/status runtime-proof support as a separate optional watchlist context without changing DailyOhlc price ownership or adding request-handler streaming.
 - [documentation] Sync README_VN with implemented SSI-derived metrics and remaining SSI capability audit.
 - [documentation] Add SSI remaining data capability audit and prioritize future SSI-backed proof targets without runtime changes.
 - [documentation] Document current access status for VN news/data provider candidates and keep FiinGroup, Vietstock, and Vnstock behind entitlement/prototype gates.

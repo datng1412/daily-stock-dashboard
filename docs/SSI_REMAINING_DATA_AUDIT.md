@@ -49,7 +49,7 @@ These capabilities are SSI-owned candidates but not fully exposed as product fea
 | Realtime `X:{symbol}` | Streaming channel `X:{symbol}` | Optional snapshot cache through background manager. | Stronger public realtime board metrics only when current cache rows exist. | Maintain; no new expansion until stability proof. | Live entitlement, manager lifecycle, stale/idle classification, timestamp semantics. | Request handlers must only read cache. |
 | Trade tape `X-TRADE:{symbol}` | Streaming channel `X-TRADE:{symbol}` | Bounded latest-event rows, B/S from explicit side codes, change versus SSI reference. | True historical time-and-sales remains unproven. | Maintain; defer history claims. | Continued live row evidence, side-code coverage, sequence semantics. | Do not infer trades from daily/realtime rows. |
 | `X-QUOTE` order book | Streaming channel `X-QUOTE:{symbol}` | Parser can preserve quote-only context/bid-ask levels in realtime snapshot; no dedicated order-book product yet. | Dedicated bid/ask ladder, best bid/ask, level count by market. | High after `F`; likely Phase 4.8H. | Confirm field keys, price/volume units, 3-level HOSE and 10-level HNX/UPCOM/DER claims before UI/API exposure. | Separate from latest price and trade tape. |
-| `F` trading session/status | SSI streaming session/status family, exact channel/fields not implemented. | Not wired. | Session label, halt/suspend/closed states, final close/finality support. | Highest missing SSI-backed candidate; likely Phase 4.8G. | Exact channel, code mapping, timestamp, market/ticker scope, and finality semantics. | Do not guess status-code meanings. |
+| `F` trading session/status | SSI streaming channel `F:{symbol}`. | Phase 4.8G adds a background-lifecycle subscription, parser, dedicated cache, watchlist fields, and diagnostics for raw `TradingSession` / `TradingStatus` context. | Final UI/product component, business-code label mapping, halt/suspend/closed semantics, and final close/finality support remain deferred until live payload evidence proves meanings. | Runtime proof completed; keep as optional context while code mapping remains unproven. | Live entitlement/tick availability, complete code mapping, timestamp behavior, exchange/ticker scope, and finality semantics. | Do not guess status-code meanings; do not use this to replace DailyOhlc, realtime snapshot, or trade tape. |
 | `R` foreign room | SSI realtime foreign-room/foreign-flow stream, exact channel/fields not implemented. | Not wired; realtime schema has placeholder `foreign_room` but current mapping does not populate it. | Total room, current room, realtime foreign buy/sell volume/value. | Medium-high after order book. | Exact fields such as current/total room, units, exchange-specific semantics, approximate value caveats. | Separate from DailyStockPrice end-of-day/daily foreign flow. |
 | `MI` realtime market index | SSI realtime market index stream, exact channel/fields not implemented. | Not wired. | VNINDEX/VN30/HNX/UPCOM realtime index pulse, change/change %, value/volume, advances/unchanged/declines. | Medium. | Channel identifiers, index code mapping, field units, breadth semantics, timestamp/freshness. | Separate from stock watchlist rows. |
 | `B` realtime OHLCV bars | SSI realtime OHLCV/bar stream, exact channel/fields not implemented. | Not wired. | Intraday bar updates or faster chart pulse. | Later. | Bar interval, session boundaries, correction semantics, and relationship to IntradayOhlc. | Must not replace DailyOhlc `latest_price`. |
@@ -61,6 +61,14 @@ These capabilities are SSI-owned candidates but not fully exposed as product fea
 
 ### A. `F` trading session/status
 
+Phase 4.8G runtime proof status:
+
+* StockClock now subscribes to symbol-scoped `F:{symbol}` channels through the same background SSI streaming lifecycle used for `X:{symbol}` and `X-TRADE:{symbol}`.
+* The backend parser stores only safe session/status fields: `ticker`, `symbol`, `exchange`, `trading_date`, `time`, `trading_session`, `trading_status`, `stream_timestamp`, `stream_data_type=F`, `r_type`, cache age, and source.
+* Watchlist rows may expose `session_status_source`, `session_status`, and `session_status_status`, with technical details under `diagnostics.session_status`.
+* Request handlers only read the process-local cache. They do not start streams, add dynamic subscriptions, use all-market channels, call trading/order APIs, or synthesize unavailable values.
+* The proof intentionally does not map SSI status codes to product labels such as open, closed, halted, suspended, or final. Those meanings need live evidence before UI/product use.
+
 Potential value:
 
 * Source-backed market/session status labels.
@@ -70,10 +78,9 @@ Potential value:
 
 Runtime proof required:
 
-* Exact stream/channel name and subscription format.
 * Complete status-code mapping from SSI evidence.
 * Scope: market-wide, exchange-wide, index-level, or ticker-level.
-* Timestamp/freshness semantics.
+* Timestamp/freshness semantics under normal trading, lunch break, close, halt, and inactive periods.
 * Final-close meaning and whether it can safely support `final_close_status`.
 
 Do not implement by guessing status codes from names or UI color conventions.
@@ -230,7 +237,7 @@ External providers must use separate source labels and must not silently fill or
 ## Recommended next implementation order
 
 1. Phase 4.8F - SSI Remaining Data Capability Audit: docs-only; this document.
-2. Phase 4.8G - Trading Session/Status from SSI `F`, only if runtime proof confirms stable fields and code mappings.
+2. Phase 4.8G - Trading Session/Status from SSI `F:{symbol}` runtime proof is now implemented as optional cache-backed context; code mappings and final UI remain deferred.
 3. Phase 4.8H - `X-QUOTE` Order Book Ladder.
 4. Phase 4.8I - Realtime Foreign Room from SSI `R`.
 5. Phase 4.8J - Realtime Market Index Pulse from SSI `MI`.

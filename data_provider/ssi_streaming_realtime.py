@@ -46,6 +46,8 @@ DEFAULT_STREAMING_REALTIME_RECONNECT_MAX_DELAY_SECONDS = 30
 DEFAULT_TRADE_TAPE_BUFFER_SIZE = 50
 DEFAULT_TRADE_TAPE_TTL_SECONDS = 60
 TRADE_TAPE_CHANNEL_PREFIX = "X-TRADE"
+DEFAULT_SESSION_STATUS_TTL_SECONDS = 60
+SESSION_STATUS_CHANNEL_PREFIX = "F"
 _TRADE_SIDE_BUY_VALUES = {"B", "BU", "BUY", "1", "MUA"}
 _TRADE_SIDE_SELL_VALUES = {"S", "SD", "SELL", "2", "BAN", "BÁN"}
 
@@ -232,6 +234,13 @@ class CachedTradeTapeEvent:
     received_at: float
 
 
+@dataclass(frozen=True)
+class CachedSessionStatus:
+    symbol: str
+    status: Dict[str, Any]
+    received_at: float
+
+
 def sanitize_streaming_error(value: Any, *, max_length: int = 240) -> str:
     """Return a bounded, secret-safe error summary."""
     text = str(value or "").replace("\r", " ").replace("\n", " ").strip()
@@ -285,9 +294,26 @@ def build_trade_tape_channel(symbol: str) -> str:
     return channel
 
 
+def build_session_status_channel(symbol: str) -> str:
+    normalized = str(symbol or "").strip().upper()
+    if not normalized:
+        raise ValueError("Streaming symbol is required.")
+    if normalized == "ALL":
+        raise ValueError(SSI_STREAMING_REALTIME_ALL_CHANNEL_FORBIDDEN_REASON)
+    channel = f"{SESSION_STATUS_CHANNEL_PREFIX}:{normalized}"
+    if re.search(r":\s*ALL\b", channel, flags=re.IGNORECASE):
+        raise ValueError(SSI_STREAMING_REALTIME_ALL_CHANNEL_FORBIDDEN_REASON)
+    return channel
+
+
 def is_trade_tape_channel(channel: Any) -> bool:
     text = str(channel or "").strip().upper()
     return text.startswith(f"{TRADE_TAPE_CHANNEL_PREFIX}:")
+
+
+def is_session_status_channel(channel: Any) -> bool:
+    text = str(channel or "").strip().upper()
+    return text.startswith(f"{SESSION_STATUS_CHANNEL_PREFIX}:")
 
 
 def build_streaming_channels(
@@ -295,6 +321,7 @@ def build_streaming_channels(
     *,
     realtime_template: str = DEFAULT_STREAMING_REALTIME_CHANNEL_TEMPLATE,
     trade_tape_enabled: bool = True,
+    session_status_enabled: bool = True,
 ) -> List[str]:
     channels: List[str] = []
     seen = set()
@@ -302,6 +329,7 @@ def build_streaming_channels(
         for channel in (
             build_symbol_channel(symbol, realtime_template),
             build_trade_tape_channel(symbol) if trade_tape_enabled else None,
+            build_session_status_channel(symbol) if session_status_enabled else None,
         ):
             if not channel or channel in seen:
                 continue
@@ -471,6 +499,75 @@ class TradeTapeEventCache:
         }
 
 
+class SessionStatusCache:
+    """Thread-safe latest F stream session/status cache keyed by VN ticker."""
+
+    def __init__(
+        self,
+        ttl_seconds: int = DEFAULT_SESSION_STATUS_TTL_SECONDS,
+        *,
+        time_func: Callable[[], float] = time.time,
+    ) -> None:
+        self.ttl_seconds = max(1, int(ttl_seconds or DEFAULT_SESSION_STATUS_TTL_SECONDS))
+        self._time_func = time_func
+        self._lock = threading.RLock()
+        self._rows: Dict[str, CachedSessionStatus] = {}
+
+    def clear(self) -> None:
+        with self._lock:
+            self._rows.clear()
+
+    def put_rows(self, rows: Iterable[Dict[str, Any]]) -> int:
+        now = float(self._time_func())
+        written = 0
+        with self._lock:
+            for row in rows or []:
+                if not isinstance(row, dict):
+                    continue
+                symbol = str(row.get("ticker") or row.get("symbol") or "").strip().upper()
+                if not symbol:
+                    continue
+                session_row = dict(row)
+                session_row["ticker"] = symbol
+                session_row.setdefault("symbol", symbol)
+                session_row["cached_at"] = _utc_iso_from_epoch(now)
+                session_row["cache_ttl_seconds"] = self.ttl_seconds
+                self._rows[symbol] = CachedSessionStatus(
+                    symbol=symbol,
+                    status=session_row,
+                    received_at=now,
+                )
+                written += 1
+        return written
+
+    def get(self, symbol: str) -> Dict[str, Any]:
+        normalized = str(symbol or "").strip().upper()
+        now = float(self._time_func())
+        with self._lock:
+            entry = self._rows.get(normalized)
+
+        if entry is None:
+            return {
+                "status": "empty",
+                "row": None,
+                "latest_session_timestamp": None,
+                "latest_session_age_seconds": None,
+            }
+
+        age_seconds = max(0.0, now - entry.received_at)
+        row = dict(entry.status)
+        row["age_seconds"] = int(age_seconds)
+        row["is_stale"] = age_seconds > self.ttl_seconds
+        if row["is_stale"]:
+            row["stale_reason"] = SSI_STREAMING_REALTIME_CACHE_STALE_REASON
+        return {
+            "status": "stale" if row["is_stale"] else "hit",
+            "row": row,
+            "latest_session_timestamp": row.get("stream_timestamp") or row.get("time"),
+            "latest_session_age_seconds": int(age_seconds),
+        }
+
+
 class SsiStreamingRealtimeManager:
     """Owns SSI realtime streaming lifecycle and cache handoff.
 
@@ -485,6 +582,7 @@ class SsiStreamingRealtimeManager:
         enabled: bool = False,
         cache: Optional[RealtimeSnapshotCache] = None,
         trade_tape_cache: Optional[TradeTapeEventCache] = None,
+        session_status_cache: Optional[SessionStatusCache] = None,
         parser: Optional[Callable[[List[Any], List[str]], List[Dict[str, Any]]]] = None,
         client_factory: Optional[Callable[[], SsiRealtimeStreamClient]] = None,
         channel_template: str = DEFAULT_STREAMING_REALTIME_CHANNEL_TEMPLATE,
@@ -494,11 +592,13 @@ class SsiStreamingRealtimeManager:
         reconnect_max_delay_seconds: int = DEFAULT_STREAMING_REALTIME_RECONNECT_MAX_DELAY_SECONDS,
         reconnect_max_attempts: int = 0,
         trade_tape_enabled: bool = True,
+        session_status_enabled: bool = True,
         time_func: Callable[[], float] = time.time,
     ) -> None:
         self.enabled = bool(enabled)
         self.cache = cache or RealtimeSnapshotCache(time_func=time_func)
         self.trade_tape_cache = trade_tape_cache or TradeTapeEventCache(time_func=time_func)
+        self.session_status_cache = session_status_cache or SessionStatusCache(time_func=time_func)
         self._parser = parser or (lambda messages, symbols: [])
         self._client_factory = client_factory
         self.channel_template = channel_template or DEFAULT_STREAMING_REALTIME_CHANNEL_TEMPLATE
@@ -514,6 +614,7 @@ class SsiStreamingRealtimeManager:
         )
         self.reconnect_max_attempts = max(0, int(reconnect_max_attempts or 0))
         self.trade_tape_enabled = bool(trade_tape_enabled)
+        self.session_status_enabled = bool(session_status_enabled)
         self._time_func = time_func
         self._lock = threading.RLock()
         self._client: Optional[SsiRealtimeStreamClient] = None
@@ -528,6 +629,7 @@ class SsiStreamingRealtimeManager:
         self._messages_observed = 0
         self._parser_rows_observed = 0
         self._trade_rows_observed = 0
+        self._session_status_rows_observed = 0
         self._bootstrap_status: Optional[str] = None
         self._bootstrap_reason: Optional[str] = None
         self._bootstrap_symbols: List[str] = []
@@ -570,6 +672,7 @@ class SsiStreamingRealtimeManager:
                 normalized_symbols,
                 realtime_template=self.channel_template,
                 trade_tape_enabled=self.trade_tape_enabled,
+                session_status_enabled=self.session_status_enabled,
             )
             if not channels:
                 raise ValueError("At least one streaming symbol is required.")
@@ -648,14 +751,18 @@ class SsiStreamingRealtimeManager:
                 if isinstance(row, dict)
                 and str(row.get("ticker") or row.get("symbol") or "").strip().upper() in requested_set
             ]
-            written = self.cache.put_rows(filtered_rows)
+            session_rows = [row for row in filtered_rows if self._is_session_status_row(row)]
+            snapshot_rows = [row for row in filtered_rows if not self._is_session_status_row(row)]
+            written = self.cache.put_rows(snapshot_rows)
             trade_written = self.trade_tape_cache.put_rows(
-                self._trade_events_from_streaming_rows(filtered_rows)
+                self._trade_events_from_streaming_rows(snapshot_rows)
             )
+            session_written = self.session_status_cache.put_rows(session_rows)
             with self._lock:
                 self._messages_observed += 1
                 self._parser_rows_observed += written
                 self._trade_rows_observed += trade_written
+                self._session_status_rows_observed += session_written
                 now = float(self._time_func())
                 self._last_message_epoch = now
                 self._last_message_at = _utc_iso_from_epoch(now)
@@ -664,6 +771,11 @@ class SsiStreamingRealtimeManager:
                 self._idle_since_epoch = None
         except Exception as exc:
             self._record_error(exc, set_errored=False)
+
+    @staticmethod
+    def _is_session_status_row(row: Dict[str, Any]) -> bool:
+        raw_type = str(row.get("stream_data_type") or row.get("r_type") or "").strip().upper()
+        return raw_type == SESSION_STATUS_CHANNEL_PREFIX
 
     @staticmethod
     def _trade_events_from_streaming_rows(rows: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -978,15 +1090,194 @@ class SsiStreamingRealtimeManager:
             "diagnostics": diagnostics,
         }
 
+    def session_status(self, symbol: str) -> Dict[str, Any]:
+        requested_symbol = str(symbol or "").strip().upper()
+        status = self.status()
+        diagnostics = dict(status)
+        diagnostics.update(
+            {
+                "streaming_status": "session_status_buffer",
+                "cache_ttl_seconds": self.session_status_cache.ttl_seconds,
+                "session_status_ttl_seconds": self.session_status_cache.ttl_seconds,
+                "channel_type": SESSION_STATUS_CHANNEL_PREFIX,
+                "session_status_rows_observed": self._session_status_rows_observed,
+            }
+        )
+        base = {
+            "source": "SSI",
+            "symbol": requested_symbol,
+            "session_status": None,
+            "count": 0,
+            "streaming_data_types": [SESSION_STATUS_CHANNEL_PREFIX],
+            "attempted_endpoints": [],
+            "candidate_endpoints": [],
+            "rest_status": "unsupported",
+        }
+
+        if not requested_symbol:
+            diagnostics["failure_class"] = "missing_symbol"
+            return {
+                **base,
+                "status": "unavailable",
+                "reason": "No symbol requested",
+                "streaming_status": "missing_symbol",
+                "cache_status": "unavailable",
+                "manager_state": status["manager_state"],
+                "diagnostics": diagnostics,
+            }
+        if not self.enabled:
+            diagnostics.update({"streaming_status": "disabled", "cache_status": "disabled"})
+            return {
+                **base,
+                "status": "unavailable",
+                "reason": SSI_STREAMING_REALTIME_DISABLED_REASON,
+                "streaming_status": "disabled",
+                "cache_status": "disabled",
+                "manager_state": MANAGER_DISABLED,
+                "diagnostics": diagnostics,
+            }
+
+        manager_state = status["manager_state"]
+        if not self.session_status_enabled:
+            diagnostics.update({"streaming_status": "f_disabled", "cache_status": "disabled"})
+            return {
+                **base,
+                "status": "unavailable",
+                "reason": "SSI F stream channel disabled.",
+                "streaming_status": "f_disabled",
+                "cache_status": "disabled",
+                "manager_state": manager_state,
+                "diagnostics": diagnostics,
+            }
+
+        if manager_state == MANAGER_ERRORED:
+            diagnostics.update({"streaming_status": "manager_error", "cache_status": "unavailable"})
+            return {
+                **base,
+                "status": "unavailable",
+                "reason": SSI_STREAMING_REALTIME_MANAGER_ERROR_REASON,
+                "streaming_status": "manager_error",
+                "cache_status": "unavailable",
+                "manager_state": manager_state,
+                "diagnostics": diagnostics,
+            }
+        if manager_state != MANAGER_RUNNING:
+            reason = SSI_STREAMING_REALTIME_NOT_STARTED_REASON
+            streaming_status = "manager_not_started"
+            cache_status = "not_started"
+            if diagnostics.get("bootstrap_status") == "symbols_empty":
+                reason = SSI_STREAMING_REALTIME_BOOTSTRAP_EMPTY_REASON
+                streaming_status = "bootstrap_symbols_empty"
+                cache_status = "bootstrap_symbols_empty"
+            diagnostics.update({"streaming_status": streaming_status, "cache_status": cache_status})
+            return {
+                **base,
+                "status": "unavailable",
+                "reason": reason,
+                "streaming_status": streaming_status,
+                "cache_status": cache_status,
+                "manager_state": manager_state,
+                "diagnostics": diagnostics,
+            }
+
+        configured_symbols = set(normalize_streaming_symbols(status.get("requested_symbols") or []))
+        bootstrap_symbols = set(normalize_streaming_symbols(status.get("bootstrap_symbols") or []))
+        membership_symbols = configured_symbols or bootstrap_symbols
+        if membership_symbols and requested_symbol not in membership_symbols:
+            diagnostics.update(
+                {
+                    "streaming_status": "ticker_not_bootstrapped",
+                    "cache_status": "not_bootstrapped",
+                    "bootstrap_membership": "not_bootstrapped",
+                }
+            )
+            return {
+                **base,
+                "status": "unavailable",
+                "reason": "SSI F stream not bootstrapped.",
+                "streaming_status": "ticker_not_bootstrapped",
+                "cache_status": "not_bootstrapped",
+                "manager_state": manager_state,
+                "diagnostics": diagnostics,
+            }
+
+        if requested_symbol and build_session_status_channel(requested_symbol) not in set(status.get("session_status_channels") or []):
+            diagnostics.update(
+                {
+                    "streaming_status": "f_not_subscribed",
+                    "cache_status": "not_subscribed",
+                    "bootstrap_membership": "bootstrapped",
+                }
+            )
+            return {
+                **base,
+                "status": "unavailable",
+                "reason": "SSI F stream channel not subscribed.",
+                "streaming_status": "f_not_subscribed",
+                "cache_status": "not_subscribed",
+                "manager_state": manager_state,
+                "diagnostics": diagnostics,
+            }
+
+        cache_result = self.session_status_cache.get(requested_symbol)
+        cache_status = cache_result["status"]
+        diagnostics.update(
+            {
+                "streaming_status": "cache_hit" if cache_status == "hit" else f"cache_{cache_status}",
+                "cache_status": cache_status,
+                "latest_session_timestamp": cache_result["latest_session_timestamp"],
+                "latest_session_age_seconds": cache_result["latest_session_age_seconds"],
+            }
+        )
+        if cache_status == "hit" and cache_result["row"]:
+            return {
+                **base,
+                "status": "ok",
+                "reason": None,
+                "session_status": cache_result["row"],
+                "count": 1,
+                "streaming_status": "cache_hit",
+                "cache_status": "hit",
+                "manager_state": manager_state,
+                "diagnostics": diagnostics,
+            }
+
+        reason = (
+            "SSI F stream cache stale."
+            if cache_status == "stale"
+            else "SSI F stream cache empty."
+        )
+        streaming_status = "cache_stale" if cache_status == "stale" else "subscribed_no_event"
+        diagnostics.update({"streaming_status": streaming_status})
+        return {
+            **base,
+            "status": "unavailable",
+            "reason": reason,
+            "streaming_status": streaming_status,
+            "cache_status": cache_status,
+            "manager_state": manager_state,
+            "diagnostics": diagnostics,
+        }
+
     def status(self) -> Dict[str, Any]:
         with self._lock:
             self._refresh_idle_state_locked()
-            realtime_channels = [channel for channel in self._channels if not is_trade_tape_channel(channel)]
+            realtime_channels = [
+                channel
+                for channel in self._channels
+                if not is_trade_tape_channel(channel) and not is_session_status_channel(channel)
+            ]
             trade_tape_channels = [channel for channel in self._channels if is_trade_tape_channel(channel)]
+            session_status_channels = [channel for channel in self._channels if is_session_status_channel(channel)]
             trade_tape_subscription_status = (
                 "disabled"
                 if not self.trade_tape_enabled
                 else ("subscribed" if trade_tape_channels else "not_subscribed")
+            )
+            session_status_subscription_status = (
+                "disabled"
+                if not self.session_status_enabled
+                else ("subscribed" if session_status_channels else "not_subscribed")
             )
             return {
                 "enabled": self.enabled,
@@ -997,6 +1288,9 @@ class SsiStreamingRealtimeManager:
                 "trade_tape_channels": trade_tape_channels,
                 "trade_tape_channel_type": TRADE_TAPE_CHANNEL_PREFIX,
                 "trade_tape_subscription_status": trade_tape_subscription_status,
+                "session_status_channels": session_status_channels,
+                "session_status_channel_type": SESSION_STATUS_CHANNEL_PREFIX,
+                "session_status_subscription_status": session_status_subscription_status,
                 "live_adapter_status": "enabled" if self._client_factory is not None else "not_enabled",
                 "latest_error": self._latest_error,
                 "last_error_at": self._last_error_at,
@@ -1004,6 +1298,7 @@ class SsiStreamingRealtimeManager:
                 "messages_observed": self._messages_observed,
                 "parser_rows_observed": self._parser_rows_observed,
                 "trade_rows_observed": self._trade_rows_observed,
+                "session_status_rows_observed": self._session_status_rows_observed,
                 "bootstrap_status": self._bootstrap_status,
                 "bootstrap_reason": self._bootstrap_reason,
                 "bootstrap_symbols": list(self._bootstrap_symbols),

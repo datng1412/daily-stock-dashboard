@@ -16,6 +16,7 @@ from data_provider.ssi_streaming_realtime import (
     RealtimeSnapshotCache,
     RUNTIME_RECONNECTING,
     RUNTIME_RUNNING_IDLE,
+    SessionStatusCache,
     SsiStreamingRealtimeManager,
     SSI_STREAMING_REALTIME_CACHE_EMPTY_REASON,
     SSI_STREAMING_REALTIME_CACHE_STALE_REASON,
@@ -24,6 +25,7 @@ from data_provider.ssi_streaming_realtime import (
     SSI_STREAMING_REALTIME_MANAGER_ERROR_REASON,
     SSI_STREAMING_REALTIME_NOT_STARTED_REASON,
     SSI_STREAMING_REALTIME_PACKAGE_UNAVAILABLE_REASON,
+    build_session_status_channel,
     build_streaming_channels,
     build_symbol_channel,
     build_trade_tape_channel,
@@ -161,6 +163,9 @@ class FakeMarketFetcher:
     def get_trade_tape(self, symbol: str, **kwargs):
         return self.realtime_fetcher.get_trade_tape(symbol, **kwargs)
 
+    def get_session_status(self, symbol: str):
+        return self.realtime_fetcher.get_session_status(symbol)
+
     def get_securities_details(self, **kwargs):
         symbol = kwargs.get("symbol") or "FPT"
         return {"status": "ok", "source": "SSI", "rows": [{"symbol": symbol, "exchange": "HOSE", "market": "HOSE", "source": "SSI"}]}
@@ -199,6 +204,7 @@ def _manager(
     }
     if time_func is not None:
         kwargs["cache"] = RealtimeSnapshotCache(15, time_func=time_func)
+        kwargs["session_status_cache"] = SessionStatusCache(15, time_func=time_func)
         kwargs["time_func"] = time_func
     kwargs.update(overrides)
     return SsiStreamingRealtimeManager(**kwargs)
@@ -245,6 +251,21 @@ def _x_combined(symbol: str = "FPT"):
     payload["Content"]["RType"] = "X"
     payload["Content"]["LastPrice"] = "130.7"
     return payload
+
+
+def _f_status(symbol: str = "FPT", *, session: str = "CONTINUOUS", status: str = "OPEN"):
+    return {
+        "DataType": "F",
+        "Content": {
+            "RType": "F",
+            "TradingDate": "25/06/2026",
+            "Time": "10:01:04",
+            "Symbol": symbol,
+            "Exchange": "HOSE",
+            "TradingSession": session,
+            "TradingStatus": status,
+        },
+    }
 
 
 def _service_with_fetcher(fetcher, *, streaming_enabled: bool = True) -> VietnamMarketService:
@@ -303,14 +324,15 @@ def test_importing_streaming_module_does_not_import_official_client_or_start_net
 def test_streaming_channel_builder_includes_realtime_and_trade_tape_channels_without_duplicates():
     channels = build_streaming_channels(["fpt", "FPT"])
 
-    assert channels == ["X:FPT", "X-TRADE:FPT"]
+    assert channels == ["X:FPT", "X-TRADE:FPT", "F:FPT"]
     assert len(channels) == len(set(channels))
     assert all("ALL" not in channel for channel in channels)
 
 
 def test_streaming_channel_builder_can_disable_trade_tape_channel():
-    assert build_streaming_channels(["fpt"], trade_tape_enabled=False) == ["X:FPT"]
+    assert build_streaming_channels(["fpt"], trade_tape_enabled=False) == ["X:FPT", "F:FPT"]
     assert build_trade_tape_channel("fpt") == "X-TRADE:FPT"
+    assert build_session_status_channel("fpt") == "F:FPT"
 
 
 def test_manager_start_uses_symbol_scoped_realtime_and_trade_tape_channels():
@@ -321,10 +343,12 @@ def test_manager_start_uses_symbol_scoped_realtime_and_trade_tape_channels():
 
     assert status["manager_state"] == MANAGER_RUNNING
     assert client.started is True
-    assert client.channels == ["X:FPT", "X-TRADE:FPT"]
+    assert client.channels == ["X:FPT", "X-TRADE:FPT", "F:FPT"]
     assert status["realtime_channels"] == ["X:FPT"]
     assert status["trade_tape_channels"] == ["X-TRADE:FPT"]
     assert status["trade_tape_subscription_status"] == "subscribed"
+    assert status["session_status_channels"] == ["F:FPT"]
+    assert status["session_status_subscription_status"] == "subscribed"
     assert all("ALL" not in channel for channel in client.channels)
 
 
@@ -392,6 +416,73 @@ def test_x_trade_message_updates_snapshot_and_trade_tape_buffer():
     assert trade_payload["trades"][0]["timestamp"] == "2026-06-25T10:01:02"
     assert trade_payload["trades"][0]["raw_type"] == "X-TRADE"
     assert trade_payload["diagnostics"]["trade_tape_returned_row_count"] == 1
+
+
+def test_f_session_status_message_updates_dedicated_session_status_cache_only():
+    client = FakeStreamClient()
+    manager = _manager(client=client)
+    manager.start(["FPT"])
+
+    manager.handle_message(_f_status(session="ATO", status="OPEN"))
+    session_payload = manager.session_status("FPT")
+    quote_payload = manager.snapshot(["FPT"])
+
+    assert session_payload["status"] == "ok"
+    assert session_payload["streaming_status"] == "cache_hit"
+    assert session_payload["session_status"]["ticker"] == "FPT"
+    assert session_payload["session_status"]["stream_data_type"] == "F"
+    assert session_payload["session_status"]["trading_session"] == "ATO"
+    assert session_payload["session_status"]["trading_status"] == "OPEN"
+    assert session_payload["session_status"]["trading_date"] == "2026-06-25"
+    assert session_payload["diagnostics"]["session_status_rows_observed"] == 1
+    assert quote_payload["status"] == "unavailable"
+    assert quote_payload["cache_status"] == "empty"
+    assert quote_payload["quotes"] == []
+
+
+def test_f_session_status_malformed_message_is_dropped_without_fake_state():
+    client = FakeStreamClient()
+    manager = _manager(client=client)
+    manager.start(["FPT"])
+
+    manager.handle_message({"DataType": "F", "Content": {"RType": "F", "Symbol": "FPT"}})
+    payload = manager.session_status("FPT")
+
+    assert payload["status"] == "unavailable"
+    assert payload["streaming_status"] == "subscribed_no_event"
+    assert payload["cache_status"] == "empty"
+    assert payload["session_status"] is None
+    assert payload["diagnostics"]["session_status_rows_observed"] == 0
+
+
+def test_f_session_status_reports_stale_without_returning_live_row():
+    now = [1000.0]
+    client = FakeStreamClient()
+    manager = _manager(client=client, now=now)
+    manager.start(["FPT"])
+    manager.handle_message(_f_status(status="OPEN"))
+
+    now[0] += 16
+    payload = manager.session_status("FPT")
+
+    assert payload["status"] == "unavailable"
+    assert payload["streaming_status"] == "cache_stale"
+    assert payload["cache_status"] == "stale"
+    assert payload["session_status"] is None
+    assert payload["diagnostics"]["latest_session_age_seconds"] == 16
+
+
+def test_f_session_status_reports_channel_not_subscribed():
+    client = FakeStreamClient()
+    manager = _manager(client=client, session_status_enabled=False)
+    manager.start(["FPT"])
+
+    payload = manager.session_status("FPT")
+
+    assert payload["status"] == "unavailable"
+    assert payload["streaming_status"] == "f_disabled"
+    assert payload["cache_status"] == "disabled"
+    assert payload["session_status"] is None
 
 
 @pytest.mark.parametrize(
@@ -569,7 +660,7 @@ def test_trade_tape_for_non_bootstrapped_symbol_is_unavailable_without_subscript
     assert payload["trades"] == []
     assert payload["streaming_status"] == "ticker_not_bootstrapped"
     assert payload["diagnostics"]["bootstrap_membership"] == "not_bootstrapped"
-    assert client.channels == ["X:FPT", "X-TRADE:FPT"]
+    assert client.channels == ["X:FPT", "X-TRADE:FPT", "F:FPT"]
 
 
 def test_trade_tape_disabled_does_not_subscribe_xtrade_channel():
@@ -582,7 +673,7 @@ def test_trade_tape_disabled_does_not_subscribe_xtrade_channel():
     assert status["realtime_channels"] == ["X:FPT"]
     assert status["trade_tape_channels"] == []
     assert status["trade_tape_subscription_status"] == "disabled"
-    assert client.channels == ["X:FPT"]
+    assert client.channels == ["X:FPT", "F:FPT"]
     assert payload["status"] == "unavailable"
     assert payload["streaming_status"] == "xtrade_disabled"
     assert payload["trades"] == []

@@ -52,8 +52,9 @@ This roadmap is the source of truth for Vietnam dashboard provider ownership. SS
 | IntradayOhlc | SSI FastConnect Data REST | Implemented and wired for watchlist/company intraday pulse | Use for compact intraday candles; keep separate from daily close and SSI realtime |
 | DailyStockPrice | SSI FastConnect Data REST | Implemented and wired for selected-ticker enrichment | Use for reference, ceiling/floor, adjusted close if provided, matched volume/value, put-through volume/value, and foreign buy/sell/net volume/value |
 | DailyIndex | SSI FastConnect Data REST | Implemented provider/service/API/dashboard context with 29-day chunking | Use only for optional source-labeled index value, change, breadth, and liquidity |
-| Realtime snapshot | SSI FastConnect Data streaming | Provider, service, API, and UI contract added; buffered `X`, `X-QUOTE`, and `X-TRADE` parser covered; config-disabled background manager/cache skeleton added; official-client adapter added behind disabled runtime flag; Phase 4.7B keeps public copy short and moves technical detail to sectioned diagnostics | Keep unavailable and separate from daily close, intraday, and official daily OHLCV until the background adapter safely populates current rows |
+| Realtime snapshot | SSI FastConnect Data streaming | Provider, service, API, and UI contract added; buffered `X`, `X-QUOTE`, `X-TRADE`, and `F` parser coverage exists; config-disabled background manager/cache skeleton added; official-client adapter added behind disabled runtime flag; Phase 4.7B keeps public copy short and moves technical detail to sectioned diagnostics | Keep unavailable and separate from daily close, intraday, trade tape, session status, and official daily OHLCV until the background adapter safely populates current rows |
 | Trade tape | SSI FastConnect Data streaming or future verified trade contract | Phase 4.7C adds a bounded process-local X-TRADE event buffer populated only by the background streaming manager; Phase 4.8E adds startup-owned `X-TRADE:{symbol}` subscriptions when trade tape is enabled; Phase 4.8E-2 returns buffered timestamped rows even when stream freshness is stale; Phase 4.8E-3 shows SSI-style B/S and change columns from explicit side/reference fields; Phase 4.8E-4 maps observed `BU`/`SD` side codes while preserving raw side audit fields; true historical list/history semantics still need confirmation | Keep latest-event tape separate from official daily OHLCV, DailyStockPrice, and realtime snapshot |
+| Trading session/status | SSI FastConnect Data streaming `F:{symbol}` | Phase 4.8G adds background lifecycle subscription, parser, dedicated cache, optional watchlist fields, and diagnostics for raw SSI `TradingSession` / `TradingStatus` context | Code meanings, final-close/finality semantics, and polished frontend UI remain deferred until live payload evidence proves them |
 | Legacy realtime snapshot/trade tape | KBS | Disabled by default; only available behind explicit legacy flags | Do not silently fallback from SSI to KBS |
 | News | Future NewsProvider | Disabled/not implemented; Phase 5.1A research completed | Do not call Mozyfin; return explicit disabled/not_implemented state until a licensed NewsProvider passes entitlement |
 | Unsupported fundamentals | External provider required | Not implemented | Keep explicitly labeled; do not mix with SSI market-data fields |
@@ -61,7 +62,7 @@ This roadmap is the source of truth for Vietnam dashboard provider ownership. SS
 | Corporate actions, dividends, rights, splits | External provider required | Stub/unavailable | Events must come from explicit source data |
 | Macro/Fed/oil/USD/gold | External provider required | Not implemented | Keep outside SSI market-data ownership |
 
-SSI should be used for symbol metadata, exchange/security type/listed info when available, index list/components, daily OHLCV, chart candles, internal indicators from SSI OHLCV, reference/ceiling/floor, adjusted close if provided, matched volume/value, put-through volume/value, foreign buy/sell/net volume/value, daily index value/change/breadth/liquidity, intraday OHLCV, realtime snapshot, and trade tape.
+SSI should be used for symbol metadata, exchange/security type/listed info when available, index list/components, daily OHLCV, chart candles, internal indicators from SSI OHLCV, reference/ceiling/floor, adjusted close if provided, matched volume/value, put-through volume/value, foreign buy/sell/net volume/value, daily index value/change/breadth/liquidity, intraday OHLCV, realtime snapshot, trade tape, and raw `F:{symbol}` session/status context when the background stream cache has usable rows.
 
 Mozyfin owns no VN dashboard runtime path. It must not be used for VN backend or UI news/social, OHLCV, chart, reference, foreign-flow, index, metadata, intraday, or fallback behavior. Future news should be implemented through a separate NewsProvider contract.
 
@@ -1241,13 +1242,30 @@ Result:
 
 Recommended next SSI-backed runtime-proof order:
 
-1. Phase 4.8G - Trading Session/Status from SSI `F`, if live proof confirms stable fields and code mappings.
+1. Phase 4.8G - Trading Session/Status from SSI `F:{symbol}` runtime proof. Implemented as optional cache-backed watchlist context; code mapping and UI productization remain deferred.
 2. Phase 4.8H - `X-QUOTE` Order Book Ladder.
 3. Phase 4.8I - Realtime Foreign Room from SSI `R`.
 4. Phase 4.8J - Realtime Market Index Pulse from SSI `MI`.
 5. Phase 4.8K - DailyStockPrice Unused Field Audit/Exposure.
 6. Phase 4.8L - SecuritiesDetails Extended Metadata.
 7. Later - Realtime OHLCV `B`, derivatives/futures, covered warrant, ETF/fund, and bond modules.
+
+### Phase 4.8G - SSI F Trading Session/Status Runtime Proof
+
+Status: implemented on 2026-07-08 as a backend/API runtime-proof path.
+
+Result:
+
+* Startup-owned SSI streaming now includes symbol-scoped `F:{symbol}` subscriptions alongside `X:{symbol}` and `X-TRADE:{symbol}` for configured bootstrap symbols.
+* Parsed `F` rows are stored in a dedicated session/status cache, not in the realtime quote cache or trade-tape buffer.
+* Watchlist rows can expose `session_status_source`, `session_status`, and `session_status_status`; technical state lives under `diagnostics.session_status`.
+* Safe fields only are surfaced: ticker/symbol, exchange, trading date, time, raw `trading_session`, raw `trading_status`, stream timestamp/type, cache age, and source.
+* No status-code business meanings are mapped yet. Open/closed/halted/final labels, polished frontend rendering, and `final_close_status` support remain deferred until live evidence proves exact SSI meanings.
+
+Boundaries:
+
+* Request handlers remain cache readers only and must not start streams, subscribe dynamically, use all-market channels, or call trading/order/account APIs.
+* `F` session/status context must not replace SSI DailyOhlc, DailyStockPrice, realtime snapshot, trade tape, or `latest_price`.
 
 ### Phase 5.0A - External Provider Contract Design
 

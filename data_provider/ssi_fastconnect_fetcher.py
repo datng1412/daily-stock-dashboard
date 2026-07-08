@@ -32,6 +32,7 @@ from data_provider.ssi_streaming_realtime import (
     DEFAULT_TRADE_TAPE_TTL_SECONDS,
     OfficialSsiRealtimeStreamClient,
     RealtimeSnapshotCache,
+    SessionStatusCache,
     SsiRealtimeStreamClient,
     SsiStreamingRealtimeManager,
     SSI_STREAMING_REALTIME_CONFIG_INCOMPLETE_REASON,
@@ -54,7 +55,7 @@ REALTIME_ENDPOINT_NOT_IDENTIFIED_REASON = "Supported SSI realtime endpoint not i
 REALTIME_STREAMING_NOT_IMPLEMENTED_REASON = "SSI realtime requires FastConnect streaming adapter; connection semantics not implemented."
 TRADE_TAPE_DISABLED_REASON = "SSI FastConnect trade tape disabled"
 SSI_REALTIME_ENDPOINT_CANDIDATES = ("RealtimeQuote", "RealtimePrice", "RealtimeSnapshot", "SecuritiesRealtime")
-SSI_REALTIME_STREAMING_DATA_TYPES = ("X", "X-QUOTE", "X-TRADE")
+SSI_REALTIME_STREAMING_DATA_TYPES = ("X", "X-QUOTE", "X-TRADE", "F")
 SSI_CHUNK_MAX_DAYS = 29
 SSI_PAGE_SIZE = 1000
 SSI_MAX_PAGES = 20
@@ -855,6 +856,7 @@ class SsiFastConnectFetcher:
                 self.trade_tape_buffer_size,
                 self.trade_tape_ttl_seconds,
             ),
+            session_status_cache=SessionStatusCache(),
             parser=self.normalize_streaming_realtime_messages,
             client_factory=streaming_realtime_client_factory,
             channel_template=self.streaming_realtime_channel_template,
@@ -1550,6 +1552,7 @@ class SsiFastConnectFetcher:
         ]
         requested_set = set(requested_symbols)
         latest_by_symbol: Dict[str, Dict[str, Any]] = {}
+        session_status_by_symbol: Dict[str, Dict[str, Any]] = {}
 
         for message in messages or []:
             parsed = self._parse_streaming_realtime_message(message)
@@ -1559,12 +1562,19 @@ class SsiFastConnectFetcher:
             symbol = str(_first_value(content, "Symbol", "Ticker", "StockCode", "SecurityCode", "Code") or "").strip().upper()
             if not symbol or symbol not in requested_set:
                 continue
+            if parsed["data_type"] == "F":
+                row = self._map_streaming_session_status(content, fallback_symbol=symbol)
+                if row:
+                    session_status_by_symbol[symbol] = row
+                continue
             row = self._map_streaming_realtime_snapshot(content, parsed["data_type"], fallback_symbol=symbol)
             if not row:
                 continue
             latest_by_symbol[symbol] = self._merge_streaming_realtime_rows(latest_by_symbol.get(symbol), row)
 
-        return [latest_by_symbol[symbol] for symbol in requested_symbols if symbol in latest_by_symbol]
+        rows = [latest_by_symbol[symbol] for symbol in requested_symbols if symbol in latest_by_symbol]
+        rows.extend(session_status_by_symbol[symbol] for symbol in requested_symbols if symbol in session_status_by_symbol)
+        return rows
 
     def _parse_streaming_realtime_message(self, message: Any) -> Optional[Dict[str, Any]]:
         if not isinstance(message, dict):
@@ -1607,8 +1617,54 @@ class SsiFastConnectFetcher:
             "XTRADE": "X-TRADE",
             "X-TRADE": "X-TRADE",
             "X": "X",
+            "F": "F",
         }
         return aliases.get(compact)
+
+    def _map_streaming_session_status(
+        self,
+        row: Dict[str, Any],
+        *,
+        fallback_symbol: str,
+    ) -> Optional[Dict[str, Any]]:
+        symbol = str(
+            _first_value(row, "Symbol", "Ticker", "StockCode", "SecurityCode", "Code")
+            or fallback_symbol
+            or ""
+        ).strip().upper()
+        if not symbol:
+            return None
+
+        trading_session = _safe_text(
+            _first_value(row, "TradingSession", "Session", "SessionCode", "tradingSession", "session")
+        )
+        trading_status = _safe_text(
+            _first_value(row, "TradingStatus", "Status", "MarketStatus", "tradingStatus", "marketStatus")
+        )
+        trading_date = _first_value(row, "TradingDate", "Date", "tradingDate")
+        time_value = _first_value(row, "Time", "TradingTime", "time", "tradingTime")
+        exchange = _safe_text(_first_value(row, "Exchange", "Market", "ExchangeCode", "exchange", "market"))
+
+        if not any((trading_session, trading_status, trading_date, time_value, exchange)):
+            return None
+
+        combined_datetime = None
+        if trading_date and time_value:
+            combined_datetime = f"{trading_date} {time_value}"
+
+        return {
+            "ticker": symbol,
+            "symbol": symbol,
+            "exchange": exchange,
+            "trading_date": _parse_date(trading_date),
+            "time": _safe_text(time_value),
+            "trading_session": trading_session,
+            "trading_status": trading_status,
+            "stream_timestamp": _parse_datetime(combined_datetime or time_value or trading_date),
+            "stream_data_type": "F",
+            "r_type": _safe_text(_first_value(row, "RType", "rtype")) or "F",
+            "source": "SSI F trading session/status stream",
+        }
 
     def _map_streaming_realtime_snapshot(
         self,
@@ -1737,6 +1793,107 @@ class SsiFastConnectFetcher:
         result.setdefault("attempted_endpoints", [])
         result.setdefault("candidate_endpoints", [])
         result.setdefault("rest_status", "unsupported")
+        return result
+
+    def get_session_status(self, symbol: str) -> Dict[str, Any]:
+        """Return SSI F stream trading session/status from the streaming cache only.
+
+        Request-time calls do not open streams, add subscriptions, or infer the
+        business meaning of SSI session/status codes.
+        """
+        normalized_symbol = str(symbol or "").strip().upper()
+        base = {
+            "source": SSI_SOURCE,
+            "symbol": normalized_symbol,
+            "session_status": None,
+            "count": 0,
+            "attempted_endpoints": [],
+            "candidate_endpoints": [],
+            "rest_status": "unsupported",
+            "streaming_data_types": ["F"],
+        }
+        if not normalized_symbol:
+            return {
+                **base,
+                "status": "unavailable",
+                "reason": "No symbol requested",
+                "streaming_status": "missing_symbol",
+                "cache_status": "unavailable",
+                "diagnostics": {
+                    "streaming_status": "missing_symbol",
+                    "cache_status": "unavailable",
+                },
+            }
+
+        if not self.streaming_realtime_enabled:
+            return {
+                **base,
+                "status": "unavailable",
+                "reason": SSI_STREAMING_REALTIME_DISABLED_REASON,
+                "streaming_status": "disabled",
+                "cache_status": "disabled",
+                "manager_state": "disabled",
+                "diagnostics": {
+                    "manager_state": "disabled",
+                    "streaming_status": "disabled",
+                    "cache_status": "disabled",
+                    "live_adapter_status": "not_enabled",
+                    "session_status_rows_observed": 0,
+                },
+            }
+
+        if (
+            not self._streaming_realtime_manager_supplied
+            and (not self.consumer_id or not self.consumer_secret or not self.streaming_realtime_stream_url)
+        ):
+            return {
+                **base,
+                "status": "unavailable",
+                "reason": SSI_STREAMING_REALTIME_CONFIG_INCOMPLETE_REASON,
+                "streaming_status": "configuration_incomplete",
+                "cache_status": "unavailable",
+                "manager_state": self.streaming_realtime_manager.state,
+                "diagnostics": {
+                    "manager_state": self.streaming_realtime_manager.state,
+                    "streaming_status": "configuration_incomplete",
+                    "cache_status": "unavailable",
+                    "live_adapter_status": "configuration_incomplete",
+                    "session_status_rows_observed": 0,
+                },
+            }
+
+        if (
+            not self._streaming_realtime_client_factory_supplied
+            and not self._streaming_realtime_manager_supplied
+            and importlib.util.find_spec("ssi_fc_data") is None
+        ):
+            return {
+                **base,
+                "status": "unavailable",
+                "reason": SSI_STREAMING_REALTIME_PACKAGE_UNAVAILABLE_REASON,
+                "streaming_status": "package_unavailable",
+                "cache_status": "unavailable",
+                "manager_state": self.streaming_realtime_manager.state,
+                "diagnostics": {
+                    "manager_state": self.streaming_realtime_manager.state,
+                    "streaming_status": "package_unavailable",
+                    "cache_status": "unavailable",
+                    "live_adapter_status": "package_unavailable",
+                    "session_status_rows_observed": 0,
+                },
+            }
+
+        result = dict(self.streaming_realtime_manager.session_status(normalized_symbol))
+        diagnostics = result.get("diagnostics") if isinstance(result.get("diagnostics"), dict) else {}
+        result.setdefault("source", SSI_SOURCE)
+        result.setdefault("symbol", normalized_symbol)
+        result.setdefault("session_status", None)
+        result.setdefault("count", 1 if result.get("session_status") else 0)
+        result.setdefault("attempted_endpoints", [])
+        result.setdefault("candidate_endpoints", [])
+        result.setdefault("rest_status", "unsupported")
+        result.setdefault("streaming_data_types", ["F"])
+        result.setdefault("runtime_status", diagnostics.get("runtime_status"))
         return result
 
     def get_index_list(self, market: Optional[str] = None, force_refresh: bool = False) -> Dict[str, Any]:

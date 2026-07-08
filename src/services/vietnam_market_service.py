@@ -79,6 +79,7 @@ VN_CACHE_TTL_SECONDS = {
     "intraday_ohlcv": 60,
     "realtime_snapshot": 10,
     "trade_tape": 5,
+    "session_status": 5,
     "news": 1800,
     "symbol_metadata": 3600,
     "index_components": VN_INDEX_COMPONENTS_CACHE_TTL_SECONDS,
@@ -95,6 +96,7 @@ SSI_SECURITIES_DETAILS_SOURCE = "SSI SecuritiesDetails"
 SSI_INTRADAY_SOURCE = "SSI IntradayOhlc"
 SSI_REALTIME_SOURCE = "SSI realtime contract"
 SSI_TRADE_TAPE_SOURCE = "SSI trade-tape contract"
+SSI_SESSION_STATUS_SOURCE = "SSI F trading session/status stream"
 SSI_INDEX_LIST_SOURCE = "SSI IndexList"
 SSI_DAILY_INDEX_SOURCE = "SSI DailyIndex"
 SSI_INDEX_COMPONENTS_SOURCE = "SSI IndexComponents"
@@ -107,6 +109,8 @@ VN_REALTIME_DISABLED_REASON = "SSI realtime is disabled."
 VN_REALTIME_UNAVAILABLE_REASON = "SSI realtime unavailable."
 VN_TRADE_TAPE_DISABLED_REASON = "SSI trade tape is disabled."
 VN_TRADE_TAPE_UNAVAILABLE_REASON = "SSI trade tape unavailable."
+VN_SESSION_STATUS_DISABLED_REASON = "SSI trading session/status stream is disabled."
+VN_SESSION_STATUS_UNAVAILABLE_REASON = "SSI trading session/status unavailable."
 VN_NEWS_DISABLED_REASON = "News provider disabled."
 STALE_CACHE_WARNING = "Live refresh failed; showing stale cached data."
 VN_STATUS_RULE_METADATA = {
@@ -647,6 +651,13 @@ LIVE_DIAGNOSTIC_KEYS = {
     "trade_rows_observed",
     "latest_trade_timestamp",
     "latest_trade_age_seconds",
+    "session_status_ttl_seconds",
+    "session_status_rows_observed",
+    "latest_session_timestamp",
+    "latest_session_age_seconds",
+    "session_status_channel_type",
+    "session_status_channels",
+    "session_status_subscription_status",
     "channel_type",
     "trade_tape_channel_type",
     "trade_tape_channels",
@@ -709,6 +720,7 @@ def _safe_live_diagnostic_value(key: str, value: Any) -> Any:
         "channels",
         "realtime_channels",
         "trade_tape_channels",
+        "session_status_channels",
     } and isinstance(value, (list, tuple, set)):
         safe_items = [
             _safe_live_diagnostic_text(item, max_length=80)
@@ -836,6 +848,18 @@ def _status_message_from_reason(
             "rate_limited": VN_REALTIME_UNAVAILABLE_REASON,
             "unknown": VN_REALTIME_UNAVAILABLE_REASON,
         }
+    elif section == "session_status":
+        messages = {
+            "cache_hit": "SSI trading session/status ready.",
+            "disabled": VN_SESSION_STATUS_DISABLED_REASON,
+            "stream_not_started": VN_SESSION_STATUS_UNAVAILABLE_REASON,
+            "stream_not_bootstrapped": VN_SESSION_STATUS_UNAVAILABLE_REASON,
+            "stream_cache_empty": VN_SESSION_STATUS_UNAVAILABLE_REASON,
+            "stream_cache_stale": "SSI trading session/status stale.",
+            "f_not_subscribed": VN_SESSION_STATUS_UNAVAILABLE_REASON,
+            "f_disabled": VN_SESSION_STATUS_DISABLED_REASON,
+            "unavailable_unknown": VN_SESSION_STATUS_UNAVAILABLE_REASON,
+        }
     else:
         messages = {
             "historical_trade_tape_supported": "SSI historical trade tape ready.",
@@ -946,6 +970,34 @@ def _classify_trade_tape_reason(
         return "latest_trade_stream_only"
     if normalized_status == "not_implemented":
         return "not_implemented"
+    if normalized_status == "unavailable":
+        return "unavailable_unknown"
+    return "unknown"
+
+
+def _classify_session_status_reason(
+    *,
+    status: str,
+    reason: Optional[str],
+) -> str:
+    normalized_status = _lower_text(status)
+    reason_text = _lower_text(reason)
+    if normalized_status == "ok":
+        return "cache_hit"
+    if normalized_status == "disabled":
+        return "disabled"
+    if "not bootstrapped" in reason_text:
+        return "stream_not_bootstrapped"
+    if "cache stale" in reason_text:
+        return "stream_cache_stale"
+    if "cache empty" in reason_text:
+        return "stream_cache_empty"
+    if "f stream channel not subscribed" in reason_text or "f_not_subscribed" in reason_text:
+        return "f_not_subscribed"
+    if "f stream channel disabled" in reason_text or "f_disabled" in reason_text:
+        return "f_disabled"
+    if "not started" in reason_text or "bootstrap symbols empty" in reason_text:
+        return "stream_not_started"
     if normalized_status == "unavailable":
         return "unavailable_unknown"
     return "unknown"
@@ -3180,6 +3232,21 @@ class VietnamMarketService:
         }
 
     @staticmethod
+    def _disabled_session_status_payload(symbol: str) -> Dict[str, Any]:
+        return {
+            "session_status_source": None,
+            "session_status": None,
+            "session_status_status": {
+                "status": "disabled",
+                "source": None,
+                "message": VN_SESSION_STATUS_DISABLED_REASON,
+                "reason_code": "disabled",
+                "classification": "disabled",
+                "ticker": symbol,
+            },
+        }
+
+    @staticmethod
     def _ssi_realtime_unavailable_payload(
         symbol: str,
         *,
@@ -3257,6 +3324,42 @@ class VietnamMarketService:
             "trade_tape_source": SSI_TRADE_TAPE_SOURCE,
             "trade_tape": [],
             "trade_tape_status": status_payload,
+        }
+
+    @staticmethod
+    def _ssi_session_status_unavailable_payload(
+        symbol: str,
+        *,
+        status: str = "unavailable",
+        reason: Optional[str] = None,
+        diagnostics: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        reason_text = reason or VN_SESSION_STATUS_UNAVAILABLE_REASON
+        public_status = _public_live_status(status)
+        reason_code = _classify_session_status_reason(status=public_status, reason=reason_text)
+        status_payload = {
+            "status": public_status,
+            "source": SSI_SESSION_STATUS_SOURCE,
+            "message": _status_message_from_reason(
+                section="session_status",
+                status=public_status,
+                reason_code=reason_code,
+                fallback=VN_SESSION_STATUS_UNAVAILABLE_REASON,
+            ),
+            "reason_code": reason_code,
+            "classification": reason_code,
+            "ticker": symbol,
+        }
+        safe_diagnostics = _live_failure_diagnostics(
+            diagnostics,
+            reason=reason_text if reason_text != VN_SESSION_STATUS_UNAVAILABLE_REASON else None,
+        )
+        if safe_diagnostics:
+            status_payload["diagnostics"] = safe_diagnostics
+        return {
+            "session_status_source": SSI_SESSION_STATUS_SOURCE,
+            "session_status": None,
+            "session_status_status": status_payload,
         }
 
     @staticmethod
@@ -3378,6 +3481,45 @@ class VietnamMarketService:
             "change_pct": _safe_float(row.get("change_pct")),
         }
 
+    @staticmethod
+    def _session_status_row_from_ssi(row: Dict[str, Any], symbol: str) -> Optional[Dict[str, Any]]:
+        if not isinstance(row, dict):
+            return None
+        def _text(value: Any) -> Optional[str]:
+            if value in (None, ""):
+                return None
+            text = str(value).replace("\r", " ").replace("\n", " ").strip()
+            return text[:80] if text else None
+
+        ticker = str(row.get("ticker") or row.get("symbol") or symbol or "").strip().upper()
+        if ticker != symbol:
+            return None
+        trading_session = _text(row.get("trading_session"))
+        trading_status = _text(row.get("trading_status"))
+        trading_date = _valid_date_string(row.get("trading_date"))
+        time_value = _text(row.get("time"))
+        exchange = _text(row.get("exchange"))
+        if not any((trading_session, trading_status, trading_date, time_value, exchange)):
+            return None
+        return {
+            "ticker": ticker,
+            "symbol": ticker,
+            "source": SSI_SESSION_STATUS_SOURCE,
+            "exchange": exchange,
+            "trading_date": trading_date,
+            "time": time_value,
+            "trading_session": trading_session,
+            "trading_status": trading_status,
+            "stream_timestamp": row.get("stream_timestamp"),
+            "stream_data_type": "F",
+            "r_type": _text(row.get("r_type")) or "F",
+            "age_seconds": _safe_int(row.get("age_seconds")),
+            "is_stale": row.get("is_stale") if isinstance(row.get("is_stale"), bool) else None,
+            "stale_reason": _text(row.get("stale_reason")),
+            "cached_at": row.get("cached_at"),
+            "cache_ttl_seconds": _safe_int(row.get("cache_ttl_seconds")),
+        }
+
     def _load_ssi_realtime_payload(self, symbol: str) -> Dict[str, Any]:
         if self.config.realtime_data_provider != VN_PROVIDER_SSI or not self.config.ssi_realtime_enabled:
             return self._disabled_realtime_payload(symbol)
@@ -3467,6 +3609,65 @@ class VietnamMarketService:
         if status == "disabled":
             return self._disabled_trade_tape_payload(symbol)
         return self._ssi_trade_tape_unavailable_payload(
+            symbol,
+            status=status or "unavailable",
+            reason=(payload.get("reason") or payload.get("message")) if isinstance(payload, dict) else None,
+            diagnostics=payload if isinstance(payload, dict) else None,
+        )
+
+    def _load_ssi_session_status_payload(self, symbol: str) -> Dict[str, Any]:
+        if not self.config.ssi_streaming_realtime_enabled:
+            return self._ssi_session_status_unavailable_payload(
+                symbol,
+                reason=SSI_STREAMING_REALTIME_DISABLED_REASON,
+                diagnostics={
+                    "streaming_status": "disabled",
+                    "manager_state": "disabled",
+                    "cache_status": "disabled",
+                    "live_adapter_status": "not_enabled",
+                },
+            )
+
+        fetcher = self._get_ssi_fetcher()
+        get_session_status = getattr(fetcher, "get_session_status", None)
+        if not callable(get_session_status):
+            return self._ssi_session_status_unavailable_payload(
+                symbol,
+                reason="SSI F stream session/status method unavailable.",
+                diagnostics={
+                    "streaming_status": "method_unavailable",
+                    "cache_status": "unavailable",
+                    "failure_class": "method_unavailable",
+                },
+            )
+
+        payload = get_session_status(symbol)
+        status = str(payload.get("status") or "").lower() if isinstance(payload, dict) else ""
+        if status == "ok":
+            session_row = self._session_status_row_from_ssi(payload.get("session_status") or {}, symbol)
+            if session_row:
+                safe_diagnostics = _live_failure_diagnostics(payload)
+                session_status = {
+                    "status": "ok",
+                    "source": SSI_SESSION_STATUS_SOURCE,
+                    "message": None,
+                    "reason_code": "cache_hit",
+                    "classification": "cache_hit",
+                    "ticker": symbol,
+                    "diagnostics": safe_diagnostics,
+                }
+                if not safe_diagnostics:
+                    session_status.pop("diagnostics", None)
+                return {
+                    "session_status_source": SSI_SESSION_STATUS_SOURCE,
+                    "session_status": session_row,
+                    "session_status_status": session_status,
+                }
+            return self._ssi_session_status_unavailable_payload(
+                symbol,
+                reason="SSI F stream returned no session/status row.",
+            )
+        return self._ssi_session_status_unavailable_payload(
             symbol,
             status=status or "unavailable",
             reason=(payload.get("reason") or payload.get("message")) if isinstance(payload, dict) else None,
@@ -5435,9 +5636,11 @@ class VietnamMarketService:
                 **self._disabled_intraday_payload(intraday_timeframe),
                 **self._disabled_realtime_payload(symbol),
                 **self._disabled_trade_tape_payload(symbol),
+                **self._disabled_session_status_payload(symbol),
                 "diagnostics": {
                     "realtime": {},
                     "trade_tape": {},
+                    "session_status": {},
                 },
                 "cache_status": cache_status,
                 "cache_last_fetched_at": cache_last_fetched_at,
@@ -5662,6 +5865,32 @@ class VietnamMarketService:
         cache_next_refresh_at["trade_tape"] = _iso(trade_tape_result["entry"].expires_at)
         if trade_tape_result["error"]:
             cache_errors["trade_tape"] = trade_tape_result["error"]
+
+        session_status_payload = self._disabled_session_status_payload(symbol)
+        session_status_key = _cache_key(
+            "session_status",
+            symbol,
+            provider=VN_PROVIDER_SSI,
+            streaming_enabled=self.config.ssi_streaming_realtime_enabled,
+        )
+        session_status_result = _read_cache(
+            session_status_key,
+            "session_status",
+            lambda: self._load_ssi_session_status_payload(symbol),
+            force_refresh=force_refresh,
+        )
+        session_status_payload = dict(session_status_result["value"])
+        session_status_status_payload = dict(session_status_payload.get("session_status_status") or {})
+        session_status_diagnostics = _live_failure_diagnostics(
+            session_status_status_payload.pop("diagnostics", {})
+        )
+        session_status_payload["session_status_status"] = session_status_status_payload
+        cache_status["session_status_cache"] = session_status_result["status"]
+        cache_last_fetched_at["session_status"] = _iso(session_status_result["entry"].fetched_at)
+        cache_next_refresh_at["session_status"] = _iso(session_status_result["entry"].expires_at)
+        if session_status_result["error"]:
+            cache_errors["session_status"] = session_status_result["error"]
+
         validation = validate_vietnam_row(latest, foreign)
         indicators = calculate_vietnam_indicators(
             df,
@@ -5824,9 +6053,11 @@ class VietnamMarketService:
             **intraday_payload,
             **realtime_payload,
             **trade_tape_payload,
+            **session_status_payload,
             "diagnostics": {
                 "realtime": realtime_diagnostics,
                 "trade_tape": trade_tape_diagnostics,
+                "session_status": session_status_diagnostics,
             },
             "cache_status": cache_status,
             "cache_last_fetched_at": cache_last_fetched_at,

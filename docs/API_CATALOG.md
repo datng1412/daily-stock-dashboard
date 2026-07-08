@@ -70,6 +70,7 @@ Source ownership:
 - Intraday: SSI IntradayOhlc.
 - Realtime snapshot: SSI realtime contract when usable.
 - Trade tape: SSI trade-tape contract when usable.
+- Trading session/status: SSI `F:{symbol}` stream context when usable.
 - News: disabled now; future separate provider.
 
 Null/empty rules:
@@ -78,13 +79,15 @@ Null/empty rules:
 - `intraday_candles = []` when unavailable/stale/no usable rows.
 - `realtime_snapshot = null` when unavailable.
 - `trade_tape = []` when unavailable/no rows.
+- `session_status = null` when unavailable/no usable `F` row.
 - `news = []` while disabled.
 
 Implemented contract notes:
 
 - Watchlist `trade_tape` is public list data. It returns `[]` when unavailable/no rows and trade rows when usable.
-- Realtime/trade-tape status messages are short and user-safe. Sanitized provider details appear under sectioned diagnostics such as `diagnostics.realtime` or `diagnostics.trade_tape`.
+- Realtime/trade-tape/session-status messages are short and user-safe. Sanitized provider details appear under sectioned diagnostics such as `diagnostics.realtime`, `diagnostics.trade_tape`, or `diagnostics.session_status`.
 - SSI trade tape rows are populated only from the background streaming X-TRADE event buffer when parsed rows exist for a bootstrapped symbol. Startup-owned streaming subscribes to `X-TRADE:{symbol}` when trade tape is enabled. Buffered rows can be returned even when stream freshness is stale; diagnostics retain stale/cache age details while row visibility is driven by the presence of real timestamped trade rows. Rows may include `side`, `side_label`, `side_if_available`, `change`, and `change_pct`; observed raw side codes `BU` and `SD` map to `buy` and `sell`, `side_if_available` preserves the raw value, and `side` comes only from explicit X-TRADE side/aggressor fields. `change` is trade price versus SSI DailyStockPrice reference. Request handlers do not start streams, add subscriptions, use all-market channels, or probe unverified REST candidate names.
+- SSI `F:{symbol}` rows are populated only from the background streaming session/status cache. Watchlist rows may include `session_status_source`, `session_status`, and `session_status_status`; raw `trading_session` and `trading_status` values are preserved without mapping business meanings. `F` rows do not create realtime quotes, trade-tape rows, DailyOhlc rows, DailyStockPrice enrichment, or `latest_price`.
 - Intraday cadence fields are public: `intraday_requested_timeframe` is the request hint, `intraday_actual_granularity` / `intraday_actual_granularity_seconds` describe detected regular provider spacing, and `intraday_cadence_status` is `matched`, `different_from_requested`, `irregular`, `unknown`, or `unavailable`.
 - Intraday unavailable status may include sanitized diagnostics such as `failure_class`, `endpoint=IntradayOhlc`, HTTP status, provider code, requested timeframe, internal page size, public limit, usable row count, date match, and cadence status.
 - DailyOhlc and DailyStockPrice can disagree on same ticker/date.
@@ -371,7 +374,7 @@ Response rules:
 
 - Realtime output is optional and not a substitute for SSI DailyOhlc.
 - Missing quote lists return `[]`; embedded unavailable snapshot objects should be `null`.
-- SSI realtime is a FastConnect streaming contract. The backend has parser coverage for buffered `X`, `X-QUOTE`, and `X-TRADE` messages, a config-disabled background manager/cache skeleton, an official-client adapter behind the disabled streaming runtime flag, and FastAPI startup bootstrap behind `SSI_STREAMING_REALTIME_BOOTSTRAP_SYMBOLS`.
+- SSI realtime is a FastConnect streaming contract. The backend has parser coverage for buffered `X`, `X-QUOTE`, `X-TRADE`, and separate `F` messages, a config-disabled background manager/cache skeleton, an official-client adapter behind the disabled streaming runtime flag, and FastAPI startup bootstrap behind `SSI_STREAMING_REALTIME_BOOTSTRAP_SYMBOLS`. `F` rows are session/status context only and do not populate this endpoint's quote list.
 - Request handlers do not open streams, start managers, or add dynamic ticker subscriptions. When `SSI_STREAMING_REALTIME_ENABLED=false`, the endpoint returns unavailable with reason `SSI streaming realtime manager disabled.` even if old cache data exists.
 - When streaming is enabled, this endpoint may read only from a running process-local manager and fresh cache rows created by startup bootstrap. Disabled, empty-bootstrap-symbols, incomplete-config, package-unavailable, not-started, empty-cache, stale-cache, and manager-error states remain unavailable with `realtime_snapshot=null`; safe manager/cache details belong in diagnostics.
 - The endpoint bypasses the generic VN response cache and returns no-store response headers so process-local streaming cache updates can surface on the next poll. Streaming cache TTL and per-row `age_seconds`, `is_stale`, `stale_reason`, `cached_at`, and `cache_ttl_seconds` remain the freshness contract.

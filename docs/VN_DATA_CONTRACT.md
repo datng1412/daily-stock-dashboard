@@ -256,6 +256,30 @@ The watchlist and company public contracts both use a list for `trade_tape`; com
 
 Each streaming trade row is latest-event tape data, not historical time-and-sales history. Public rows may include `ticker`, `price`, `volume`, `value`, `side`, `timestamp`, `timestamp_display`, `source`, `sequence`, and `raw_type`, plus compatibility aliases such as `time`, `side_if_available`, and `sequence_if_available`. Price, volume, and timestamp are required; rows missing any of those fields are dropped. `X-QUOTE` and `X` snapshot messages do not create trade-tape rows. `GET /api/v1/stocks/vn/realtime/trades` retains its top-level `trades` list plus short `status_message`; sanitized technical detail lives in its `diagnostics` object.
 
+### Trading Session / Status
+
+SSI `F:{symbol}` session/status context is an optional live watchlist block. It is produced only by the background streaming lifecycle and a dedicated process-local cache.
+
+When SSI `F` has a usable cached row:
+
+```text
+session_status_status.status = ok
+session_status_status.reason_code = cache_hit
+session_status = { ... }
+```
+
+The `session_status` object may include `ticker`, `symbol`, `exchange`, `trading_date`, `time`, `trading_session`, `trading_status`, `stream_timestamp`, `stream_data_type=F`, `r_type`, `age_seconds`, `is_stale`, `stale_reason`, `cached_at`, and `cache_ttl_seconds`.
+
+When no usable row exists:
+
+```text
+session_status_status.status = unavailable or disabled
+session_status_status.reason_code = disabled, stream_not_started, stream_not_bootstrapped, stream_cache_empty, stream_cache_stale, f_not_subscribed, f_disabled, unavailable_unknown, or unknown
+session_status = null
+```
+
+`trading_session` and `trading_status` preserve raw SSI-observed values. The public contract does not map them to business labels such as open, closed, halted, suspended, lunch break, or final until live payload evidence proves exact meanings. `F` rows must not populate `latest_price`, `realtime_snapshot`, `trade_tape`, DailyOhlc, DailyStockPrice, or indicators. Request handlers must not start streams, add dynamic subscriptions, or use all-market channels.
+
 ### Diagnostics
 
 Diagnostics may include:
@@ -274,6 +298,7 @@ Watchlist/company live diagnostics use:
 ```text
 diagnostics.realtime = { ... }
 diagnostics.trade_tape = { ... }
+diagnostics.session_status = { ... }
 ```
 
 Status blocks do not carry endpoint dumps or raw provider messages. Diagnostics must not contain tokens, Authorization headers, cookies, account IDs, consumer credentials, full provider bodies, or stack traces. Secret-like diagnostic strings are redacted and URLs in provider summaries are collapsed.
@@ -399,7 +424,8 @@ The SSI-first rule is: if SSI can provide a market-data field, SSI owns it; if a
 | Intraday candles | SSI IntradayOhlc | Strict source; no fallback |
 | Realtime snapshot | SSI FastConnect streaming realtime contract | Parser, manager/cache, official-client adapter, and FastAPI startup bootstrap exist behind disabled-by-default config; request handlers read process-local cache only |
 | Trade tape / latest trade events | SSI streaming X-TRADE event buffer | Fresh bootstrapped X-TRADE rows may populate latest-event tape; full historical time-and-sales remains unverified |
-| Future SSI `F`, `X-QUOTE`, `R`, `MI`, `B` streams | SSI streaming after runtime proof | Trading status, order book, foreign room, realtime index, and realtime bars must remain separate source-labeled blocks; no fake placeholders and no request-handler stream starts |
+| SSI `F` stream | SSI streaming runtime proof | Raw trading session/status context may appear in watchlist `session_status`; code meanings and finality labels remain deferred and must not affect price ownership |
+| Future SSI `X-QUOTE`, `R`, `MI`, `B` streams | SSI streaming after runtime proof | Order book, foreign room, realtime index, and realtime bars must remain separate source-labeled blocks; no fake placeholders and no request-handler stream starts |
 | Future SSI extended instrument metadata | SSI SecuritiesDetails/Securities after runtime proof | Derivative, covered warrant, ETF/fund, and bond fields require exact row-key evidence and instrument-specific semantics before exposure |
 | News | Future NewsProvider | Disabled now |
 | Financials | Future external provider | Not implemented |
