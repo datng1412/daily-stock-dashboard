@@ -260,12 +260,20 @@ Each streaming trade row is latest-event tape data, not historical time-and-sale
 
 SSI `X-QUOTE:{symbol}` order-book context is an optional live watchlist block. It is produced only by the background streaming lifecycle and a dedicated process-local latest-row cache.
 
-When SSI `X-QUOTE` has a usable cached row:
+When SSI `X-QUOTE` has a usable fresh cached row:
 
 ```text
 order_book_status.status = ok
 order_book_status.reason_code = cache_hit
 order_book = { ... }
+```
+
+When SSI `X-QUOTE` has a stale but usable cached row:
+
+```text
+order_book_status.status = stale
+order_book_status.reason_code = stream_cache_stale
+order_book = { ... is_stale=true ... }
 ```
 
 The `order_book` object may include `ticker`, `symbol`, `exchange`, `bids`, `asks`, `trading_date`, `time`, `stream_timestamp`, `stream_data_type=X-QUOTE`, `r_type`, `age_seconds`, `is_stale`, `stale_reason`, `cached_at`, and `cache_ttl_seconds`. Each `bids[]` / `asks[]` level may include `level`, `price`, and `volume`. A usable level requires positive `price` and nonnegative `volume`; malformed or empty levels are dropped and never replaced with fake placeholders.
@@ -274,7 +282,7 @@ When no usable row exists:
 
 ```text
 order_book_status.status = unavailable or disabled
-order_book_status.reason_code = disabled, stream_not_started, stream_not_bootstrapped, stream_cache_empty, stream_cache_stale, xquote_not_subscribed, xquote_disabled, unavailable_unknown, or unknown
+order_book_status.reason_code = disabled, stream_not_started, stream_not_bootstrapped, stream_cache_empty, xquote_not_subscribed, xquote_disabled, unavailable_unknown, or unknown
 order_book = null
 ```
 

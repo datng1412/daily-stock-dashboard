@@ -12,6 +12,43 @@ export type ExtractFromImageResponse = {
   rawText?: string;
 };
 
+export type VietnamOrderBookLevel = {
+  level?: number | null;
+  price?: number | null;
+  volume?: number | null;
+};
+
+export type VietnamOrderBook = {
+  ticker?: string | null;
+  symbol?: string | null;
+  source?: string | null;
+  exchange?: string | null;
+  bids?: VietnamOrderBookLevel[];
+  asks?: VietnamOrderBookLevel[];
+  tradingDate?: string | null;
+  time?: string | null;
+  receivedAt?: string | null;
+  streamTimestamp?: string | null;
+  streamDataType?: string | null;
+  rType?: string | null;
+  ageSeconds?: number | null;
+  isStale?: boolean | null;
+  staleReason?: string | null;
+  cachedAt?: string | null;
+  cacheTtlSeconds?: number | null;
+};
+
+export type VietnamOptionalLiveStatus = {
+  status?: string | null;
+  source?: string | null;
+  message?: string | null;
+  reasonCode?: string | null;
+  classification?: string | null;
+  count?: number | null;
+  fetchedAt?: string | null;
+  diagnostics?: Record<string, unknown> | null;
+};
+
 export type VietnamWatchItem = {
   ticker: string;
   status?: 'ok' | 'unavailable' | string;
@@ -311,9 +348,13 @@ export type VietnamWatchItem = {
     fetchedAt?: string | null;
     diagnostics?: Record<string, unknown> | null;
   };
+  orderBookSource?: string | null;
+  orderBook?: VietnamOrderBook | null;
+  orderBookStatus?: VietnamOptionalLiveStatus;
   diagnostics?: {
     realtime?: Record<string, unknown> | null;
     tradeTape?: Record<string, unknown> | null;
+    orderBook?: Record<string, unknown> | null;
   };
   dataQualitySummary?: VietnamDataQualitySummary;
   cacheStatus: Record<string, string>;
@@ -772,9 +813,13 @@ export type VietnamCompanyResearchResponse = {
     reasonCode?: string | null;
     classification?: string | null;
   };
+  orderBookSource?: string | null;
+  orderBook?: VietnamOrderBook | null;
+  orderBookStatus?: VietnamOptionalLiveStatus;
   diagnostics?: {
     realtime?: Record<string, unknown> | null;
     tradeTape?: Record<string, unknown> | null;
+    orderBook?: Record<string, unknown> | null;
   };
   dataQualitySummary?: VietnamDataQualitySummary;
   sourceCoverage: VietnamCompanySourceCoverageItem[];

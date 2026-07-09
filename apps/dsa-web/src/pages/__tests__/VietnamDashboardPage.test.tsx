@@ -2389,6 +2389,223 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(trade.queryByText(/stale/i)).not.toBeInTheDocument();
   });
 
+  it('renders dynamic SSI X-QUOTE order book levels with board price colors', async () => {
+    mockedGetVietnamWatchlist.mockImplementation(async (tickers) => ({
+      ...makeResponse(tickers?.length ? tickers : defaultTickers),
+      watchlist: (tickers?.length ? tickers : defaultTickers).map((ticker) => {
+        const item = makeItem(ticker);
+        if (ticker !== 'FPT') return item;
+        return {
+          ...item,
+          dailyStockPrice: {
+            ...item.dailyStockPrice,
+            referencePrice: 99_000,
+            ceilingPrice: 106_000,
+            floorPrice: 92_000,
+          },
+          priceLimit: {
+            ...item.priceLimit,
+            referencePrice: 99_000,
+            ceilingPrice: 106_000,
+            floorPrice: 92_000,
+          },
+          orderBookSource: 'SSI X-QUOTE',
+          orderBookStatus: {
+            status: 'ok',
+            source: 'SSI X-QUOTE',
+            message: 'SSI order book ready.',
+          },
+          orderBook: {
+            ticker: 'FPT',
+            symbol: 'FPT',
+            source: 'SSI X-QUOTE',
+            streamDataType: 'X-QUOTE',
+            time: '09:41:23',
+            ageSeconds: 2,
+            bids: [
+              { level: 1, price: 99_000, volume: 19_400 },
+              { level: 2, price: 98_000, volume: 25_100 },
+              { level: 4, price: 92_000, volume: 84_800 },
+            ],
+            asks: [
+              { level: 1, price: 100_000, volume: 7_400 },
+              { level: 2, price: 106_000, volume: 50_500 },
+              { level: 3, price: 107_000, volume: 6_000 },
+              { level: 4, price: 108_000, volume: 1_000 },
+            ],
+          },
+          diagnostics: {
+            ...item.diagnostics,
+            orderBook: {
+              orderBookRowsObserved: 55,
+              orderBookSubscriptionStatus: 'subscribed',
+            },
+          },
+        };
+      }),
+    }));
+
+    render(<VietnamDashboardPage />);
+
+    const heading = await screen.findByRole('heading', { name: 'Order Book — SSI X-QUOTE' });
+    const card = heading.closest('section') as HTMLElement | null;
+    if (!card) throw new Error('Order book card not found');
+    const book = within(card);
+
+    expect(book.getAllByText('SSI X-QUOTE').length).toBeGreaterThan(0);
+    expect(book.getByRole('columnheader', { name: 'Bid Vol' })).toBeInTheDocument();
+    expect(book.getByRole('columnheader', { name: 'Bid Price' })).toBeInTheDocument();
+    expect(book.getByRole('columnheader', { name: 'Ask Price' })).toBeInTheDocument();
+    expect(book.getByRole('columnheader', { name: 'Ask Vol' })).toBeInTheDocument();
+    expect(book.getAllByRole('row')).toHaveLength(5);
+    expect(book.getByText('19,400')).toBeInTheDocument();
+    expect(book.getByText('7,400')).toBeInTheDocument();
+    expect(book.getAllByText('99.00').some((node) => node.className.includes('text-reference-yellow'))).toBe(true);
+    expect(book.getAllByText('92.00').some((node) => node.className.includes('text-cyan'))).toBe(true);
+    expect(book.getAllByText('106.00').some((node) => node.className.includes('text-ceiling-purple'))).toBe(true);
+    expect(book.getByText('100.00')).toHaveClass('text-success');
+    expect(book.getByLabelText('Bid level 3 unavailable')).toBeInTheDocument();
+    expect(book.getByText(/time 09:41:23/)).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /foreign room/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /market index pulse/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /session status/i })).not.toBeInTheDocument();
+    expect(selectedTickerHeader().getAllByText('0.10').length).toBeGreaterThan(0);
+  });
+
+  it('renders SSI X-QUOTE unavailable without fake order-book rows', async () => {
+    mockedGetVietnamWatchlist.mockImplementation(async (tickers) => ({
+      ...makeResponse(tickers?.length ? tickers : defaultTickers),
+      watchlist: (tickers?.length ? tickers : defaultTickers).map((ticker) => {
+        const item = makeItem(ticker);
+        if (ticker !== 'FPT') return item;
+        return {
+          ...item,
+          orderBookSource: 'SSI X-QUOTE',
+          orderBook: null,
+          orderBookStatus: {
+            status: 'unavailable',
+            source: 'SSI X-QUOTE',
+            message: 'Order book unavailable.',
+            reasonCode: 'stream_cache_empty',
+          },
+        };
+      }),
+    }));
+
+    render(<VietnamDashboardPage />);
+
+    const heading = await screen.findByRole('heading', { name: 'Order Book — SSI X-QUOTE' });
+    const card = heading.closest('section') as HTMLElement | null;
+    if (!card) throw new Error('Order book card not found');
+    const book = within(card);
+
+    expect(book.getByText('Order book unavailable.')).toBeInTheDocument();
+    expect(book.queryByRole('columnheader', { name: 'Bid Vol' })).not.toBeInTheDocument();
+    expect(book.queryByText('Bid Price')).not.toBeInTheDocument();
+    expect(book.queryByText('Ask Price')).not.toBeInTheDocument();
+  });
+
+  it('renders stale SSI X-QUOTE rows distinctly when cached levels exist', async () => {
+    mockedGetVietnamWatchlist.mockImplementation(async (tickers) => ({
+      ...makeResponse(tickers?.length ? tickers : defaultTickers),
+      watchlist: (tickers?.length ? tickers : defaultTickers).map((ticker) => {
+        const item = makeItem(ticker);
+        if (ticker !== 'FPT') return item;
+        return {
+          ...item,
+          orderBookSource: 'SSI X-QUOTE',
+          orderBookStatus: {
+            status: 'stale',
+            source: 'SSI X-QUOTE',
+            message: 'X-QUOTE cache stale.',
+            reasonCode: 'stale',
+          },
+          orderBook: {
+            ticker: 'FPT',
+            bids: [{ level: 1, price: 98_000, volume: 1_000 }],
+            asks: [{ level: 1, price: 100_000, volume: 2_000 }],
+            isStale: true,
+            staleReason: 'market inactive or no recent tick',
+          },
+        };
+      }),
+    }));
+
+    render(<VietnamDashboardPage />);
+
+    const heading = await screen.findByRole('heading', { name: 'Order Book — SSI X-QUOTE' });
+    const card = heading.closest('section') as HTMLElement | null;
+    if (!card) throw new Error('Order book card not found');
+    const book = within(card);
+
+    expect(book.getByText('stale')).toBeInTheDocument();
+    expect(book.getByText(/Last available order book is stale/)).toBeInTheDocument();
+    expect(book.getByText('98.00')).toBeInTheDocument();
+    expect(book.getByText('2,000')).toBeInTheDocument();
+  });
+
+  it('refreshes selected ticker live context with a bounded one-ticker watchlist request', async () => {
+    vi.useFakeTimers();
+    let selectedRefreshCount = 0;
+    mockedGetVietnamWatchlist.mockImplementation(async (tickers) => {
+      const requestedTickers = tickers?.length ? tickers : defaultTickers;
+      if (requestedTickers.length === 1 && requestedTickers[0] === 'FPT') {
+        selectedRefreshCount += 1;
+        const item = makeItem('FPT');
+        return {
+          ...makeResponse(['FPT']),
+          watchlist: [{
+            ...item,
+            orderBookSource: 'SSI X-QUOTE',
+            orderBookStatus: {
+              status: 'ok',
+              source: 'SSI X-QUOTE',
+              reasonCode: 'cache_hit',
+            },
+            orderBook: {
+              ticker: 'FPT',
+              bids: [{ level: 1, price: 101_000, volume: 1_000 }],
+              asks: [{ level: 1, price: 102_000, volume: 2_000 }],
+              isStale: false,
+            },
+          }],
+        };
+      }
+      return {
+        ...makeResponse(requestedTickers),
+        watchlist: requestedTickers.map((ticker) => ({
+          ...makeItem(ticker),
+          orderBookSource: 'SSI X-QUOTE',
+          orderBook: null,
+          orderBookStatus: {
+            status: 'unavailable',
+            source: 'SSI X-QUOTE',
+            message: 'Order book unavailable.',
+            reasonCode: 'stream_cache_empty',
+          },
+        })),
+      };
+    });
+
+    render(<VietnamDashboardPage />);
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText('Order book unavailable.')).toBeInTheDocument();
+
+    await act(async () => {
+      vi.advanceTimersByTime(3_000);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(selectedRefreshCount).toBe(1);
+    expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(['FPT'], false);
+    expect(screen.getByText('101.00')).toBeInTheDocument();
+  });
+
   it('refetches pending trade tape until X-TRADE rows arrive and then renders rows first', async () => {
     let callCount = 0;
     mockedGetVietnamRealtimeTrades.mockImplementation(async (symbol) => {

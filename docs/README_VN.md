@@ -74,11 +74,11 @@ The current strict SSI runtime can already show these stock-detail metrics when 
 - SSI-derived metrics from current SSI inputs: 52W high/low, 10D average volume, 3M average volume, price-vs-reference percent, and daily range percent. These remain null/status-labeled when SSI inputs are insufficient and do not change `latest_price` ownership.
 - Limited symbol metadata such as exchange, market, security type, issuer, lot size, listed shares, and listed date when SSI `SecuritiesDetails` or `Securities` returns exact ticker fields.
 - VN30/index component lists from SSI IndexComponents where available.
-- Backend/API support for optional SSI `X-QUOTE:{symbol}` order-book context when the background stream has a usable cache row. Public rows may expose `order_book_source`, `order_book`, `order_book_status`, and sanitized `diagnostics.order_book`.
+- Backend/API and selected-ticker frontend support for optional SSI `X-QUOTE:{symbol}` order-book context when the background stream has a usable cache row. Public rows may expose `order_book_source`, `order_book`, `order_book_status`, and sanitized `diagnostics.order_book`.
 - Backend/API support for optional SSI `R:{symbol}` foreign-room context when the background stream has a usable cache row. Public rows may expose `foreign_room_source`, `foreign_room`, `foreign_room_status`, and sanitized `diagnostics.foreign_room`.
 - Backend/API support for optional SSI `MI:{index_code}` market-index pulse context when the background stream has usable cache rows. Public responses may expose `market_index_pulse_source`, `market_index_pulse`, `market_index_pulse_status`, and sanitized `diagnostics.market_index_pulse`.
 
-`X-QUOTE` order book is a separate optional live context. It does not affect `latest_price`, does not replace DailyOhlc or DailyStockPrice, and does not replace realtime `X:{symbol}` snapshots, trade tape `X-TRADE:{symbol}`, or session/status `F:{symbol}`. Malformed bid/ask levels are dropped, no fake order-book rows are synthesized, and empty/unavailable state is explicit through status/diagnostics. Live market proof and frontend order-book UI are still deferred.
+`X-QUOTE` order book is a separate optional live context. It does not affect `latest_price`, does not replace DailyOhlc or DailyStockPrice, and does not replace realtime `X:{symbol}` snapshots, trade tape `X-TRADE:{symbol}`, or session/status `F:{symbol}`. Malformed bid/ask levels are dropped, no fake order-book rows are synthesized, and empty/unavailable state is explicit through status/diagnostics. The dashboard and company selected-ticker panels can render a source-labeled `Order Book — SSI X-QUOTE` ladder with dynamic levels when cached rows exist, including stale last-known rows with visible stale copy and age metadata.
 
 `R` foreign room is a separate optional live context. It does not affect `latest_price`, does not replace DailyOhlc or DailyStockPrice daily foreign flow, and does not replace realtime `X:{symbol}` snapshots, trade tape `X-TRADE:{symbol}`, order book `X-QUOTE:{symbol}`, or session/status `F:{symbol}`. Malformed or negative room/volume/value fields are dropped/null, no fake foreign-room values are synthesized, and empty/unavailable state is explicit through status/diagnostics. Live value-unit proof and frontend foreign-room UI are still deferred.
 
@@ -87,7 +87,7 @@ The current strict SSI runtime can already show these stock-detail metrics when 
 Remaining SSI-backed candidates or deferred productization need further proof before exposure:
 
 - `F` trading session/status live market proof and UI, including possible `TradingSession` / `TradingStatus` labels after payload proof.
-- `X-QUOTE` order-book live proof and frontend UI; backend/API support exists.
+- Further X-QUOTE market-specific depth/level semantics after more live payload evidence; the current frontend renders dynamic cached levels without fixed-depth claims.
 - `R` realtime foreign-room live proof and frontend UI; backend/API support exists.
 - `MI` realtime market-index pulse live proof and frontend UI; backend/API support exists.
 - `B` realtime bars.

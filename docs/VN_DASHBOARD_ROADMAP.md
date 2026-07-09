@@ -1243,7 +1243,7 @@ Result:
 Recommended next SSI-backed runtime-proof order:
 
 1. Phase 4.8G - Trading Session/Status from SSI `F:{symbol}` runtime proof. Implemented as optional cache-backed watchlist context; code mapping and UI productization remain deferred.
-2. Phase 4.8H - `X-QUOTE` Order Book Ladder. Implemented as optional cache-backed watchlist context; live payload proof and UI productization remain deferred.
+2. Phase 4.8H - `X-QUOTE` Order Book Ladder. Implemented as optional cache-backed watchlist/company context with selected-ticker UI; further market-specific depth semantics remain deferred.
 3. Phase 4.8I - Realtime Foreign Room from SSI `R`. Implemented as optional cache-backed watchlist context; live payload proof and UI productization remain deferred.
 4. Phase 4.8I-Live - live smoke for SSI `R:{symbol}` during market hours.
 5. Phase 4.8I-UI - foreign-room UI only after live proof.
@@ -1256,7 +1256,7 @@ Recommended next SSI-backed runtime-proof order:
 
 ### Phase 4.8G - SSI F Trading Session/Status Runtime Proof
 
-Status: implemented on 2026-07-08 as a backend/API runtime-proof path.
+Status: backend/API runtime-proof path implemented on 2026-07-08; selected-ticker frontend UI implemented on 2026-07-09.
 
 Result:
 
@@ -1281,13 +1281,17 @@ Result:
 * Parsed `X-QUOTE` rows are stored in a dedicated latest order-book cache, not in the realtime quote cache, trade-tape buffer, or session/status cache.
 * Watchlist rows can expose `order_book_source`, `order_book`, and `order_book_status`; technical state lives under `diagnostics.order_book`.
 * Safe fields only are surfaced: ticker/symbol, exchange, bid/ask levels, trading date, time, stream timestamp/type, cache age, and source. Bid/ask levels require positive price and nonnegative volume; malformed levels are dropped rather than filled.
-* No UI bid/ask ladder is productized yet. Level-count claims, price/volume unit labels, empty-book behavior, and market-specific semantics remain deferred until live payload evidence proves exact meanings.
+* Dashboard and company selected-ticker panels now render `Order Book — SSI X-QUOTE` when cached rows exist, using dynamic level counts, bid/ask matching by level, full-share volumes, board-style price formatting, SSI board colors when reference/ceiling/floor are available, and explicit stale/unavailable states.
+* Stale but usable `X-QUOTE` cache rows remain visible as last-known ladders with `order_book_status.status=stale`, stale copy, cache age metadata, and no effect on DailyOhlc `latest_price`. Empty/no-usable-level cache still returns `order_book=null`.
+* The dashboard selected ticker and company detail live context refresh through existing watchlist/company responses on a short visible-tab interval so short-TTL X-QUOTE updates can surface without dynamic stream subscription or a new endpoint.
+* Live proof on 2026-07-09 09:35-09:41 +07 verified usable FPT/HPG/SSI/ACB X-QUOTE rows. The UI does not claim every market/exchange always provides exactly three levels; further market-specific depth and unit semantics remain deferred until more live payload evidence proves exact meanings.
 
 Boundaries:
 
 * Request handlers remain cache readers only and must not start streams, subscribe dynamically, use all-market channels, or call trading/order/account APIs.
 * `X-QUOTE` order-book context must not replace SSI DailyOhlc, DailyStockPrice, realtime snapshot, trade tape, session/status, intraday, indicators, or `latest_price`.
 * `latest_price_source` remains `SSI DailyOhlc`.
+* Phase 4.8H-UI does not add F session/status UI, R foreign-room UI, or MI market-index pulse UI.
 
 ### Phase 4.8I - SSI R Foreign Room Backend/API Support
 

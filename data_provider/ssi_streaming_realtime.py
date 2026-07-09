@@ -1682,15 +1682,16 @@ class SsiStreamingRealtimeManager:
                 "latest_order_book_age_seconds": cache_result["latest_order_book_age_seconds"],
             }
         )
-        if cache_status == "hit" and cache_result["row"]:
+        if cache_status in {"hit", "stale"} and cache_result["row"]:
+            streaming_status = "cache_hit" if cache_status == "hit" else "cache_stale"
             return {
                 **base,
-                "status": "ok",
-                "reason": None,
+                "status": "ok" if cache_status == "hit" else "stale",
+                "reason": None if cache_status == "hit" else "SSI X-QUOTE stream cache stale.",
                 "order_book": cache_result["row"],
                 "count": 1,
-                "streaming_status": "cache_hit",
-                "cache_status": "hit",
+                "streaming_status": streaming_status,
+                "cache_status": cache_status,
                 "manager_state": manager_state,
                 "diagnostics": diagnostics,
             }

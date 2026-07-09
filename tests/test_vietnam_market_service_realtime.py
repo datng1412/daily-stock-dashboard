@@ -467,6 +467,57 @@ def test_ssi_order_book_cache_empty_is_optional_unavailable():
     assert any(issue["code"] == "order_book_stream_cache_empty" for issue in item["data_quality_summary"]["issues"])
 
 
+def test_ssi_order_book_stale_preserves_last_known_ladder_without_changing_daily_price():
+    fetcher = FakeSsiFetcher(
+        order_book_payload={
+            "status": "stale",
+            "source": "SSI",
+            "symbol": "FPT",
+            "reason": "SSI X-QUOTE stream cache stale.",
+            "order_book": {
+                "ticker": "FPT",
+                "symbol": "FPT",
+                "exchange": "HOSE",
+                "bids": [{"level": 1, "price": 130.4, "volume": 1000}],
+                "asks": [{"level": 1, "price": 130.6, "volume": 2000}],
+                "trading_date": "2026-06-30",
+                "time": "10:00:00",
+                "stream_timestamp": "2026-06-30T10:00:00",
+                "stream_data_type": "X-QUOTE",
+                "r_type": "X-QUOTE",
+                "age_seconds": 16,
+                "is_stale": True,
+                "stale_reason": "SSI streaming realtime cache stale.",
+                "cached_at": "2026-06-30T03:00:00+00:00",
+                "cache_ttl_seconds": 5,
+            },
+            "streaming_status": "cache_stale",
+            "cache_status": "stale",
+            "diagnostics": {
+                "streaming_status": "cache_stale",
+                "cache_status": "stale",
+                "manager_state": "running",
+                "order_book_channels": ["X-QUOTE:FPT"],
+                "latest_order_book_age_seconds": 16,
+            },
+        }
+    )
+
+    item = _service(fetcher).build_watchlist(["FPT"], force_refresh=True)["watchlist"][0]
+
+    assert item["status"] == "ok"
+    assert item["latest_price_source"] == "SSI DailyOhlc"
+    assert item["order_book_source"] == "SSI X-QUOTE order-book stream"
+    assert item["order_book_status"]["status"] == "stale"
+    assert item["order_book_status"]["reason_code"] == "stream_cache_stale"
+    assert item["order_book_status"]["message"] == "SSI order book stale."
+    assert item["order_book"]["is_stale"] is True
+    assert item["order_book"]["bids"][0] == {"level": 1, "price": 130.4, "volume": 1000.0}
+    assert item["order_book"]["asks"][0] == {"level": 1, "price": 130.6, "volume": 2000.0}
+    assert item["diagnostics"]["order_book"]["streaming_status"] == "cache_stale"
+    assert item["diagnostics"]["order_book"]["latest_order_book_age_seconds"] == 16
+
+
 def test_ssi_foreign_room_success_is_separate_from_daily_price_and_daily_stock_price():
     fetcher = FakeSsiFetcher(
         foreign_room_payload={

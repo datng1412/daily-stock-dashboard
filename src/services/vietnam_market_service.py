@@ -1063,6 +1063,8 @@ def _classify_order_book_reason(
     reason_text = _lower_text(reason)
     if normalized_status == "ok":
         return "cache_hit"
+    if normalized_status == "stale":
+        return "stream_cache_stale"
     if normalized_status == "disabled":
         return "disabled"
     if "not bootstrapped" in reason_text:
@@ -1236,7 +1238,7 @@ def _intraday_failure_diagnostics(payload: Any) -> Dict[str, Any]:
 
 def _public_live_status(status: Optional[str]) -> str:
     normalized = str(status or "").lower()
-    if normalized in {"ok", "unavailable", "disabled"}:
+    if normalized in {"ok", "stale", "unavailable", "disabled"}:
         return normalized
     return "unavailable"
 
@@ -4071,16 +4073,23 @@ class VietnamMarketService:
 
         payload = get_order_book(symbol)
         status = str(payload.get("status") or "").lower() if isinstance(payload, dict) else ""
-        if status == "ok":
+        if status in {"ok", "stale"}:
             order_book = self._order_book_from_ssi(payload.get("order_book") or {}, symbol)
             if order_book:
                 safe_diagnostics = _live_failure_diagnostics(payload)
+                public_status = "stale" if status == "stale" or order_book.get("is_stale") is True else "ok"
+                reason_code = "stream_cache_stale" if public_status == "stale" else "cache_hit"
                 order_book_status = {
-                    "status": "ok",
+                    "status": public_status,
                     "source": SSI_ORDER_BOOK_SOURCE,
-                    "message": None,
-                    "reason_code": "cache_hit",
-                    "classification": "cache_hit",
+                    "message": _status_message_from_reason(
+                        section="order_book",
+                        status=public_status,
+                        reason_code=reason_code,
+                        fallback=VN_ORDER_BOOK_UNAVAILABLE_REASON,
+                    ) if public_status == "stale" else None,
+                    "reason_code": reason_code,
+                    "classification": reason_code,
                     "ticker": symbol,
                     "bid_levels": len(order_book.get("bids") or []),
                     "ask_levels": len(order_book.get("asks") or []),

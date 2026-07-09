@@ -181,9 +181,35 @@ const makeCompanySnapshot = (): VietnamCompanyResearchResponse => ({
       source: 'SSI',
     },
   ],
+  orderBookSource: 'SSI X-QUOTE',
+  orderBookStatus: {
+    source: 'SSI X-QUOTE',
+    status: 'ok',
+    message: null,
+  },
+  orderBook: {
+    ticker: 'FPT',
+    symbol: 'FPT',
+    source: 'SSI X-QUOTE',
+    streamDataType: 'X-QUOTE',
+    time: '09:41:23',
+    ageSeconds: 2,
+    bids: [
+      { level: 1, price: 123000, volume: 19_400 },
+      { level: 2, price: 122000, volume: 25_100 },
+      { level: 4, price: 114400, volume: 84_800 },
+    ],
+    asks: [
+      { level: 1, price: 124600, volume: 7_400 },
+      { level: 2, price: 131600, volume: 50_500 },
+      { level: 3, price: 132000, volume: 6_000 },
+      { level: 4, price: 133000, volume: 1_000 },
+    ],
+  },
   diagnostics: {
     realtime: {},
     tradeTape: {},
+    orderBook: {},
   },
   dataQualitySummary: {
     overallStatus: 'ok',
@@ -310,6 +336,57 @@ describe('VietnamCompanyResearchPage', () => {
     await waitFor(() => {
       expect(stocksApi.getVietnamCompanyResearch).toHaveBeenCalledWith('FPT', false);
     });
+  });
+
+  it('renders company SSI X-QUOTE order book with dynamic levels and board colors', async () => {
+    vi.mocked(stocksApi.getVietnamCompanyResearch).mockResolvedValue(makeCompanySnapshot());
+
+    renderPage();
+
+    const section = (await screen.findByRole('heading', { name: 'Order Book — SSI X-QUOTE' })).closest('section');
+    if (!section) throw new Error('SSI X-QUOTE order book section not found');
+    const book = within(section);
+
+    expect(book.getAllByText('SSI X-QUOTE').length).toBeGreaterThan(0);
+    expect(book.getByRole('columnheader', { name: 'Bid Vol' })).toBeInTheDocument();
+    expect(book.getByRole('columnheader', { name: 'Bid Price' })).toBeInTheDocument();
+    expect(book.getByRole('columnheader', { name: 'Ask Price' })).toBeInTheDocument();
+    expect(book.getByRole('columnheader', { name: 'Ask Vol' })).toBeInTheDocument();
+    expect(book.getAllByRole('row')).toHaveLength(5);
+    expect(book.getByText('19,400')).toBeInTheDocument();
+    expect(book.getByText('7,400')).toBeInTheDocument();
+    expect(book.getAllByText('123.00').some((node) => node.className.includes('text-reference-yellow'))).toBe(true);
+    expect(book.getAllByText('114.40').some((node) => node.className.includes('text-cyan'))).toBe(true);
+    expect(book.getAllByText('131.60').some((node) => node.className.includes('text-ceiling-purple'))).toBe(true);
+    expect(book.getByText('124.60')).toHaveClass('text-success');
+    expect(book.getByLabelText('Bid level 3 unavailable')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /foreign room/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /market index pulse/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /session status/i })).not.toBeInTheDocument();
+    expect(screen.getByTestId('company-latest-price')).toHaveTextContent('124.60');
+  });
+
+  it('renders company SSI X-QUOTE unavailable without fake rows', async () => {
+    const snapshot = makeCompanySnapshot();
+    snapshot.orderBook = null;
+    snapshot.orderBookStatus = {
+      source: 'SSI X-QUOTE',
+      status: 'unavailable',
+      message: 'Order book unavailable.',
+      reasonCode: 'stream_cache_empty',
+    };
+    vi.mocked(stocksApi.getVietnamCompanyResearch).mockResolvedValue(snapshot);
+
+    renderPage();
+
+    const section = (await screen.findByRole('heading', { name: 'Order Book — SSI X-QUOTE' })).closest('section');
+    if (!section) throw new Error('SSI X-QUOTE order book section not found');
+    const book = within(section);
+
+    expect(book.getByText('Order book unavailable.')).toBeInTheDocument();
+    expect(book.queryByRole('columnheader', { name: 'Bid Vol' })).not.toBeInTheDocument();
+    expect(book.queryByText('Bid Price')).not.toBeInTheDocument();
+    expect(book.queryByText('Ask Price')).not.toBeInTheDocument();
   });
 
   it('shows company trade rows when stale diagnostics accompany buffered X-TRADE data', async () => {

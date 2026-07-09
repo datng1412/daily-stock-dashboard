@@ -862,7 +862,7 @@ def test_x_quote_drops_malformed_order_book_levels_without_fake_rows():
     assert payload["diagnostics"]["order_book_rows_observed"] == 0
 
 
-def test_x_quote_order_book_reports_stale_without_returning_live_row():
+def test_x_quote_order_book_returns_stale_last_known_ladder():
     now = [1000.0]
     client = FakeStreamClient()
     manager = _manager(client=client, now=now)
@@ -872,10 +872,14 @@ def test_x_quote_order_book_reports_stale_without_returning_live_row():
     now[0] += 16
     payload = manager.order_book("FPT")
 
-    assert payload["status"] == "unavailable"
+    assert payload["status"] == "stale"
     assert payload["streaming_status"] == "cache_stale"
     assert payload["cache_status"] == "stale"
-    assert payload["order_book"] is None
+    assert payload["order_book"]["ticker"] == "FPT"
+    assert payload["order_book"]["is_stale"] is True
+    assert payload["order_book"]["stale_reason"] == "SSI streaming realtime cache stale."
+    assert payload["order_book"]["bids"][0] == {"level": 1, "price": 130.4, "volume": 1000.0}
+    assert payload["order_book"]["asks"][0] == {"level": 1, "price": 130.6, "volume": 2000.0}
     assert payload["diagnostics"]["latest_order_book_age_seconds"] == 16
 
 

@@ -4,7 +4,7 @@ import { ArrowLeft, RefreshCw } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
 import { stocksApi, type VietnamCompanyResearchResponse, type VietnamRealtimeTrade } from '../api/stocks';
 import { AppPage, Badge, Button, Loading } from '../components/common';
-import { DataQualitySummary } from '../components/dashboard';
+import { DataQualitySummary, OrderBookLadder } from '../components/dashboard';
 import { cn } from '../utils/cn';
 import {
   CEILING_PRICE_CLASS,
@@ -37,6 +37,7 @@ type DiagnosticRow = {
 
 const TRADE_TAPE_STARTUP_REFETCH_INTERVAL_MS = 4_000;
 const TRADE_TAPE_STARTUP_REFETCH_MAX_WAIT_MS = 60_000;
+const SELECTED_LIVE_CONTEXT_REFRESH_INTERVAL_MS = 3_000;
 
 const statusVariant = (status?: string | null): StatusVariant => {
   if (status === 'ok' || status === 'complete') return 'success';
@@ -439,6 +440,7 @@ const CompanyDiagnosticsPanel: React.FC<{ snapshot: VietnamCompanyResearchRespon
     ...liveStatusDiagnosticRows('SSI intraday status', snapshot.intraday?.diagnostics),
     ...liveStatusDiagnosticRows('SSI realtime status', snapshot.diagnostics?.realtime),
     ...liveStatusDiagnosticRows('SSI trade tape status', snapshot.diagnostics?.tradeTape),
+    ...liveStatusDiagnosticRows('SSI order book status', snapshot.diagnostics?.orderBook),
   ];
 
   if (!rows.length) return null;
@@ -499,6 +501,7 @@ const VietnamCompanyResearchPage: React.FC = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const tradeTapeWarmupStartedAtRef = useRef<{ symbol: string; startedAt: number } | null>(null);
+  const selectedLiveContextRefreshInFlightRef = useRef(false);
 
   const loadSnapshot = useCallback(async (forceRefresh = false, background = false) => {
     if (!ticker) {
@@ -524,6 +527,18 @@ const VietnamCompanyResearchPage: React.FC = () => {
   useEffect(() => {
     void loadSnapshot(false);
   }, [loadSnapshot]);
+
+  useEffect(() => {
+    if (!ticker || loading || refreshing) return undefined;
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'hidden' || selectedLiveContextRefreshInFlightRef.current) return;
+      selectedLiveContextRefreshInFlightRef.current = true;
+      void loadSnapshot(false, true).finally(() => {
+        selectedLiveContextRefreshInFlightRef.current = false;
+      });
+    }, SELECTED_LIVE_CONTEXT_REFRESH_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [loadSnapshot, loading, refreshing, ticker]);
 
   useEffect(() => {
     if (!ticker || !snapshot || hasCompanyTradeTapeData(snapshot) || !isCompanyTradeTapeWarmupPending(snapshot)) {
@@ -776,6 +791,13 @@ const VietnamCompanyResearchPage: React.FC = () => {
             <p className="text-sm text-secondary-text">SSI realtime unavailable. Daily SSI data is still available.</p>
           )}
         </SectionShell>
+        <OrderBookLadder
+          orderBook={snapshot.orderBook}
+          status={snapshot.orderBookStatus}
+          referencePrice={referencePrice}
+          ceilingPrice={ceilingPrice}
+          floorPrice={floorPrice}
+        />
         <SectionShell title="SSI trade tape" source={snapshot.tradeTapeStatus?.source ?? 'SSI trade-tape contract'} status={hasTradeTapeRows ? 'ok' : tradeTapeWarmupPending ? 'loading' : snapshot.tradeTapeStatus?.status ?? 'unavailable'}>
           {hasTradeTapeRows ? (
             <>

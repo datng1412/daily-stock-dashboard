@@ -18,7 +18,7 @@ import {
   type VietnamWatchlistResponse,
 } from '../api/stocks';
 import { AppPage, Badge, Button, Loading } from '../components/common';
-import { DataQualitySummary } from '../components/dashboard';
+import { DataQualitySummary, OrderBookLadder } from '../components/dashboard';
 import { cn } from '../utils/cn';
 import { buildVietnamConditionSummary, VIETNAM_CONDITION_SUMMARY_SUBTITLE } from '../utils/vietnamConditionSummary';
 import { getRealtimeSnapshotDisplayState, type RealtimeSnapshotDisplayResult } from '../utils/realtimeSnapshotState';
@@ -55,6 +55,7 @@ const CUSTOM_WATCHLIST_STORAGE_KEY = 'vnDashboard.customWatchlist.v1';
 const AUTO_REFRESH_INTERVALS = [60, 180, 300];
 const REALTIME_SNAPSHOT_REFRESH_INTERVALS = [2, 3, 5, 10, 15];
 const TRADE_TAPE_REFRESH_INTERVALS = [5, 10, 15];
+const SELECTED_LIVE_CONTEXT_REFRESH_INTERVAL_MS = 3_000;
 const TRADE_TAPE_STARTUP_REFETCH_INTERVAL_MS = 4_000;
 const TRADE_TAPE_STARTUP_REFETCH_MAX_WAIT_MS = 60_000;
 const FILTER_SLOW_LOADING_MS = 3_000;
@@ -2118,6 +2119,7 @@ const DataStatusPanel: React.FC<{
     ...liveStatusDiagnosticRows('SSI intraday status', selectedItem?.intradayStatus?.diagnostics),
     ...liveStatusDiagnosticRows('SSI realtime status', selectedItem?.diagnostics?.realtime),
     ...liveStatusDiagnosticRows('SSI trade tape status', selectedItem?.diagnostics?.tradeTape),
+    ...liveStatusDiagnosticRows('SSI order book status', selectedItem?.diagnostics?.orderBook),
   ];
   const diagnosticsAvailable = Boolean(
     liveStatusDiagnostics.length
@@ -4623,6 +4625,14 @@ const StockDetailView: React.FC<{
         </p>
         ) : null}
       </div>
+      <OrderBookLadder
+        className="mt-4"
+        orderBook={item.orderBook}
+        status={item.orderBookStatus}
+        referencePrice={ssiReferencePrice}
+        ceilingPrice={ssiCeilingPrice}
+        floorPrice={ssiFloorPrice}
+      />
       <div className="mt-4 rounded-lg border border-border/60 bg-elevated/30 p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-sm font-semibold text-foreground">Trade tape</h3>
@@ -4858,15 +4868,18 @@ const VietnamDashboardPage: React.FC = () => {
   const initialWatchlistLoadStartedRef = useRef(false);
   const realtimeRequestIdRef = useRef(0);
   const tradesRequestIdRef = useRef(0);
+  const selectedLiveContextRequestIdRef = useRef(0);
   const corporateActionsRequestIdRef = useRef(0);
   const nextRefreshAtRef = useRef(0);
   const realtimeSnapshotNextRefreshAtRef = useRef(0);
   const tradeTapeNextRefreshAtRef = useRef(0);
   const realtimeSnapshotRefreshInFlightRef = useRef(false);
   const tradeTapeRefreshInFlightRef = useRef(false);
+  const selectedLiveContextRefreshInFlightRef = useRef(false);
   const tradeTapeWarmupStartedAtRef = useRef<{ symbol: string; startedAt: number } | null>(null);
   const pendingRealtimeSnapshotTickersRef = useRef<string[] | null>(null);
   const pendingTradeTapeSymbolRef = useRef<string | null>(null);
+  const pendingSelectedLiveContextSymbolRef = useRef<string | null>(null);
   const unmountedRef = useRef(false);
 
   useEffect(() => {
@@ -4875,6 +4888,7 @@ const VietnamDashboardPage: React.FC = () => {
       unmountedRef.current = true;
       realtimeRequestIdRef.current += 1;
       tradesRequestIdRef.current += 1;
+      selectedLiveContextRequestIdRef.current += 1;
       corporateActionsRequestIdRef.current += 1;
       filterIntentIdRef.current += 1;
       vn30HydrationRunIdRef.current += 1;
@@ -5158,6 +5172,79 @@ const VietnamDashboardPage: React.FC = () => {
       }
     }
   }, [loadRealtimeTrades, selectedTicker]);
+
+  const refreshSelectedLiveContext = useCallback(async (selectedTickerOverride?: string | null) => {
+    const targetTicker = normalizeVietnamTicker(selectedTickerOverride ?? selectedTickerRef.current ?? '');
+    if (!targetTicker || !logicalWatchlistRef.current.includes(targetTicker)) return false;
+    if (selectedLiveContextRefreshInFlightRef.current) {
+      pendingSelectedLiveContextSymbolRef.current = targetTicker;
+      return false;
+    }
+
+    selectedLiveContextRefreshInFlightRef.current = true;
+    const requestId = selectedLiveContextRequestIdRef.current + 1;
+    selectedLiveContextRequestIdRef.current = requestId;
+    try {
+      const response = await stocksApi.getVietnamWatchlist([targetTicker], false);
+      if (
+        requestId !== selectedLiveContextRequestIdRef.current
+        || unmountedRef.current
+        || targetTicker !== selectedTickerRef.current
+      ) {
+        return false;
+      }
+      const refreshedRow = response.watchlist.find((row) => normalizeVietnamTicker(row.ticker) === targetTicker);
+      if (!refreshedRow) return false;
+      setData((previous) => {
+        if (!previous || !logicalWatchlistRef.current.includes(targetTicker)) return previous;
+        let replaced = false;
+        let changed = false;
+        const nextRows = previous.watchlist.map((row) => {
+          if (normalizeVietnamTicker(row.ticker) !== targetTicker) return row;
+          replaced = true;
+          const previousOrderBookState = JSON.stringify({
+            orderBookSource: row.orderBookSource ?? null,
+            orderBook: row.orderBook ?? null,
+            orderBookStatus: row.orderBookStatus ?? null,
+            diagnostics: row.diagnostics?.orderBook ?? null,
+          });
+          const nextOrderBookState = JSON.stringify({
+            orderBookSource: refreshedRow.orderBookSource ?? null,
+            orderBook: refreshedRow.orderBook ?? null,
+            orderBookStatus: refreshedRow.orderBookStatus ?? null,
+            diagnostics: refreshedRow.diagnostics?.orderBook ?? row.diagnostics?.orderBook ?? null,
+          });
+          if (previousOrderBookState === nextOrderBookState) return row;
+          changed = true;
+          return {
+            ...row,
+            orderBookSource: refreshedRow.orderBookSource,
+            orderBook: refreshedRow.orderBook,
+            orderBookStatus: refreshedRow.orderBookStatus,
+            diagnostics: {
+              ...row.diagnostics,
+              orderBook: refreshedRow.diagnostics?.orderBook ?? row.diagnostics?.orderBook,
+            },
+          };
+        });
+        if (!replaced || !changed) return previous;
+        return {
+          ...previous,
+          watchlist: nextRows,
+        };
+      });
+      return true;
+    } catch {
+      return false;
+    } finally {
+      selectedLiveContextRefreshInFlightRef.current = false;
+      const pendingSymbol = pendingSelectedLiveContextSymbolRef.current;
+      pendingSelectedLiveContextSymbolRef.current = null;
+      if (pendingSymbol && pendingSymbol !== targetTicker) {
+        void refreshSelectedLiveContext(pendingSymbol);
+      }
+    }
+  }, []);
 
   const load = useCallback(async (
     forceRefresh = false,
@@ -5761,6 +5848,20 @@ const VietnamDashboardPage: React.FC = () => {
     }, 1000);
     return () => window.clearInterval(timer);
   }, [tradeTapeAutoRefreshEnabled, tradeTapeRefreshInterval, refreshTradeTape]);
+
+  useEffect(() => {
+    const normalizedSelectedTicker = normalizeVietnamTicker(selectedTicker ?? '');
+    if (!normalizedSelectedTicker || !hasActiveWatchlist) return undefined;
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'hidden') {
+        setIsTabHidden(true);
+        return;
+      }
+      setIsTabHidden(false);
+      void refreshSelectedLiveContext(normalizedSelectedTicker);
+    }, SELECTED_LIVE_CONTEXT_REFRESH_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [hasActiveWatchlist, logicalWatchlistKey, refreshSelectedLiveContext, selectedTicker]);
 
   useEffect(() => {
     const rows = data?.watchlist ?? [];
