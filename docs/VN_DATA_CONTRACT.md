@@ -328,6 +328,30 @@ session_status = null
 
 `trading_session` and `trading_status` preserve raw SSI-observed values. The public contract does not map them to business labels such as open, closed, halted, suspended, lunch break, or final until live payload evidence proves exact meanings. `F` rows must not populate `latest_price`, `realtime_snapshot`, `trade_tape`, DailyOhlc, DailyStockPrice, or indicators. Request handlers must not start streams, add dynamic subscriptions, or use all-market channels.
 
+### Market Index Pulse
+
+SSI `MI:{index_code}` market-index pulse is an optional live index block. It is produced only by the background streaming lifecycle and a dedicated process-local market-index cache.
+
+When SSI `MI` has usable cached rows:
+
+```text
+market_index_pulse_status.status = ok or partial
+market_index_pulse_status.reason_code = cache_hit
+market_index_pulse = [ ... ]
+```
+
+Each `market_index_pulse[]` row may include `index_code`, `exchange`, `index_value`, `estimated_index_value`, `change`, `change_pct`, `total_trades`, `total_volume`, `total_value`, `advances`, `unchanged`, `declines`, `trading_date`, `time`, `stream_timestamp`, `stream_data_type=MI`, `r_type`, `age_seconds`, `is_stale`, `stale_reason`, `cached_at`, `cache_ttl_seconds`, `channel_format_status`, and `value_semantics_status`. Positive index values and nonnegative totals/breadth counts are required when present; malformed numeric fields are set null/dropped, and rows with no usable MI metric are unavailable.
+
+When no usable row exists:
+
+```text
+market_index_pulse_status.status = unavailable or disabled
+market_index_pulse_status.reason_code = disabled, stream_not_started, stream_not_bootstrapped, stream_cache_empty, stream_cache_stale, mi_not_subscribed, mi_disabled, unavailable_unknown, or unknown
+market_index_pulse = []
+```
+
+`MI` rows are exposed through the separate market-index pulse endpoint. They must not populate stock watchlist rows, `latest_price`, `realtime_snapshot`, `trade_tape`, `order_book`, `foreign_room`, `session_status`, DailyOhlc, DailyStockPrice, or REST DailyIndex rows. Request handlers must not start streams, add dynamic subscriptions, or use all-market channels. The `MI:{index_code}` channel format and value/breadth units remain `needs_live_proof` until market-hours live payload evidence confirms exact SSI semantics.
+
 ### Diagnostics
 
 Diagnostics may include:
@@ -476,7 +500,8 @@ The SSI-first rule is: if SSI can provide a market-data field, SSI owns it; if a
 | SSI `X-QUOTE` stream | SSI streaming runtime proof | Order-book context may appear in watchlist `order_book`; level-count/unit proof and UI remain deferred and must not affect price ownership |
 | SSI `R` stream | SSI streaming runtime proof | Foreign-room context may appear in watchlist `foreign_room`; value-unit/approximation proof and UI remain deferred and must not replace DailyStockPrice foreign flow |
 | SSI `F` stream | SSI streaming runtime proof | Raw trading session/status context may appear in watchlist `session_status`; code meanings and finality labels remain deferred and must not affect price ownership |
-| Future SSI `MI`, `B` streams | SSI streaming after runtime proof | Realtime index and realtime bars must remain separate source-labeled blocks; no fake placeholders and no request-handler stream starts |
+| SSI `MI` stream | SSI streaming runtime proof | Market-index pulse may appear in `market_index_pulse`; channel/field live proof and UI remain deferred and must not replace DailyIndex or affect price ownership |
+| Future SSI `B` stream | SSI streaming after runtime proof | Realtime bars must remain separate source-labeled blocks; no fake placeholders and no request-handler stream starts |
 | Future SSI extended instrument metadata | SSI SecuritiesDetails/Securities after runtime proof | Derivative, covered warrant, ETF/fund, and bond fields require exact row-key evidence and instrument-specific semantics before exposure |
 | News | Future NewsProvider | Disabled now |
 | Financials | Future external provider | Not implemented |
@@ -486,7 +511,7 @@ The SSI-first rule is: if SSI can provide a market-data field, SSI owns it; if a
 
 Compatibility aliases must stay within the same source owner. Do not use SSI DailyStockPrice close to overwrite `latest_price`, do not use DailyOhlc volume to fill matched volume, and do not use realtime, trade-tape, Mozyfin, or KBS values to fill daily fields.
 
-Future SSI-backed fields from Phase 4.8F must be additive and explicit. Public rows need source labels, availability status, missing-field/null semantics, and sanitized diagnostics. Missing streaming data must stay `null` or `[]` rather than placeholder metrics, and external providers must not fill order book, trading status, foreign room, realtime index, realtime bars, or SSI-returned instrument metadata while SSI can provide those fields.
+Future SSI-backed fields from Phase 4.8F must be additive and explicit. Public rows need source labels, availability status, missing-field/null semantics, and sanitized diagnostics. Missing streaming data must stay `null` or `[]` rather than placeholder metrics, and external providers must not fill order book, trading status, foreign room, market-index pulse, realtime bars, or SSI-returned instrument metadata while SSI can provide those fields.
 
 ## Index Data Contract
 

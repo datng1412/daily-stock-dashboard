@@ -13,6 +13,7 @@ from data_provider.ssi_streaming_realtime import (
     ForeignRoomCache,
     MANAGER_ERRORED,
     MANAGER_RUNNING,
+    MarketIndexPulseCache,
     OfficialSsiRealtimeStreamClient,
     OrderBookCache,
     RealtimeSnapshotCache,
@@ -28,6 +29,7 @@ from data_provider.ssi_streaming_realtime import (
     SSI_STREAMING_REALTIME_NOT_STARTED_REASON,
     SSI_STREAMING_REALTIME_PACKAGE_UNAVAILABLE_REASON,
     build_foreign_room_channel,
+    build_market_index_channel,
     build_order_book_channel,
     build_session_status_channel,
     build_streaming_channels,
@@ -216,6 +218,7 @@ def _manager(
         kwargs["cache"] = RealtimeSnapshotCache(15, time_func=time_func)
         kwargs["order_book_cache"] = OrderBookCache(15, time_func=time_func)
         kwargs["foreign_room_cache"] = ForeignRoomCache(15, time_func=time_func)
+        kwargs["market_index_cache"] = MarketIndexPulseCache(15, time_func=time_func)
         kwargs["session_status_cache"] = SessionStatusCache(15, time_func=time_func)
         kwargs["time_func"] = time_func
     kwargs.update(overrides)
@@ -280,6 +283,29 @@ def _r_foreign_room(symbol: str = "FPT", current_room: str = "123000000"):
             "FSellVol": "50000",
             "FBuyVal": "7200000000",
             "FSellVal": "3600000000",
+        },
+    }
+
+
+def _mi_index(index_code: str = "VNINDEX", index_value: str = "1234.56"):
+    return {
+        "DataType": "MI",
+        "Content": {
+            "RType": "MI",
+            "TradingDate": "25/06/2026",
+            "Time": "10:01:05",
+            "IndexCode": index_code,
+            "Exchange": "HOSE",
+            "IndexValue": index_value,
+            "IndexValEst": "1234.50",
+            "Change": "5.67",
+            "RatioChange": "0.46",
+            "TotalTrade": "123456",
+            "TotalQtty": "123456789",
+            "TotalValue": "1234567890000",
+            "Advances": "200",
+            "Nochanges": "50",
+            "Declines": "180",
         },
     }
 
@@ -355,15 +381,35 @@ def test_importing_streaming_module_does_not_import_official_client_or_start_net
 def test_streaming_channel_builder_includes_realtime_order_book_trade_tape_and_session_channels_without_duplicates():
     channels = build_streaming_channels(["fpt", "FPT"])
 
-    assert channels == ["X:FPT", "X-QUOTE:FPT", "R:FPT", "X-TRADE:FPT", "F:FPT"]
+    assert channels == [
+        "X:FPT",
+        "X-QUOTE:FPT",
+        "R:FPT",
+        "X-TRADE:FPT",
+        "F:FPT",
+        "MI:VNINDEX",
+        "MI:VN30",
+        "MI:HNX",
+        "MI:UPCOM",
+    ]
     assert len(channels) == len(set(channels))
     assert all("ALL" not in channel for channel in channels)
 
 
 def test_streaming_channel_builder_can_disable_trade_tape_channel():
-    assert build_streaming_channels(["fpt"], trade_tape_enabled=False) == ["X:FPT", "X-QUOTE:FPT", "R:FPT", "F:FPT"]
+    assert build_streaming_channels(["fpt"], trade_tape_enabled=False) == [
+        "X:FPT",
+        "X-QUOTE:FPT",
+        "R:FPT",
+        "F:FPT",
+        "MI:VNINDEX",
+        "MI:VN30",
+        "MI:HNX",
+        "MI:UPCOM",
+    ]
     assert build_order_book_channel("fpt") == "X-QUOTE:FPT"
     assert build_foreign_room_channel("fpt") == "R:FPT"
+    assert build_market_index_channel("vnindex") == "MI:VNINDEX"
     assert build_trade_tape_channel("fpt") == "X-TRADE:FPT"
     assert build_session_status_channel("fpt") == "F:FPT"
 
@@ -376,7 +422,17 @@ def test_manager_start_uses_symbol_scoped_realtime_and_trade_tape_channels():
 
     assert status["manager_state"] == MANAGER_RUNNING
     assert client.started is True
-    assert client.channels == ["X:FPT", "X-QUOTE:FPT", "R:FPT", "X-TRADE:FPT", "F:FPT"]
+    assert client.channels == [
+        "X:FPT",
+        "X-QUOTE:FPT",
+        "R:FPT",
+        "X-TRADE:FPT",
+        "F:FPT",
+        "MI:VNINDEX",
+        "MI:VN30",
+        "MI:HNX",
+        "MI:UPCOM",
+    ]
     assert status["realtime_channels"] == ["X:FPT"]
     assert status["order_book_channels"] == ["X-QUOTE:FPT"]
     assert status["order_book_subscription_status"] == "subscribed"
@@ -386,6 +442,8 @@ def test_manager_start_uses_symbol_scoped_realtime_and_trade_tape_channels():
     assert status["trade_tape_subscription_status"] == "subscribed"
     assert status["session_status_channels"] == ["F:FPT"]
     assert status["session_status_subscription_status"] == "subscribed"
+    assert status["market_index_channels"] == ["MI:VNINDEX", "MI:VN30", "MI:HNX", "MI:UPCOM"]
+    assert status["market_index_subscription_status"] == "subscribed"
     assert all("ALL" not in channel for channel in client.channels)
 
 
@@ -681,6 +739,100 @@ def test_r_foreign_room_reports_not_subscribed_when_channel_is_missing():
     assert payload["diagnostics"]["foreign_room_channels"] == []
 
 
+def test_mi_market_index_message_updates_dedicated_cache_only():
+    client = FakeStreamClient()
+    manager = _manager(client=client)
+    manager.start(["FPT"])
+
+    manager.handle_message(_mi_index())
+    pulse_payload = manager.market_index_pulse(["VNINDEX"])
+
+    assert pulse_payload["status"] == "ok"
+    assert pulse_payload["streaming_status"] == "cache_hit"
+    assert pulse_payload["market_index_pulse"][0]["index_code"] == "VNINDEX"
+    assert pulse_payload["market_index_pulse"][0]["stream_data_type"] == "MI"
+    assert pulse_payload["market_index_pulse"][0]["index_value"] == 1234.56
+    assert pulse_payload["market_index_pulse"][0]["estimated_index_value"] == 1234.50
+    assert pulse_payload["market_index_pulse"][0]["change"] == 5.67
+    assert pulse_payload["market_index_pulse"][0]["change_pct"] == 0.46
+    assert pulse_payload["market_index_pulse"][0]["total_volume"] == 123456789.0
+    assert pulse_payload["market_index_pulse"][0]["advances"] == 200.0
+    assert pulse_payload["diagnostics"]["market_index_rows_observed"] == 1
+    assert manager.snapshot(["FPT"])["quotes"] == []
+    assert manager.order_book("FPT")["order_book"] is None
+    assert manager.foreign_room("FPT")["foreign_room"] is None
+    assert manager.trade_tape("FPT")["trades"] == []
+    assert manager.session_status("FPT")["session_status"] is None
+
+
+def test_mi_market_index_drops_malformed_numeric_fields_without_fake_row():
+    client = FakeStreamClient()
+    manager = _manager(client=client)
+    manager.start(["FPT"])
+
+    manager.handle_message(_mi_index(index_value="bad"))
+    payload = manager.market_index_pulse(["VNINDEX"])
+
+    assert payload["status"] == "ok"
+    assert payload["market_index_pulse"][0]["index_value"] is None
+    assert payload["market_index_pulse"][0]["change"] == 5.67
+
+    manager.handle_message(
+        {
+            "DataType": "MI",
+            "Content": {"RType": "MI", "IndexCode": "VN30", "IndexValue": "bad", "TotalQtty": "-1"},
+        }
+    )
+    empty_payload = manager.market_index_pulse(["VN30"])
+    assert empty_payload["status"] == "unavailable"
+    assert empty_payload["market_index_pulse"] == []
+
+
+def test_mi_market_index_reports_stale_without_returning_live_row():
+    now = [1000.0]
+    client = FakeStreamClient()
+    manager = _manager(client=client, now=now)
+    manager.start(["FPT"])
+    manager.handle_message(_mi_index())
+
+    now[0] = 1016.0
+    payload = manager.market_index_pulse(["VNINDEX"])
+
+    assert payload["status"] == "unavailable"
+    assert payload["streaming_status"] == "cache_stale"
+    assert payload["market_index_pulse"] == []
+    assert payload["diagnostics"]["latest_market_index_age_seconds"] == 16
+
+
+def test_mi_market_index_reports_not_subscribed_when_channel_is_missing():
+    client = FakeStreamClient()
+    manager = _manager(client=client)
+    manager.start(["FPT"])
+    with manager._lock:
+        manager._channels = ["X:FPT", "X-QUOTE:FPT", "R:FPT", "X-TRADE:FPT", "F:FPT"]
+
+    payload = manager.market_index_pulse(["VNINDEX"])
+
+    assert payload["status"] == "unavailable"
+    assert payload["streaming_status"] == "mi_not_subscribed"
+    assert payload["market_index_pulse"] == []
+    assert payload["diagnostics"]["market_index_channels"] == []
+
+
+def test_mi_market_index_disabled_does_not_subscribe_channel():
+    client = FakeStreamClient()
+    manager = _manager(client=client, market_index_enabled=False)
+
+    status = manager.start(["FPT"])
+    payload = manager.market_index_pulse(["VNINDEX"])
+
+    assert "MI:VNINDEX" not in client.channels
+    assert status["market_index_channels"] == []
+    assert status["market_index_subscription_status"] == "disabled"
+    assert payload["streaming_status"] == "mi_disabled"
+    assert payload["market_index_pulse"] == []
+
+
 def test_x_quote_drops_malformed_order_book_levels_without_fake_rows():
     client = FakeStreamClient()
     manager = _manager(client=client)
@@ -856,7 +1008,17 @@ def test_trade_tape_for_non_bootstrapped_symbol_is_unavailable_without_subscript
     assert payload["trades"] == []
     assert payload["streaming_status"] == "ticker_not_bootstrapped"
     assert payload["diagnostics"]["bootstrap_membership"] == "not_bootstrapped"
-    assert client.channels == ["X:FPT", "X-QUOTE:FPT", "R:FPT", "X-TRADE:FPT", "F:FPT"]
+    assert client.channels == [
+        "X:FPT",
+        "X-QUOTE:FPT",
+        "R:FPT",
+        "X-TRADE:FPT",
+        "F:FPT",
+        "MI:VNINDEX",
+        "MI:VN30",
+        "MI:HNX",
+        "MI:UPCOM",
+    ]
 
 
 def test_trade_tape_disabled_does_not_subscribe_xtrade_channel():
@@ -870,7 +1032,16 @@ def test_trade_tape_disabled_does_not_subscribe_xtrade_channel():
     assert status["order_book_channels"] == ["X-QUOTE:FPT"]
     assert status["trade_tape_channels"] == []
     assert status["trade_tape_subscription_status"] == "disabled"
-    assert client.channels == ["X:FPT", "X-QUOTE:FPT", "R:FPT", "F:FPT"]
+    assert client.channels == [
+        "X:FPT",
+        "X-QUOTE:FPT",
+        "R:FPT",
+        "F:FPT",
+        "MI:VNINDEX",
+        "MI:VN30",
+        "MI:HNX",
+        "MI:UPCOM",
+    ]
     assert payload["status"] == "unavailable"
     assert payload["streaming_status"] == "xtrade_disabled"
     assert payload["trades"] == []
@@ -886,7 +1057,16 @@ def test_foreign_room_disabled_does_not_subscribe_r_channel():
     assert status["realtime_channels"] == ["X:FPT"]
     assert status["foreign_room_channels"] == []
     assert status["foreign_room_subscription_status"] == "disabled"
-    assert client.channels == ["X:FPT", "X-QUOTE:FPT", "X-TRADE:FPT", "F:FPT"]
+    assert client.channels == [
+        "X:FPT",
+        "X-QUOTE:FPT",
+        "X-TRADE:FPT",
+        "F:FPT",
+        "MI:VNINDEX",
+        "MI:VN30",
+        "MI:HNX",
+        "MI:UPCOM",
+    ]
     assert payload["status"] == "unavailable"
     assert payload["streaming_status"] == "r_disabled"
     assert payload["foreign_room"] is None

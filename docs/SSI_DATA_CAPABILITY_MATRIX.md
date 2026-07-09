@@ -59,7 +59,7 @@ This is the canonical SSI-first ownership matrix for future VN dashboard work. P
 | Order book / bid-ask ladder | SSI-owned optional live context | SSI streaming `X-QUOTE:{symbol}` latest cache | `partial_runtime_proof` | Dedicated ladder/best bid-ask stays separate from `latest_price`, realtime snapshot, trade tape, and session/status. |
 | Trading session/status | SSI-owned candidate | SSI streaming `F` if proven | `not_implemented_runtime_proof_required` | Candidate source for session/halt/finality labels; do not guess code mappings. |
 | Realtime foreign room | SSI-owned candidate | SSI streaming `R` if proven | `not_implemented_runtime_proof_required` | Separate from DailyStockPrice daily foreign-flow enrichment. |
-| Realtime market index pulse | SSI-owned candidate | SSI streaming `MI` if proven | `not_implemented_runtime_proof_required` | Separate from stock watchlist rows and optional DailyIndex REST context. |
+| Realtime market index pulse | SSI-owned optional live context | SSI streaming `MI:{index_code}` latest cache | `partial_runtime_proof` | Separate from stock watchlist rows and optional DailyIndex REST context. |
 | Realtime OHLCV bars | SSI-owned candidate | SSI streaming `B` if proven | `deferred_runtime_proof_required` | Candidate intraday bar source; must not replace DailyOhlc daily candles or `latest_price`. |
 | IndexList | SSI-owned | SSI IndexList | `usable` | Use SSI-returned identifiers. |
 | VN30 components | SSI-owned | SSI IndexComponents | `usable` | Use exact SSI component rows; no hardcoded constituents. |
@@ -112,7 +112,7 @@ This is the canonical SSI-first ownership matrix for future VN dashboard work. P
 | `X-QUOTE` order book | `partial_runtime_proof` | SSI streaming latest ladder context is cache-backed when background stream/cache is enabled, symbol bootstrapped, and usable X-QUOTE events arrive | `X-QUOTE:{symbol}` streaming order-book cache | Optional watchlist `order_book` fields preserve only real bid/ask levels; unavailable state remains null/status-only | Phase 4.8H adds parser routing, dedicated cache, watchlist fields, and diagnostics without frontend productization | Prove live field keys, price/volume units, timestamp behavior, market-specific level counts, and stale/empty semantics before UI | No if SSI proves ladder semantics |
 | `F` trading session/status | `partial_runtime_proof` | SSI streaming latest status context is cache-backed when background stream/cache is enabled, symbol bootstrapped, and usable F events arrive | `F:{symbol}` streaming session/status cache | Optional watchlist `session_status` fields preserve raw `trading_session` / `trading_status` values; unavailable state remains null/status-only | Phase 4.8G adds parser, dedicated cache, watchlist fields, and diagnostics without frontend productization or code mapping | Prove live code meanings, scope, timestamp behavior, and final-close semantics before mapping labels or driving UI state | No if SSI proves code semantics |
 | `R` foreign room | `not_implemented_runtime_proof_required` | SSI streaming candidate | `R` stream family if live docs/payloads prove it | Realtime `foreign_room` schema placeholder exists, but current SSI mapping does not populate it | Candidate source for total/current room and intraday foreign buy/sell context | Prove fields, units, approximate value semantics, and relationship to DailyStockPrice daily foreign flow | No if SSI proves it |
-| `MI` realtime market index | `not_implemented_runtime_proof_required` | SSI streaming candidate | `MI` stream family if live docs/payloads prove it | No public realtime index stream rows yet | Candidate for VNINDEX/VN30/HNX/UPCOM realtime pulse and breadth | Prove identifiers, index value/change, breadth, total value/volume, and freshness | No if SSI proves it |
+| `MI` realtime market index | `partial_runtime_proof` | SSI streaming latest index context is cache-backed when background stream/cache is enabled and usable MI events arrive | `MI:{index_code}` streaming market-index cache | Separate `market_index_pulse` API response preserves real index value/change/activity/breadth rows; unavailable state remains empty-list/status-only | Phase 4.8J adds parser routing, dedicated cache, API response, and diagnostics without frontend productization | Prove live channel format, index identifiers, index value/change, breadth, total value/volume, units, and freshness before UI | No if SSI proves it |
 | `B` realtime OHLCV bars | `deferred_runtime_proof_required` | SSI streaming candidate | `B` stream family if live docs/payloads prove it | No public realtime bar rows yet | Candidate after streaming lifecycle is stable | Prove interval, session boundaries, correction semantics, and relationship to IntradayOhlc/DailyOhlc | No if SSI proves it |
 | Extended instrument metadata | `not_implemented_runtime_proof_required` | SSI metadata candidate | Securities/SecuritiesDetails for DER/futures, covered warrants, ETF/fund, bond rows if SSI returns exact fields | Current metadata contract exposes common symbol/profile fields only | Candidate for separate instrument metadata modules, not core stock fields | Prove exact row keys such as underlying, maturity, multiplier, exercise price/ratio, issuer, and instrument type semantics | No for SSI-returned metadata |
 | Unsupported fundamentals | `external_provider_required` | SSI endpoint not found in current repo/docs/evidence | None | No SSI-owned public contract | Current implementation exposes no SSI fundamentals endpoint | Keep unavailable/not implemented until a provider is selected | Yes |
@@ -282,7 +282,7 @@ Official SSI FastConnect Data docs describe realtime as a streaming feed, not a 
 The current implementation adds deterministic parser coverage for buffered SSI streaming envelopes shaped like:
 
 ```text
-DataType = X, X-QUOTE, X-TRADE, F, or R
+DataType = X, X-QUOTE, X-TRADE, F, R, or MI
 Content = JSON object or JSON string containing RType, Symbol, and stream fields
 ```
 
@@ -294,6 +294,7 @@ Parser rules:
 - Parse `Content` safely when SSI sends it as a JSON string.
 - Preserve provider timestamps from `TradingDate` and `Time` when present.
 - Treat `X-QUOTE` as order-book context. Do not synthesize `LastPrice`, realtime snapshot price, or matched trade rows from bid/ask fields.
+- Treat `MI` as market-index pulse context. Do not synthesize stock rows, REST DailyIndex rows, or watchlist price fields from index stream rows.
 - Treat `X` and `X-TRADE` as latest-trade snapshot candidates only when `LastPrice` is present.
 - Do not describe the bounded `X-TRADE` event buffer as full trade-tape history.
 - Treat `F` as session/status context only. Preserve raw `TradingSession` / `TradingStatus` fields in a dedicated cache; do not put `F` rows in realtime quote snapshots or trade-tape rows, and do not infer code meanings.

@@ -1247,10 +1247,12 @@ Recommended next SSI-backed runtime-proof order:
 3. Phase 4.8I - Realtime Foreign Room from SSI `R`. Implemented as optional cache-backed watchlist context; live payload proof and UI productization remain deferred.
 4. Phase 4.8I-Live - live smoke for SSI `R:{symbol}` during market hours.
 5. Phase 4.8I-UI - foreign-room UI only after live proof.
-6. Phase 4.8J - Realtime Market Index Pulse from SSI `MI`.
-7. Phase 4.8K - DailyStockPrice Unused Field Audit/Exposure.
-8. Phase 4.8L - SecuritiesDetails Extended Metadata.
-9. Later - Realtime OHLCV `B`, derivatives/futures, covered warrant, ETF/fund, and bond modules.
+6. Phase 4.8J - Realtime Market Index Pulse from SSI `MI`. Implemented as optional cache-backed index API context; live payload proof and UI productization remain deferred.
+7. Phase 4.8J-Live - live smoke for SSI `MI:{index_code}` during market hours.
+8. Phase 4.8J-UI - market pulse UI only after live proof.
+9. Phase 4.8K - DailyStockPrice Unused Field Audit/Exposure.
+10. Phase 4.8L - SecuritiesDetails Extended Metadata.
+11. Later - Realtime OHLCV `B`, derivatives/futures, covered warrant, ETF/fund, and bond modules.
 
 ### Phase 4.8G - SSI F Trading Session/Status Runtime Proof
 
@@ -1303,6 +1305,25 @@ Boundaries:
 
 * Request handlers remain cache readers only and must not start streams, subscribe dynamically, use all-market channels, or call trading/order/account APIs.
 * `R` foreign-room context must not replace SSI DailyOhlc, DailyStockPrice daily foreign flow, realtime snapshot, trade tape, order book, session/status, intraday, indicators, or `latest_price`.
+* `latest_price_source` remains `SSI DailyOhlc`.
+
+### Phase 4.8J - SSI MI Realtime Market Index Pulse Backend/API Support
+
+Status: implemented on 2026-07-09 as a backend/API runtime-proof path; live proof and UI remain deferred.
+
+Result:
+
+* Startup-owned SSI streaming now includes bounded `MI:{index_code}` subscriptions for `VNINDEX`, `VN30`, `HNX`, and `UPCOM` alongside the existing stock-scoped `X:{symbol}`, `X-QUOTE:{symbol}`, `R:{symbol}`, `X-TRADE:{symbol}`, and `F:{symbol}` channels when the streaming lifecycle is enabled and stock bootstrap symbols are configured.
+* Parsed `MI` rows are stored in a dedicated latest market-index cache, not in the realtime quote cache, trade-tape buffer, order-book cache, foreign-room cache, session/status cache, REST DailyIndex rows, or stock watchlist rows.
+* The separate market-index pulse API can expose `market_index_pulse_source`, `market_index_pulse`, and `market_index_pulse_status`; technical state lives under `diagnostics.market_index_pulse`.
+* Safe fields only are surfaced: index code, exchange, index value, estimated index value, change/change %, total trades, total volume/value, advances/unchanged/declines, trading date/time, stream timestamp/type, cache age, source, and live-proof caveats.
+* Malformed numeric fields are null/dropped; rows with no usable MI metric are unavailable. No fake index values are synthesized.
+* No frontend market-pulse UI is productized yet. Channel format, value units, breadth semantics, and timestamp/freshness behavior remain deferred until live payload evidence proves exact meanings.
+
+Boundaries:
+
+* Request handlers remain cache readers only and must not start streams, subscribe dynamically, use all-market channels, or call trading/order/account APIs.
+* `MI` market-index pulse must not replace SSI DailyOhlc, DailyStockPrice, REST DailyIndex, realtime snapshot, trade tape, order book, foreign room, session/status, intraday, indicators, or `latest_price`.
 * `latest_price_source` remains `SSI DailyOhlc`.
 
 ### Phase 5.0A - External Provider Contract Design

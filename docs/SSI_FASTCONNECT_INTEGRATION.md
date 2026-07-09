@@ -18,13 +18,14 @@ Current phase:
 * SSI IntradayOhlc provider-rate-limit cooldown guardrails.
 * SSI realtime snapshot and trade-tape contracts for dashboard/company realtime blocks.
 * SSI realtime REST endpoint discovery concluded that no supported FastConnect realtime snapshot endpoint is identified in this repository.
-* SSI streaming realtime parser coverage for buffered `X`, `X-QUOTE`, `X-TRADE`, `F`, and `R` messages.
+* SSI streaming realtime parser coverage for buffered `X`, `X-QUOTE`, `X-TRADE`, `F`, `R`, and `MI` messages.
 * Config-disabled SSI streaming manager/cache skeleton for future background runtime work.
 * Official `ssi-fc-data` Python client adapter behind the disabled streaming runtime flag.
 * FastAPI startup bootstrap for SSI streaming realtime when explicitly enabled and given a small bootstrap symbol list.
 * Realtime endpoint response-cache bypass and frontend quote polling tuned for the process-local streaming cache.
 * SSI `X-QUOTE:{symbol}` order-book backend/API support as a separate optional watchlist context.
 * SSI `R:{symbol}` foreign-room backend/API support as a separate optional watchlist context.
+* SSI `MI:{index_code}` market-index pulse backend/API support as a separate optional index context.
 * SSI live API plus backend cache/TTL; local DB market-data storage is deferred.
 
 Out of scope:
@@ -82,8 +83,9 @@ External providers are still required for BCTC/KQKD, financial statements, finan
 | Realtime snapshot | SSI FastConnect Data streaming | Provider/service/API/UI contract added for `X:{symbol}` rows; config-disabled background manager/cache skeleton added; official client adapter is available only behind `SSI_STREAMING_REALTIME_ENABLED=true`; FastAPI startup can start a process-local manager only when `SSI_STREAMING_REALTIME_BOOTSTRAP_SYMBOLS` is non-empty; default channel template is `X:{symbol}` | Show SSI unavailable until the backend lifecycle cache safely populates current rows; no request-handler streaming and no KBS fallback |
 | Order book | SSI FastConnect Data streaming `X-QUOTE:{symbol}` | Phase 4.8H adds a dedicated latest order-book cache, watchlist fields, and diagnostics | Keep bid/ask ladder separate from realtime snapshot, trade tape, session/status, DailyOhlc, DailyStockPrice, and `latest_price`; UI productization waits for live proof |
 | Foreign room | SSI FastConnect Data streaming `R:{symbol}` | Phase 4.8I adds a dedicated latest foreign-room cache, watchlist fields, and diagnostics | Keep foreign room separate from DailyStockPrice daily foreign flow, realtime snapshot, trade tape, order book, session/status, DailyOhlc, and `latest_price`; value-unit proof and UI productization wait for live evidence |
+| Market index pulse | SSI FastConnect Data streaming `MI:{index_code}` | Phase 4.8J adds a dedicated latest market-index cache, separate market-index pulse API response, and diagnostics | Keep MI separate from stock watchlist rows, REST DailyIndex, realtime snapshot, trade tape, order book, foreign room, session/status, DailyOhlc, and `latest_price`; channel/field proof and UI productization wait for live evidence |
 | Trade tape | SSI FastConnect Data streaming or future verified trade contract | Provider/service/API/UI contract added; live history/list semantics still need confirmation | Keep separate from realtime latest-trade messages and official daily OHLCV |
-| Realtime index stream, realtime bars/OHLC | SSI streaming/protocol hardening later | Candidate stream types are documented but not wired | Phase 4.8F documents `MI` and `B` as SSI-owned candidates that need runtime proof before exposure |
+| Realtime bars/OHLC | SSI streaming/protocol hardening later | Candidate stream type is documented but not wired | Phase 4.8F documents `B` as an SSI-owned candidate that needs runtime proof before exposure |
 | News | Future NewsProvider | Disabled/not implemented | Do not call Mozyfin; keep separate from SSI-owned market data |
 | BCTC/KQKD, financial statements, ratios | External provider | Unsupported/future provider | Do not infer fundamentals from price fields |
 | Corporate actions, dividends, rights, splits | External provider through future `CorporateActionsProvider` | Disabled/not configured by default; contract proof only | Do not infer events from reference or adjusted-close gaps |
@@ -126,7 +128,7 @@ Highest-value missing SSI-backed candidates:
 1. Trading session/status from SSI `F`, if runtime proof confirms stable channel, code mappings, scope, timestamp, and finality semantics.
 2. `X-QUOTE` order book live proof and UI productization, after Phase 4.8H backend/API support and current-market payloads confirm field coverage and level counts.
 3. Realtime foreign room from SSI `R`, separate from DailyStockPrice daily foreign-flow fields; backend/API support exists and live/UI proof remains deferred.
-4. Realtime market index pulse from SSI `MI`, separate from stock watchlist rows and optional DailyIndex REST context.
+4. Realtime market index pulse from SSI `MI`, separate from stock watchlist rows and optional DailyIndex REST context; backend/API support exists and live/UI proof remains deferred.
 5. DailyStockPrice unused fields such as average price, total buy/sell trade counts, total buy/sell volume, and foreign current room only after field-key and unit proof.
 6. SecuritiesDetails extended metadata for derivatives, covered warrants, ETF/fund, and bond instruments as separate instrument metadata tracks.
 7. Realtime OHLCV bars from SSI `B` later, after streaming lifecycle and bar interval/correction semantics are proven.
@@ -213,7 +215,7 @@ The official client exposes streaming connection/subscription primitives:
 * `MarketDataStream.start(on_message, on_error, selected_channel)` gets an access token, adds an `Authorization` header, connects to `config.stream_url + "v2.0/signalr"`, registers SignalR hub `FcMarketDataV2Hub`, attaches `Broadcast` and `Error` handlers, invokes `SwitchChannels(selected_channel)` when opened, and starts a daemon websocket thread.
 * `MarketDataStream.swith_channel(channel)` invokes `SwitchChannels(channel)` after start. The method name is misspelled as `swith_channel` in the installed package.
 
-The subscription argument is a caller-provided channel string. For symbol-scoped runtime work, use no-space channels such as `X:FPT`, `X-QUOTE:FPT`, `R:FPT`, or `X-TRADE:FPT`; do not use `X:ALL` or any `ALL` subscription. Live verification showed that spaced forms such as `X: FPT` can start transport but do not receive callbacks.
+The subscription argument is a caller-provided channel string. For symbol-scoped runtime work, use no-space channels such as `X:FPT`, `X-QUOTE:FPT`, `R:FPT`, or `X-TRADE:FPT`; for the bounded market-index pulse path, use no-space index channels such as `MI:VNINDEX`. Do not use `X:ALL`, `MI:ALL`, or any `ALL` subscription. Live verification showed that spaced forms such as `X: FPT` can start transport but do not receive callbacks; `MI:{index_code}` still needs market-hours live proof.
 
 Safety blockers before runtime use:
 
@@ -258,7 +260,7 @@ SSI_STREAMING_REALTIME_RECONNECT_MAX_DELAY_SECONDS=30
 SSI_STREAMING_REALTIME_RECONNECT_MAX_ATTEMPTS=0
 ```
 
-When `SSI_STREAMING_REALTIME_ENABLED=true` and `SSI_STREAMING_REALTIME_BOOTSTRAP_SYMBOLS` contains a small explicit comma-separated list, backend startup creates the process-local manager, subscribes to symbol-scoped channels such as `X:FPT`, and stores parsed snapshots in the manager cache. Shutdown stops the manager if startup started it.
+When `SSI_STREAMING_REALTIME_ENABLED=true` and `SSI_STREAMING_REALTIME_BOOTSTRAP_SYMBOLS` contains a small explicit comma-separated list, backend startup creates the process-local manager, subscribes to symbol-scoped channels such as `X:FPT`, and also subscribes the bounded market-index channels `MI:VNINDEX`, `MI:VN30`, `MI:HNX`, and `MI:UPCOM`. Parsed rows are stored in dedicated caches. Shutdown stops the manager if startup started it.
 
 Important runtime boundaries:
 
@@ -694,6 +696,7 @@ It requests IndexList sequentially without a market, with `HOSE`, and with `HNX`
 * Trade-tape public data remains `trade_tape=[]` unless the process-local X-TRADE buffer has parsed event rows for the requested bootstrapped symbol. Startup-owned streaming now registers `X-TRADE:{symbol}` when trade tape is enabled; diagnostics distinguish `xtrade_not_subscribed`, disabled, subscribed-empty, stale, cache-hit, and buffered-row-available states. X-TRADE rows are latest-event tape rows only, not historical time-and-sales history. Explicit SSI side/aggressor fields are normalized to `buy`, `sell`, or null; observed raw `BU`/`SD` map to Buy/Sell and remain preserved in `side_if_available`. Unknown side remains null and must not be inferred from price color or change direction. `change` and `change_pct` are calculated against SSI DailyStockPrice reference when available.
 * Phase 4.8G adds SSI `F:{symbol}` trading session/status runtime-proof support through the same startup-owned streaming lifecycle. Parsed `F` rows populate a dedicated session/status cache and optional watchlist fields only; they are not realtime quotes, trade-tape rows, DailyOhlc rows, DailyStockPrice enrichment, or price sources. Safe public fields preserve raw `trading_session` and `trading_status` values, but the backend does not map SSI codes to open/closed/halted/final meanings until live evidence proves them.
 * Phase 4.8I adds SSI `R:{symbol}` foreign-room backend/API support through the same startup-owned streaming lifecycle. Parsed `R` rows populate a dedicated foreign-room cache and optional watchlist fields only; they are not realtime quotes, trade-tape rows, order-book rows, session/status rows, DailyOhlc rows, DailyStockPrice enrichment, or price sources. Safe public fields include explicit total/current room and foreign buy/sell volume/value metrics when valid; value-unit and approximate-value meanings remain `needs_semantics_proof` until live evidence proves them.
+* Phase 4.8J adds SSI `MI:{index_code}` market-index pulse backend/API support through the same startup-owned streaming lifecycle. Parsed `MI` rows populate a dedicated market-index cache and the separate market-index pulse API only; they are not stock watchlist rows, realtime quotes, REST DailyIndex rows, DailyOhlc rows, DailyStockPrice enrichment, or price sources. Safe public fields include explicit index value/change/activity/breadth metrics when valid; channel format and value/breadth meanings remain `needs_live_proof` until live evidence proves them.
 * Realtime and trade-tape unavailable messages should be short and user-safe. Streaming manager/cache state and sanitized provider error summaries should move to diagnostics. When `trade_tape` rows exist, the UI should render those timestamped rows even if diagnostics say stream/cache freshness is stale; when the stream is not enabled, not started, not bootstrapped, or empty, classify trade tape with stream-specific unavailable reasons instead of implying a working historical time-and-sales feed.
 * REST realtime candidate probing is disabled; do not reintroduce repeated speculative realtime endpoint probes.
 
@@ -701,7 +704,7 @@ It requests IndexList sequentially without a market, with `HOSE`, and with `HNX`
 
 * SSI FastConnect credentials are not bundled; with default placeholder config, SSI-owned sections are unavailable.
 * Mozyfin is disabled for VN dashboard runtime; news/social returns disabled or `not_implemented`.
-* SSI realtime snapshot, trade tape, `X-QUOTE:{symbol}` order book, `R:{symbol}` foreign room, and `F:{symbol}` session/status context remain separate from daily close and intraday candles.
+* SSI realtime snapshot, trade tape, `X-QUOTE:{symbol}` order book, `R:{symbol}` foreign room, `MI:{index_code}` market-index pulse, and `F:{symbol}` session/status context remain separate from daily close and intraday candles.
 * KBS is disabled by default and legacy-only behind explicit development flags.
 * Local DB market-data storage is deferred while current call volume remains low and backend cache/TTL is sufficient.
 * No UI source switcher or comparison card exists.

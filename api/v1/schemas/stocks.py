@@ -422,6 +422,52 @@ class VietnamDailyIndexResponse(BaseModel):
     diagnostics: Dict[str, Any] = Field(default_factory=dict)
 
 
+class VietnamMarketIndexPulseRow(BaseModel):
+    """Latest normalized SSI MI market-index pulse row."""
+
+    index_code: str
+    exchange: Optional[str] = None
+    index_value: Optional[float] = None
+    estimated_index_value: Optional[float] = None
+    change: Optional[float] = None
+    change_pct: Optional[float] = None
+    total_trades: Optional[int] = None
+    total_volume: Optional[int] = None
+    total_value: Optional[float] = None
+    advances: Optional[int] = None
+    unchanged: Optional[int] = None
+    declines: Optional[int] = None
+    trading_date: Optional[str] = None
+    time: Optional[str] = None
+    stream_timestamp: Optional[str] = None
+    stream_data_type: str = "MI"
+    r_type: Optional[str] = None
+    source: str = "SSI MI market-index stream"
+    received_at: Optional[str] = None
+    cached_at: Optional[str] = None
+    cache_ttl_seconds: Optional[int] = None
+    age_seconds: Optional[int] = None
+    is_stale: bool = False
+    stale_reason: Optional[str] = None
+    channel_format_status: Optional[str] = "needs_live_proof"
+    value_semantics_status: Optional[str] = "needs_live_proof"
+
+
+class VietnamMarketIndexPulseResponse(BaseModel):
+    """Optional SSI MI market-index pulse response from the streaming cache."""
+
+    status: str = "unavailable"
+    source: str = "SSI MI market-index stream"
+    reason: Optional[str] = None
+    market_index_pulse_source: Optional[str] = "SSI MI market-index stream"
+    requested_index_codes: List[str] = Field(default_factory=list)
+    market_index_pulse: List[VietnamMarketIndexPulseRow] = Field(default_factory=list)
+    market_index_pulse_status: Dict[str, Any] = Field(default_factory=dict)
+    count: int = 0
+    fallback_used: bool = False
+    diagnostics: Dict[str, Any] = Field(default_factory=dict)
+
+
 class VietnamIndexComponent(BaseModel):
     """SSI IndexComponents row for Vietnam index membership."""
 

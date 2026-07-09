@@ -7,6 +7,7 @@ import pandas as pd
 import pytest
 
 from api.v1.endpoints.stocks import (
+    _get_vietnam_realtime_quotes_impl,
     get_vietnam_observability,
     get_vietnam_realtime_quotes,
     get_vietnam_realtime_trades,
@@ -194,7 +195,7 @@ def test_realtime_endpoints_default_to_ssi_and_do_not_call_kbs(monkeypatch):
     monkeypatch.setattr(VnstockRealtimeFetcher, "fetch_quotes", fail_kbs)
     monkeypatch.setattr(VnstockRealtimeFetcher, "fetch_trades", fail_kbs)
 
-    quote_response = get_vietnam_realtime_quotes("FPT")
+    quote_response = _get_vietnam_realtime_quotes_impl("FPT")
     trade_response = get_vietnam_realtime_trades("FPT", limit=100)
     payload = get_vietnam_observability().model_dump()
 

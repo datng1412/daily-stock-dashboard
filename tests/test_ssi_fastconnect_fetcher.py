@@ -133,6 +133,29 @@ def _r_foreign_room(symbol: str = "FPT", *, current_room: str = "123000000"):
     }
 
 
+def _mi_index(index_code: str = "VNINDEX", *, index_value: str = "1234.56"):
+    return {
+        "DataType": "MI",
+        "Content": {
+            "RType": "MI",
+            "TradingDate": "25/06/2026",
+            "Time": "10:01:05",
+            "IndexCode": index_code,
+            "Exchange": "HOSE",
+            "IndexValue": index_value,
+            "IndexValEst": "1234.50",
+            "Change": "5.67",
+            "RatioChange": "0.46",
+            "TotalTrade": "123456",
+            "TotalQtty": "123456789",
+            "TotalValue": "1234567890000",
+            "Advances": "200",
+            "Nochanges": "50",
+            "Declines": "180",
+        },
+    }
+
+
 def _get_call_count(session):
     return len([call for call in session.calls if call[0] == "GET"])
 
@@ -1029,6 +1052,47 @@ def test_streaming_r_drops_rows_without_usable_foreign_room_metrics():
     assert rows == []
 
 
+def test_streaming_mi_maps_market_index_without_quote_or_trade_fields():
+    fetcher = _fetcher()
+
+    rows = fetcher.normalize_streaming_realtime_messages([_mi_index("VNINDEX")], ["VNINDEX"])
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["index_code"] == "VNINDEX"
+    assert row["stream_data_type"] == "MI"
+    assert row["index_value"] == 1234.56
+    assert row["estimated_index_value"] == 1234.50
+    assert row["change"] == 5.67
+    assert row["change_pct"] == 0.46
+    assert row["total_trades"] == 123456.0
+    assert row["total_volume"] == 123456789.0
+    assert row["total_value"] == 1234567890000.0
+    assert row["advances"] == 200.0
+    assert row["unchanged"] == 50.0
+    assert row["declines"] == 180.0
+    assert row["source"] == "SSI MI market-index stream"
+    assert row["channel_format_status"] == "needs_live_proof"
+    assert "price" not in row
+    assert "has_last_trade" not in row
+
+
+def test_streaming_mi_drops_rows_without_usable_index_metrics():
+    fetcher = _fetcher()
+
+    rows = fetcher.normalize_streaming_realtime_messages(
+        [
+            {
+                "DataType": "MI",
+                "Content": {"RType": "MI", "IndexCode": "VN30", "IndexValue": "bad", "TotalQtty": "-1"},
+            }
+        ],
+        ["VN30"],
+    )
+
+    assert rows == []
+
+
 def test_streaming_parser_ignores_malformed_and_unrequested_messages():
     fetcher = _fetcher()
 
@@ -1175,6 +1239,47 @@ def test_foreign_room_reads_streaming_r_cache_without_rest_probe():
     assert payload["foreign_room"]["value_semantics_status"] == "needs_semantics_proof"
     assert session.calls == []
     assert SECRET_TOKEN not in str(payload)
+
+
+def test_market_index_pulse_reads_streaming_mi_cache_without_rest_probe():
+    session = _FakeSession()
+    client = _FakeStreamClient()
+    fetcher = _fetcher(
+        session=session,
+        streaming_realtime_enabled=True,
+        streaming_realtime_client_factory=lambda: client,
+    )
+    fetcher.streaming_realtime_manager.start(["FPT"])
+    fetcher.streaming_realtime_manager.handle_message(_mi_index())
+
+    payload = fetcher.get_market_index_pulse(["vnindex"])
+
+    assert payload["status"] == "ok"
+    assert payload["source"] == "SSI"
+    assert payload["streaming_status"] == "cache_hit"
+    assert payload["rest_status"] == "unsupported"
+    assert payload["attempted_endpoints"] == []
+    assert payload["count"] == 1
+    assert payload["market_index_pulse"][0]["index_code"] == "VNINDEX"
+    assert payload["market_index_pulse"][0]["stream_data_type"] == "MI"
+    assert payload["market_index_pulse"][0]["index_value"] == 1234.56
+    assert payload["channel_format_status"] == "needs_live_proof"
+    assert payload["diagnostics"]["market_index_channels"] == ["MI:VNINDEX", "MI:VN30", "MI:HNX", "MI:UPCOM"]
+    assert session.calls == []
+    assert SECRET_TOKEN not in str(payload)
+
+
+def test_market_index_pulse_stream_disabled_returns_unavailable_without_rest_probe():
+    session = _FakeSession()
+    fetcher = _fetcher(session=session, streaming_realtime_enabled=False)
+
+    payload = fetcher.get_market_index_pulse(["VNINDEX"])
+
+    assert payload["status"] == "unavailable"
+    assert payload["streaming_status"] == "disabled"
+    assert payload["market_index_pulse"] == []
+    assert payload["reason"] == "SSI streaming realtime manager disabled."
+    assert session.calls == []
 
 
 def test_foreign_room_stream_disabled_returns_unavailable_without_rest_probe():

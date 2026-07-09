@@ -25,17 +25,20 @@ class FakeSsiFetcher:
         realtime_payload=None,
         order_book_payload=None,
         foreign_room_payload=None,
+        market_index_payload=None,
         trade_payload=None,
         session_status_payload=None,
     ):
         self.realtime_payload = realtime_payload
         self.order_book_payload = order_book_payload
         self.foreign_room_payload = foreign_room_payload
+        self.market_index_payload = market_index_payload
         self.trade_payload = trade_payload
         self.session_status_payload = session_status_payload
         self.realtime_calls = 0
         self.order_book_calls = 0
         self.foreign_room_calls = 0
+        self.market_index_calls = 0
         self.trade_calls = 0
         self.session_status_calls = 0
 
@@ -194,6 +197,28 @@ class FakeSsiFetcher:
                 "cache_status": "empty",
                 "manager_state": "running",
                 "session_status_channels": [f"F:{symbol}"],
+            },
+        }
+
+    def get_market_index_pulse(self, index_codes):
+        self.market_index_calls += 1
+        if self.market_index_payload is not None:
+            return self.market_index_payload
+        return {
+            "status": "unavailable",
+            "source": "SSI",
+            "requested_index_codes": index_codes,
+            "reason": "SSI MI market-index stream cache empty.",
+            "market_index_pulse": [],
+            "streaming_status": "subscribed_no_event",
+            "cache_status": "empty",
+            "channel_format_status": "needs_live_proof",
+            "diagnostics": {
+                "streaming_status": "subscribed_no_event",
+                "cache_status": "empty",
+                "manager_state": "running",
+                "market_index_channels": [f"MI:{code}" for code in index_codes],
+                "requested_index_codes": index_codes,
             },
         }
 
@@ -529,6 +554,99 @@ def test_ssi_foreign_room_cache_empty_is_optional_unavailable():
     assert item["foreign_room_status"]["message"] == "SSI foreign room unavailable."
     assert item["diagnostics"]["foreign_room"]["streaming_status"] == "subscribed_no_event"
     assert any(issue["code"] == "foreign_room_stream_cache_empty" for issue in item["data_quality_summary"]["issues"])
+
+
+def test_ssi_market_index_pulse_success_is_separate_from_stock_rows_and_daily_index():
+    fetcher = FakeSsiFetcher(
+        market_index_payload={
+            "status": "ok",
+            "source": "SSI",
+            "requested_index_codes": ["VNINDEX"],
+            "market_index_pulse": [
+                {
+                    "index_code": "VNINDEX",
+                    "exchange": "HOSE",
+                    "index_value": 1234.56,
+                    "estimated_index_value": 1234.50,
+                    "change": 5.67,
+                    "change_pct": 0.46,
+                    "total_trades": 123456,
+                    "total_volume": 123456789,
+                    "total_value": 1234567890000,
+                    "advances": 200,
+                    "unchanged": 50,
+                    "declines": 180,
+                    "trading_date": "2026-06-30",
+                    "time": "10:00:00",
+                    "stream_timestamp": "2026-06-30T10:00:00",
+                    "stream_data_type": "MI",
+                    "r_type": "MI",
+                    "age_seconds": 0,
+                    "cached_at": "2026-06-30T03:00:00+00:00",
+                    "cache_ttl_seconds": 5,
+                    "channel_format_status": "needs_live_proof",
+                    "value_semantics_status": "needs_live_proof",
+                }
+            ],
+            "streaming_status": "cache_hit",
+            "cache_status": "hit",
+            "channel_format_status": "needs_live_proof",
+            "diagnostics": {
+                "streaming_status": "cache_hit",
+                "cache_status": "hit",
+                "manager_state": "running",
+                "market_index_channels": ["MI:VNINDEX"],
+                "market_index_rows_observed": 1,
+                "requested_index_codes": ["VNINDEX"],
+            },
+        }
+    )
+    service = _service(fetcher)
+
+    pulse = service.build_market_index_pulse(["VNINDEX"])
+    item = service.build_watchlist(["FPT"], force_refresh=True)["watchlist"][0]
+
+    assert pulse["status"] == "ok"
+    assert pulse["source"] == "SSI MI market-index stream"
+    assert pulse["market_index_pulse_status"]["status"] == "ok"
+    assert pulse["market_index_pulse_status"]["reason_code"] == "cache_hit"
+    assert pulse["market_index_pulse"][0]["index_code"] == "VNINDEX"
+    assert pulse["market_index_pulse"][0]["index_value"] == 1234.56
+    assert pulse["market_index_pulse"][0]["channel_format_status"] == "needs_live_proof"
+    assert pulse["diagnostics"]["market_index_pulse"]["market_index_channels"] == ["MI:VNINDEX"]
+    assert item["latest_price_source"] == "SSI DailyOhlc"
+    assert "market_index_pulse" not in item
+    assert fetcher.market_index_calls == 1
+
+
+def test_ssi_market_index_pulse_cache_empty_is_explicit_unavailable():
+    fetcher = FakeSsiFetcher(
+        market_index_payload={
+            "status": "unavailable",
+            "source": "SSI",
+            "requested_index_codes": ["VNINDEX"],
+            "reason": "SSI MI market-index stream cache empty.",
+            "market_index_pulse": [],
+            "streaming_status": "subscribed_no_event",
+            "cache_status": "empty",
+            "channel_format_status": "needs_live_proof",
+            "diagnostics": {
+                "streaming_status": "subscribed_no_event",
+                "cache_status": "empty",
+                "manager_state": "running",
+                "market_index_channels": ["MI:VNINDEX"],
+            },
+        }
+    )
+
+    pulse = _service(fetcher).build_market_index_pulse(["VNINDEX"])
+
+    assert pulse["status"] == "unavailable"
+    assert pulse["market_index_pulse"] == []
+    assert pulse["market_index_pulse_status"]["status"] == "unavailable"
+    assert pulse["market_index_pulse_status"]["reason_code"] == "stream_cache_empty"
+    assert pulse["market_index_pulse_status"]["message"] == "SSI market-index pulse unavailable."
+    assert pulse["diagnostics"]["market_index_pulse"]["streaming_status"] == "subscribed_no_event"
 
 
 def test_ssi_session_status_success_is_separate_from_daily_price():

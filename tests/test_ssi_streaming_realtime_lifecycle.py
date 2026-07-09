@@ -176,6 +176,10 @@ def test_bootstrap_rejects_unsafe_symbols_and_starts_no_space_channels():
         "R:HPG",
         "X-TRADE:HPG",
         "F:HPG",
+        "MI:VNINDEX",
+        "MI:VN30",
+        "MI:HNX",
+        "MI:UPCOM",
     ]
     assert "ALL" in status["bootstrap_rejected_symbols"]
     assert "$BAD" in status["bootstrap_rejected_symbols"]
@@ -191,13 +195,33 @@ def test_bootstrap_respects_explicit_old_space_channel_override():
         client_factory=lambda: client,
     )
 
-    assert client.channels == ["X: FPT", "X-QUOTE:FPT", "R:FPT", "X-TRADE:FPT", "F:FPT"]
+    assert client.channels == [
+        "X: FPT",
+        "X-QUOTE:FPT",
+        "R:FPT",
+        "X-TRADE:FPT",
+        "F:FPT",
+        "MI:VNINDEX",
+        "MI:VN30",
+        "MI:HNX",
+        "MI:UPCOM",
+    ]
 
 
 def test_service_reads_backend_lifecycle_cache_without_dynamic_subscription():
     client = FakeStreamClient()
     bootstrap_ssi_streaming_realtime(config=_config(), client_factory=lambda: client)
-    assert client.channels == ["X:FPT", "X-QUOTE:FPT", "R:FPT", "X-TRADE:FPT", "F:FPT"]
+    assert client.channels == [
+        "X:FPT",
+        "X-QUOTE:FPT",
+        "R:FPT",
+        "X-TRADE:FPT",
+        "F:FPT",
+        "MI:VNINDEX",
+        "MI:VN30",
+        "MI:HNX",
+        "MI:UPCOM",
+    ]
 
     client.on_message(_x_trade(price="131.5"))
     service = VietnamMarketService(config=_dashboard_config())
@@ -211,7 +235,17 @@ def test_service_reads_backend_lifecycle_cache_without_dynamic_subscription():
     assert payload["cache"]["streaming_cache_status"] == "hit"
     assert payload["streaming_status"] == "cache_hit"
     assert payload["runtime_status"] == "running"
-    assert client.channels == ["X:FPT", "X-QUOTE:FPT", "R:FPT", "X-TRADE:FPT", "F:FPT"]
+    assert client.channels == [
+        "X:FPT",
+        "X-QUOTE:FPT",
+        "R:FPT",
+        "X-TRADE:FPT",
+        "F:FPT",
+        "MI:VNINDEX",
+        "MI:VN30",
+        "MI:HNX",
+        "MI:UPCOM",
+    ]
 
     client.on_message(_x_trade(price="132.5"))
     refreshed_payload = service.build_realtime_snapshot(["FPT"])
@@ -221,7 +255,17 @@ def test_service_reads_backend_lifecycle_cache_without_dynamic_subscription():
     outside_payload = service.build_realtime_snapshot(["HPG"])
     assert outside_payload["status"] == "unavailable"
     assert outside_payload["quotes"] == []
-    assert client.channels == ["X:FPT", "X-QUOTE:FPT", "R:FPT", "X-TRADE:FPT", "F:FPT"]
+    assert client.channels == [
+        "X:FPT",
+        "X-QUOTE:FPT",
+        "R:FPT",
+        "X-TRADE:FPT",
+        "F:FPT",
+        "MI:VNINDEX",
+        "MI:VN30",
+        "MI:HNX",
+        "MI:UPCOM",
+    ]
 
 
 def test_service_config_off_still_wins_over_backend_cache():

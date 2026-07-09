@@ -46,13 +46,16 @@ DEFAULT_STREAMING_REALTIME_RECONNECT_MAX_DELAY_SECONDS = 30
 DEFAULT_ORDER_BOOK_TTL_SECONDS = 5
 DEFAULT_ORDER_BOOK_MAX_LEVELS = 10
 DEFAULT_FOREIGN_ROOM_TTL_SECONDS = 5
+DEFAULT_MARKET_INDEX_TTL_SECONDS = 5
 DEFAULT_TRADE_TAPE_BUFFER_SIZE = 50
 DEFAULT_TRADE_TAPE_TTL_SECONDS = 60
 ORDER_BOOK_CHANNEL_PREFIX = "X-QUOTE"
 FOREIGN_ROOM_CHANNEL_PREFIX = "R"
+MARKET_INDEX_CHANNEL_PREFIX = "MI"
 TRADE_TAPE_CHANNEL_PREFIX = "X-TRADE"
 DEFAULT_SESSION_STATUS_TTL_SECONDS = 60
 SESSION_STATUS_CHANNEL_PREFIX = "F"
+DEFAULT_MARKET_INDEX_CODES = ("VNINDEX", "VN30", "HNX", "UPCOM")
 _TRADE_SIDE_BUY_VALUES = {"B", "BU", "BUY", "1", "MUA"}
 _TRADE_SIDE_SELL_VALUES = {"S", "SD", "SELL", "2", "BAN", "BÁN"}
 
@@ -260,6 +263,13 @@ class CachedSessionStatus:
     received_at: float
 
 
+@dataclass(frozen=True)
+class CachedMarketIndexPulse:
+    index_code: str
+    pulse: Dict[str, Any]
+    received_at: float
+
+
 def sanitize_streaming_error(value: Any, *, max_length: int = 240) -> str:
     """Return a bounded, secret-safe error summary."""
     text = str(value or "").replace("\r", " ").replace("\n", " ").strip()
@@ -349,6 +359,18 @@ def build_session_status_channel(symbol: str) -> str:
     return channel
 
 
+def build_market_index_channel(index_code: str) -> str:
+    normalized = str(index_code or "").strip().upper()
+    if not normalized:
+        raise ValueError("Streaming index code is required.")
+    if normalized == "ALL":
+        raise ValueError(SSI_STREAMING_REALTIME_ALL_CHANNEL_FORBIDDEN_REASON)
+    channel = f"{MARKET_INDEX_CHANNEL_PREFIX}:{normalized}"
+    if re.search(r":\s*ALL\b", channel, flags=re.IGNORECASE):
+        raise ValueError(SSI_STREAMING_REALTIME_ALL_CHANNEL_FORBIDDEN_REASON)
+    return channel
+
+
 def is_trade_tape_channel(channel: Any) -> bool:
     text = str(channel or "").strip().upper()
     return text.startswith(f"{TRADE_TAPE_CHANNEL_PREFIX}:")
@@ -369,14 +391,21 @@ def is_session_status_channel(channel: Any) -> bool:
     return text.startswith(f"{SESSION_STATUS_CHANNEL_PREFIX}:")
 
 
+def is_market_index_channel(channel: Any) -> bool:
+    text = str(channel or "").strip().upper()
+    return text.startswith(f"{MARKET_INDEX_CHANNEL_PREFIX}:")
+
+
 def build_streaming_channels(
     symbols: Iterable[str],
     *,
+    market_indexes: Optional[Iterable[str]] = None,
     realtime_template: str = DEFAULT_STREAMING_REALTIME_CHANNEL_TEMPLATE,
     order_book_enabled: bool = True,
     foreign_room_enabled: bool = True,
     trade_tape_enabled: bool = True,
     session_status_enabled: bool = True,
+    market_index_enabled: bool = True,
 ) -> List[str]:
     channels: List[str] = []
     seen = set()
@@ -389,6 +418,13 @@ def build_streaming_channels(
             build_session_status_channel(symbol) if session_status_enabled else None,
         ):
             if not channel or channel in seen:
+                continue
+            channels.append(channel)
+            seen.add(channel)
+    if market_index_enabled:
+        for index_code in normalize_streaming_symbols(market_indexes or DEFAULT_MARKET_INDEX_CODES):
+            channel = build_market_index_channel(index_code)
+            if channel in seen:
                 continue
             channels.append(channel)
             seen.add(channel)
@@ -866,6 +902,172 @@ class ForeignRoomCache:
         return number
 
 
+class MarketIndexPulseCache:
+    """Thread-safe latest MI market-index pulse cache keyed by index code."""
+
+    def __init__(
+        self,
+        ttl_seconds: int = DEFAULT_MARKET_INDEX_TTL_SECONDS,
+        *,
+        time_func: Callable[[], float] = time.time,
+    ) -> None:
+        self.ttl_seconds = max(1, int(ttl_seconds or DEFAULT_MARKET_INDEX_TTL_SECONDS))
+        self._time_func = time_func
+        self._lock = threading.RLock()
+        self._rows: Dict[str, CachedMarketIndexPulse] = {}
+
+    def clear(self) -> None:
+        with self._lock:
+            self._rows.clear()
+
+    def put_rows(self, rows: Iterable[Dict[str, Any]]) -> int:
+        now = float(self._time_func())
+        written = 0
+        with self._lock:
+            for row in rows or []:
+                pulse = self._normalize_market_index(row, now)
+                if not pulse:
+                    continue
+                index_code = str(pulse.get("index_code") or "").strip().upper()
+                self._rows[index_code] = CachedMarketIndexPulse(
+                    index_code=index_code,
+                    pulse=pulse,
+                    received_at=now,
+                )
+                written += 1
+        return written
+
+    def get_many(self, index_codes: Iterable[str]) -> Dict[str, Any]:
+        requested = normalize_streaming_symbols(index_codes)
+        now = float(self._time_func())
+        rows: List[Dict[str, Any]] = []
+        stale_rows: List[Dict[str, Any]] = []
+        latest_timestamp = None
+        latest_age_seconds = None
+        with self._lock:
+            entries = {code: self._rows.get(code) for code in requested}
+
+        for code in requested:
+            entry = entries.get(code)
+            if entry is None:
+                continue
+            age_seconds = max(0.0, now - entry.received_at)
+            row = dict(entry.pulse)
+            row["age_seconds"] = int(age_seconds)
+            row["is_stale"] = age_seconds > self.ttl_seconds
+            if row["is_stale"]:
+                row["stale_reason"] = SSI_STREAMING_REALTIME_CACHE_STALE_REASON
+                stale_rows.append(row)
+            else:
+                rows.append(row)
+            if latest_age_seconds is None or age_seconds < latest_age_seconds:
+                latest_age_seconds = int(age_seconds)
+                latest_timestamp = row.get("stream_timestamp") or row.get("time")
+
+        if rows:
+            status = "hit"
+        elif stale_rows:
+            status = "stale"
+        else:
+            status = "empty"
+        return {
+            "status": status,
+            "rows": rows,
+            "stale_rows": stale_rows,
+            "latest_market_index_timestamp": latest_timestamp,
+            "latest_market_index_age_seconds": latest_age_seconds,
+        }
+
+    def _normalize_market_index(self, row: Any, now: float) -> Optional[Dict[str, Any]]:
+        if not isinstance(row, dict):
+            return None
+        index_code = str(
+            self._first_value(row, "index_code", "IndexCode", "IndexId", "IndexID", "Code")
+            or ""
+        ).strip().upper()
+        if not index_code:
+            return None
+
+        def signed(value: Any) -> Optional[float]:
+            return self._to_float(value)
+
+        def nonnegative(value: Any) -> Optional[float]:
+            number = self._to_float(value)
+            if number is None or number < 0:
+                return None
+            return number
+
+        numeric_fields = {
+            "index_value": nonnegative(self._first_value(row, "index_value", "IndexValue", "IndexVal")),
+            "estimated_index_value": nonnegative(
+                self._first_value(row, "estimated_index_value", "IndexValEst", "EstimatedIndexValue")
+            ),
+            "change": signed(self._first_value(row, "change", "Change")),
+            "change_pct": signed(self._first_value(row, "change_pct", "RatioChange")),
+            "total_trades": nonnegative(self._first_value(row, "total_trades", "TotalTrade")),
+            "total_volume": nonnegative(self._first_value(row, "total_volume", "TotalQtty", "TotalVolume")),
+            "total_value": nonnegative(self._first_value(row, "total_value", "TotalValue")),
+            "advances": nonnegative(self._first_value(row, "advances", "Advances")),
+            "unchanged": nonnegative(self._first_value(row, "unchanged", "Nochanges", "NoChanges")),
+            "declines": nonnegative(self._first_value(row, "declines", "Declines")),
+        }
+        if not any(value is not None for value in numeric_fields.values()):
+            return None
+
+        cached_at = _utc_iso_from_epoch(now)
+        pulse = {
+            "index_code": index_code,
+            "exchange": self._safe_text(self._first_value(row, "exchange", "Exchange", "Market", "market")),
+            "trading_date": self._safe_text(
+                self._first_value(row, "trading_date", "TradingDate", "Date", "date")
+            ),
+            "time": self._safe_text(self._first_value(row, "time", "Time", "TradingTime", "tradingTime")),
+            "stream_timestamp": self._safe_text(self._first_value(row, "stream_timestamp", "streamTimestamp")),
+            "stream_data_type": MARKET_INDEX_CHANNEL_PREFIX,
+            "r_type": self._safe_text(self._first_value(row, "r_type", "RType", "rtype")) or MARKET_INDEX_CHANNEL_PREFIX,
+            "source": "SSI MI market-index stream",
+            "received_at": cached_at,
+            "cached_at": cached_at,
+            "cache_ttl_seconds": self.ttl_seconds,
+            "channel_format_status": "needs_live_proof",
+            "value_semantics_status": "needs_live_proof",
+        }
+        pulse.update(numeric_fields)
+        return pulse
+
+    @staticmethod
+    def _clean_key(key: Any) -> str:
+        return "".join(ch for ch in str(key or "").strip().lower() if ch.isalnum())
+
+    @classmethod
+    def _first_value(cls, row: Dict[str, Any], *keys: str) -> Any:
+        normalized = {cls._clean_key(k): v for k, v in row.items()}
+        for key in keys:
+            value = normalized.get(cls._clean_key(key))
+            if value not in (None, ""):
+                return value
+        return None
+
+    @staticmethod
+    def _safe_text(value: Any) -> Optional[str]:
+        if value in (None, ""):
+            return None
+        text = str(value).replace("\r", " ").replace("\n", " ").strip()
+        return text[:120] if text else None
+
+    @staticmethod
+    def _to_float(value: Any) -> Optional[float]:
+        if value in (None, ""):
+            return None
+        try:
+            text = str(value).replace(",", "").strip()
+            if text.lower() in {"nan", "none", "null"} or text in {"-", "--"}:
+                return None
+            return float(text)
+        except (TypeError, ValueError):
+            return None
+
+
 class SessionStatusCache:
     """Thread-safe latest F stream session/status cache keyed by VN ticker."""
 
@@ -950,6 +1152,7 @@ class SsiStreamingRealtimeManager:
         cache: Optional[RealtimeSnapshotCache] = None,
         order_book_cache: Optional[OrderBookCache] = None,
         foreign_room_cache: Optional[ForeignRoomCache] = None,
+        market_index_cache: Optional[MarketIndexPulseCache] = None,
         trade_tape_cache: Optional[TradeTapeEventCache] = None,
         session_status_cache: Optional[SessionStatusCache] = None,
         parser: Optional[Callable[[List[Any], List[str]], List[Dict[str, Any]]]] = None,
@@ -962,6 +1165,8 @@ class SsiStreamingRealtimeManager:
         reconnect_max_attempts: int = 0,
         order_book_enabled: bool = True,
         foreign_room_enabled: bool = True,
+        market_index_enabled: bool = True,
+        market_index_codes: Optional[Iterable[str]] = None,
         trade_tape_enabled: bool = True,
         session_status_enabled: bool = True,
         time_func: Callable[[], float] = time.time,
@@ -970,6 +1175,7 @@ class SsiStreamingRealtimeManager:
         self.cache = cache or RealtimeSnapshotCache(time_func=time_func)
         self.order_book_cache = order_book_cache or OrderBookCache(time_func=time_func)
         self.foreign_room_cache = foreign_room_cache or ForeignRoomCache(time_func=time_func)
+        self.market_index_cache = market_index_cache or MarketIndexPulseCache(time_func=time_func)
         self.trade_tape_cache = trade_tape_cache or TradeTapeEventCache(time_func=time_func)
         self.session_status_cache = session_status_cache or SessionStatusCache(time_func=time_func)
         self._parser = parser or (lambda messages, symbols: [])
@@ -988,6 +1194,8 @@ class SsiStreamingRealtimeManager:
         self.reconnect_max_attempts = max(0, int(reconnect_max_attempts or 0))
         self.order_book_enabled = bool(order_book_enabled)
         self.foreign_room_enabled = bool(foreign_room_enabled)
+        self.market_index_enabled = bool(market_index_enabled)
+        self.market_index_codes = normalize_streaming_symbols(market_index_codes or DEFAULT_MARKET_INDEX_CODES)
         self.trade_tape_enabled = bool(trade_tape_enabled)
         self.session_status_enabled = bool(session_status_enabled)
         self._time_func = time_func
@@ -1005,6 +1213,7 @@ class SsiStreamingRealtimeManager:
         self._parser_rows_observed = 0
         self._order_book_rows_observed = 0
         self._foreign_room_rows_observed = 0
+        self._market_index_rows_observed = 0
         self._trade_rows_observed = 0
         self._session_status_rows_observed = 0
         self._bootstrap_status: Optional[str] = None
@@ -1047,11 +1256,13 @@ class SsiStreamingRealtimeManager:
         try:
             channels = build_streaming_channels(
                 normalized_symbols,
+                market_indexes=self.market_index_codes,
                 realtime_template=self.channel_template,
                 order_book_enabled=self.order_book_enabled,
                 foreign_room_enabled=self.foreign_room_enabled,
                 trade_tape_enabled=self.trade_tape_enabled,
                 session_status_enabled=self.session_status_enabled,
+                market_index_enabled=self.market_index_enabled,
             )
             if not channels:
                 raise ValueError("At least one streaming symbol is required.")
@@ -1121,28 +1332,32 @@ class SsiStreamingRealtimeManager:
             if self._state != MANAGER_RUNNING:
                 return
             requested_symbols = list(self._requested_symbols)
+            requested_market_indexes = list(self.market_index_codes)
         try:
-            rows = self._parser([message], requested_symbols)
-            requested_set = set(requested_symbols)
+            rows = self._parser([message], requested_symbols + requested_market_indexes)
+            requested_set = set(requested_symbols + requested_market_indexes)
             filtered_rows = [
                 row
                 for row in rows or []
                 if isinstance(row, dict)
-                and str(row.get("ticker") or row.get("symbol") or "").strip().upper() in requested_set
+                and str(row.get("ticker") or row.get("symbol") or row.get("index_code") or "").strip().upper() in requested_set
             ]
             session_rows = [row for row in filtered_rows if self._is_session_status_row(row)]
             order_book_rows = [row for row in filtered_rows if self._is_order_book_row(row)]
             foreign_room_rows = [row for row in filtered_rows if self._is_foreign_room_row(row)]
+            market_index_rows = [row for row in filtered_rows if self._is_market_index_row(row)]
             snapshot_rows = [
                 row
                 for row in filtered_rows
                 if not self._is_session_status_row(row)
                 and not self._is_order_book_row(row)
                 and not self._is_foreign_room_row(row)
+                and not self._is_market_index_row(row)
             ]
             written = self.cache.put_rows(snapshot_rows)
             order_book_written = self.order_book_cache.put_rows(order_book_rows)
             foreign_room_written = self.foreign_room_cache.put_rows(foreign_room_rows)
+            market_index_written = self.market_index_cache.put_rows(market_index_rows)
             trade_written = self.trade_tape_cache.put_rows(
                 self._trade_events_from_streaming_rows(snapshot_rows)
             )
@@ -1152,6 +1367,7 @@ class SsiStreamingRealtimeManager:
                 self._parser_rows_observed += written
                 self._order_book_rows_observed += order_book_written
                 self._foreign_room_rows_observed += foreign_room_written
+                self._market_index_rows_observed += market_index_written
                 self._trade_rows_observed += trade_written
                 self._session_status_rows_observed += session_written
                 now = float(self._time_func())
@@ -1177,6 +1393,11 @@ class SsiStreamingRealtimeManager:
     def _is_foreign_room_row(row: Dict[str, Any]) -> bool:
         raw_type = str(row.get("stream_data_type") or row.get("r_type") or "").strip().upper()
         return raw_type == FOREIGN_ROOM_CHANNEL_PREFIX
+
+    @staticmethod
+    def _is_market_index_row(row: Dict[str, Any]) -> bool:
+        raw_type = str(row.get("stream_data_type") or row.get("r_type") or "").strip().upper()
+        return raw_type == MARKET_INDEX_CHANNEL_PREFIX
 
     @staticmethod
     def _trade_events_from_streaming_rows(rows: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -1660,6 +1881,188 @@ class SsiStreamingRealtimeManager:
             "diagnostics": diagnostics,
         }
 
+    def market_index_pulse(self, index_codes: Iterable[str]) -> Dict[str, Any]:
+        requested_indexes = normalize_streaming_symbols(index_codes)
+        if not requested_indexes:
+            requested_indexes = list(self.market_index_codes)
+        status = self.status()
+        diagnostics = dict(status)
+        diagnostics.update(
+            {
+                "streaming_status": "market_index_buffer",
+                "cache_ttl_seconds": self.market_index_cache.ttl_seconds,
+                "market_index_ttl_seconds": self.market_index_cache.ttl_seconds,
+                "channel_type": MARKET_INDEX_CHANNEL_PREFIX,
+                "market_index_rows_observed": self._market_index_rows_observed,
+                "requested_index_codes": requested_indexes,
+            }
+        )
+        base = {
+            "source": "SSI",
+            "requested_index_codes": requested_indexes,
+            "market_index_pulse": [],
+            "count": 0,
+            "streaming_data_types": [MARKET_INDEX_CHANNEL_PREFIX],
+            "attempted_endpoints": [],
+            "candidate_endpoints": [],
+            "rest_status": "unsupported",
+            "channel_format_status": "needs_live_proof",
+        }
+
+        if not requested_indexes:
+            diagnostics["failure_class"] = "missing_index_codes"
+            return {
+                **base,
+                "status": "unavailable",
+                "reason": "No index codes requested",
+                "streaming_status": "missing_index_codes",
+                "cache_status": "unavailable",
+                "manager_state": status["manager_state"],
+                "diagnostics": diagnostics,
+            }
+        if not self.enabled:
+            diagnostics.update({"streaming_status": "disabled", "cache_status": "disabled"})
+            return {
+                **base,
+                "status": "unavailable",
+                "reason": SSI_STREAMING_REALTIME_DISABLED_REASON,
+                "streaming_status": "disabled",
+                "cache_status": "disabled",
+                "manager_state": MANAGER_DISABLED,
+                "diagnostics": diagnostics,
+            }
+
+        manager_state = status["manager_state"]
+        if not self.market_index_enabled:
+            diagnostics.update({"streaming_status": "mi_disabled", "cache_status": "disabled"})
+            return {
+                **base,
+                "status": "unavailable",
+                "reason": "SSI MI market-index stream channel disabled.",
+                "streaming_status": "mi_disabled",
+                "cache_status": "disabled",
+                "manager_state": manager_state,
+                "diagnostics": diagnostics,
+            }
+
+        if manager_state == MANAGER_ERRORED:
+            diagnostics.update({"streaming_status": "manager_error", "cache_status": "unavailable"})
+            return {
+                **base,
+                "status": "unavailable",
+                "reason": SSI_STREAMING_REALTIME_MANAGER_ERROR_REASON,
+                "streaming_status": "manager_error",
+                "cache_status": "unavailable",
+                "manager_state": manager_state,
+                "diagnostics": diagnostics,
+            }
+        if manager_state != MANAGER_RUNNING:
+            reason = SSI_STREAMING_REALTIME_NOT_STARTED_REASON
+            streaming_status = "manager_not_started"
+            cache_status = "not_started"
+            if diagnostics.get("bootstrap_status") == "symbols_empty":
+                reason = SSI_STREAMING_REALTIME_BOOTSTRAP_EMPTY_REASON
+                streaming_status = "bootstrap_symbols_empty"
+                cache_status = "bootstrap_symbols_empty"
+            diagnostics.update({"streaming_status": streaming_status, "cache_status": cache_status})
+            return {
+                **base,
+                "status": "unavailable",
+                "reason": reason,
+                "streaming_status": streaming_status,
+                "cache_status": cache_status,
+                "manager_state": manager_state,
+                "diagnostics": diagnostics,
+            }
+
+        configured_indexes = set(normalize_streaming_symbols(status.get("market_index_codes") or []))
+        missing_bootstrap = [code for code in requested_indexes if configured_indexes and code not in configured_indexes]
+        if missing_bootstrap:
+            diagnostics.update(
+                {
+                    "streaming_status": "index_not_bootstrapped",
+                    "cache_status": "not_bootstrapped",
+                    "bootstrap_membership": "not_bootstrapped",
+                    "missing_index_codes": missing_bootstrap,
+                }
+            )
+            return {
+                **base,
+                "status": "unavailable",
+                "reason": "SSI MI market-index stream not bootstrapped.",
+                "streaming_status": "index_not_bootstrapped",
+                "cache_status": "not_bootstrapped",
+                "manager_state": manager_state,
+                "diagnostics": diagnostics,
+            }
+
+        subscribed_channels = set(status.get("market_index_channels") or [])
+        missing_channels = [
+            build_market_index_channel(code)
+            for code in requested_indexes
+            if build_market_index_channel(code) not in subscribed_channels
+        ]
+        if missing_channels:
+            diagnostics.update(
+                {
+                    "streaming_status": "mi_not_subscribed",
+                    "cache_status": "not_subscribed",
+                    "bootstrap_membership": "bootstrapped",
+                    "missing_channels": missing_channels,
+                }
+            )
+            return {
+                **base,
+                "status": "unavailable",
+                "reason": "SSI MI market-index stream channel not subscribed.",
+                "streaming_status": "mi_not_subscribed",
+                "cache_status": "not_subscribed",
+                "manager_state": manager_state,
+                "diagnostics": diagnostics,
+            }
+
+        cache_result = self.market_index_cache.get_many(requested_indexes)
+        cache_status = cache_result["status"]
+        rows = cache_result["rows"]
+        diagnostics.update(
+            {
+                "streaming_status": "cache_hit" if cache_status == "hit" else f"cache_{cache_status}",
+                "cache_status": cache_status,
+                "latest_market_index_timestamp": cache_result["latest_market_index_timestamp"],
+                "latest_market_index_age_seconds": cache_result["latest_market_index_age_seconds"],
+                "stale_market_index_row_count": len(cache_result["stale_rows"]),
+            }
+        )
+        if rows:
+            return {
+                **base,
+                "status": "ok" if len(rows) == len(requested_indexes) else "partial",
+                "reason": None if len(rows) == len(requested_indexes) else "Some SSI MI market-index rows unavailable.",
+                "market_index_pulse": rows,
+                "count": len(rows),
+                "streaming_status": "cache_hit",
+                "cache_status": "hit",
+                "manager_state": manager_state,
+                "diagnostics": diagnostics,
+            }
+
+        reason = (
+            "SSI MI market-index stream cache stale."
+            if cache_status == "stale"
+            else "SSI MI market-index stream cache empty."
+        )
+        streaming_status = "cache_stale" if cache_status == "stale" else "subscribed_no_event"
+        diagnostics.update({"streaming_status": streaming_status})
+        return {
+            **base,
+            "status": "unavailable",
+            "reason": reason,
+            "streaming_status": streaming_status,
+            "cache_status": cache_status,
+            "manager_state": manager_state,
+            "diagnostics": diagnostics,
+        }
+
     def trade_tape(self, symbol: str, limit: int = DEFAULT_TRADE_TAPE_BUFFER_SIZE) -> Dict[str, Any]:
         requested_symbol = str(symbol or "").strip().upper()
         safe_limit = max(1, min(int(limit or DEFAULT_TRADE_TAPE_BUFFER_SIZE), self.trade_tape_cache.max_rows_per_symbol))
@@ -2007,11 +2410,13 @@ class SsiStreamingRealtimeManager:
                 for channel in self._channels
                 if not is_order_book_channel(channel)
                 and not is_foreign_room_channel(channel)
+                and not is_market_index_channel(channel)
                 and not is_trade_tape_channel(channel)
                 and not is_session_status_channel(channel)
             ]
             order_book_channels = [channel for channel in self._channels if is_order_book_channel(channel)]
             foreign_room_channels = [channel for channel in self._channels if is_foreign_room_channel(channel)]
+            market_index_channels = [channel for channel in self._channels if is_market_index_channel(channel)]
             trade_tape_channels = [channel for channel in self._channels if is_trade_tape_channel(channel)]
             session_status_channels = [channel for channel in self._channels if is_session_status_channel(channel)]
             order_book_subscription_status = (
@@ -2023,6 +2428,11 @@ class SsiStreamingRealtimeManager:
                 "disabled"
                 if not self.foreign_room_enabled
                 else ("subscribed" if foreign_room_channels else "not_subscribed")
+            )
+            market_index_subscription_status = (
+                "disabled"
+                if not self.market_index_enabled
+                else ("subscribed" if market_index_channels else "not_subscribed")
             )
             trade_tape_subscription_status = (
                 "disabled"
@@ -2046,6 +2456,10 @@ class SsiStreamingRealtimeManager:
                 "foreign_room_channels": foreign_room_channels,
                 "foreign_room_channel_type": FOREIGN_ROOM_CHANNEL_PREFIX,
                 "foreign_room_subscription_status": foreign_room_subscription_status,
+                "market_index_channels": market_index_channels,
+                "market_index_channel_type": MARKET_INDEX_CHANNEL_PREFIX,
+                "market_index_subscription_status": market_index_subscription_status,
+                "market_index_codes": list(self.market_index_codes),
                 "trade_tape_channels": trade_tape_channels,
                 "trade_tape_channel_type": TRADE_TAPE_CHANNEL_PREFIX,
                 "trade_tape_subscription_status": trade_tape_subscription_status,
@@ -2060,6 +2474,7 @@ class SsiStreamingRealtimeManager:
                 "parser_rows_observed": self._parser_rows_observed,
                 "order_book_rows_observed": self._order_book_rows_observed,
                 "foreign_room_rows_observed": self._foreign_room_rows_observed,
+                "market_index_rows_observed": self._market_index_rows_observed,
                 "trade_rows_observed": self._trade_rows_observed,
                 "session_status_rows_observed": self._session_status_rows_observed,
                 "bootstrap_status": self._bootstrap_status,

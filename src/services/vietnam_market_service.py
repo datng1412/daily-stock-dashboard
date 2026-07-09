@@ -80,6 +80,7 @@ VN_CACHE_TTL_SECONDS = {
     "realtime_snapshot": 10,
     "order_book": 5,
     "foreign_room": 5,
+    "market_index_pulse": 5,
     "trade_tape": 5,
     "session_status": 5,
     "news": 1800,
@@ -98,6 +99,7 @@ SSI_SECURITIES_DETAILS_SOURCE = "SSI SecuritiesDetails"
 SSI_INTRADAY_SOURCE = "SSI IntradayOhlc"
 SSI_REALTIME_SOURCE = "SSI realtime contract"
 SSI_ORDER_BOOK_SOURCE = "SSI X-QUOTE order-book stream"
+SSI_MARKET_INDEX_PULSE_SOURCE = "SSI MI market-index stream"
 SSI_FOREIGN_ROOM_SOURCE = "SSI R foreign-room stream"
 SSI_TRADE_TAPE_SOURCE = "SSI trade-tape contract"
 SSI_SESSION_STATUS_SOURCE = "SSI F trading session/status stream"
@@ -115,6 +117,8 @@ VN_ORDER_BOOK_DISABLED_REASON = "SSI order book stream is disabled."
 VN_ORDER_BOOK_UNAVAILABLE_REASON = "SSI order book unavailable."
 VN_FOREIGN_ROOM_DISABLED_REASON = "SSI foreign-room stream is disabled."
 VN_FOREIGN_ROOM_UNAVAILABLE_REASON = "SSI foreign room unavailable."
+VN_MARKET_INDEX_PULSE_DISABLED_REASON = "SSI market-index pulse stream is disabled."
+VN_MARKET_INDEX_PULSE_UNAVAILABLE_REASON = "SSI market-index pulse unavailable."
 VN_TRADE_TAPE_DISABLED_REASON = "SSI trade tape is disabled."
 VN_TRADE_TAPE_UNAVAILABLE_REASON = "SSI trade tape unavailable."
 VN_SESSION_STATUS_DISABLED_REASON = "SSI trading session/status stream is disabled."
@@ -667,6 +671,15 @@ LIVE_DIAGNOSTIC_KEYS = {
     "foreign_room_channel_type",
     "foreign_room_channels",
     "foreign_room_subscription_status",
+    "market_index_ttl_seconds",
+    "market_index_rows_observed",
+    "latest_market_index_timestamp",
+    "latest_market_index_age_seconds",
+    "market_index_channel_type",
+    "market_index_channels",
+    "market_index_subscription_status",
+    "market_index_codes",
+    "requested_index_codes",
     "trade_tape_ttl_seconds",
     "trade_tape_buffer_size",
     "trade_tape_buffer_row_count",
@@ -744,6 +757,9 @@ def _safe_live_diagnostic_value(key: str, value: Any) -> Any:
         "realtime_channels",
         "order_book_channels",
         "foreign_room_channels",
+        "market_index_channels",
+        "market_index_codes",
+        "requested_index_codes",
         "trade_tape_channels",
         "session_status_channels",
     } and isinstance(value, (list, tuple, set)):
@@ -908,6 +924,18 @@ def _status_message_from_reason(
             "r_not_subscribed": VN_FOREIGN_ROOM_UNAVAILABLE_REASON,
             "r_disabled": VN_FOREIGN_ROOM_DISABLED_REASON,
             "unavailable_unknown": VN_FOREIGN_ROOM_UNAVAILABLE_REASON,
+        }
+    elif section == "market_index_pulse":
+        messages = {
+            "cache_hit": "SSI market-index pulse ready.",
+            "disabled": VN_MARKET_INDEX_PULSE_DISABLED_REASON,
+            "stream_not_started": VN_MARKET_INDEX_PULSE_UNAVAILABLE_REASON,
+            "stream_not_bootstrapped": VN_MARKET_INDEX_PULSE_UNAVAILABLE_REASON,
+            "stream_cache_empty": VN_MARKET_INDEX_PULSE_UNAVAILABLE_REASON,
+            "stream_cache_stale": "SSI market-index pulse stale.",
+            "mi_not_subscribed": VN_MARKET_INDEX_PULSE_UNAVAILABLE_REASON,
+            "mi_disabled": VN_MARKET_INDEX_PULSE_DISABLED_REASON,
+            "unavailable_unknown": VN_MARKET_INDEX_PULSE_UNAVAILABLE_REASON,
         }
     elif section == "trade_tape":
         messages = {
@@ -1103,6 +1131,34 @@ def _classify_session_status_reason(
         return "f_not_subscribed"
     if "f stream channel disabled" in reason_text or "f_disabled" in reason_text:
         return "f_disabled"
+    if "not started" in reason_text or "bootstrap symbols empty" in reason_text:
+        return "stream_not_started"
+    if normalized_status == "unavailable":
+        return "unavailable_unknown"
+    return "unknown"
+
+
+def _classify_market_index_pulse_reason(
+    *,
+    status: str,
+    reason: Optional[str],
+) -> str:
+    normalized_status = _lower_text(status)
+    reason_text = _lower_text(reason)
+    if normalized_status in {"ok", "partial"}:
+        return "cache_hit"
+    if normalized_status == "disabled":
+        return "disabled"
+    if "not bootstrapped" in reason_text:
+        return "stream_not_bootstrapped"
+    if "cache stale" in reason_text:
+        return "stream_cache_stale"
+    if "cache empty" in reason_text:
+        return "stream_cache_empty"
+    if "mi market-index stream channel not subscribed" in reason_text or "mi_not_subscribed" in reason_text:
+        return "mi_not_subscribed"
+    if "mi market-index stream channel disabled" in reason_text or "mi_disabled" in reason_text:
+        return "mi_disabled"
     if "not started" in reason_text or "bootstrap symbols empty" in reason_text:
         return "stream_not_started"
     if normalized_status == "unavailable":
@@ -5308,6 +5364,175 @@ class VietnamMarketService:
                     for index, result in enumerate(results)
                 },
             },
+        }
+
+    @staticmethod
+    def _market_index_pulse_row_from_ssi(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        if not isinstance(row, dict):
+            return None
+        index_code = str(row.get("index_code") or "").strip().upper()
+        if not index_code:
+            return None
+        numeric_keys = (
+            "index_value",
+            "estimated_index_value",
+            "change",
+            "change_pct",
+            "total_trades",
+            "total_volume",
+            "total_value",
+            "advances",
+            "unchanged",
+            "declines",
+        )
+        if not any(row.get(key) is not None for key in numeric_keys):
+            return None
+        return {
+            "index_code": index_code,
+            "exchange": _safe_live_diagnostic_text(row.get("exchange")),
+            "index_value": _safe_float(row.get("index_value")),
+            "estimated_index_value": _safe_float(row.get("estimated_index_value")),
+            "change": _safe_float(row.get("change")),
+            "change_pct": _safe_float(row.get("change_pct")),
+            "total_trades": _safe_int(row.get("total_trades")),
+            "total_volume": _safe_int(row.get("total_volume")),
+            "total_value": _safe_float(row.get("total_value")),
+            "advances": _safe_int(row.get("advances")),
+            "unchanged": _safe_int(row.get("unchanged")),
+            "declines": _safe_int(row.get("declines")),
+            "trading_date": _safe_live_diagnostic_text(row.get("trading_date")),
+            "time": _safe_live_diagnostic_text(row.get("time")),
+            "stream_timestamp": _safe_live_diagnostic_text(row.get("stream_timestamp")),
+            "stream_data_type": "MI",
+            "r_type": _safe_live_diagnostic_text(row.get("r_type")) or "MI",
+            "source": SSI_MARKET_INDEX_PULSE_SOURCE,
+            "received_at": _safe_live_diagnostic_text(row.get("received_at")),
+            "cached_at": _safe_live_diagnostic_text(row.get("cached_at")),
+            "cache_ttl_seconds": _safe_int(row.get("cache_ttl_seconds")),
+            "age_seconds": _safe_int(row.get("age_seconds")),
+            "is_stale": bool(row.get("is_stale")) if row.get("is_stale") is not None else False,
+            "stale_reason": _safe_live_diagnostic_text(row.get("stale_reason")),
+            "channel_format_status": _safe_live_diagnostic_text(row.get("channel_format_status")) or "needs_live_proof",
+            "value_semantics_status": _safe_live_diagnostic_text(row.get("value_semantics_status")) or "needs_live_proof",
+        }
+
+    def build_market_index_pulse(
+        self,
+        index_codes: Optional[Iterable[str]] = None,
+    ) -> Dict[str, Any]:
+        """Return optional SSI MI market-index pulse rows from the streaming cache."""
+        requested_codes = list(
+            dict.fromkeys(
+                code
+                for code in (
+                    self._normalize_index_value(value)
+                    for value in (index_codes or ("VNINDEX", "VN30", "HNX", "UPCOM"))
+                )
+                if code
+            )
+        )[:10]
+        if not requested_codes:
+            requested_codes = ["VNINDEX", "VN30", "HNX", "UPCOM"]
+
+        fetcher = self._get_ssi_fetcher()
+        get_pulse = getattr(fetcher, "get_market_index_pulse", None)
+        if not callable(get_pulse):
+            reason_code = "unavailable_unknown"
+            message = _status_message_from_reason(
+                section="market_index_pulse",
+                status="unavailable",
+                reason_code=reason_code,
+                fallback=VN_MARKET_INDEX_PULSE_UNAVAILABLE_REASON,
+            )
+            return {
+                "status": "unavailable",
+                "source": SSI_MARKET_INDEX_PULSE_SOURCE,
+                "reason": message,
+                "market_index_pulse_source": SSI_MARKET_INDEX_PULSE_SOURCE,
+                "requested_index_codes": requested_codes,
+                "market_index_pulse": [],
+                "market_index_pulse_status": {
+                    "status": "unavailable",
+                    "reason_code": reason_code,
+                    "classification": reason_code,
+                    "message": message,
+                },
+                "count": 0,
+                "fallback_used": False,
+                "diagnostics": {
+                    "market_index_pulse": {
+                        "failure_class": "method_unavailable",
+                        "requested_index_codes": requested_codes,
+                    }
+                },
+            }
+
+        payload = get_pulse(requested_codes)
+        provider_status = str(payload.get("status") or "unavailable")
+        provider_reason = self._safe_provider_reason(payload)
+        classifier_reason = " ".join(
+            str(value or "")
+            for value in (
+                provider_reason,
+                payload.get("streaming_status"),
+                payload.get("cache_status"),
+            )
+            if value
+        )
+        if payload.get("reason_code"):
+            reason_code = str(payload.get("reason_code"))
+        elif payload.get("streaming_status") == "subscribed_no_event" or payload.get("cache_status") == "empty":
+            reason_code = "stream_cache_empty"
+        elif payload.get("streaming_status") == "cache_stale" or payload.get("cache_status") == "stale":
+            reason_code = "stream_cache_stale"
+        elif payload.get("streaming_status") == "mi_not_subscribed":
+            reason_code = "mi_not_subscribed"
+        elif payload.get("streaming_status") == "mi_disabled":
+            reason_code = "mi_disabled"
+        else:
+            reason_code = _classify_market_index_pulse_reason(status=provider_status, reason=classifier_reason)
+        rows = [
+            row
+            for row in (
+                self._market_index_pulse_row_from_ssi(item)
+                for item in (payload.get("market_index_pulse") or [])
+                if isinstance(item, dict)
+            )
+            if row
+        ]
+        public_status = "ok" if rows and len(rows) == len(requested_codes) else "partial" if rows else "unavailable"
+        message = _status_message_from_reason(
+            section="market_index_pulse",
+            status=public_status,
+            reason_code=reason_code,
+            fallback=VN_MARKET_INDEX_PULSE_UNAVAILABLE_REASON,
+        )
+        diagnostics = _live_failure_diagnostics(payload, reason=provider_reason)
+        diagnostics["requested_index_codes"] = requested_codes
+        diagnostics["normalized_row_count"] = len(rows)
+        status_payload = {
+            "status": public_status,
+            "reason_code": reason_code,
+            "classification": reason_code,
+            "message": message,
+            "streaming_status": payload.get("streaming_status"),
+            "cache_status": payload.get("cache_status"),
+            "manager_state": payload.get("manager_state"),
+            "runtime_status": payload.get("runtime_status"),
+            "channel_format_status": payload.get("channel_format_status") or "needs_live_proof",
+            "diagnostics": diagnostics,
+        }
+        return {
+            "status": public_status,
+            "source": SSI_MARKET_INDEX_PULSE_SOURCE,
+            "reason": None if public_status == "ok" else message,
+            "market_index_pulse_source": SSI_MARKET_INDEX_PULSE_SOURCE,
+            "requested_index_codes": requested_codes,
+            "market_index_pulse": rows,
+            "market_index_pulse_status": status_payload,
+            "count": len(rows),
+            "fallback_used": False,
+            "diagnostics": {"market_index_pulse": diagnostics},
         }
 
     @staticmethod

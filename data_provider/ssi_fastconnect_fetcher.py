@@ -23,6 +23,8 @@ import requests
 from src.config import get_config, parse_env_bool, parse_env_int
 from data_provider.ssi_streaming_realtime import (
     DEFAULT_FOREIGN_ROOM_TTL_SECONDS,
+    DEFAULT_MARKET_INDEX_CODES,
+    DEFAULT_MARKET_INDEX_TTL_SECONDS,
     DEFAULT_ORDER_BOOK_TTL_SECONDS,
     DEFAULT_STREAMING_REALTIME_CACHE_TTL_SECONDS,
     DEFAULT_STREAMING_REALTIME_CHANNEL_TEMPLATE,
@@ -33,6 +35,7 @@ from data_provider.ssi_streaming_realtime import (
     DEFAULT_TRADE_TAPE_BUFFER_SIZE,
     DEFAULT_TRADE_TAPE_TTL_SECONDS,
     ForeignRoomCache,
+    MarketIndexPulseCache,
     OfficialSsiRealtimeStreamClient,
     OrderBookCache,
     RealtimeSnapshotCache,
@@ -59,7 +62,7 @@ REALTIME_ENDPOINT_NOT_IDENTIFIED_REASON = "Supported SSI realtime endpoint not i
 REALTIME_STREAMING_NOT_IMPLEMENTED_REASON = "SSI realtime requires FastConnect streaming adapter; connection semantics not implemented."
 TRADE_TAPE_DISABLED_REASON = "SSI FastConnect trade tape disabled"
 SSI_REALTIME_ENDPOINT_CANDIDATES = ("RealtimeQuote", "RealtimePrice", "RealtimeSnapshot", "SecuritiesRealtime")
-SSI_REALTIME_STREAMING_DATA_TYPES = ("X", "X-QUOTE", "X-TRADE", "F", "R")
+SSI_REALTIME_STREAMING_DATA_TYPES = ("X", "X-QUOTE", "X-TRADE", "F", "R", "MI")
 SSI_REALTIME_QUOTE_STREAMING_DATA_TYPES = ("X",)
 SSI_CHUNK_MAX_DAYS = 29
 SSI_PAGE_SIZE = 1000
@@ -859,6 +862,7 @@ class SsiFastConnectFetcher:
             cache=RealtimeSnapshotCache(self.streaming_realtime_cache_ttl_seconds),
             order_book_cache=OrderBookCache(DEFAULT_ORDER_BOOK_TTL_SECONDS),
             foreign_room_cache=ForeignRoomCache(DEFAULT_FOREIGN_ROOM_TTL_SECONDS),
+            market_index_cache=MarketIndexPulseCache(DEFAULT_MARKET_INDEX_TTL_SECONDS),
             trade_tape_cache=TradeTapeEventCache(
                 self.trade_tape_buffer_size,
                 self.trade_tape_ttl_seconds,
@@ -868,6 +872,7 @@ class SsiFastConnectFetcher:
             client_factory=streaming_realtime_client_factory,
             channel_template=self.streaming_realtime_channel_template,
             trade_tape_enabled=self.trade_tape_enabled,
+            market_index_codes=DEFAULT_MARKET_INDEX_CODES,
             idle_timeout_seconds=self.streaming_realtime_idle_timeout_seconds,
             reconnect_enabled=self.streaming_realtime_reconnect_enabled,
             reconnect_initial_delay_seconds=self.streaming_realtime_reconnect_initial_delay_seconds,
@@ -1662,14 +1667,23 @@ class SsiFastConnectFetcher:
         latest_by_symbol: Dict[str, Dict[str, Any]] = {}
         session_status_by_symbol: Dict[str, Dict[str, Any]] = {}
         foreign_room_by_symbol: Dict[str, Dict[str, Any]] = {}
+        market_index_by_code: Dict[str, Dict[str, Any]] = {}
 
         for message in messages or []:
             parsed = self._parse_streaming_realtime_message(message)
             if not parsed:
                 continue
             content = parsed["content"]
-            symbol = str(_first_value(content, "Symbol", "Ticker", "StockCode", "SecurityCode", "Code") or "").strip().upper()
+            symbol = str(
+                _first_value(content, "Symbol", "Ticker", "StockCode", "SecurityCode", "Code", "IndexCode", "IndexID", "IndexId")
+                or ""
+            ).strip().upper()
             if not symbol or symbol not in requested_set:
+                continue
+            if parsed["data_type"] == "MI":
+                row = self._map_streaming_market_index(content, fallback_index_code=symbol)
+                if row:
+                    market_index_by_code[symbol] = row
                 continue
             if parsed["data_type"] == "F":
                 row = self._map_streaming_session_status(content, fallback_symbol=symbol)
@@ -1689,6 +1703,7 @@ class SsiFastConnectFetcher:
         rows = [latest_by_symbol[symbol] for symbol in requested_symbols if symbol in latest_by_symbol]
         rows.extend(session_status_by_symbol[symbol] for symbol in requested_symbols if symbol in session_status_by_symbol)
         rows.extend(foreign_room_by_symbol[symbol] for symbol in requested_symbols if symbol in foreign_room_by_symbol)
+        rows.extend(market_index_by_code[symbol] for symbol in requested_symbols if symbol in market_index_by_code)
         return rows
 
     def _parse_streaming_realtime_message(self, message: Any) -> Optional[Dict[str, Any]]:
@@ -1734,8 +1749,87 @@ class SsiFastConnectFetcher:
             "X": "X",
             "F": "F",
             "R": "R",
+            "MI": "MI",
+            "MARKETINDEX": "MI",
+            "MARKET-INDEX": "MI",
         }
         return aliases.get(compact)
+
+    def _map_streaming_market_index(
+        self,
+        row: Dict[str, Any],
+        *,
+        fallback_index_code: str,
+    ) -> Optional[Dict[str, Any]]:
+        index_code = str(
+            _first_value(row, "IndexCode", "IndexID", "IndexId", "Code", "indexCode")
+            or fallback_index_code
+            or ""
+        ).strip().upper()
+        if not index_code:
+            return None
+
+        def nonnegative(value: Any) -> Optional[float]:
+            number = _to_float(value)
+            if number is None or number < 0:
+                return None
+            return number
+
+        index_value = nonnegative(_first_value(row, "IndexValue", "IndexVal", "indexValue", "indexVal"))
+        estimated_index_value = nonnegative(_first_value(row, "IndexValEst", "EstimatedIndexValue", "indexValEst"))
+        change = _to_float(_first_value(row, "Change", "change"))
+        change_pct = _to_float(_first_value(row, "RatioChange", "ChangePercent", "change_pct", "ratioChange"))
+        total_trades = nonnegative(_first_value(row, "TotalTrade", "totalTrade"))
+        total_volume = nonnegative(_first_value(row, "TotalQtty", "TotalVolume", "totalQtty", "total_volume"))
+        total_value = nonnegative(_first_value(row, "TotalValue", "totalValue"))
+        advances = nonnegative(_first_value(row, "Advances", "advances"))
+        unchanged = nonnegative(_first_value(row, "Nochanges", "NoChanges", "unchanged"))
+        declines = nonnegative(_first_value(row, "Declines", "declines"))
+        if not any(
+            value is not None
+            for value in (
+                index_value,
+                estimated_index_value,
+                change,
+                change_pct,
+                total_trades,
+                total_volume,
+                total_value,
+                advances,
+                unchanged,
+                declines,
+            )
+        ):
+            return None
+
+        trading_date = _first_value(row, "TradingDate", "Date", "tradingDate")
+        time_value = _first_value(row, "Time", "TradingTime", "time", "tradingTime")
+        combined_datetime = None
+        if trading_date and time_value:
+            combined_datetime = f"{trading_date} {time_value}"
+
+        return {
+            "index_code": index_code,
+            "exchange": _safe_text(_first_value(row, "Exchange", "Market", "ExchangeCode", "exchange", "market")),
+            "index_value": index_value,
+            "estimated_index_value": estimated_index_value,
+            "change": change,
+            "change_pct": change_pct,
+            "total_trades": total_trades,
+            "total_volume": total_volume,
+            "total_value": total_value,
+            "advances": advances,
+            "unchanged": unchanged,
+            "declines": declines,
+            "trading_date": _parse_date(trading_date),
+            "time": _safe_text(time_value),
+            "stream_timestamp": _parse_datetime(combined_datetime or time_value or trading_date),
+            "stream_data_type": "MI",
+            "r_type": _safe_text(_first_value(row, "RType", "rtype")) or "MI",
+            "source": "SSI MI market-index stream",
+            "channel_format_status": "needs_live_proof",
+            "value_semantics_status": "needs_live_proof",
+        }
 
     def _map_streaming_foreign_room(
         self,
@@ -2175,6 +2269,108 @@ class SsiFastConnectFetcher:
         result.setdefault("rest_status", "unsupported")
         result.setdefault("streaming_data_types", ["R"])
         result.setdefault("runtime_status", diagnostics.get("runtime_status"))
+        return result
+
+    def get_market_index_pulse(self, index_codes: Optional[Iterable[str]] = None) -> Dict[str, Any]:
+        """Return SSI MI market-index pulse rows from the streaming cache only.
+
+        Request-time calls do not open streams, add subscriptions, probe REST
+        endpoints, or reconcile MI rows with REST DailyIndex rows.
+        """
+        requested_codes = [
+            code
+            for code in (
+                str(value or "").strip().upper()
+                for value in (index_codes or DEFAULT_MARKET_INDEX_CODES)
+            )
+            if code
+        ]
+        requested_codes = list(dict.fromkeys(requested_codes))[:10] or list(DEFAULT_MARKET_INDEX_CODES)
+        base = {
+            "source": SSI_SOURCE,
+            "requested_index_codes": requested_codes,
+            "market_index_pulse": [],
+            "count": 0,
+            "attempted_endpoints": [],
+            "candidate_endpoints": [],
+            "rest_status": "unsupported",
+            "streaming_data_types": ["MI"],
+            "channel_format_status": "needs_live_proof",
+        }
+
+        if not self.streaming_realtime_enabled:
+            return {
+                **base,
+                "status": "unavailable",
+                "reason": SSI_STREAMING_REALTIME_DISABLED_REASON,
+                "streaming_status": "disabled",
+                "cache_status": "disabled",
+                "manager_state": "disabled",
+                "diagnostics": {
+                    "manager_state": "disabled",
+                    "streaming_status": "disabled",
+                    "cache_status": "disabled",
+                    "live_adapter_status": "not_enabled",
+                    "market_index_rows_observed": 0,
+                    "requested_index_codes": requested_codes,
+                },
+            }
+
+        if (
+            not self._streaming_realtime_manager_supplied
+            and (not self.consumer_id or not self.consumer_secret or not self.streaming_realtime_stream_url)
+        ):
+            return {
+                **base,
+                "status": "unavailable",
+                "reason": SSI_STREAMING_REALTIME_CONFIG_INCOMPLETE_REASON,
+                "streaming_status": "configuration_incomplete",
+                "cache_status": "unavailable",
+                "manager_state": self.streaming_realtime_manager.state,
+                "diagnostics": {
+                    "manager_state": self.streaming_realtime_manager.state,
+                    "streaming_status": "configuration_incomplete",
+                    "cache_status": "unavailable",
+                    "live_adapter_status": "configuration_incomplete",
+                    "market_index_rows_observed": 0,
+                    "requested_index_codes": requested_codes,
+                },
+            }
+
+        if (
+            not self._streaming_realtime_client_factory_supplied
+            and not self._streaming_realtime_manager_supplied
+            and importlib.util.find_spec("ssi_fc_data") is None
+        ):
+            return {
+                **base,
+                "status": "unavailable",
+                "reason": SSI_STREAMING_REALTIME_PACKAGE_UNAVAILABLE_REASON,
+                "streaming_status": "package_unavailable",
+                "cache_status": "unavailable",
+                "manager_state": self.streaming_realtime_manager.state,
+                "diagnostics": {
+                    "manager_state": self.streaming_realtime_manager.state,
+                    "streaming_status": "package_unavailable",
+                    "cache_status": "unavailable",
+                    "live_adapter_status": "package_unavailable",
+                    "market_index_rows_observed": 0,
+                    "requested_index_codes": requested_codes,
+                },
+            }
+
+        result = dict(self.streaming_realtime_manager.market_index_pulse(requested_codes))
+        diagnostics = result.get("diagnostics") if isinstance(result.get("diagnostics"), dict) else {}
+        result.setdefault("source", SSI_SOURCE)
+        result.setdefault("requested_index_codes", requested_codes)
+        result.setdefault("market_index_pulse", [])
+        result.setdefault("count", len(result.get("market_index_pulse") or []))
+        result.setdefault("attempted_endpoints", [])
+        result.setdefault("candidate_endpoints", [])
+        result.setdefault("rest_status", "unsupported")
+        result.setdefault("streaming_data_types", ["MI"])
+        result.setdefault("runtime_status", diagnostics.get("runtime_status"))
+        result.setdefault("channel_format_status", "needs_live_proof")
         return result
 
     def get_index_list(self, market: Optional[str] = None, force_refresh: bool = False) -> Dict[str, Any]:

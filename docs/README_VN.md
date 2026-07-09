@@ -10,6 +10,7 @@ This page is the current entry point for VN dashboard setup. The active runtime 
 - Realtime snapshots come from the optional SSI `X:{symbol}` live contract and stay separate from daily prices.
 - Trade tape comes from the optional SSI `X-TRADE:{symbol}` latest-event stream context and stays separate from daily prices.
 - Foreign room comes from the optional SSI `R:{symbol}` live context when a usable streaming cache row exists and stays separate from DailyStockPrice daily foreign flow.
+- Market-index pulse comes from the optional SSI `MI:{index_code}` live context when usable streaming cache rows exist and stays separate from REST DailyIndex and stock rows.
 - VN30/index components are SSI-backed where available.
 - News, fundamentals, financial statements, ratios, macro data, research reports, and corporate actions/dividends/rights/splits are disabled / `not_implemented` until a separate qualified provider is added for those gaps.
 - Missing object data is represented as `null`; missing list data is represented as `[]`.
@@ -58,6 +59,7 @@ The active dashboard uses source-specific labels:
 - `Trade tape` for the selected ticker trade-tape rows.
 - `Order book` / `SSI X-QUOTE order book` for optional bid/ask ladder context when backend/API data exists.
 - `Foreign room` / `SSI R foreign room` for optional foreign-room context when backend/API data exists.
+- `Market index pulse` / `SSI MI market-index stream` for optional realtime index context when backend/API data exists.
 
 The dashboard must not present SSI realtime, trade-tape, order-book, or foreign-room features as KBS, and must not mix DailyOhlc and DailyStockPrice labels into a single source.
 
@@ -74,24 +76,27 @@ The current strict SSI runtime can already show these stock-detail metrics when 
 - VN30/index component lists from SSI IndexComponents where available.
 - Backend/API support for optional SSI `X-QUOTE:{symbol}` order-book context when the background stream has a usable cache row. Public rows may expose `order_book_source`, `order_book`, `order_book_status`, and sanitized `diagnostics.order_book`.
 - Backend/API support for optional SSI `R:{symbol}` foreign-room context when the background stream has a usable cache row. Public rows may expose `foreign_room_source`, `foreign_room`, `foreign_room_status`, and sanitized `diagnostics.foreign_room`.
+- Backend/API support for optional SSI `MI:{index_code}` market-index pulse context when the background stream has usable cache rows. Public responses may expose `market_index_pulse_source`, `market_index_pulse`, `market_index_pulse_status`, and sanitized `diagnostics.market_index_pulse`.
 
 `X-QUOTE` order book is a separate optional live context. It does not affect `latest_price`, does not replace DailyOhlc or DailyStockPrice, and does not replace realtime `X:{symbol}` snapshots, trade tape `X-TRADE:{symbol}`, or session/status `F:{symbol}`. Malformed bid/ask levels are dropped, no fake order-book rows are synthesized, and empty/unavailable state is explicit through status/diagnostics. Live market proof and frontend order-book UI are still deferred.
 
 `R` foreign room is a separate optional live context. It does not affect `latest_price`, does not replace DailyOhlc or DailyStockPrice daily foreign flow, and does not replace realtime `X:{symbol}` snapshots, trade tape `X-TRADE:{symbol}`, order book `X-QUOTE:{symbol}`, or session/status `F:{symbol}`. Malformed or negative room/volume/value fields are dropped/null, no fake foreign-room values are synthesized, and empty/unavailable state is explicit through status/diagnostics. Live value-unit proof and frontend foreign-room UI are still deferred.
+
+`MI` market-index pulse is a separate optional index context. It does not affect `latest_price`, does not replace DailyOhlc, DailyStockPrice, or REST DailyIndex, and does not create stock watchlist rows. Malformed index/activity/breadth fields are dropped/null, no fake index values are synthesized, and empty/unavailable state is explicit through status/diagnostics. Live channel/field proof and frontend market-pulse UI are still deferred.
 
 Remaining SSI-backed candidates or deferred productization need further proof before exposure:
 
 - `F` trading session/status live market proof and UI, including possible `TradingSession` / `TradingStatus` labels after payload proof.
 - `X-QUOTE` order-book live proof and frontend UI; backend/API support exists.
 - `R` realtime foreign-room live proof and frontend UI; backend/API support exists.
-- `MI` realtime market index pulse.
+- `MI` realtime market-index pulse live proof and frontend UI; backend/API support exists.
 - `B` realtime bars.
 - Unused SSI `DailyStockPrice` fields after field-key, unit, and date-alignment proof.
 - Extended SSI `SecuritiesDetails` metadata after exact-field proof.
 
 See `docs/SSI_REMAINING_DATA_AUDIT.md` for the remaining SSI-backed data backlog.
 
-SSI-owned data must not be externalized or silently overwritten: prices, daily OHLCV, SSI-backed intraday OHLCV, realtime price snapshots, trade tape, SSI X-QUOTE order book, reference/ceiling/floor, SSI-backed foreign flow/foreign room, SSI-backed index components/realtime index data, and SSI-backed instrument metadata.
+SSI-owned data must not be externalized or silently overwritten: prices, daily OHLCV, SSI-backed intraday OHLCV, realtime price snapshots, trade tape, SSI X-QUOTE order book, reference/ceiling/floor, SSI-backed foreign flow/foreign room, SSI-backed index components/realtime index pulse, and SSI-backed instrument metadata.
 
 `external-provider-required` gaps are limited to domains SSI does not provide or cannot support sufficiently, such as news, corporate actions/dividends/rights/splits, financial statements, EPS/P/E/P/B/ROE/ROA, macro data, research reports, and ownership/shareholder data when not SSI-backed or insufficient. These fields must remain unavailable until a qualified provider contract exists.
 

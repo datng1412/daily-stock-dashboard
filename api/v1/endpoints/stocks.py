@@ -32,6 +32,7 @@ from api.v1.schemas.stocks import (
     VietnamDailyIndexResponse,
     VietnamIndexComponentsResponse,
     VietnamIndexListResponse,
+    VietnamMarketIndexPulseResponse,
     VietnamObservabilityResponse,
     VietnamRealtimeResponse,
     VietnamRealtimeTradesResponse,
@@ -567,6 +568,31 @@ def get_vietnam_daily_index(
 
 
 @router.get(
+    "/vn/market-index-pulse",
+    response_model=VietnamMarketIndexPulseResponse,
+    summary="Vietnam SSI realtime market-index pulse",
+    description="Return optional SSI MI market-index pulse rows from the background streaming cache. Does not replace SSI DailyIndex or stock daily close semantics.",
+)
+def get_vietnam_market_index_pulse(
+    index_codes: str = Query("VNINDEX,VN30,HNX,UPCOM", description="Comma-separated SSI MI index codes to read from the streaming cache."),
+) -> VietnamMarketIndexPulseResponse:
+    try:
+        requested_codes = [
+            value.strip().upper()
+            for value in index_codes.split(",")
+            if value.strip()
+        ]
+        payload = VietnamMarketService().build_market_index_pulse(requested_codes)
+        return VietnamMarketIndexPulseResponse(**payload)
+    except Exception as e:
+        logger.error("Vietnam market index pulse failed: %s", e, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={"error": "vn_market_index_pulse_failed", "message": str(e)},
+        )
+
+
+@router.get(
     "/vn/index-components",
     response_model=VietnamIndexComponentsResponse,
     summary="Vietnam SSI index components",
@@ -645,6 +671,10 @@ def get_vietnam_realtime_quotes(
 ) -> VietnamRealtimeResponse:
     response.headers["Cache-Control"] = "no-store, no-cache, max-age=0"
     response.headers["Pragma"] = "no-cache"
+    return _get_vietnam_realtime_quotes_impl(tickers)
+
+
+def _get_vietnam_realtime_quotes_impl(tickers: str) -> VietnamRealtimeResponse:
     symbols = [item.strip().upper() for item in tickers.split(",") if item.strip()]
     service = VietnamMarketService()
     try:

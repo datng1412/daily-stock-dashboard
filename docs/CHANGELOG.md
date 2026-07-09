@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [new feature] Add SSI `MI:{index_code}` market-index pulse backend/API support as a separate optional index context without changing DailyIndex or DailyOhlc price ownership.
 - [new feature] Add SSI `R:{symbol}` foreign-room backend/API support as a separate optional watchlist context without changing DailyOhlc price ownership or DailyStockPrice foreign-flow enrichment.
 - [new feature] Add SSI `X-QUOTE:{symbol}` order-book backend/API support as a separate optional watchlist context without changing DailyOhlc price ownership or adding request-handler streaming.
 - [documentation] Sync README_VN with SSI X-QUOTE backend/API order-book support and deferred live/UI status.
