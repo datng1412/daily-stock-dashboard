@@ -1482,6 +1482,9 @@ const TRADE_TAPE_PENDING_STATUSES = new Set([
 const TRADE_TAPE_TERMINAL_REASON_CODES = new Set([
   'disabled',
   'config_disabled',
+  'market_closed',
+  'idle_market_closed',
+  'after_hours_stale',
   'not_implemented',
   'latest_trade_stream_only',
   'unavailable_provider_error',
@@ -1549,6 +1552,9 @@ const optionalLiveStatusText = (
     bootstrap_symbols_empty: 'SSI realtime cache miss.',
     ticker_not_bootstrapped: 'SSI realtime cache miss.',
     running_idle: 'SSI realtime cache miss.',
+    market_closed: 'Market closed — showing last known data.',
+    idle_market_closed: 'Market closed — showing last known data.',
+    after_hours_stale: 'Market closed — showing last known data.',
     cache_empty: 'SSI realtime cache miss.',
     cache_stale: 'SSI realtime stale.',
     connection_error: 'SSI realtime unavailable.',
@@ -5741,6 +5747,9 @@ const VietnamDashboardPage: React.FC = () => {
         setTradeTapeCountdownSeconds(tradeTapeRefreshInterval);
         void refreshTradeTape();
       }
+      if (!hidden) {
+        void refreshSelectedLiveContext(selectedTickerRef.current);
+      }
     };
     document.addEventListener('visibilitychange', onVisibilityChange);
     return () => document.removeEventListener('visibilitychange', onVisibilityChange);
@@ -5753,6 +5762,7 @@ const VietnamDashboardPage: React.FC = () => {
     tradeTapeRefreshInterval,
     refreshRealtimeSnapshots,
     refreshTradeTape,
+    refreshSelectedLiveContext,
   ]);
 
   useEffect(() => {

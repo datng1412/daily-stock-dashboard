@@ -15,7 +15,7 @@ import re
 import threading
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any, Callable, Dict, Iterable, List, Optional, Protocol, Sequence, Tuple
 
@@ -56,6 +56,7 @@ TRADE_TAPE_CHANNEL_PREFIX = "X-TRADE"
 DEFAULT_SESSION_STATUS_TTL_SECONDS = 60
 SESSION_STATUS_CHANNEL_PREFIX = "F"
 DEFAULT_MARKET_INDEX_CODES = ("VNINDEX", "VN30", "HNX", "UPCOM")
+VIETNAM_MARKET_TIMEZONE = timezone(timedelta(hours=7), "ICT")
 _TRADE_SIDE_BUY_VALUES = {"B", "BU", "BUY", "1", "MUA"}
 _TRADE_SIDE_SELL_VALUES = {"S", "SD", "SELL", "2", "BAN", "BÁN"}
 
@@ -68,6 +69,46 @@ RUNTIME_RECONNECTING = "reconnecting"
 RUNTIME_ERRORED = "errored"
 RUNTIME_STOPPED = "stopped"
 RUNTIME_SHUTDOWN = "shutdown"
+
+
+def vietnam_market_session_from_epoch(epoch_seconds: float) -> Dict[str, Any]:
+    """Return a small HOSE-like Vietnam session classifier.
+
+    This helper is intentionally holiday-unaware. It exists only to avoid
+    treating normal after-hours stream silence as a transport failure.
+    """
+
+    local_dt = datetime.fromtimestamp(float(epoch_seconds), timezone.utc).astimezone(VIETNAM_MARKET_TIMEZONE)
+    minutes = local_dt.hour * 60 + local_dt.minute
+    weekday = local_dt.weekday()
+
+    def session(code: str, label: str, *, active: bool, auction: bool = False, continuous: bool = False) -> Dict[str, Any]:
+        return {
+            "market_session": code,
+            "market_session_label": label,
+            "market_session_active": active,
+            "market_session_is_auction": auction,
+            "market_session_is_continuous": continuous,
+            "market_session_holiday_aware": False,
+        }
+
+    if weekday >= 5:
+        return session("weekend_closed", "Weekend / closed", active=False)
+    if minutes < 9 * 60:
+        return session("pre_open", "Pre-open", active=False)
+    if minutes < 9 * 60 + 15:
+        return session("ato", "ATO opening auction", active=True, auction=True)
+    if minutes < 11 * 60 + 30:
+        return session("continuous_morning", "Continuous morning", active=True, continuous=True)
+    if minutes < 13 * 60:
+        return session("lunch_break", "Lunch break", active=False)
+    if minutes < 14 * 60 + 30:
+        return session("continuous_afternoon", "Continuous afternoon", active=True, continuous=True)
+    if minutes < 14 * 60 + 45:
+        return session("atc", "ATC closing auction", active=True, auction=True)
+    if minutes < 15 * 60:
+        return session("post_close", "Post-close", active=False)
+    return session("closed", "Closed", active=False)
 
 _SECRET_PATTERNS = (
     re.compile(r"(?i)(authorization\s*[:=]\s*bearer\s+)[^\s,;]+"),
@@ -1531,6 +1572,14 @@ class SsiStreamingRealtimeManager:
             reason = SSI_STREAMING_REALTIME_CACHE_EMPTY_REASON
             streaming_status = "cache_empty"
             cache_status = "empty"
+        if diagnostics.get("stream_health") in {"market_closed", "idle_market_closed", "after_hours_stale"}:
+            reason = (
+                "Market closed — showing last known data."
+                if cache_result["stale_count"] > 0
+                else "Market closed — no live realtime snapshot expected."
+            )
+            streaming_status = "after_hours_stale" if cache_result["stale_count"] > 0 else diagnostics.get("stream_health")
+        diagnostics["streaming_status"] = streaming_status
         return {
             **base,
             "status": "unavailable",
@@ -1683,12 +1732,26 @@ class SsiStreamingRealtimeManager:
             }
         )
         if cache_status in {"hit", "stale"} and cache_result["row"]:
-            streaming_status = "cache_hit" if cache_status == "hit" else "cache_stale"
+            after_hours = not diagnostics.get("market_session_active")
+            streaming_status = (
+                "market_closed"
+                if after_hours and cache_status == "hit"
+                else "after_hours_stale"
+                if after_hours
+                else "cache_hit"
+                if cache_status == "hit"
+                else "cache_stale"
+            )
+            order_book_row = dict(cache_result["row"])
+            if after_hours:
+                order_book_row["is_stale"] = True
+                order_book_row["stale_reason"] = "Market closed — showing last known data."
+            diagnostics["streaming_status"] = streaming_status
             return {
                 **base,
-                "status": "ok" if cache_status == "hit" else "stale",
-                "reason": None if cache_status == "hit" else "SSI X-QUOTE stream cache stale.",
-                "order_book": cache_result["row"],
+                "status": "stale" if after_hours or cache_status == "stale" else "ok",
+                "reason": "Market closed — showing last known data." if after_hours else None if cache_status == "hit" else "SSI X-QUOTE stream cache stale.",
+                "order_book": order_book_row,
                 "count": 1,
                 "streaming_status": streaming_status,
                 "cache_status": cache_status,
@@ -1702,6 +1765,13 @@ class SsiStreamingRealtimeManager:
             else "SSI X-QUOTE stream cache empty."
         )
         streaming_status = "cache_stale" if cache_status == "stale" else "subscribed_no_event"
+        if diagnostics.get("stream_health") in {"market_closed", "idle_market_closed", "after_hours_stale"}:
+            reason = (
+                "Market closed — showing last known data."
+                if cache_status == "stale"
+                else "Market closed — no live order-book rows expected."
+            )
+            streaming_status = "after_hours_stale" if cache_status == "stale" else diagnostics.get("stream_health")
         diagnostics.update({"streaming_status": streaming_status})
         return {
             **base,
@@ -2206,11 +2276,21 @@ class SsiStreamingRealtimeManager:
             }
         )
         if cache_result["rows"]:
-            streaming_status = "cache_stale" if cache_result["status"] == "stale" else "cache_hit"
+            after_hours = not diagnostics.get("market_session_active")
+            streaming_status = (
+                "market_closed"
+                if after_hours and cache_result["status"] == "hit"
+                else "after_hours_stale"
+                if after_hours
+                else "cache_stale"
+                if cache_result["status"] == "stale"
+                else "cache_hit"
+            )
+            diagnostics["streaming_status"] = streaming_status
             return {
                 **base,
                 "status": "ok",
-                "reason": "Buffered SSI X-TRADE rows available." if cache_result["status"] == "stale" else None,
+                "reason": "Market closed — showing last known data." if after_hours else "Buffered SSI X-TRADE rows available." if cache_result["status"] == "stale" else None,
                 "trades": cache_result["rows"],
                 "count": len(cache_result["rows"]),
                 "streaming_status": streaming_status,
@@ -2224,6 +2304,13 @@ class SsiStreamingRealtimeManager:
             if cache_result["status"] == "stale"
             else "SSI trade tape stream buffer empty."
         )
+        if diagnostics.get("stream_health") in {"market_closed", "idle_market_closed", "after_hours_stale"}:
+            reason = (
+                "Market closed — showing last known data."
+                if cache_result["status"] == "stale"
+                else "Market closed — no live trade rows expected."
+            )
+            diagnostics["streaming_status"] = "after_hours_stale" if cache_result["status"] == "stale" else diagnostics.get("stream_health")
         return {
             **base,
             "status": "unavailable",
@@ -2445,11 +2532,31 @@ class SsiStreamingRealtimeManager:
                 if not self.session_status_enabled
                 else ("subscribed" if session_status_channels else "not_subscribed")
             )
+            try:
+                expected_channels = build_streaming_channels(
+                    self._requested_symbols or self._bootstrap_symbols,
+                    realtime_template=self.channel_template,
+                    order_book_enabled=self.order_book_enabled,
+                    foreign_room_enabled=self.foreign_room_enabled,
+                    trade_tape_enabled=self.trade_tape_enabled,
+                    session_status_enabled=self.session_status_enabled,
+                    market_index_enabled=self.market_index_enabled,
+                    market_indexes=self.market_index_codes,
+                )
+            except ValueError:
+                expected_channels = []
+            last_message_age_seconds = self._last_message_age_seconds_locked()
+            market_session = vietnam_market_session_from_epoch(float(self._time_func()))
+            stream_health = self._stream_health_locked(last_message_age_seconds, market_session)
             return {
                 "enabled": self.enabled,
                 "manager_state": self._state,
+                "stream_health": stream_health,
+                **market_session,
                 "requested_symbols": list(self._requested_symbols),
                 "channels": list(self._channels),
+                "subscription_count": len(self._channels),
+                "expected_subscription_count": len(expected_channels),
                 "realtime_channels": realtime_channels,
                 "order_book_channels": order_book_channels,
                 "order_book_channel_type": ORDER_BOOK_CHANNEL_PREFIX,
@@ -2471,6 +2578,7 @@ class SsiStreamingRealtimeManager:
                 "latest_error": self._latest_error,
                 "last_error_at": self._last_error_at,
                 "last_message_at": self._last_message_at,
+                "last_message_age_seconds": last_message_age_seconds,
                 "messages_observed": self._messages_observed,
                 "parser_rows_observed": self._parser_rows_observed,
                 "order_book_rows_observed": self._order_book_rows_observed,
@@ -2488,6 +2596,7 @@ class SsiStreamingRealtimeManager:
                 "idle_since": self._idle_since,
                 "reconnect_enabled": self.reconnect_enabled,
                 "reconnect_attempt_count": self._reconnect_attempt_count,
+                "reconnect_count": self._reconnect_attempt_count,
                 "last_reconnect_at": self._last_reconnect_at,
                 "next_reconnect_at": self._next_reconnect_at,
                 "reconnect_backoff_seconds": self._reconnect_backoff_seconds,
@@ -2528,6 +2637,7 @@ class SsiStreamingRealtimeManager:
                     self._reconnect_backoff_seconds = self.reconnect_initial_delay_seconds
                     self._last_reconnect_error = None
                     self._last_reconnect_reason = reason
+                    self._reconnect_in_progress = False
                 return self.status()
             reconnect_error = status.get("latest_error") or "reconnect attempt failed"
         except Exception as exc:  # pragma: no cover - defensive path
@@ -2549,6 +2659,7 @@ class SsiStreamingRealtimeManager:
     def _prepare_reconnect_action(self, *, wants_streaming: bool) -> Optional[Tuple[List[str], str]]:
         with self._lock:
             self._refresh_idle_state_locked()
+            market_session = vietnam_market_session_from_epoch(float(self._time_func()))
             if (
                 not self.enabled
                 or not wants_streaming
@@ -2561,8 +2672,11 @@ class SsiStreamingRealtimeManager:
             if not symbols:
                 return None
 
-            reason = self._reconnect_reason_locked()
+            reason = self._reconnect_reason_locked(market_session)
             if reason is None:
+                if self._state == MANAGER_RUNNING and not market_session["market_session_active"]:
+                    self._next_reconnect_at = None
+                    self._next_reconnect_epoch = None
                 return None
             if self.reconnect_max_attempts > 0 and self._reconnect_attempt_count >= self.reconnect_max_attempts:
                 self._next_reconnect_at = None
@@ -2586,13 +2700,13 @@ class SsiStreamingRealtimeManager:
             self._next_reconnect_epoch = None
             return symbols, reason
 
-    def _reconnect_reason_locked(self) -> Optional[str]:
+    def _reconnect_reason_locked(self, market_session: Dict[str, Any]) -> Optional[str]:
         if self._state == MANAGER_ERRORED:
             return "stream_error" if self._messages_observed > 0 else "start_error"
         if self._state == MANAGER_STOPPED and self._bootstrap_started_by_lifecycle:
             return "unexpected_stopped"
-        # Without a market-hours utility in this project, idle is reported as a
-        # diagnostic state only. This avoids off-hours reconnect loops.
+        if self._state == MANAGER_RUNNING and self._is_idle and market_session["market_session_active"]:
+            return "stream_stale"
         return None
 
     def _schedule_reconnect_locked(self, *, reason: str, from_now: bool) -> None:
@@ -2648,3 +2762,33 @@ class SsiStreamingRealtimeManager:
         if self._state == MANAGER_STOPPED:
             return RUNTIME_NOT_STARTED if not self._requested_symbols else RUNTIME_STOPPED
         return RUNTIME_STOPPED
+
+    def _last_message_age_seconds_locked(self) -> Optional[int]:
+        if self._last_message_epoch is None:
+            return None
+        return max(0, int(float(self._time_func()) - self._last_message_epoch))
+
+    def _stream_health_locked(self, last_message_age_seconds: Optional[int], market_session: Dict[str, Any]) -> str:
+        if self._shutdown_requested:
+            return "not_started"
+        if not self.enabled or self._state == MANAGER_DISABLED:
+            return "disabled"
+        if self._state == MANAGER_ERRORED:
+            return "failed"
+        if self._reconnect_in_progress or self._next_reconnect_epoch is not None:
+            return "reconnecting"
+        if self._state in {MANAGER_STOPPED, MANAGER_STARTING}:
+            return "not_started"
+        if self._state == MANAGER_RUNNING:
+            if not market_session["market_session_active"]:
+                if self._is_idle and last_message_age_seconds is not None:
+                    return "after_hours_stale"
+                if self._is_idle:
+                    return "idle_market_closed"
+                return "market_closed"
+            if self._is_idle:
+                return "stale"
+            if last_message_age_seconds is None:
+                return "idle"
+            return "healthy"
+        return "not_started"

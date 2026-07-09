@@ -650,10 +650,24 @@ LIVE_DIAGNOSTIC_KEYS = {
     "cooldown_until",
     "backoff_seconds",
     "next_reconnect_at",
+    "last_reconnect_at",
+    "last_reconnect_reason",
+    "last_reconnect_error",
+    "reconnect_count",
     "reconnect_attempts",
+    "reconnect_attempt_count",
     "streaming_status",
     "runtime_status",
+    "stream_health",
     "manager_state",
+    "market_session",
+    "market_session_label",
+    "market_session_active",
+    "market_session_is_auction",
+    "market_session_is_continuous",
+    "market_session_holiday_aware",
+    "subscription_count",
+    "expected_subscription_count",
     "cache_status",
     "cache_ttl_seconds",
     "order_book_ttl_seconds",
@@ -707,6 +721,7 @@ LIVE_DIAGNOSTIC_KEYS = {
     "messages_observed",
     "parser_rows_observed",
     "last_message_at",
+    "last_message_age_seconds",
     "provider_message",
     "latest_error",
 }
@@ -881,6 +896,9 @@ def _status_message_from_reason(
             "bootstrap_symbols_empty": "SSI realtime cache miss.",
             "ticker_not_bootstrapped": "SSI realtime cache miss.",
             "running_idle": "SSI realtime cache miss.",
+            "market_closed": "Market closed — showing last known data.",
+            "idle_market_closed": "Market closed — showing last known data.",
+            "after_hours_stale": "Market closed — showing last known data.",
             "cache_empty": "SSI realtime cache miss.",
             "cache_stale": "SSI realtime stale.",
             "connection_error": VN_REALTIME_UNAVAILABLE_REASON,
@@ -909,6 +927,9 @@ def _status_message_from_reason(
             "stream_not_bootstrapped": VN_ORDER_BOOK_UNAVAILABLE_REASON,
             "stream_cache_empty": VN_ORDER_BOOK_UNAVAILABLE_REASON,
             "stream_cache_stale": "SSI order book stale.",
+            "market_closed": "Market closed — showing last known data.",
+            "idle_market_closed": "Market closed — showing last known data.",
+            "after_hours_stale": "Market closed — showing last known data.",
             "xquote_not_subscribed": VN_ORDER_BOOK_UNAVAILABLE_REASON,
             "xquote_disabled": VN_ORDER_BOOK_DISABLED_REASON,
             "unavailable_unknown": VN_ORDER_BOOK_UNAVAILABLE_REASON,
@@ -949,6 +970,9 @@ def _status_message_from_reason(
             "stream_not_bootstrapped": VN_TRADE_TAPE_UNAVAILABLE_REASON,
             "stream_cache_empty": VN_TRADE_TAPE_UNAVAILABLE_REASON,
             "stream_cache_stale": VN_TRADE_TAPE_UNAVAILABLE_REASON,
+            "market_closed": "Market closed — showing last known data.",
+            "idle_market_closed": "Market closed — showing last known data.",
+            "after_hours_stale": "Market closed — showing last known data.",
             "xtrade_not_subscribed": VN_TRADE_TAPE_UNAVAILABLE_REASON,
             "xtrade_disabled": VN_TRADE_TAPE_DISABLED_REASON,
             "unavailable_provider_error": VN_TRADE_TAPE_UNAVAILABLE_REASON,
@@ -978,10 +1002,15 @@ def _classify_realtime_reason(
     cache_status = _lower_text(_diagnostic_value(diagnostics, "cache_status"))
     manager_state = _lower_text(_diagnostic_value(diagnostics, "manager_state"))
     runtime_status = _lower_text(_diagnostic_value(diagnostics, "runtime_status"))
+    stream_health = _lower_text(_diagnostic_value(diagnostics, "stream_health"))
     latest_error = _lower_text(_diagnostic_value(diagnostics, "latest_error", "provider_message"))
 
     if normalized_status == "ok":
         return "cache_hit"
+    if streaming_status in {"market_closed", "idle_market_closed", "after_hours_stale"}:
+        return streaming_status
+    if stream_health in {"market_closed", "idle_market_closed", "after_hours_stale"}:
+        return stream_health
     if normalized_status == "disabled" or streaming_status == "disabled":
         return "config_disabled"
     if streaming_status == "bootstrap_symbols_empty" or cache_status == "bootstrap_symbols_empty":
@@ -1022,9 +1051,17 @@ def _classify_trade_tape_reason(
     *,
     status: str,
     reason: Optional[str],
+    diagnostics: Optional[Dict[str, Any]] = None,
 ) -> str:
+    diagnostics = dict(diagnostics or {})
     normalized_status = _lower_text(status)
     reason_text = _lower_text(reason)
+    streaming_status = _lower_text(_diagnostic_value(diagnostics, "streaming_status"))
+    stream_health = _lower_text(_diagnostic_value(diagnostics, "stream_health"))
+    if streaming_status in {"market_closed", "idle_market_closed", "after_hours_stale"}:
+        return streaming_status
+    if stream_health in {"market_closed", "idle_market_closed", "after_hours_stale"}:
+        return stream_health
     if normalized_status == "ok":
         if "stream" in reason_text or "x-trade" in reason_text or "cache_hit" in reason_text:
             return "streaming_trade_tape_supported"
@@ -1058,9 +1095,17 @@ def _classify_order_book_reason(
     *,
     status: str,
     reason: Optional[str],
+    diagnostics: Optional[Dict[str, Any]] = None,
 ) -> str:
+    diagnostics = dict(diagnostics or {})
     normalized_status = _lower_text(status)
     reason_text = _lower_text(reason)
+    streaming_status = _lower_text(_diagnostic_value(diagnostics, "streaming_status"))
+    stream_health = _lower_text(_diagnostic_value(diagnostics, "stream_health"))
+    if streaming_status in {"market_closed", "idle_market_closed", "after_hours_stale"}:
+        return streaming_status
+    if stream_health in {"market_closed", "idle_market_closed", "after_hours_stale"}:
+        return stream_health
     if normalized_status == "ok":
         return "cache_hit"
     if normalized_status == "stale":
@@ -3557,24 +3602,28 @@ class VietnamMarketService:
     ) -> Dict[str, Any]:
         reason_text = reason or VN_TRADE_TAPE_UNAVAILABLE_REASON
         public_status = _public_live_status(status)
+        safe_diagnostics = _live_failure_diagnostics(
+            diagnostics,
+            reason=reason_text if reason_text != VN_TRADE_TAPE_UNAVAILABLE_REASON else None,
+        )
+        reason_code = _classify_trade_tape_reason(
+            status=public_status,
+            reason=reason_text,
+            diagnostics=safe_diagnostics,
+        )
         status_payload = {
             "status": public_status,
             "source": SSI_TRADE_TAPE_SOURCE,
             "message": _status_message_from_reason(
                 section="trade_tape",
                 status=public_status,
-                reason_code=_classify_trade_tape_reason(status=public_status, reason=reason_text),
+                reason_code=reason_code,
                 fallback=VN_TRADE_TAPE_UNAVAILABLE_REASON,
             ),
             "ticker": symbol,
         }
-        reason_code = _classify_trade_tape_reason(status=public_status, reason=reason_text)
         status_payload["reason_code"] = reason_code
         status_payload["classification"] = reason_code
-        safe_diagnostics = _live_failure_diagnostics(
-            diagnostics,
-            reason=reason_text if reason_text != VN_TRADE_TAPE_UNAVAILABLE_REASON else None,
-        )
         if safe_diagnostics:
             status_payload["diagnostics"] = safe_diagnostics
         return {
@@ -3593,7 +3642,15 @@ class VietnamMarketService:
     ) -> Dict[str, Any]:
         reason_text = reason or VN_ORDER_BOOK_UNAVAILABLE_REASON
         public_status = _public_live_status(status)
-        reason_code = _classify_order_book_reason(status=public_status, reason=reason_text)
+        safe_diagnostics = _live_failure_diagnostics(
+            diagnostics,
+            reason=reason_text if reason_text != VN_ORDER_BOOK_UNAVAILABLE_REASON else None,
+        )
+        reason_code = _classify_order_book_reason(
+            status=public_status,
+            reason=reason_text,
+            diagnostics=safe_diagnostics,
+        )
         status_payload = {
             "status": public_status,
             "source": SSI_ORDER_BOOK_SOURCE,
@@ -3607,10 +3664,6 @@ class VietnamMarketService:
             "classification": reason_code,
             "ticker": symbol,
         }
-        safe_diagnostics = _live_failure_diagnostics(
-            diagnostics,
-            reason=reason_text if reason_text != VN_ORDER_BOOK_UNAVAILABLE_REASON else None,
-        )
         if safe_diagnostics:
             status_payload["diagnostics"] = safe_diagnostics
         return {
@@ -4011,6 +4064,12 @@ class VietnamMarketService:
             if trades:
                 safe_diagnostics = _live_failure_diagnostics(payload)
                 reason_code = (
+                    "after_hours_stale"
+                    if _lower_text(safe_diagnostics.get("streaming_status")) in {"after_hours_stale", "market_closed"}
+                    or _lower_text(safe_diagnostics.get("stream_health")) in {"after_hours_stale", "market_closed", "idle_market_closed"}
+                    else "idle_market_closed"
+                    if _lower_text(safe_diagnostics.get("streaming_status")) == "idle_market_closed"
+                    else
                     "buffered_rows_available"
                     if payload.get("streaming_status") == "cache_stale"
                     else "streaming_trade_tape_supported"
@@ -4020,7 +4079,12 @@ class VietnamMarketService:
                 trade_tape_status = {
                     "status": "ok",
                     "source": SSI_TRADE_TAPE_SOURCE,
-                    "message": None,
+                    "message": _status_message_from_reason(
+                        section="trade_tape",
+                        status="ok",
+                        reason_code=reason_code,
+                        fallback=VN_TRADE_TAPE_UNAVAILABLE_REASON,
+                    ) if reason_code in {"market_closed", "idle_market_closed", "after_hours_stale"} else None,
                     "reason_code": reason_code,
                     "classification": reason_code,
                     "ticker": symbol,
@@ -4078,7 +4142,11 @@ class VietnamMarketService:
             if order_book:
                 safe_diagnostics = _live_failure_diagnostics(payload)
                 public_status = "stale" if status == "stale" or order_book.get("is_stale") is True else "ok"
-                reason_code = "stream_cache_stale" if public_status == "stale" else "cache_hit"
+                reason_code = _classify_order_book_reason(
+                    status=public_status,
+                    reason=(payload.get("reason") or payload.get("message")),
+                    diagnostics=safe_diagnostics,
+                )
                 order_book_status = {
                     "status": public_status,
                     "source": SSI_ORDER_BOOK_SOURCE,
@@ -6185,9 +6253,16 @@ class VietnamMarketService:
         response_reason_code = _classify_trade_tape_reason(
             status=str(response.get("status") or status or "unavailable"),
             reason=str(response.get("error_detail") or response.get("error") or payload.get("reason") or payload.get("streaming_status") or ""),
+            diagnostics=diagnostics,
         )
         if response.get("status") == "ok" and payload.get("streaming_status"):
             response_reason_code = (
+                "after_hours_stale"
+                if _lower_text(diagnostics.get("streaming_status")) in {"after_hours_stale", "market_closed"}
+                or _lower_text(diagnostics.get("stream_health")) in {"after_hours_stale", "market_closed", "idle_market_closed"}
+                else "idle_market_closed"
+                if _lower_text(diagnostics.get("streaming_status")) == "idle_market_closed"
+                else
                 "buffered_rows_available"
                 if payload.get("streaming_status") == "cache_stale"
                 else "streaming_trade_tape_supported"

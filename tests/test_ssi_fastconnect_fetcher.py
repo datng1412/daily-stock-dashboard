@@ -1183,6 +1183,7 @@ def test_streaming_realtime_bootstrap_symbols_default_empty():
 
 
 def test_trade_tape_reads_streaming_x_trade_buffer_without_rest_probe():
+    active_market_epoch = datetime(2026, 6, 8, 9, 20, tzinfo=timezone(timedelta(hours=7))).timestamp()
     session = _FakeSession()
     client = _FakeStreamClient()
     fetcher = _fetcher(
@@ -1192,6 +1193,7 @@ def test_trade_tape_reads_streaming_x_trade_buffer_without_rest_probe():
         trade_tape_buffer_size=10,
         trade_tape_ttl_seconds=60,
     )
+    fetcher.streaming_realtime_manager._time_func = lambda: active_market_epoch
     fetcher.streaming_realtime_manager.start(["FPT"])
     fetcher.streaming_realtime_manager.handle_message(_x_trade())
 

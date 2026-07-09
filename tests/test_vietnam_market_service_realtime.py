@@ -518,6 +518,47 @@ def test_ssi_order_book_stale_preserves_last_known_ladder_without_changing_daily
     assert item["diagnostics"]["order_book"]["latest_order_book_age_seconds"] == 16
 
 
+def test_ssi_order_book_after_hours_stale_preserves_ladder_with_market_closed_message():
+    fetcher = FakeSsiFetcher(
+        order_book_payload={
+            "status": "stale",
+            "source": "SSI",
+            "symbol": "FPT",
+            "reason": "Market closed — showing last known data.",
+            "order_book": {
+                "ticker": "FPT",
+                "symbol": "FPT",
+                "exchange": "HOSE",
+                "bids": [{"level": 1, "price": 130.4, "volume": 1000}],
+                "asks": [{"level": 1, "price": 130.6, "volume": 2000}],
+                "stream_data_type": "X-QUOTE",
+                "age_seconds": 3600,
+                "is_stale": True,
+                "stale_reason": "Market closed — showing last known data.",
+            },
+            "streaming_status": "after_hours_stale",
+            "cache_status": "stale",
+            "diagnostics": {
+                "streaming_status": "after_hours_stale",
+                "stream_health": "after_hours_stale",
+                "market_session": "closed",
+                "market_session_active": False,
+            },
+        }
+    )
+
+    item = _service(fetcher).build_watchlist(["FPT"], force_refresh=True)["watchlist"][0]
+
+    assert item["status"] == "ok"
+    assert item["latest_price_source"] == "SSI DailyOhlc"
+    assert item["order_book_status"]["status"] == "stale"
+    assert item["order_book_status"]["reason_code"] == "after_hours_stale"
+    assert item["order_book_status"]["message"] == "Market closed — showing last known data."
+    assert item["order_book"]["is_stale"] is True
+    assert item["order_book"]["stale_reason"] == "Market closed — showing last known data."
+    assert item["diagnostics"]["order_book"]["market_session_active"] is False
+
+
 def test_ssi_foreign_room_success_is_separate_from_daily_price_and_daily_stock_price():
     fetcher = FakeSsiFetcher(
         foreign_room_payload={
@@ -910,6 +951,52 @@ def test_ssi_trade_tape_stale_buffer_rows_remain_public_and_daily_stays_ok():
     assert item["trade_tape"][0]["change_pct"] == 1.16
     assert item["diagnostics"]["trade_tape"]["streaming_status"] == "cache_stale"
     assert item["diagnostics"]["trade_tape"]["trade_tape_returned_row_count"] == 1
+
+
+def test_ssi_trade_tape_after_hours_stale_rows_remain_public_with_market_closed_message():
+    fetcher = FakeSsiFetcher(
+        trade_payload={
+            "status": "ok",
+            "source": "SSI",
+            "symbol": "FPT",
+            "reason": "Market closed — showing last known data.",
+            "streaming_status": "after_hours_stale",
+            "cache_status": "stale",
+            "trades": [
+                {
+                    "ticker": "FPT",
+                    "symbol": "FPT",
+                    "time": "14:44:58",
+                    "timestamp": "2026-06-30T14:44:58+07:00",
+                    "price": 130.5,
+                    "volume": 5000,
+                    "raw_type": "X-TRADE",
+                    "source": "SSI",
+                    "is_stale": True,
+                }
+            ],
+            "diagnostics": {
+                "streaming_status": "after_hours_stale",
+                "stream_health": "after_hours_stale",
+                "market_session": "closed",
+                "market_session_active": False,
+            },
+        }
+    )
+
+    endpoint_payload = _service(fetcher).build_trade_tape("FPT", force_refresh=True)
+    item = _service(fetcher).build_watchlist(["FPT"], force_refresh=True)["watchlist"][0]
+
+    assert endpoint_payload["status"] == "ok"
+    assert endpoint_payload["reason_code"] == "after_hours_stale"
+    assert endpoint_payload["status_message"] == "Market closed — showing last known data."
+    assert item["status"] == "ok"
+    assert item["latest_price_source"] == "SSI DailyOhlc"
+    assert item["trade_tape_status"]["status"] == "ok"
+    assert item["trade_tape_status"]["reason_code"] == "after_hours_stale"
+    assert item["trade_tape_status"]["message"] == "Market closed — showing last known data."
+    assert item["trade_tape"][0]["price"] == 130.5
+    assert item["diagnostics"]["trade_tape"]["market_session_active"] is False
 
 
 def test_ssi_trade_tape_failure_is_separate_from_daily_row():

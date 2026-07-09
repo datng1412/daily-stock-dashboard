@@ -2544,6 +2544,46 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(book.getByText('2,000')).toBeInTheDocument();
   });
 
+  it('renders after-hours SSI X-QUOTE rows with market-closed last-known copy', async () => {
+    mockedGetVietnamWatchlist.mockImplementation(async (tickers) => ({
+      ...makeResponse(tickers?.length ? tickers : defaultTickers),
+      watchlist: (tickers?.length ? tickers : defaultTickers).map((ticker) => {
+        const item = makeItem(ticker);
+        if (ticker !== 'FPT') return item;
+        return {
+          ...item,
+          orderBookSource: 'SSI X-QUOTE',
+          orderBookStatus: {
+            status: 'stale',
+            source: 'SSI X-QUOTE',
+            message: 'Market closed — showing last known data.',
+            reasonCode: 'after_hours_stale',
+            classification: 'after_hours_stale',
+          },
+          orderBook: {
+            ticker: 'FPT',
+            bids: [{ level: 1, price: 98_000, volume: 1_000 }],
+            asks: [{ level: 1, price: 100_000, volume: 2_000 }],
+            isStale: true,
+            staleReason: 'Market closed — showing last known data.',
+          },
+        };
+      }),
+    }));
+
+    render(<VietnamDashboardPage />);
+
+    const heading = await screen.findByRole('heading', { name: /Order Book.*SSI X-QUOTE/ });
+    const card = heading.closest('section') as HTMLElement | null;
+    if (!card) throw new Error('Order book card not found');
+    const book = within(card);
+
+    expect(book.getByText('stale')).toBeInTheDocument();
+    expect(book.getByText('Last available order book is stale: Market closed — showing last known data.')).toBeInTheDocument();
+    expect(book.queryByText('Order book unavailable.')).not.toBeInTheDocument();
+    expect(book.getByText('98.00')).toBeInTheDocument();
+  });
+
   it('refreshes selected ticker live context with a bounded one-ticker watchlist request', async () => {
     vi.useFakeTimers();
     let selectedRefreshCount = 0;
@@ -2604,6 +2644,43 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(selectedRefreshCount).toBe(1);
     expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(['FPT'], false);
     expect(screen.getByText('101.00')).toBeInTheDocument();
+  });
+
+  it('pauses selected ticker live refresh while hidden and resumes immediately on focus', async () => {
+    vi.useFakeTimers();
+    let selectedRefreshCount = 0;
+    mockedGetVietnamWatchlist.mockImplementation(async (tickers) => {
+      const requestedTickers = tickers?.length ? tickers : defaultTickers;
+      if (requestedTickers.length === 1 && requestedTickers[0] === 'FPT') {
+        selectedRefreshCount += 1;
+      }
+      return makeResponse(requestedTickers);
+    });
+
+    render(<VietnamDashboardPage />);
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(defaultTickers, false);
+
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+    await act(async () => {
+      vi.advanceTimersByTime(6_000);
+      await Promise.resolve();
+    });
+    expect(selectedRefreshCount).toBe(0);
+
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
+    fireEvent(document, new Event('visibilitychange'));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(selectedRefreshCount).toBe(1);
+    expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(['FPT'], false);
   });
 
   it('refetches pending trade tape until X-TRADE rows arrive and then renders rows first', async () => {
@@ -5746,7 +5823,8 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     expect(mockedGetVietnamRealtimeQuotes).toHaveBeenCalledTimes(1);
     expect(mockedGetVietnamRealtimeTrades).not.toHaveBeenCalled();
-    expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistCalls);
+    expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistCalls + 1);
+    expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(['FPT'], false);
     expect(mockedGetVietnamChart).toHaveBeenCalledTimes(chartCalls);
     expect(mockedGetVietnamCorporateActions).toHaveBeenCalledTimes(corporateActionsCalls);
   });

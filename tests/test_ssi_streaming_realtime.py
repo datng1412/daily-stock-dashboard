@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib
 import sys
 from types import SimpleNamespace
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -28,6 +29,7 @@ from data_provider.ssi_streaming_realtime import (
     SSI_STREAMING_REALTIME_MANAGER_ERROR_REASON,
     SSI_STREAMING_REALTIME_NOT_STARTED_REASON,
     SSI_STREAMING_REALTIME_PACKAGE_UNAVAILABLE_REASON,
+    TradeTapeEventCache,
     build_foreign_room_channel,
     build_market_index_channel,
     build_order_book_channel,
@@ -40,6 +42,11 @@ from src.services.vietnam_market_service import VietnamDashboardConfig, VietnamM
 
 
 SECRET_TOKEN = "SECRET_STREAM_TOKEN_DO_NOT_EXPOSE"
+VIETNAM_TZ = timezone(timedelta(hours=7))
+
+
+def _vn_epoch(year: int, month: int, day: int, hour: int, minute: int = 0) -> float:
+    return datetime(year, month, day, hour, minute, tzinfo=VIETNAM_TZ).timestamp()
 
 
 class NoNetworkSession:
@@ -488,8 +495,9 @@ def test_manager_start_error_is_sanitized():
 
 
 def test_x_trade_message_updates_snapshot_and_trade_tape_buffer():
+    now = [_vn_epoch(2026, 6, 8, 9, 20)]
     client = FakeStreamClient()
-    manager = _manager(client=client)
+    manager = _manager(client=client, now=now)
     manager.start(["FPT"])
 
     manager.handle_message(_x_trade())
@@ -627,8 +635,9 @@ def test_x_trade_side_is_not_inferred_from_price_move():
 
 
 def test_x_quote_message_updates_order_book_context_without_inventing_realtime_or_trade_rows():
+    now = [_vn_epoch(2026, 6, 8, 9, 20)]
     client = FakeStreamClient()
-    manager = _manager(client=client)
+    manager = _manager(client=client, now=now)
     manager.start(["FPT"])
 
     manager.handle_message(_x_quote())
@@ -834,8 +843,9 @@ def test_mi_market_index_disabled_does_not_subscribe_channel():
 
 
 def test_x_quote_drops_malformed_order_book_levels_without_fake_rows():
+    now = [_vn_epoch(2026, 6, 8, 9, 20)]
     client = FakeStreamClient()
-    manager = _manager(client=client)
+    manager = _manager(client=client, now=now)
     manager.start(["FPT"])
 
     manager.handle_message({
@@ -863,7 +873,7 @@ def test_x_quote_drops_malformed_order_book_levels_without_fake_rows():
 
 
 def test_x_quote_order_book_returns_stale_last_known_ladder():
-    now = [1000.0]
+    now = [_vn_epoch(2026, 6, 8, 9, 20)]
     client = FakeStreamClient()
     manager = _manager(client=client, now=now)
     manager.start(["FPT"])
@@ -881,6 +891,27 @@ def test_x_quote_order_book_returns_stale_last_known_ladder():
     assert payload["order_book"]["bids"][0] == {"level": 1, "price": 130.4, "volume": 1000.0}
     assert payload["order_book"]["asks"][0] == {"level": 1, "price": 130.6, "volume": 2000.0}
     assert payload["diagnostics"]["latest_order_book_age_seconds"] == 16
+
+
+def test_x_quote_order_book_after_hours_preserves_last_known_ladder_with_market_closed_label():
+    now = [_vn_epoch(2026, 6, 8, 14, 44)]
+    client = FakeStreamClient()
+    manager = _manager(client=client, now=now)
+    manager.start(["FPT"])
+    manager.handle_message(_x_quote())
+
+    now[0] = _vn_epoch(2026, 6, 8, 16, 0)
+    payload = manager.order_book("FPT")
+
+    assert payload["status"] == "stale"
+    assert payload["streaming_status"] == "after_hours_stale"
+    assert payload["cache_status"] == "stale"
+    assert payload["reason"] == "Market closed — showing last known data."
+    assert payload["order_book"]["ticker"] == "FPT"
+    assert payload["order_book"]["is_stale"] is True
+    assert payload["order_book"]["stale_reason"] == "Market closed — showing last known data."
+    assert payload["diagnostics"]["stream_health"] == "after_hours_stale"
+    assert payload["diagnostics"]["market_session_active"] is False
 
 
 def test_x_quote_order_book_reports_not_subscribed_when_channel_is_missing():
@@ -915,8 +946,9 @@ def test_x_message_updates_snapshot_when_fields_exist():
 
 
 def test_malformed_message_does_not_crash_manager():
+    now = [_vn_epoch(2026, 6, 8, 9, 20)]
     client = FakeStreamClient()
-    manager = _manager(client=client)
+    manager = _manager(client=client, now=now)
     manager.start(["FPT"])
 
     manager.handle_message({"DataType": "X-TRADE", "Content": '{"RType":"X-TRADE",'})
@@ -928,8 +960,9 @@ def test_malformed_message_does_not_crash_manager():
 
 
 def test_message_for_unrequested_symbol_is_ignored():
+    now = [_vn_epoch(2026, 6, 8, 9, 20)]
     client = FakeStreamClient()
-    manager = _manager(client=client)
+    manager = _manager(client=client, now=now)
     manager.start(["FPT"])
 
     manager.handle_message(_x_trade("SSI", "32"))
@@ -940,21 +973,21 @@ def test_message_for_unrequested_symbol_is_ignored():
 
 
 def test_empty_and_stale_cache_return_unavailable():
-    now = [100.0]
+    now = [_vn_epoch(2026, 6, 8, 9, 20)]
     client = FakeStreamClient()
     manager = _manager(client=client, now=now)
     manager.start(["FPT"])
 
     assert manager.snapshot(["FPT"])["reason"] == SSI_STREAMING_REALTIME_CACHE_EMPTY_REASON
     manager.handle_message(_x_trade())
-    now[0] = 120.0
+    now[0] += 20.0
     stale_payload = manager.snapshot(["FPT"])
 
     assert stale_payload["status"] == "unavailable"
     assert stale_payload["reason"] == SSI_STREAMING_REALTIME_CACHE_STALE_REASON
     assert stale_payload["cache_status"] == "stale"
     assert manager.trade_tape("FPT")["status"] == "ok"
-    now[0] = 170.0
+    now[0] += 50.0
     stale_trades = manager.trade_tape("FPT")
     assert stale_trades["status"] == "ok"
     assert stale_trades["trades"][0]["ticker"] == "FPT"
@@ -966,6 +999,24 @@ def test_empty_and_stale_cache_return_unavailable():
     assert stale_trades["cache_status"] == "stale"
     assert stale_trades["diagnostics"]["trade_tape_buffer_row_count"] == 1
     assert stale_trades["diagnostics"]["trade_tape_returned_row_count"] == 1
+
+
+def test_after_hours_trade_tape_preserves_stale_rows_with_market_closed_label():
+    now = [_vn_epoch(2026, 6, 8, 14, 44)]
+    client = FakeStreamClient()
+    manager = _manager(client=client, now=now)
+    manager.start(["FPT"])
+    manager.handle_message(_x_trade())
+
+    now[0] = _vn_epoch(2026, 6, 8, 16, 0)
+    payload = manager.trade_tape("FPT")
+
+    assert payload["status"] == "ok"
+    assert payload["streaming_status"] == "after_hours_stale"
+    assert payload["reason"] == "Market closed — showing last known data."
+    assert payload["trades"][0]["ticker"] == "FPT"
+    assert payload["diagnostics"]["stream_health"] == "after_hours_stale"
+    assert payload["diagnostics"]["market_session_active"] is False
 
 
 def test_trade_tape_skips_xtrade_rows_missing_required_trade_fields():
@@ -1093,38 +1144,99 @@ def test_trade_tape_reports_not_subscribed_when_xtrade_channel_is_missing():
 
 
 def test_running_manager_with_no_messages_past_idle_timeout_reports_idle():
-    now = [100.0]
+    now = [_vn_epoch(2026, 6, 8, 9, 20)]
     client = FakeStreamClient()
     manager = _manager(client=client, now=now, idle_timeout_seconds=10)
     manager.start(["FPT"])
 
-    now[0] = 111.0
+    now[0] += 11.0
     status = manager.status()
     payload = manager.snapshot(["FPT"])
 
     assert status["is_idle"] is True
     assert status["runtime_status"] == RUNTIME_RUNNING_IDLE
+    assert status["stream_health"] == "stale"
+    assert status["market_session"] == "continuous_morning"
+    assert status["market_session_active"] is True
+    assert status["last_message_age_seconds"] is None
     assert payload["diagnostics"]["is_idle"] is True
     assert payload["diagnostics"]["runtime_status"] == RUNTIME_RUNNING_IDLE
 
 
 def test_running_manager_with_recent_message_reports_not_idle():
-    now = [100.0]
+    now = [_vn_epoch(2026, 6, 8, 9, 20)]
     client = FakeStreamClient()
     manager = _manager(client=client, now=now, idle_timeout_seconds=10)
     manager.start(["FPT"])
-    now[0] = 105.0
+    now[0] += 5.0
     manager.handle_message(_x_trade())
-    now[0] = 112.0
+    now[0] += 7.0
 
     status = manager.status()
 
     assert status["is_idle"] is False
     assert status["runtime_status"] == MANAGER_RUNNING
+    assert status["stream_health"] == "healthy"
+    assert status["last_message_age_seconds"] == 7
+    assert status["subscription_count"] == status["expected_subscription_count"]
 
 
-def test_idle_without_market_hours_utility_is_diagnostic_only_not_reconnect_loop():
-    now = [100.0]
+def test_closed_market_idle_stream_does_not_schedule_stale_reconnect():
+    now = [_vn_epoch(2026, 6, 8, 16, 0)]
+    client = FakeStreamClient()
+    manager = _manager(
+        client=client,
+        now=now,
+        idle_timeout_seconds=10,
+        reconnect_enabled=True,
+    )
+    manager.start(["FPT"])
+    now[0] += 20.0
+
+    status = manager.monitor_tick(wants_streaming=True)
+
+    assert status["is_idle"] is True
+    assert status["stream_health"] == "idle_market_closed"
+    assert status["market_session"] == "closed"
+    assert status["market_session_active"] is False
+    assert status["last_reconnect_reason"] is None
+    assert status["next_reconnect_at"] is None
+    assert status["reconnect_attempt_count"] == 0
+    assert client.stop_calls == 0
+
+
+def test_closed_market_stream_before_idle_reports_market_closed_without_reconnect():
+    now = [_vn_epoch(2026, 6, 8, 16, 0)]
+    client = FakeStreamClient()
+    manager = _manager(
+        client=client,
+        now=now,
+        idle_timeout_seconds=10,
+        reconnect_enabled=True,
+    )
+    manager.start(["FPT"])
+
+    status = manager.monitor_tick(wants_streaming=True)
+    snapshot = manager.snapshot(["FPT"])
+    order_book = manager.order_book("FPT")
+    trade_tape = manager.trade_tape("FPT")
+
+    assert status["stream_health"] == "market_closed"
+    assert status["market_session"] == "closed"
+    assert status["last_reconnect_reason"] is None
+    assert status["next_reconnect_at"] is None
+    assert status["reconnect_attempt_count"] == 0
+    assert client.stop_calls == 0
+    assert snapshot["streaming_status"] == "market_closed"
+    assert snapshot["reason"] == "Market closed — no live realtime snapshot expected."
+    assert order_book["streaming_status"] == "market_closed"
+    assert order_book["reason"] == "Market closed — no live order-book rows expected."
+    assert trade_tape["streaming_status"] == "market_closed"
+    assert trade_tape["reason"] == "Market closed — no live trade rows expected."
+
+
+def test_stale_running_stream_schedules_debounced_reconnect_once():
+    now = [_vn_epoch(2026, 6, 8, 9, 20)]
     clients = [FakeStreamClient()]
     manager = _manager(
         client=clients[0],
@@ -1133,15 +1245,102 @@ def test_idle_without_market_hours_utility_is_diagnostic_only_not_reconnect_loop
         reconnect_enabled=True,
     )
     manager.start(["FPT"])
-    now[0] = 120.0
+    now[0] += 20.0
 
     status = manager.monitor_tick(wants_streaming=True)
 
     assert status["is_idle"] is True
-    assert status["runtime_status"] == RUNTIME_RUNNING_IDLE
+    assert status["runtime_status"] == RUNTIME_RECONNECTING
+    assert status["stream_health"] == "reconnecting"
     assert status["reconnect_attempt_count"] == 0
-    assert status["next_reconnect_at"] is None
+    assert status["reconnect_count"] == 0
+    assert status["last_reconnect_reason"] == "stream_stale"
+    assert status["next_reconnect_at"] is not None
     assert clients[0].stop_calls == 0
+
+    again = manager.monitor_tick(wants_streaming=True)
+
+    assert again["reconnect_attempt_count"] == 0
+    assert clients[0].stop_calls == 0
+
+
+def test_stale_running_stream_reconnects_and_preserves_existing_buffers():
+    now = [_vn_epoch(2026, 6, 8, 9, 20)]
+    clients = [FakeStreamClient(), FakeStreamClient()]
+
+    def factory():
+        return clients.pop(0)
+
+    parser_fetcher = _fetcher()
+    manager = SsiStreamingRealtimeManager(
+        enabled=True,
+        parser=parser_fetcher.normalize_streaming_realtime_messages,
+        client_factory=factory,
+        cache=RealtimeSnapshotCache(15, time_func=lambda: now[0]),
+        order_book_cache=OrderBookCache(15, time_func=lambda: now[0]),
+        idle_timeout_seconds=10,
+        reconnect_initial_delay_seconds=2,
+        time_func=lambda: now[0],
+    )
+    manager.start(["FPT"])
+    first_client = manager._client
+    first_channels = list(first_client.channels)
+    manager.handle_message(_x_trade())
+    manager.handle_message(_x_quote())
+    assert manager.trade_tape("FPT")["count"] == 1
+    assert manager.order_book("FPT")["count"] == 1
+
+    now[0] += 20.0
+    scheduled = manager.monitor_tick(wants_streaming=True)
+    assert scheduled["last_reconnect_reason"] == "stream_stale"
+    assert scheduled["reconnect_attempt_count"] == 0
+    now[0] += 2.0
+
+    status = manager.monitor_tick(wants_streaming=True)
+
+    assert status["manager_state"] == MANAGER_RUNNING
+    assert status["stream_health"] == "stale"
+    assert status["reconnect_attempt_count"] == 1
+    assert status["reconnect_count"] == 1
+    assert status["last_reconnect_reason"] == "stream_stale"
+    assert first_client.stop_calls == 1
+    assert manager._client.channels == first_channels
+    assert len(manager._client.channels) == len(set(manager._client.channels))
+    assert manager.trade_tape("FPT")["count"] == 1
+    assert manager.order_book("FPT")["count"] == 1
+
+
+def test_stale_running_stream_reconnect_failure_is_reported_without_crashing():
+    now = [_vn_epoch(2026, 6, 8, 9, 20)]
+    clients = [FakeStreamClient(), FakeStreamClient(fail_start=True)]
+
+    def factory():
+        return clients.pop(0)
+
+    parser_fetcher = _fetcher()
+    manager = SsiStreamingRealtimeManager(
+        enabled=True,
+        parser=parser_fetcher.normalize_streaming_realtime_messages,
+        client_factory=factory,
+        idle_timeout_seconds=10,
+        reconnect_initial_delay_seconds=2,
+        reconnect_max_delay_seconds=5,
+        time_func=lambda: now[0],
+    )
+    manager.start(["FPT"])
+    now[0] += 20.0
+    manager.monitor_tick(wants_streaming=True)
+    now[0] += 2.0
+
+    status = manager.monitor_tick(wants_streaming=True)
+
+    assert status["manager_state"] == MANAGER_ERRORED
+    assert status["stream_health"] == "failed"
+    assert status["runtime_status"] == RUNTIME_RECONNECTING
+    assert status["last_reconnect_reason"] == "stream_stale"
+    assert SECRET_TOKEN not in str(status["last_reconnect_error"])
+    assert "<redacted>" in str(status["last_reconnect_error"])
+    assert status["reconnect_attempt_count"] == 1
 
 
 def test_running_idle_realtime_does_not_make_daily_data_invalid():
@@ -1465,12 +1664,16 @@ def test_manager_start_instantiates_official_wrapper_only_when_enabled():
 
 
 def test_realtime_service_reads_cache_hit_without_overwriting_daily_latest_price():
+    now = [_vn_epoch(2026, 6, 8, 9, 20)]
     client = FakeStreamClient()
     parser_fetcher = _fetcher(streaming_realtime_enabled=True)
     manager = SsiStreamingRealtimeManager(
         enabled=True,
+        cache=RealtimeSnapshotCache(15, time_func=lambda: now[0]),
+        trade_tape_cache=TradeTapeEventCache(time_func=lambda: now[0]),
         parser=parser_fetcher.normalize_streaming_realtime_messages,
         client_factory=lambda: client,
+        time_func=lambda: now[0],
     )
     manager.start(["FPT"])
     manager.handle_message(_x_trade(price="131.5"))

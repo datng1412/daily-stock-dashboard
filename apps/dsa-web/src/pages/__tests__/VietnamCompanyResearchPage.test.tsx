@@ -389,6 +389,29 @@ describe('VietnamCompanyResearchPage', () => {
     expect(book.queryByText('Ask Price')).not.toBeInTheDocument();
   });
 
+  it('refreshes the company live snapshot immediately when tab focus returns', async () => {
+    vi.mocked(stocksApi.getVietnamCompanyResearch).mockResolvedValue(makeCompanySnapshot());
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(stocksApi.getVietnamCompanyResearch).toHaveBeenCalledWith('FPT', false);
+    });
+    const baselineCalls = vi.mocked(stocksApi.getVietnamCompanyResearch).mock.calls.length;
+
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+    fireEvent(document, new Event('visibilitychange'));
+    expect(stocksApi.getVietnamCompanyResearch).toHaveBeenCalledTimes(baselineCalls);
+
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
+    fireEvent(document, new Event('visibilitychange'));
+
+    await waitFor(() => {
+      expect(stocksApi.getVietnamCompanyResearch).toHaveBeenCalledTimes(baselineCalls + 1);
+    });
+    expect(stocksApi.getVietnamCompanyResearch).toHaveBeenLastCalledWith('FPT', false);
+  });
+
   it('shows company trade rows when stale diagnostics accompany buffered X-TRADE data', async () => {
     const snapshot = makeCompanySnapshot();
     snapshot.tradeTapeStatus = {

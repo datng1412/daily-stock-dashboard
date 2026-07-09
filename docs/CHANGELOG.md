@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [fix] Add market-session-aware SSI streaming health diagnostics, after-hours last-known live rows, stale-stream watchdog reconnects during active VN trading windows, and immediate selected live-context refresh when VN dashboard tabs regain focus.
 - [fix] Preserve stale SSI `X-QUOTE:{symbol}` order-book ladders as last-known rows with stale status and add bounded selected-ticker live-context refresh without changing DailyOhlc price ownership.
 - [improvement] Render SSI `X-QUOTE:{symbol}` order-book rows in VN dashboard and company selected-ticker panels with dynamic bid/ask levels, source labels, stale/unavailable states, and SSI board price colors.
 - [new feature] Add SSI `MI:{index_code}` market-index pulse backend/API support as a separate optional index context without changing DailyIndex or DailyOhlc price ownership.

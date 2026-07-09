@@ -259,6 +259,9 @@ const TRADE_TAPE_PENDING_STATUSES = new Set([
 const TRADE_TAPE_TERMINAL_REASON_CODES = new Set([
   'disabled',
   'config_disabled',
+  'market_closed',
+  'idle_market_closed',
+  'after_hours_stale',
   'not_implemented',
   'latest_trade_stream_only',
   'unavailable_provider_error',
@@ -524,6 +527,15 @@ const VietnamCompanyResearchPage: React.FC = () => {
     }
   }, [ticker]);
 
+  const refreshSelectedLiveContext = useCallback(() => {
+    if (!ticker || selectedLiveContextRefreshInFlightRef.current) return false;
+    selectedLiveContextRefreshInFlightRef.current = true;
+    void loadSnapshot(false, true).finally(() => {
+      selectedLiveContextRefreshInFlightRef.current = false;
+    });
+    return true;
+  }, [loadSnapshot, ticker]);
+
   useEffect(() => {
     void loadSnapshot(false);
   }, [loadSnapshot]);
@@ -531,14 +543,20 @@ const VietnamCompanyResearchPage: React.FC = () => {
   useEffect(() => {
     if (!ticker || loading || refreshing) return undefined;
     const timer = window.setInterval(() => {
-      if (document.visibilityState === 'hidden' || selectedLiveContextRefreshInFlightRef.current) return;
-      selectedLiveContextRefreshInFlightRef.current = true;
-      void loadSnapshot(false, true).finally(() => {
-        selectedLiveContextRefreshInFlightRef.current = false;
-      });
+      if (document.visibilityState === 'hidden') return;
+      refreshSelectedLiveContext();
     }, SELECTED_LIVE_CONTEXT_REFRESH_INTERVAL_MS);
     return () => window.clearInterval(timer);
-  }, [loadSnapshot, loading, refreshing, ticker]);
+  }, [loading, refreshing, refreshSelectedLiveContext, ticker]);
+
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') return;
+      refreshSelectedLiveContext();
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+  }, [refreshSelectedLiveContext]);
 
   useEffect(() => {
     if (!ticker || !snapshot || hasCompanyTradeTapeData(snapshot) || !isCompanyTradeTapeWarmupPending(snapshot)) {
