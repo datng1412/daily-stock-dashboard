@@ -1244,11 +1244,13 @@ Recommended next SSI-backed runtime-proof order:
 
 1. Phase 4.8G - Trading Session/Status from SSI `F:{symbol}` runtime proof. Implemented as optional cache-backed watchlist context; code mapping and UI productization remain deferred.
 2. Phase 4.8H - `X-QUOTE` Order Book Ladder. Implemented as optional cache-backed watchlist context; live payload proof and UI productization remain deferred.
-3. Phase 4.8I - Realtime Foreign Room from SSI `R`.
-4. Phase 4.8J - Realtime Market Index Pulse from SSI `MI`.
-5. Phase 4.8K - DailyStockPrice Unused Field Audit/Exposure.
-6. Phase 4.8L - SecuritiesDetails Extended Metadata.
-7. Later - Realtime OHLCV `B`, derivatives/futures, covered warrant, ETF/fund, and bond modules.
+3. Phase 4.8I - Realtime Foreign Room from SSI `R`. Implemented as optional cache-backed watchlist context; live payload proof and UI productization remain deferred.
+4. Phase 4.8I-Live - live smoke for SSI `R:{symbol}` during market hours.
+5. Phase 4.8I-UI - foreign-room UI only after live proof.
+6. Phase 4.8J - Realtime Market Index Pulse from SSI `MI`.
+7. Phase 4.8K - DailyStockPrice Unused Field Audit/Exposure.
+8. Phase 4.8L - SecuritiesDetails Extended Metadata.
+9. Later - Realtime OHLCV `B`, derivatives/futures, covered warrant, ETF/fund, and bond modules.
 
 ### Phase 4.8G - SSI F Trading Session/Status Runtime Proof
 
@@ -1283,6 +1285,24 @@ Boundaries:
 
 * Request handlers remain cache readers only and must not start streams, subscribe dynamically, use all-market channels, or call trading/order/account APIs.
 * `X-QUOTE` order-book context must not replace SSI DailyOhlc, DailyStockPrice, realtime snapshot, trade tape, session/status, intraday, indicators, or `latest_price`.
+* `latest_price_source` remains `SSI DailyOhlc`.
+
+### Phase 4.8I - SSI R Foreign Room Backend/API Support
+
+Status: implemented on 2026-07-08 as a backend/API runtime-proof path.
+
+Result:
+
+* Startup-owned SSI streaming now includes symbol-scoped `R:{symbol}` subscriptions alongside `X:{symbol}`, `X-QUOTE:{symbol}`, `X-TRADE:{symbol}`, and `F:{symbol}` for configured bootstrap symbols.
+* Parsed `R` rows are stored in a dedicated latest foreign-room cache, not in the realtime quote cache, trade-tape buffer, order-book cache, or session/status cache.
+* Watchlist rows can expose `foreign_room_source`, `foreign_room`, and `foreign_room_status`; technical state lives under `diagnostics.foreign_room`.
+* Safe fields only are surfaced: ticker/symbol, exchange, total/current room, foreign buy/sell volume/value when explicitly provided, trading date, time, stream timestamp/type, cache age, source, and `value_semantics_status`.
+* No frontend foreign-room UI is productized yet. Value-unit semantics, approximate-value behavior, exchange-specific caveats, and final display copy remain deferred until live payload evidence proves exact meanings.
+
+Boundaries:
+
+* Request handlers remain cache readers only and must not start streams, subscribe dynamically, use all-market channels, or call trading/order/account APIs.
+* `R` foreign-room context must not replace SSI DailyOhlc, DailyStockPrice daily foreign flow, realtime snapshot, trade tape, order book, session/status, intraday, indicators, or `latest_price`.
 * `latest_price_source` remains `SSI DailyOhlc`.
 
 ### Phase 5.0A - External Provider Contract Design

@@ -114,6 +114,25 @@ def _x_trade(symbol: str = "FPT", *, price: str = "130.5", volume: str = "1000",
     }
 
 
+def _r_foreign_room(symbol: str = "FPT", *, current_room: str = "123000000"):
+    return {
+        "DataType": "R",
+        "Content": {
+            "RType": "R",
+            "TradingDate": "25/06/2026",
+            "Time": "10:01:04",
+            "Symbol": symbol,
+            "Exchange": "HOSE",
+            "TotalRoom": "123456789",
+            "CurrentRoom": current_room,
+            "FBuyVol": "100000",
+            "FSellVol": "50000",
+            "FBuyVal": "7200000000",
+            "FSellVal": "3600000000",
+        },
+    }
+
+
 def _get_call_count(session):
     return len([call for call in session.calls if call[0] == "GET"])
 
@@ -967,6 +986,49 @@ def test_streaming_x_quote_maps_quote_context_without_last_trade():
     assert rows[0]["quote_only"] is True
 
 
+def test_streaming_r_maps_foreign_room_without_quote_or_trade_fields():
+    fetcher = _fetcher()
+
+    rows = fetcher.normalize_streaming_realtime_messages([_r_foreign_room("ACB")], ["ACB"])
+
+    assert len(rows) == 1
+    assert rows[0]["ticker"] == "ACB"
+    assert rows[0]["stream_data_type"] == "R"
+    assert rows[0]["total_room"] == 123456789.0
+    assert rows[0]["current_room"] == 123000000.0
+    assert rows[0]["foreign_buy_volume"] == 100000.0
+    assert rows[0]["foreign_sell_volume"] == 50000.0
+    assert rows[0]["foreign_buy_value"] == 7200000000.0
+    assert rows[0]["foreign_sell_value"] == 3600000000.0
+    assert rows[0]["stream_timestamp"] == "2026-06-25T10:01:04"
+    assert rows[0]["value_semantics_status"] == "needs_semantics_proof"
+    assert "price" not in rows[0]
+    assert "has_last_trade" not in rows[0]
+
+
+def test_streaming_r_drops_rows_without_usable_foreign_room_metrics():
+    fetcher = _fetcher()
+
+    rows = fetcher.normalize_streaming_realtime_messages(
+        [
+            {
+                "DataType": "R",
+                "Content": {
+                    "RType": "R",
+                    "Symbol": "ACB",
+                    "TotalRoom": "bad",
+                    "CurrentRoom": "-1",
+                    "FBuyVol": "--",
+                    "FSellVol": "",
+                },
+            }
+        ],
+        ["ACB"],
+    )
+
+    assert rows == []
+
+
 def test_streaming_parser_ignores_malformed_and_unrequested_messages():
     fetcher = _fetcher()
 
@@ -1082,6 +1144,53 @@ def test_trade_tape_reads_streaming_x_trade_buffer_without_rest_probe():
     assert payload["trades"][0]["volume"] == 1000.0
     assert payload["trades"][0]["timestamp"] == "2026-06-25T10:00:00"
     assert payload["trades"][0]["raw_type"] == "X-TRADE"
+    assert session.calls == []
+    assert SECRET_TOKEN not in str(payload)
+
+
+def test_foreign_room_reads_streaming_r_cache_without_rest_probe():
+    session = _FakeSession()
+    client = _FakeStreamClient()
+    fetcher = _fetcher(
+        session=session,
+        streaming_realtime_enabled=True,
+        streaming_realtime_client_factory=lambda: client,
+    )
+    fetcher.streaming_realtime_manager.start(["FPT"])
+    fetcher.streaming_realtime_manager.handle_message(_r_foreign_room())
+
+    payload = fetcher.get_foreign_room("fpt")
+
+    assert payload["status"] == "ok"
+    assert payload["source"] == "SSI"
+    assert payload["symbol"] == "FPT"
+    assert payload["streaming_status"] == "cache_hit"
+    assert payload["rest_status"] == "unsupported"
+    assert payload["attempted_endpoints"] == []
+    assert payload["foreign_room"]["ticker"] == "FPT"
+    assert payload["foreign_room"]["stream_data_type"] == "R"
+    assert payload["foreign_room"]["total_room"] == 123456789.0
+    assert payload["foreign_room"]["current_room"] == 123000000.0
+    assert payload["foreign_room"]["foreign_buy_value"] == 7200000000.0
+    assert payload["foreign_room"]["value_semantics_status"] == "needs_semantics_proof"
+    assert session.calls == []
+    assert SECRET_TOKEN not in str(payload)
+
+
+def test_foreign_room_stream_disabled_returns_unavailable_without_rest_probe():
+    session = _FakeSession()
+    fetcher = _fetcher(session=session, streaming_realtime_enabled=False)
+
+    payload = fetcher.get_foreign_room("FPT")
+
+    assert payload["status"] == "unavailable"
+    assert payload["source"] == "SSI"
+    assert payload["symbol"] == "FPT"
+    assert payload["reason"] == "SSI streaming realtime manager disabled."
+    assert payload["attempted_endpoints"] == []
+    assert payload["rest_status"] == "unsupported"
+    assert payload["streaming_data_types"] == ["R"]
+    assert payload["diagnostics"]["streaming_status"] == "disabled"
     assert session.calls == []
     assert SECRET_TOKEN not in str(payload)
 

@@ -22,6 +22,7 @@ import requests
 
 from src.config import get_config, parse_env_bool, parse_env_int
 from data_provider.ssi_streaming_realtime import (
+    DEFAULT_FOREIGN_ROOM_TTL_SECONDS,
     DEFAULT_ORDER_BOOK_TTL_SECONDS,
     DEFAULT_STREAMING_REALTIME_CACHE_TTL_SECONDS,
     DEFAULT_STREAMING_REALTIME_CHANNEL_TEMPLATE,
@@ -31,6 +32,7 @@ from data_provider.ssi_streaming_realtime import (
     DEFAULT_STREAMING_REALTIME_STREAM_URL,
     DEFAULT_TRADE_TAPE_BUFFER_SIZE,
     DEFAULT_TRADE_TAPE_TTL_SECONDS,
+    ForeignRoomCache,
     OfficialSsiRealtimeStreamClient,
     OrderBookCache,
     RealtimeSnapshotCache,
@@ -57,7 +59,7 @@ REALTIME_ENDPOINT_NOT_IDENTIFIED_REASON = "Supported SSI realtime endpoint not i
 REALTIME_STREAMING_NOT_IMPLEMENTED_REASON = "SSI realtime requires FastConnect streaming adapter; connection semantics not implemented."
 TRADE_TAPE_DISABLED_REASON = "SSI FastConnect trade tape disabled"
 SSI_REALTIME_ENDPOINT_CANDIDATES = ("RealtimeQuote", "RealtimePrice", "RealtimeSnapshot", "SecuritiesRealtime")
-SSI_REALTIME_STREAMING_DATA_TYPES = ("X", "X-QUOTE", "X-TRADE", "F")
+SSI_REALTIME_STREAMING_DATA_TYPES = ("X", "X-QUOTE", "X-TRADE", "F", "R")
 SSI_REALTIME_QUOTE_STREAMING_DATA_TYPES = ("X",)
 SSI_CHUNK_MAX_DAYS = 29
 SSI_PAGE_SIZE = 1000
@@ -856,6 +858,7 @@ class SsiFastConnectFetcher:
             enabled=self.streaming_realtime_enabled,
             cache=RealtimeSnapshotCache(self.streaming_realtime_cache_ttl_seconds),
             order_book_cache=OrderBookCache(DEFAULT_ORDER_BOOK_TTL_SECONDS),
+            foreign_room_cache=ForeignRoomCache(DEFAULT_FOREIGN_ROOM_TTL_SECONDS),
             trade_tape_cache=TradeTapeEventCache(
                 self.trade_tape_buffer_size,
                 self.trade_tape_ttl_seconds,
@@ -1658,6 +1661,7 @@ class SsiFastConnectFetcher:
         requested_set = set(requested_symbols)
         latest_by_symbol: Dict[str, Dict[str, Any]] = {}
         session_status_by_symbol: Dict[str, Dict[str, Any]] = {}
+        foreign_room_by_symbol: Dict[str, Dict[str, Any]] = {}
 
         for message in messages or []:
             parsed = self._parse_streaming_realtime_message(message)
@@ -1672,6 +1676,11 @@ class SsiFastConnectFetcher:
                 if row:
                     session_status_by_symbol[symbol] = row
                 continue
+            if parsed["data_type"] == "R":
+                row = self._map_streaming_foreign_room(content, fallback_symbol=symbol)
+                if row:
+                    foreign_room_by_symbol[symbol] = row
+                continue
             row = self._map_streaming_realtime_snapshot(content, parsed["data_type"], fallback_symbol=symbol)
             if not row:
                 continue
@@ -1679,6 +1688,7 @@ class SsiFastConnectFetcher:
 
         rows = [latest_by_symbol[symbol] for symbol in requested_symbols if symbol in latest_by_symbol]
         rows.extend(session_status_by_symbol[symbol] for symbol in requested_symbols if symbol in session_status_by_symbol)
+        rows.extend(foreign_room_by_symbol[symbol] for symbol in requested_symbols if symbol in foreign_room_by_symbol)
         return rows
 
     def _parse_streaming_realtime_message(self, message: Any) -> Optional[Dict[str, Any]]:
@@ -1723,8 +1733,73 @@ class SsiFastConnectFetcher:
             "X-TRADE": "X-TRADE",
             "X": "X",
             "F": "F",
+            "R": "R",
         }
         return aliases.get(compact)
+
+    def _map_streaming_foreign_room(
+        self,
+        row: Dict[str, Any],
+        *,
+        fallback_symbol: str,
+    ) -> Optional[Dict[str, Any]]:
+        symbol = str(
+            _first_value(row, "Symbol", "Ticker", "StockCode", "SecurityCode", "Code")
+            or fallback_symbol
+            or ""
+        ).strip().upper()
+        if not symbol:
+            return None
+
+        def nonnegative(value: Any) -> Optional[float]:
+            number = _to_float(value)
+            if number is None or number < 0:
+                return None
+            return number
+
+        total_room = nonnegative(_first_value(row, "TotalRoom", "totalRoom", "total_room"))
+        current_room = nonnegative(_first_value(row, "CurrentRoom", "currentRoom", "current_room"))
+        foreign_buy_volume = nonnegative(_first_value(row, "FBuyVol", "fBuyVol", "f_buy_vol"))
+        foreign_sell_volume = nonnegative(_first_value(row, "FSellVol", "fSellVol", "f_sell_vol"))
+        foreign_buy_value = nonnegative(_first_value(row, "FBuyVal", "fBuyVal", "f_buy_val"))
+        foreign_sell_value = nonnegative(_first_value(row, "FSellVal", "fSellVal", "f_sell_val"))
+        if not any(
+            value is not None
+            for value in (
+                total_room,
+                current_room,
+                foreign_buy_volume,
+                foreign_sell_volume,
+                foreign_buy_value,
+                foreign_sell_value,
+            )
+        ):
+            return None
+
+        trading_date = _first_value(row, "TradingDate", "Date", "tradingDate")
+        time_value = _first_value(row, "Time", "TradingTime", "time", "tradingTime")
+        combined_datetime = None
+        if trading_date and time_value:
+            combined_datetime = f"{trading_date} {time_value}"
+
+        return {
+            "ticker": symbol,
+            "symbol": symbol,
+            "exchange": _safe_text(_first_value(row, "Exchange", "Market", "ExchangeCode", "exchange", "market")),
+            "total_room": total_room,
+            "current_room": current_room,
+            "foreign_buy_volume": foreign_buy_volume,
+            "foreign_sell_volume": foreign_sell_volume,
+            "foreign_buy_value": foreign_buy_value,
+            "foreign_sell_value": foreign_sell_value,
+            "trading_date": _parse_date(trading_date),
+            "time": _safe_text(time_value),
+            "stream_timestamp": _parse_datetime(combined_datetime or time_value or trading_date),
+            "stream_data_type": "R",
+            "r_type": _safe_text(_first_value(row, "RType", "rtype")) or "R",
+            "source": "SSI R foreign-room stream",
+            "value_semantics_status": "needs_semantics_proof",
+        }
 
     def _map_streaming_session_status(
         self,
@@ -1998,6 +2073,107 @@ class SsiFastConnectFetcher:
         result.setdefault("candidate_endpoints", [])
         result.setdefault("rest_status", "unsupported")
         result.setdefault("streaming_data_types", ["F"])
+        result.setdefault("runtime_status", diagnostics.get("runtime_status"))
+        return result
+
+    def get_foreign_room(self, symbol: str) -> Dict[str, Any]:
+        """Return SSI R foreign-room context from the streaming cache only.
+
+        Request-time calls do not open streams, add subscriptions, probe REST
+        endpoints, or mix R rows into DailyStockPrice foreign-flow enrichment.
+        """
+        normalized_symbol = str(symbol or "").strip().upper()
+        base = {
+            "source": SSI_SOURCE,
+            "symbol": normalized_symbol,
+            "foreign_room": None,
+            "count": 0,
+            "attempted_endpoints": [],
+            "candidate_endpoints": [],
+            "rest_status": "unsupported",
+            "streaming_data_types": ["R"],
+        }
+        if not normalized_symbol:
+            return {
+                **base,
+                "status": "unavailable",
+                "reason": "No symbol requested",
+                "streaming_status": "missing_symbol",
+                "cache_status": "unavailable",
+                "diagnostics": {
+                    "streaming_status": "missing_symbol",
+                    "cache_status": "unavailable",
+                },
+            }
+
+        if not self.streaming_realtime_enabled:
+            return {
+                **base,
+                "status": "unavailable",
+                "reason": SSI_STREAMING_REALTIME_DISABLED_REASON,
+                "streaming_status": "disabled",
+                "cache_status": "disabled",
+                "manager_state": "disabled",
+                "diagnostics": {
+                    "manager_state": "disabled",
+                    "streaming_status": "disabled",
+                    "cache_status": "disabled",
+                    "live_adapter_status": "not_enabled",
+                    "foreign_room_rows_observed": 0,
+                },
+            }
+
+        if (
+            not self._streaming_realtime_manager_supplied
+            and (not self.consumer_id or not self.consumer_secret or not self.streaming_realtime_stream_url)
+        ):
+            return {
+                **base,
+                "status": "unavailable",
+                "reason": SSI_STREAMING_REALTIME_CONFIG_INCOMPLETE_REASON,
+                "streaming_status": "configuration_incomplete",
+                "cache_status": "unavailable",
+                "manager_state": self.streaming_realtime_manager.state,
+                "diagnostics": {
+                    "manager_state": self.streaming_realtime_manager.state,
+                    "streaming_status": "configuration_incomplete",
+                    "cache_status": "unavailable",
+                    "live_adapter_status": "configuration_incomplete",
+                    "foreign_room_rows_observed": 0,
+                },
+            }
+
+        if (
+            not self._streaming_realtime_client_factory_supplied
+            and not self._streaming_realtime_manager_supplied
+            and importlib.util.find_spec("ssi_fc_data") is None
+        ):
+            return {
+                **base,
+                "status": "unavailable",
+                "reason": SSI_STREAMING_REALTIME_PACKAGE_UNAVAILABLE_REASON,
+                "streaming_status": "package_unavailable",
+                "cache_status": "unavailable",
+                "manager_state": self.streaming_realtime_manager.state,
+                "diagnostics": {
+                    "manager_state": self.streaming_realtime_manager.state,
+                    "streaming_status": "package_unavailable",
+                    "cache_status": "unavailable",
+                    "live_adapter_status": "package_unavailable",
+                    "foreign_room_rows_observed": 0,
+                },
+            }
+
+        result = dict(self.streaming_realtime_manager.foreign_room(normalized_symbol))
+        diagnostics = result.get("diagnostics") if isinstance(result.get("diagnostics"), dict) else {}
+        result.setdefault("source", SSI_SOURCE)
+        result.setdefault("symbol", normalized_symbol)
+        result.setdefault("foreign_room", None)
+        result.setdefault("count", 1 if result.get("foreign_room") else 0)
+        result.setdefault("attempted_endpoints", [])
+        result.setdefault("candidate_endpoints", [])
+        result.setdefault("rest_status", "unsupported")
+        result.setdefault("streaming_data_types", ["R"])
         result.setdefault("runtime_status", diagnostics.get("runtime_status"))
         return result
 

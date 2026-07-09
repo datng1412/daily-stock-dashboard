@@ -87,7 +87,7 @@ Status values:
 | Beta | Market beta | Deferred pending methodology/semantics | SSI DailyOhlc plus verified SSI index data and documented beta methodology, or future source-labeled provider only if SSI cannot support it | No current beta field | Do not default to external provider; verify SSI index input and methodology first. |
 | FR. buy vol | Foreign buy volume | Available now | SSI DailyStockPrice | `daily_stock_price.foreign_buy_volume`; `foreign.buy`; raw-field marker `foreign_buy_raw_field` | Unit is shares when quantity fields exist. |
 | FR. sell vol | Foreign sell volume | Available now | SSI DailyStockPrice | `daily_stock_price.foreign_sell_volume`; `foreign.sell`; raw-field marker `foreign_sell_raw_field` | Unit is shares when quantity fields exist. |
-| FR. room | Foreign ownership room/remaining room | Ambiguous, needs provider confirmation | Optional SSI realtime schema placeholder only | Realtime quote `foreign_room` / `foreignRoom` exists in schema/types but current provider mapping does not populate it | Do not present as available DailyStockPrice or stock-detail data today. |
+| FR. room | Foreign ownership room/remaining room | Optional backend/API live context | SSI `R:{symbol}` streaming cache | Watchlist `foreign_room_source`, `foreign_room`, `foreign_room_status`, and `diagnostics.foreign_room` | Separate from DailyStockPrice daily foreign flow. Value-unit and approximate-value semantics remain `needs_semantics_proof` until live provider evidence confirms them. |
 | PT vol | Put-through trading volume | Available now | SSI DailyStockPrice | `daily_stock_price.put_through_volume`; compatibility `ssi_put_through_volume` | Do not substitute DailyOhlc volume or matched volume. |
 | Low 52W | 52-week low | SSI-derived implemented | SSI DailyOhlc low history | `indicators.low_52w`; company `technical.low_52w`; date `low_52w_date` | Uses the latest 252 returned DailyOhlc rows; null when fewer than 120 usable high/low rows are available. |
 | Outs. qty | Outstanding quantity / share count | Ambiguous, needs provider confirmation | SSI SecuritiesDetails/Securities metadata when provider returns share-count fields | `symbol_metadata.listed_shares`; watchlist/company `listed_shares`; profile `listed_shares` | Exposed field is listed shares / provider share-count metadata. Do not label it as exact outstanding quantity until SSI semantics are confirmed. |
@@ -107,7 +107,7 @@ Required rules:
 * `overall_status` uses `ok`, `partial`, or `unavailable` for summary quality only.
 * `issues` contains short user-safe messages and source-labeled fields.
 * `issues` must not contain endpoint names, HTTP status, attempted endpoints, raw provider errors, credentials, tokens, account IDs, or raw auth responses.
-* `checks` records section quality for daily OHLCV, DailyStockPrice, final close, adjusted price, intraday, realtime, trade tape, profile, and news.
+* `checks` records section quality for daily OHLCV, DailyStockPrice, final close, adjusted price, intraday, realtime, order book, foreign room, trade tape, profile, and news.
 * Optional live-section unavailable states may make the summary `partial`, but they must not make valid daily SSI data unavailable.
 
 Watchlist responses may also expose additive request-completeness counters:
@@ -278,7 +278,31 @@ order_book_status.reason_code = disabled, stream_not_started, stream_not_bootstr
 order_book = null
 ```
 
-`X-QUOTE` rows must not populate `latest_price`, `realtime_snapshot`, `trade_tape`, `session_status`, DailyOhlc, DailyStockPrice, or indicators. Request handlers must not start streams, add dynamic subscriptions, or use all-market channels. Price/volume units, market-specific level counts, empty-book behavior, and UI product rendering still require live evidence before stronger product claims.
+`X-QUOTE` rows must not populate `latest_price`, `realtime_snapshot`, `trade_tape`, `session_status`, `foreign_room`, DailyOhlc, DailyStockPrice, or indicators. Request handlers must not start streams, add dynamic subscriptions, or use all-market channels. Price/volume units, market-specific level counts, empty-book behavior, and UI product rendering still require live evidence before stronger product claims.
+
+### Foreign Room
+
+SSI `R:{symbol}` foreign-room context is an optional live watchlist block. It is produced only by the background streaming lifecycle and a dedicated process-local latest-row cache.
+
+When SSI `R` has a usable cached row:
+
+```text
+foreign_room_status.status = ok
+foreign_room_status.reason_code = cache_hit
+foreign_room = { ... }
+```
+
+The `foreign_room` object may include `ticker`, `symbol`, `exchange`, `total_room`, `current_room`, `foreign_buy_volume`, `foreign_sell_volume`, `foreign_buy_value`, `foreign_sell_value`, `trading_date`, `time`, `stream_timestamp`, `stream_data_type=R`, `r_type`, `age_seconds`, `is_stale`, `stale_reason`, `cached_at`, `cache_ttl_seconds`, and `value_semantics_status`. Numeric room/volume/value fields must be valid nonnegative numbers when present; malformed fields are set null/dropped and rows with no usable R metric are unavailable.
+
+When no usable row exists:
+
+```text
+foreign_room_status.status = unavailable or disabled
+foreign_room_status.reason_code = disabled, stream_not_started, stream_not_bootstrapped, stream_cache_empty, stream_cache_stale, r_not_subscribed, r_disabled, unavailable_unknown, or unknown
+foreign_room = null
+```
+
+`R` rows must not populate `latest_price`, `realtime_snapshot`, `trade_tape`, `order_book`, `session_status`, DailyOhlc, DailyStockPrice, or indicators. They also do not replace DailyStockPrice daily foreign buy/sell/net enrichment. Request handlers must not start streams, add dynamic subscriptions, or use all-market channels. Foreign buy/sell value units and any exchange-specific approximate-value semantics remain `needs_semantics_proof` until live payload evidence confirms them.
 
 ### Trading Session / Status
 
@@ -449,8 +473,10 @@ The SSI-first rule is: if SSI can provide a market-data field, SSI owns it; if a
 | Intraday candles | SSI IntradayOhlc | Strict source; no fallback |
 | Realtime snapshot | SSI FastConnect streaming realtime contract | Parser, manager/cache, official-client adapter, and FastAPI startup bootstrap exist behind disabled-by-default config; request handlers read process-local cache only |
 | Trade tape / latest trade events | SSI streaming X-TRADE event buffer | Fresh bootstrapped X-TRADE rows may populate latest-event tape; full historical time-and-sales remains unverified |
+| SSI `X-QUOTE` stream | SSI streaming runtime proof | Order-book context may appear in watchlist `order_book`; level-count/unit proof and UI remain deferred and must not affect price ownership |
+| SSI `R` stream | SSI streaming runtime proof | Foreign-room context may appear in watchlist `foreign_room`; value-unit/approximation proof and UI remain deferred and must not replace DailyStockPrice foreign flow |
 | SSI `F` stream | SSI streaming runtime proof | Raw trading session/status context may appear in watchlist `session_status`; code meanings and finality labels remain deferred and must not affect price ownership |
-| Future SSI `X-QUOTE`, `R`, `MI`, `B` streams | SSI streaming after runtime proof | Order book, foreign room, realtime index, and realtime bars must remain separate source-labeled blocks; no fake placeholders and no request-handler stream starts |
+| Future SSI `MI`, `B` streams | SSI streaming after runtime proof | Realtime index and realtime bars must remain separate source-labeled blocks; no fake placeholders and no request-handler stream starts |
 | Future SSI extended instrument metadata | SSI SecuritiesDetails/Securities after runtime proof | Derivative, covered warrant, ETF/fund, and bond fields require exact row-key evidence and instrument-specific semantics before exposure |
 | News | Future NewsProvider | Disabled now |
 | Financials | Future external provider | Not implemented |

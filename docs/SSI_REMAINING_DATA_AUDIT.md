@@ -50,7 +50,7 @@ These capabilities are SSI-owned candidates but not fully exposed as product fea
 | Trade tape `X-TRADE:{symbol}` | Streaming channel `X-TRADE:{symbol}` | Bounded latest-event rows, B/S from explicit side codes, change versus SSI reference. | True historical time-and-sales remains unproven. | Maintain; defer history claims. | Continued live row evidence, side-code coverage, sequence semantics. | Do not infer trades from daily/realtime rows. |
 | `X-QUOTE` order book | Streaming channel `X-QUOTE:{symbol}` | Phase 4.8H adds background-lifecycle subscription, parser routing, a dedicated latest order-book cache, optional watchlist fields, and diagnostics. | Live payload proof, UI bid/ask ladder, level-count/unit semantics, and empty-book behavior remain deferred. | Runtime proof path implemented; live smoke/UI proof next. | Confirm field keys, price/volume units, 3-level HOSE and 10-level HNX/UPCOM/DER claims before UI exposure. | Separate from latest price, realtime snapshot, trade tape, and session/status. |
 | `F` trading session/status | SSI streaming channel `F:{symbol}`. | Phase 4.8G adds a background-lifecycle subscription, parser, dedicated cache, watchlist fields, and diagnostics for raw `TradingSession` / `TradingStatus` context. | Final UI/product component, business-code label mapping, halt/suspend/closed semantics, and final close/finality support remain deferred until live payload evidence proves meanings. | Runtime proof completed; keep as optional context while code mapping remains unproven. | Live entitlement/tick availability, complete code mapping, timestamp behavior, exchange/ticker scope, and finality semantics. | Do not guess status-code meanings; do not use this to replace DailyOhlc, realtime snapshot, or trade tape. |
-| `R` foreign room | SSI realtime foreign-room/foreign-flow stream, exact channel/fields not implemented. | Not wired; realtime schema has placeholder `foreign_room` but current mapping does not populate it. | Total room, current room, realtime foreign buy/sell volume/value. | Medium-high after order book. | Exact fields such as current/total room, units, exchange-specific semantics, approximate value caveats. | Separate from DailyStockPrice end-of-day/daily foreign flow. |
+| `R` foreign room | Streaming channel `R:{symbol}`. | Phase 4.8I adds background-lifecycle subscription, parser routing, a dedicated latest foreign-room cache, optional watchlist fields, and diagnostics. | Live payload proof, frontend UI, value-unit semantics, and approximate value caveats remain deferred. | Runtime proof path implemented; live smoke/UI proof next. | Confirm field keys, units, exchange-specific semantics, and whether value fields are raw, provider-scaled, or approximate. | Separate from DailyStockPrice end-of-day/daily foreign flow. |
 | `MI` realtime market index | SSI realtime market index stream, exact channel/fields not implemented. | Not wired. | VNINDEX/VN30/HNX/UPCOM realtime index pulse, change/change %, value/volume, advances/unchanged/declines. | Medium. | Channel identifiers, index code mapping, field units, breadth semantics, timestamp/freshness. | Separate from stock watchlist rows. |
 | `B` realtime OHLCV bars | SSI realtime OHLCV/bar stream, exact channel/fields not implemented. | Not wired. | Intraday bar updates or faster chart pulse. | Later. | Bar interval, session boundaries, correction semantics, and relationship to IntradayOhlc. | Must not replace DailyOhlc `latest_price`. |
 | DER/futures metadata | Securities/SecuritiesDetails or SSI derivative metadata if returned. | Generic `security_type` only. | Contract multiplier, maturity/expiry, underlying, settlement, tick size. | Later separate instrument track. | Exact instrument rows and field semantics. | Not core stock dashboard unless a derivatives module is planned. |
@@ -111,6 +111,14 @@ Live proof still required:
 Order book rows must be separate from `latest_price`, DailyStockPrice, realtime snapshot, trade tape, and session/status.
 
 ### C. `R` foreign room
+
+Phase 4.8I backend/API status:
+
+* StockClock now subscribes to symbol-scoped `R:{symbol}` channels through the same background SSI streaming lifecycle used for `X:{symbol}`, `X-QUOTE:{symbol}`, `X-TRADE:{symbol}`, and `F:{symbol}`.
+* The backend parser stores only safe foreign-room fields in a dedicated latest cache: ticker/symbol, exchange, total/current room, foreign buy/sell volume/value when explicitly provided, trading date, time, stream timestamp/type, cache age, and source.
+* Watchlist rows may expose `foreign_room_source`, `foreign_room`, and `foreign_room_status`, with technical details under `diagnostics.foreign_room`.
+* Request handlers only read the process-local cache. They do not start streams, add dynamic subscriptions, use all-market channels, call trading/order APIs, or synthesize unavailable foreign-room values.
+* Value-unit and approximate-value semantics remain `needs_semantics_proof` until live payload evidence confirms exact SSI meanings.
 
 Potential value:
 
@@ -247,7 +255,7 @@ External providers must use separate source labels and must not silently fill or
 1. Phase 4.8F - SSI Remaining Data Capability Audit: docs-only; this document.
 2. Phase 4.8G - Trading Session/Status from SSI `F:{symbol}` runtime proof is now implemented as optional cache-backed context; code mappings and final UI remain deferred.
 3. Phase 4.8H - `X-QUOTE` Order Book Ladder is now implemented as optional cache-backed context; live payload proof and UI remain deferred.
-4. Phase 4.8I - Realtime Foreign Room from SSI `R`.
+4. Phase 4.8I - Realtime Foreign Room from SSI `R` is now implemented as optional cache-backed watchlist context; live payload proof and UI remain deferred.
 5. Phase 4.8J - Realtime Market Index Pulse from SSI `MI`.
 6. Phase 4.8K - DailyStockPrice Unused Field Audit/Exposure.
 7. Phase 4.8L - SecuritiesDetails Extended Metadata.

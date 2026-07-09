@@ -20,13 +20,22 @@ class ExplodingManager:
 
 
 class FakeSsiFetcher:
-    def __init__(self, realtime_payload=None, order_book_payload=None, trade_payload=None, session_status_payload=None):
+    def __init__(
+        self,
+        realtime_payload=None,
+        order_book_payload=None,
+        foreign_room_payload=None,
+        trade_payload=None,
+        session_status_payload=None,
+    ):
         self.realtime_payload = realtime_payload
         self.order_book_payload = order_book_payload
+        self.foreign_room_payload = foreign_room_payload
         self.trade_payload = trade_payload
         self.session_status_payload = session_status_payload
         self.realtime_calls = 0
         self.order_book_calls = 0
+        self.foreign_room_calls = 0
         self.trade_calls = 0
         self.session_status_calls = 0
 
@@ -145,6 +154,26 @@ class FakeSsiFetcher:
                 "cache_status": "empty",
                 "manager_state": "running",
                 "order_book_channels": [f"X-QUOTE:{symbol}"],
+            },
+        }
+
+    def get_foreign_room(self, symbol: str):
+        self.foreign_room_calls += 1
+        if self.foreign_room_payload is not None:
+            return self.foreign_room_payload
+        return {
+            "status": "unavailable",
+            "source": "SSI",
+            "symbol": symbol,
+            "reason": "SSI R foreign-room stream cache empty.",
+            "foreign_room": None,
+            "streaming_status": "subscribed_no_event",
+            "cache_status": "empty",
+            "diagnostics": {
+                "streaming_status": "subscribed_no_event",
+                "cache_status": "empty",
+                "manager_state": "running",
+                "foreign_room_channels": [f"R:{symbol}"],
             },
         }
 
@@ -411,6 +440,95 @@ def test_ssi_order_book_cache_empty_is_optional_unavailable():
     assert item["order_book_status"]["message"] == "SSI order book unavailable."
     assert item["diagnostics"]["order_book"]["streaming_status"] == "subscribed_no_event"
     assert any(issue["code"] == "order_book_stream_cache_empty" for issue in item["data_quality_summary"]["issues"])
+
+
+def test_ssi_foreign_room_success_is_separate_from_daily_price_and_daily_stock_price():
+    fetcher = FakeSsiFetcher(
+        foreign_room_payload={
+            "status": "ok",
+            "source": "SSI",
+            "symbol": "FPT",
+            "foreign_room": {
+                "ticker": "FPT",
+                "symbol": "FPT",
+                "exchange": "HOSE",
+                "total_room": 123456789,
+                "current_room": 123000000,
+                "foreign_buy_volume": 100000,
+                "foreign_sell_volume": 50000,
+                "foreign_buy_value": 7200000000,
+                "foreign_sell_value": 3600000000,
+                "trading_date": "2026-06-30",
+                "time": "10:00:00",
+                "stream_timestamp": "2026-06-30T10:00:00",
+                "stream_data_type": "R",
+                "r_type": "R",
+                "age_seconds": 0,
+                "cached_at": "2026-06-30T03:00:00+00:00",
+                "cache_ttl_seconds": 5,
+                "value_semantics_status": "needs_semantics_proof",
+            },
+            "streaming_status": "cache_hit",
+            "cache_status": "hit",
+            "diagnostics": {
+                "streaming_status": "cache_hit",
+                "cache_status": "hit",
+                "manager_state": "running",
+                "foreign_room_channels": ["R:FPT"],
+                "foreign_room_rows_observed": 1,
+            },
+        }
+    )
+
+    item = _service(fetcher).build_watchlist(["FPT"], force_refresh=True)["watchlist"][0]
+
+    assert item["status"] == "ok"
+    assert item["latest_price_source"] == "SSI DailyOhlc"
+    assert item["daily_stock_price"]["foreign_net_volume"] == 20000.0
+    assert item["foreign_room_source"] == "SSI R foreign-room stream"
+    assert item["foreign_room_status"]["status"] == "ok"
+    assert item["foreign_room_status"]["reason_code"] == "cache_hit"
+    assert item["foreign_room"]["stream_data_type"] == "R"
+    assert item["foreign_room"]["total_room"] == 123456789.0
+    assert item["foreign_room"]["current_room"] == 123000000.0
+    assert item["foreign_room"]["foreign_buy_volume"] == 100000.0
+    assert item["foreign_room"]["foreign_sell_value"] == 3600000000.0
+    assert item["foreign_room"]["value_semantics_status"] == "needs_semantics_proof"
+    assert item["diagnostics"]["foreign_room"]["streaming_status"] == "cache_hit"
+    assert item["diagnostics"]["foreign_room"]["foreign_room_channels"] == ["R:FPT"]
+    assert fetcher.foreign_room_calls == 1
+
+
+def test_ssi_foreign_room_cache_empty_is_optional_unavailable():
+    fetcher = FakeSsiFetcher(
+        foreign_room_payload={
+            "status": "unavailable",
+            "source": "SSI",
+            "symbol": "FPT",
+            "reason": "SSI R foreign-room stream cache empty.",
+            "foreign_room": None,
+            "streaming_status": "subscribed_no_event",
+            "cache_status": "empty",
+            "diagnostics": {
+                "streaming_status": "subscribed_no_event",
+                "cache_status": "empty",
+                "manager_state": "running",
+                "foreign_room_channels": ["R:FPT"],
+            },
+        }
+    )
+
+    item = _service(fetcher).build_watchlist(["FPT"], force_refresh=True)["watchlist"][0]
+
+    assert item["status"] == "ok"
+    assert item["latest_price_source"] == "SSI DailyOhlc"
+    assert item["foreign_room_source"] == "SSI R foreign-room stream"
+    assert item["foreign_room"] is None
+    assert item["foreign_room_status"]["status"] == "unavailable"
+    assert item["foreign_room_status"]["reason_code"] == "stream_cache_empty"
+    assert item["foreign_room_status"]["message"] == "SSI foreign room unavailable."
+    assert item["diagnostics"]["foreign_room"]["streaming_status"] == "subscribed_no_event"
+    assert any(issue["code"] == "foreign_room_stream_cache_empty" for issue in item["data_quality_summary"]["issues"])
 
 
 def test_ssi_session_status_success_is_separate_from_daily_price():

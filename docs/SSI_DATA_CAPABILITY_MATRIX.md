@@ -277,11 +277,12 @@ Official SSI FastConnect Data docs describe realtime as a streaming feed, not a 
 - `X-QUOTE`: order-book/bid-ask ladder context only.
 - `X-TRADE`: latest matched trade context.
 - `F`: trading session/status context only.
+- `R`: foreign-room/foreign-flow context only.
 
 The current implementation adds deterministic parser coverage for buffered SSI streaming envelopes shaped like:
 
 ```text
-DataType = X, X-QUOTE, X-TRADE, or F
+DataType = X, X-QUOTE, X-TRADE, F, or R
 Content = JSON object or JSON string containing RType, Symbol, and stream fields
 ```
 
@@ -296,6 +297,7 @@ Parser rules:
 - Treat `X` and `X-TRADE` as latest-trade snapshot candidates only when `LastPrice` is present.
 - Do not describe the bounded `X-TRADE` event buffer as full trade-tape history.
 - Treat `F` as session/status context only. Preserve raw `TradingSession` / `TradingStatus` fields in a dedicated cache; do not put `F` rows in realtime quote snapshots or trade-tape rows, and do not infer code meanings.
+- Treat `R` as foreign-room context only. Preserve explicit `TotalRoom`, `CurrentRoom`, `FBuyVol`, `FSellVol`, `FBuyVal`, and `FSellVal`-style fields in a dedicated cache; do not put `R` rows in realtime quote snapshots, trade-tape rows, order-book rows, session/status rows, DailyStockPrice enrichment, or `latest_price`.
 
 Runtime state remained unavailable at the end of Phase 4.0C-3 because the repository did not implement a bounded SSI streaming client, subscription lifecycle, reconnection/backoff policy, or request-safe cache handoff. `SsiFastConnectFetcher.get_realtime_snapshot()` did not open a streaming connection and did not probe REST realtime candidates. It returned:
 
@@ -399,7 +401,7 @@ This phase does not prove live reliability. Under the Phase 4.5A vocabulary, rea
 
 ## Phase 4.0C-7E Streaming Channel Template Fix
 
-Live diagnostics proved the official SSI stream requires no-space channel strings. Working verifier channels include `X:FPT`, `X-QUOTE:FPT`, and `X-TRADE:FPT`. Old spaced forms such as `X: FPT`, `X-QUOTE: FPT`, and `X-TRADE: FPT` can start transport but did not receive callbacks in live verification.
+Live diagnostics proved the official SSI stream requires no-space channel strings. Working verifier channels include `X:FPT`, `X-QUOTE:FPT`, and `X-TRADE:FPT`; Phase 4.8I uses the same no-space shape for `R:FPT`. Old spaced forms such as `X: FPT`, `X-QUOTE: FPT`, and `X-TRADE: FPT` can start transport but did not receive callbacks in live verification.
 
 The project default is now `SSI_STREAMING_REALTIME_CHANNEL_TEMPLATE=X:{symbol}`. Explicit custom overrides remain respected for diagnostics, and the verifier still supports channel-format variants with both spaced and no-space forms. This change does not add backend auto-start, does not mark realtime production reliable, does not alter `latest_price`, and does not implement trade tape.
 
@@ -410,7 +412,7 @@ The project default is now `SSI_STREAMING_REALTIME_CHANNEL_TEMPLATE=X:{symbol}`.
 - SSI DailyOhlc owns canonical daily close/OHLCV/chart fields.
 - SSI DailyStockPrice owns reference/ceiling/floor, matched stats, and foreign-flow fields.
 - Indicators are derived from SSI DailyOhlc.
-- Realtime and trade tape are optional and must not be called reliable unless the current audit observes `ok` status and usable data.
+- Realtime, trade tape, order book, session/status, and foreign room are optional live contexts and must not be called reliable unless the current audit observes `ok` status and usable data.
 - News, fundamentals, corporate actions, dividends, and macro need future provider contracts.
 - Corporate actions and dividends must not be inferred from price gaps.
 - Mozyfin/KBS fallback must not be reintroduced.

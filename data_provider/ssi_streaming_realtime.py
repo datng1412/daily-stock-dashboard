@@ -45,9 +45,11 @@ DEFAULT_STREAMING_REALTIME_RECONNECT_INITIAL_DELAY_SECONDS = 2
 DEFAULT_STREAMING_REALTIME_RECONNECT_MAX_DELAY_SECONDS = 30
 DEFAULT_ORDER_BOOK_TTL_SECONDS = 5
 DEFAULT_ORDER_BOOK_MAX_LEVELS = 10
+DEFAULT_FOREIGN_ROOM_TTL_SECONDS = 5
 DEFAULT_TRADE_TAPE_BUFFER_SIZE = 50
 DEFAULT_TRADE_TAPE_TTL_SECONDS = 60
 ORDER_BOOK_CHANNEL_PREFIX = "X-QUOTE"
+FOREIGN_ROOM_CHANNEL_PREFIX = "R"
 TRADE_TAPE_CHANNEL_PREFIX = "X-TRADE"
 DEFAULT_SESSION_STATUS_TTL_SECONDS = 60
 SESSION_STATUS_CHANNEL_PREFIX = "F"
@@ -245,6 +247,13 @@ class CachedOrderBook:
 
 
 @dataclass(frozen=True)
+class CachedForeignRoom:
+    symbol: str
+    foreign_room: Dict[str, Any]
+    received_at: float
+
+
+@dataclass(frozen=True)
 class CachedSessionStatus:
     symbol: str
     status: Dict[str, Any]
@@ -316,6 +325,18 @@ def build_order_book_channel(symbol: str) -> str:
     return channel
 
 
+def build_foreign_room_channel(symbol: str) -> str:
+    normalized = str(symbol or "").strip().upper()
+    if not normalized:
+        raise ValueError("Streaming symbol is required.")
+    if normalized == "ALL":
+        raise ValueError(SSI_STREAMING_REALTIME_ALL_CHANNEL_FORBIDDEN_REASON)
+    channel = f"{FOREIGN_ROOM_CHANNEL_PREFIX}:{normalized}"
+    if re.search(r":\s*ALL\b", channel, flags=re.IGNORECASE):
+        raise ValueError(SSI_STREAMING_REALTIME_ALL_CHANNEL_FORBIDDEN_REASON)
+    return channel
+
+
 def build_session_status_channel(symbol: str) -> str:
     normalized = str(symbol or "").strip().upper()
     if not normalized:
@@ -338,6 +359,11 @@ def is_order_book_channel(channel: Any) -> bool:
     return text.startswith(f"{ORDER_BOOK_CHANNEL_PREFIX}:")
 
 
+def is_foreign_room_channel(channel: Any) -> bool:
+    text = str(channel or "").strip().upper()
+    return text.startswith(f"{FOREIGN_ROOM_CHANNEL_PREFIX}:")
+
+
 def is_session_status_channel(channel: Any) -> bool:
     text = str(channel or "").strip().upper()
     return text.startswith(f"{SESSION_STATUS_CHANNEL_PREFIX}:")
@@ -348,6 +374,7 @@ def build_streaming_channels(
     *,
     realtime_template: str = DEFAULT_STREAMING_REALTIME_CHANNEL_TEMPLATE,
     order_book_enabled: bool = True,
+    foreign_room_enabled: bool = True,
     trade_tape_enabled: bool = True,
     session_status_enabled: bool = True,
 ) -> List[str]:
@@ -357,6 +384,7 @@ def build_streaming_channels(
         for channel in (
             build_symbol_channel(symbol, realtime_template),
             build_order_book_channel(symbol) if order_book_enabled else None,
+            build_foreign_room_channel(symbol) if foreign_room_enabled else None,
             build_trade_tape_channel(symbol) if trade_tape_enabled else None,
             build_session_status_channel(symbol) if session_status_enabled else None,
         ):
@@ -682,6 +710,162 @@ class OrderBookCache:
         return int(number)
 
 
+class ForeignRoomCache:
+    """Thread-safe latest R foreign-room cache keyed by VN ticker."""
+
+    def __init__(
+        self,
+        ttl_seconds: int = DEFAULT_FOREIGN_ROOM_TTL_SECONDS,
+        *,
+        time_func: Callable[[], float] = time.time,
+    ) -> None:
+        self.ttl_seconds = max(1, int(ttl_seconds or DEFAULT_FOREIGN_ROOM_TTL_SECONDS))
+        self._time_func = time_func
+        self._lock = threading.RLock()
+        self._rows: Dict[str, CachedForeignRoom] = {}
+
+    def clear(self) -> None:
+        with self._lock:
+            self._rows.clear()
+
+    def put_rows(self, rows: Iterable[Dict[str, Any]]) -> int:
+        now = float(self._time_func())
+        written = 0
+        with self._lock:
+            for row in rows or []:
+                foreign_room = self._normalize_foreign_room(row, now)
+                if not foreign_room:
+                    continue
+                symbol = str(foreign_room.get("ticker") or foreign_room.get("symbol") or "").strip().upper()
+                self._rows[symbol] = CachedForeignRoom(
+                    symbol=symbol,
+                    foreign_room=foreign_room,
+                    received_at=now,
+                )
+                written += 1
+        return written
+
+    def get(self, symbol: str) -> Dict[str, Any]:
+        normalized = str(symbol or "").strip().upper()
+        now = float(self._time_func())
+        with self._lock:
+            entry = self._rows.get(normalized)
+
+        if entry is None:
+            return {
+                "status": "empty",
+                "row": None,
+                "latest_foreign_room_timestamp": None,
+                "latest_foreign_room_age_seconds": None,
+            }
+
+        age_seconds = max(0.0, now - entry.received_at)
+        row = dict(entry.foreign_room)
+        row["age_seconds"] = int(age_seconds)
+        row["is_stale"] = age_seconds > self.ttl_seconds
+        if row["is_stale"]:
+            row["stale_reason"] = SSI_STREAMING_REALTIME_CACHE_STALE_REASON
+        return {
+            "status": "stale" if row["is_stale"] else "hit",
+            "row": row,
+            "latest_foreign_room_timestamp": row.get("stream_timestamp") or row.get("time"),
+            "latest_foreign_room_age_seconds": int(age_seconds),
+        }
+
+    def _normalize_foreign_room(self, row: Any, now: float) -> Optional[Dict[str, Any]]:
+        if not isinstance(row, dict):
+            return None
+        symbol = str(
+            self._first_value(row, "ticker", "symbol", "Symbol", "Ticker", "StockCode", "SecurityCode", "Code")
+            or ""
+        ).strip().upper()
+        if not symbol:
+            return None
+
+        numeric_fields = {
+            "total_room": self._to_nonnegative_float(
+                self._first_value(row, "total_room", "TotalRoom", "totalRoom")
+            ),
+            "current_room": self._to_nonnegative_float(
+                self._first_value(row, "current_room", "CurrentRoom", "currentRoom")
+            ),
+            "foreign_buy_volume": self._to_nonnegative_float(
+                self._first_value(row, "foreign_buy_volume", "FBuyVol", "fBuyVol", "f_buy_vol")
+            ),
+            "foreign_sell_volume": self._to_nonnegative_float(
+                self._first_value(row, "foreign_sell_volume", "FSellVol", "fSellVol", "f_sell_vol")
+            ),
+            "foreign_buy_value": self._to_nonnegative_float(
+                self._first_value(row, "foreign_buy_value", "FBuyVal", "fBuyVal", "f_buy_val")
+            ),
+            "foreign_sell_value": self._to_nonnegative_float(
+                self._first_value(row, "foreign_sell_value", "FSellVal", "fSellVal", "f_sell_val")
+            ),
+        }
+        if not any(value is not None for value in numeric_fields.values()):
+            return None
+
+        cached_at = _utc_iso_from_epoch(now)
+        foreign_room = {
+            "ticker": symbol,
+            "symbol": symbol,
+            "exchange": self._safe_text(self._first_value(row, "exchange", "Exchange", "Market", "market")),
+            "trading_date": self._safe_text(
+                self._first_value(row, "trading_date", "TradingDate", "Date", "date")
+            ),
+            "time": self._safe_text(self._first_value(row, "time", "Time", "TradingTime", "tradingTime")),
+            "stream_timestamp": self._safe_text(self._first_value(row, "stream_timestamp", "streamTimestamp")),
+            "stream_data_type": FOREIGN_ROOM_CHANNEL_PREFIX,
+            "r_type": self._safe_text(self._first_value(row, "r_type", "RType", "rtype")) or FOREIGN_ROOM_CHANNEL_PREFIX,
+            "source": "SSI R foreign-room stream",
+            "received_at": cached_at,
+            "cached_at": cached_at,
+            "cache_ttl_seconds": self.ttl_seconds,
+            "value_semantics_status": "needs_semantics_proof",
+        }
+        foreign_room.update(numeric_fields)
+        return foreign_room
+
+    @staticmethod
+    def _clean_key(key: Any) -> str:
+        return "".join(ch for ch in str(key or "").strip().lower() if ch.isalnum())
+
+    @classmethod
+    def _first_value(cls, row: Dict[str, Any], *keys: str) -> Any:
+        normalized = {cls._clean_key(k): v for k, v in row.items()}
+        for key in keys:
+            value = normalized.get(cls._clean_key(key))
+            if value not in (None, ""):
+                return value
+        return None
+
+    @staticmethod
+    def _safe_text(value: Any) -> Optional[str]:
+        if value in (None, ""):
+            return None
+        text = str(value).replace("\r", " ").replace("\n", " ").strip()
+        return text[:120] if text else None
+
+    @staticmethod
+    def _to_float(value: Any) -> Optional[float]:
+        if value in (None, ""):
+            return None
+        try:
+            text = str(value).replace(",", "").strip()
+            if text.lower() in {"nan", "none", "null"} or text in {"-", "--"}:
+                return None
+            return float(text)
+        except (TypeError, ValueError):
+            return None
+
+    @classmethod
+    def _to_nonnegative_float(cls, value: Any) -> Optional[float]:
+        number = cls._to_float(value)
+        if number is None or number < 0:
+            return None
+        return number
+
+
 class SessionStatusCache:
     """Thread-safe latest F stream session/status cache keyed by VN ticker."""
 
@@ -765,6 +949,7 @@ class SsiStreamingRealtimeManager:
         enabled: bool = False,
         cache: Optional[RealtimeSnapshotCache] = None,
         order_book_cache: Optional[OrderBookCache] = None,
+        foreign_room_cache: Optional[ForeignRoomCache] = None,
         trade_tape_cache: Optional[TradeTapeEventCache] = None,
         session_status_cache: Optional[SessionStatusCache] = None,
         parser: Optional[Callable[[List[Any], List[str]], List[Dict[str, Any]]]] = None,
@@ -776,6 +961,7 @@ class SsiStreamingRealtimeManager:
         reconnect_max_delay_seconds: int = DEFAULT_STREAMING_REALTIME_RECONNECT_MAX_DELAY_SECONDS,
         reconnect_max_attempts: int = 0,
         order_book_enabled: bool = True,
+        foreign_room_enabled: bool = True,
         trade_tape_enabled: bool = True,
         session_status_enabled: bool = True,
         time_func: Callable[[], float] = time.time,
@@ -783,6 +969,7 @@ class SsiStreamingRealtimeManager:
         self.enabled = bool(enabled)
         self.cache = cache or RealtimeSnapshotCache(time_func=time_func)
         self.order_book_cache = order_book_cache or OrderBookCache(time_func=time_func)
+        self.foreign_room_cache = foreign_room_cache or ForeignRoomCache(time_func=time_func)
         self.trade_tape_cache = trade_tape_cache or TradeTapeEventCache(time_func=time_func)
         self.session_status_cache = session_status_cache or SessionStatusCache(time_func=time_func)
         self._parser = parser or (lambda messages, symbols: [])
@@ -800,6 +987,7 @@ class SsiStreamingRealtimeManager:
         )
         self.reconnect_max_attempts = max(0, int(reconnect_max_attempts or 0))
         self.order_book_enabled = bool(order_book_enabled)
+        self.foreign_room_enabled = bool(foreign_room_enabled)
         self.trade_tape_enabled = bool(trade_tape_enabled)
         self.session_status_enabled = bool(session_status_enabled)
         self._time_func = time_func
@@ -816,6 +1004,7 @@ class SsiStreamingRealtimeManager:
         self._messages_observed = 0
         self._parser_rows_observed = 0
         self._order_book_rows_observed = 0
+        self._foreign_room_rows_observed = 0
         self._trade_rows_observed = 0
         self._session_status_rows_observed = 0
         self._bootstrap_status: Optional[str] = None
@@ -860,6 +1049,7 @@ class SsiStreamingRealtimeManager:
                 normalized_symbols,
                 realtime_template=self.channel_template,
                 order_book_enabled=self.order_book_enabled,
+                foreign_room_enabled=self.foreign_room_enabled,
                 trade_tape_enabled=self.trade_tape_enabled,
                 session_status_enabled=self.session_status_enabled,
             )
@@ -942,13 +1132,17 @@ class SsiStreamingRealtimeManager:
             ]
             session_rows = [row for row in filtered_rows if self._is_session_status_row(row)]
             order_book_rows = [row for row in filtered_rows if self._is_order_book_row(row)]
+            foreign_room_rows = [row for row in filtered_rows if self._is_foreign_room_row(row)]
             snapshot_rows = [
                 row
                 for row in filtered_rows
-                if not self._is_session_status_row(row) and not self._is_order_book_row(row)
+                if not self._is_session_status_row(row)
+                and not self._is_order_book_row(row)
+                and not self._is_foreign_room_row(row)
             ]
             written = self.cache.put_rows(snapshot_rows)
             order_book_written = self.order_book_cache.put_rows(order_book_rows)
+            foreign_room_written = self.foreign_room_cache.put_rows(foreign_room_rows)
             trade_written = self.trade_tape_cache.put_rows(
                 self._trade_events_from_streaming_rows(snapshot_rows)
             )
@@ -957,6 +1151,7 @@ class SsiStreamingRealtimeManager:
                 self._messages_observed += 1
                 self._parser_rows_observed += written
                 self._order_book_rows_observed += order_book_written
+                self._foreign_room_rows_observed += foreign_room_written
                 self._trade_rows_observed += trade_written
                 self._session_status_rows_observed += session_written
                 now = float(self._time_func())
@@ -977,6 +1172,11 @@ class SsiStreamingRealtimeManager:
     def _is_order_book_row(row: Dict[str, Any]) -> bool:
         raw_type = str(row.get("stream_data_type") or row.get("r_type") or "").strip().upper()
         return raw_type == ORDER_BOOK_CHANNEL_PREFIX
+
+    @staticmethod
+    def _is_foreign_room_row(row: Dict[str, Any]) -> bool:
+        raw_type = str(row.get("stream_data_type") or row.get("r_type") or "").strip().upper()
+        return raw_type == FOREIGN_ROOM_CHANNEL_PREFIX
 
     @staticmethod
     def _trade_events_from_streaming_rows(rows: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -1278,6 +1478,175 @@ class SsiStreamingRealtimeManager:
             "SSI X-QUOTE stream cache stale."
             if cache_status == "stale"
             else "SSI X-QUOTE stream cache empty."
+        )
+        streaming_status = "cache_stale" if cache_status == "stale" else "subscribed_no_event"
+        diagnostics.update({"streaming_status": streaming_status})
+        return {
+            **base,
+            "status": "unavailable",
+            "reason": reason,
+            "streaming_status": streaming_status,
+            "cache_status": cache_status,
+            "manager_state": manager_state,
+            "diagnostics": diagnostics,
+        }
+
+    def foreign_room(self, symbol: str) -> Dict[str, Any]:
+        requested_symbol = str(symbol or "").strip().upper()
+        status = self.status()
+        diagnostics = dict(status)
+        diagnostics.update(
+            {
+                "streaming_status": "foreign_room_buffer",
+                "cache_ttl_seconds": self.foreign_room_cache.ttl_seconds,
+                "foreign_room_ttl_seconds": self.foreign_room_cache.ttl_seconds,
+                "channel_type": FOREIGN_ROOM_CHANNEL_PREFIX,
+                "foreign_room_rows_observed": self._foreign_room_rows_observed,
+            }
+        )
+        base = {
+            "source": "SSI",
+            "symbol": requested_symbol,
+            "foreign_room": None,
+            "count": 0,
+            "streaming_data_types": [FOREIGN_ROOM_CHANNEL_PREFIX],
+            "attempted_endpoints": [],
+            "candidate_endpoints": [],
+            "rest_status": "unsupported",
+        }
+
+        if not requested_symbol:
+            diagnostics["failure_class"] = "missing_symbol"
+            return {
+                **base,
+                "status": "unavailable",
+                "reason": "No symbol requested",
+                "streaming_status": "missing_symbol",
+                "cache_status": "unavailable",
+                "manager_state": status["manager_state"],
+                "diagnostics": diagnostics,
+            }
+        if not self.enabled:
+            diagnostics.update({"streaming_status": "disabled", "cache_status": "disabled"})
+            return {
+                **base,
+                "status": "unavailable",
+                "reason": SSI_STREAMING_REALTIME_DISABLED_REASON,
+                "streaming_status": "disabled",
+                "cache_status": "disabled",
+                "manager_state": MANAGER_DISABLED,
+                "diagnostics": diagnostics,
+            }
+
+        manager_state = status["manager_state"]
+        if not self.foreign_room_enabled:
+            diagnostics.update({"streaming_status": "r_disabled", "cache_status": "disabled"})
+            return {
+                **base,
+                "status": "unavailable",
+                "reason": "SSI R foreign-room stream channel disabled.",
+                "streaming_status": "r_disabled",
+                "cache_status": "disabled",
+                "manager_state": manager_state,
+                "diagnostics": diagnostics,
+            }
+
+        if manager_state == MANAGER_ERRORED:
+            diagnostics.update({"streaming_status": "manager_error", "cache_status": "unavailable"})
+            return {
+                **base,
+                "status": "unavailable",
+                "reason": SSI_STREAMING_REALTIME_MANAGER_ERROR_REASON,
+                "streaming_status": "manager_error",
+                "cache_status": "unavailable",
+                "manager_state": manager_state,
+                "diagnostics": diagnostics,
+            }
+        if manager_state != MANAGER_RUNNING:
+            reason = SSI_STREAMING_REALTIME_NOT_STARTED_REASON
+            streaming_status = "manager_not_started"
+            cache_status = "not_started"
+            if diagnostics.get("bootstrap_status") == "symbols_empty":
+                reason = SSI_STREAMING_REALTIME_BOOTSTRAP_EMPTY_REASON
+                streaming_status = "bootstrap_symbols_empty"
+                cache_status = "bootstrap_symbols_empty"
+            diagnostics.update({"streaming_status": streaming_status, "cache_status": cache_status})
+            return {
+                **base,
+                "status": "unavailable",
+                "reason": reason,
+                "streaming_status": streaming_status,
+                "cache_status": cache_status,
+                "manager_state": manager_state,
+                "diagnostics": diagnostics,
+            }
+
+        configured_symbols = set(normalize_streaming_symbols(status.get("requested_symbols") or []))
+        bootstrap_symbols = set(normalize_streaming_symbols(status.get("bootstrap_symbols") or []))
+        membership_symbols = configured_symbols or bootstrap_symbols
+        if membership_symbols and requested_symbol not in membership_symbols:
+            diagnostics.update(
+                {
+                    "streaming_status": "ticker_not_bootstrapped",
+                    "cache_status": "not_bootstrapped",
+                    "bootstrap_membership": "not_bootstrapped",
+                }
+            )
+            return {
+                **base,
+                "status": "unavailable",
+                "reason": "SSI R foreign-room stream not bootstrapped.",
+                "streaming_status": "ticker_not_bootstrapped",
+                "cache_status": "not_bootstrapped",
+                "manager_state": manager_state,
+                "diagnostics": diagnostics,
+            }
+
+        if requested_symbol and build_foreign_room_channel(requested_symbol) not in set(status.get("foreign_room_channels") or []):
+            diagnostics.update(
+                {
+                    "streaming_status": "r_not_subscribed",
+                    "cache_status": "not_subscribed",
+                    "bootstrap_membership": "bootstrapped",
+                }
+            )
+            return {
+                **base,
+                "status": "unavailable",
+                "reason": "SSI R foreign-room stream channel not subscribed.",
+                "streaming_status": "r_not_subscribed",
+                "cache_status": "not_subscribed",
+                "manager_state": manager_state,
+                "diagnostics": diagnostics,
+            }
+
+        cache_result = self.foreign_room_cache.get(requested_symbol)
+        cache_status = cache_result["status"]
+        diagnostics.update(
+            {
+                "streaming_status": "cache_hit" if cache_status == "hit" else f"cache_{cache_status}",
+                "cache_status": cache_status,
+                "latest_foreign_room_timestamp": cache_result["latest_foreign_room_timestamp"],
+                "latest_foreign_room_age_seconds": cache_result["latest_foreign_room_age_seconds"],
+            }
+        )
+        if cache_status == "hit" and cache_result["row"]:
+            return {
+                **base,
+                "status": "ok",
+                "reason": None,
+                "foreign_room": cache_result["row"],
+                "count": 1,
+                "streaming_status": "cache_hit",
+                "cache_status": "hit",
+                "manager_state": manager_state,
+                "diagnostics": diagnostics,
+            }
+
+        reason = (
+            "SSI R foreign-room stream cache stale."
+            if cache_status == "stale"
+            else "SSI R foreign-room stream cache empty."
         )
         streaming_status = "cache_stale" if cache_status == "stale" else "subscribed_no_event"
         diagnostics.update({"streaming_status": streaming_status})
@@ -1637,16 +2006,23 @@ class SsiStreamingRealtimeManager:
                 channel
                 for channel in self._channels
                 if not is_order_book_channel(channel)
+                and not is_foreign_room_channel(channel)
                 and not is_trade_tape_channel(channel)
                 and not is_session_status_channel(channel)
             ]
             order_book_channels = [channel for channel in self._channels if is_order_book_channel(channel)]
+            foreign_room_channels = [channel for channel in self._channels if is_foreign_room_channel(channel)]
             trade_tape_channels = [channel for channel in self._channels if is_trade_tape_channel(channel)]
             session_status_channels = [channel for channel in self._channels if is_session_status_channel(channel)]
             order_book_subscription_status = (
                 "disabled"
                 if not self.order_book_enabled
                 else ("subscribed" if order_book_channels else "not_subscribed")
+            )
+            foreign_room_subscription_status = (
+                "disabled"
+                if not self.foreign_room_enabled
+                else ("subscribed" if foreign_room_channels else "not_subscribed")
             )
             trade_tape_subscription_status = (
                 "disabled"
@@ -1667,6 +2043,9 @@ class SsiStreamingRealtimeManager:
                 "order_book_channels": order_book_channels,
                 "order_book_channel_type": ORDER_BOOK_CHANNEL_PREFIX,
                 "order_book_subscription_status": order_book_subscription_status,
+                "foreign_room_channels": foreign_room_channels,
+                "foreign_room_channel_type": FOREIGN_ROOM_CHANNEL_PREFIX,
+                "foreign_room_subscription_status": foreign_room_subscription_status,
                 "trade_tape_channels": trade_tape_channels,
                 "trade_tape_channel_type": TRADE_TAPE_CHANNEL_PREFIX,
                 "trade_tape_subscription_status": trade_tape_subscription_status,
@@ -1680,6 +2059,7 @@ class SsiStreamingRealtimeManager:
                 "messages_observed": self._messages_observed,
                 "parser_rows_observed": self._parser_rows_observed,
                 "order_book_rows_observed": self._order_book_rows_observed,
+                "foreign_room_rows_observed": self._foreign_room_rows_observed,
                 "trade_rows_observed": self._trade_rows_observed,
                 "session_status_rows_observed": self._session_status_rows_observed,
                 "bootstrap_status": self._bootstrap_status,

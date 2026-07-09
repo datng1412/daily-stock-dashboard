@@ -299,6 +299,9 @@ class VietnamWatchItem(BaseModel):
     order_book_source: Optional[str] = None
     order_book: Optional[Dict[str, Any]] = None
     order_book_status: Dict[str, Any] = Field(default_factory=dict)
+    foreign_room_source: Optional[str] = None
+    foreign_room: Optional[Dict[str, Any]] = None
+    foreign_room_status: Dict[str, Any] = Field(default_factory=dict)
     trade_tape_source: Optional[str] = None
     trade_tape: List[Dict[str, Any]] = Field(default_factory=list)
     trade_tape_status: Dict[str, Any] = Field(default_factory=dict)

@@ -79,6 +79,7 @@ VN_CACHE_TTL_SECONDS = {
     "intraday_ohlcv": 60,
     "realtime_snapshot": 10,
     "order_book": 5,
+    "foreign_room": 5,
     "trade_tape": 5,
     "session_status": 5,
     "news": 1800,
@@ -97,6 +98,7 @@ SSI_SECURITIES_DETAILS_SOURCE = "SSI SecuritiesDetails"
 SSI_INTRADAY_SOURCE = "SSI IntradayOhlc"
 SSI_REALTIME_SOURCE = "SSI realtime contract"
 SSI_ORDER_BOOK_SOURCE = "SSI X-QUOTE order-book stream"
+SSI_FOREIGN_ROOM_SOURCE = "SSI R foreign-room stream"
 SSI_TRADE_TAPE_SOURCE = "SSI trade-tape contract"
 SSI_SESSION_STATUS_SOURCE = "SSI F trading session/status stream"
 SSI_INDEX_LIST_SOURCE = "SSI IndexList"
@@ -111,6 +113,8 @@ VN_REALTIME_DISABLED_REASON = "SSI realtime is disabled."
 VN_REALTIME_UNAVAILABLE_REASON = "SSI realtime unavailable."
 VN_ORDER_BOOK_DISABLED_REASON = "SSI order book stream is disabled."
 VN_ORDER_BOOK_UNAVAILABLE_REASON = "SSI order book unavailable."
+VN_FOREIGN_ROOM_DISABLED_REASON = "SSI foreign-room stream is disabled."
+VN_FOREIGN_ROOM_UNAVAILABLE_REASON = "SSI foreign room unavailable."
 VN_TRADE_TAPE_DISABLED_REASON = "SSI trade tape is disabled."
 VN_TRADE_TAPE_UNAVAILABLE_REASON = "SSI trade tape unavailable."
 VN_SESSION_STATUS_DISABLED_REASON = "SSI trading session/status stream is disabled."
@@ -656,6 +660,13 @@ LIVE_DIAGNOSTIC_KEYS = {
     "order_book_channel_type",
     "order_book_channels",
     "order_book_subscription_status",
+    "foreign_room_ttl_seconds",
+    "foreign_room_rows_observed",
+    "latest_foreign_room_timestamp",
+    "latest_foreign_room_age_seconds",
+    "foreign_room_channel_type",
+    "foreign_room_channels",
+    "foreign_room_subscription_status",
     "trade_tape_ttl_seconds",
     "trade_tape_buffer_size",
     "trade_tape_buffer_row_count",
@@ -732,6 +743,7 @@ def _safe_live_diagnostic_value(key: str, value: Any) -> Any:
         "channels",
         "realtime_channels",
         "order_book_channels",
+        "foreign_room_channels",
         "trade_tape_channels",
         "session_status_channels",
     } and isinstance(value, (list, tuple, set)):
@@ -885,6 +897,18 @@ def _status_message_from_reason(
             "xquote_disabled": VN_ORDER_BOOK_DISABLED_REASON,
             "unavailable_unknown": VN_ORDER_BOOK_UNAVAILABLE_REASON,
         }
+    elif section == "foreign_room":
+        messages = {
+            "cache_hit": "SSI foreign room ready.",
+            "disabled": VN_FOREIGN_ROOM_DISABLED_REASON,
+            "stream_not_started": VN_FOREIGN_ROOM_UNAVAILABLE_REASON,
+            "stream_not_bootstrapped": VN_FOREIGN_ROOM_UNAVAILABLE_REASON,
+            "stream_cache_empty": VN_FOREIGN_ROOM_UNAVAILABLE_REASON,
+            "stream_cache_stale": "SSI foreign room stale.",
+            "r_not_subscribed": VN_FOREIGN_ROOM_UNAVAILABLE_REASON,
+            "r_disabled": VN_FOREIGN_ROOM_DISABLED_REASON,
+            "unavailable_unknown": VN_FOREIGN_ROOM_UNAVAILABLE_REASON,
+        }
     elif section == "trade_tape":
         messages = {
             "historical_trade_tape_supported": "SSI historical trade tape ready.",
@@ -1030,6 +1054,34 @@ def _classify_order_book_reason(
     return "unknown"
 
 
+def _classify_foreign_room_reason(
+    *,
+    status: str,
+    reason: Optional[str],
+) -> str:
+    normalized_status = _lower_text(status)
+    reason_text = _lower_text(reason)
+    if normalized_status == "ok":
+        return "cache_hit"
+    if normalized_status == "disabled":
+        return "disabled"
+    if "not bootstrapped" in reason_text:
+        return "stream_not_bootstrapped"
+    if "cache stale" in reason_text:
+        return "stream_cache_stale"
+    if "cache empty" in reason_text:
+        return "stream_cache_empty"
+    if "r foreign-room stream channel not subscribed" in reason_text or "r_not_subscribed" in reason_text:
+        return "r_not_subscribed"
+    if "r foreign-room stream channel disabled" in reason_text or "r_disabled" in reason_text:
+        return "r_disabled"
+    if "not started" in reason_text or "bootstrap symbols empty" in reason_text:
+        return "stream_not_started"
+    if normalized_status == "unavailable":
+        return "unavailable_unknown"
+    return "unknown"
+
+
 def _classify_session_status_reason(
     *,
     status: str,
@@ -1157,10 +1209,12 @@ def build_vietnam_data_quality_summary(row: Dict[str, Any]) -> Dict[str, Any]:
     intraday_status = _status_from_block(row.get("intraday_status"))
     realtime_status = _status_from_block(row.get("realtime_status"))
     order_book_status = _status_from_block(row.get("order_book_status"))
+    foreign_room_status = _status_from_block(row.get("foreign_room_status"))
     trade_tape_status = _status_from_block(row.get("trade_tape_status"))
     intraday_block = row.get("intraday_status") if isinstance(row.get("intraday_status"), dict) else {}
     realtime_block = row.get("realtime_status") if isinstance(row.get("realtime_status"), dict) else {}
     order_book_block = row.get("order_book_status") if isinstance(row.get("order_book_status"), dict) else {}
+    foreign_room_block = row.get("foreign_room_status") if isinstance(row.get("foreign_room_status"), dict) else {}
     trade_tape_block = row.get("trade_tape_status") if isinstance(row.get("trade_tape_status"), dict) else {}
     news_status = _status_from_block(row.get("news_status"), default="disabled")
     final_close_status = str(row.get("final_close_status") or "unknown")
@@ -1249,6 +1303,14 @@ def build_vietnam_data_quality_summary(row: Dict[str, Any]) -> Dict[str, Any]:
         or _classify_order_book_reason(
             status=order_book_status,
             reason=order_book_block.get("message"),
+        )
+    )
+    foreign_room_reason_code = str(
+        foreign_room_block.get("reason_code")
+        or foreign_room_block.get("classification")
+        or _classify_foreign_room_reason(
+            status=foreign_room_status,
+            reason=foreign_room_block.get("message"),
         )
     )
 
@@ -1498,6 +1560,23 @@ def build_vietnam_data_quality_summary(row: Dict[str, Any]) -> Dict[str, Any]:
                 },
             }
         )
+    if foreign_room_status in {"unavailable", "disabled"}:
+        issues.append(
+            {
+                "code": "foreign_room_disabled" if foreign_room_status == "disabled" else f"foreign_room_{foreign_room_reason_code}",
+                "severity": "info",
+                "message": _status_message_from_reason(
+                    section="foreign_room",
+                    status=foreign_room_status,
+                    reason_code=foreign_room_reason_code,
+                    fallback=f"SSI foreign room is {foreign_room_status}.",
+                ),
+                "fields": {
+                    "status": foreign_room_status,
+                    "reason_code": foreign_room_reason_code,
+                },
+            }
+        )
     if profile_status == "partial":
         issues.append(
             {
@@ -1522,6 +1601,7 @@ def build_vietnam_data_quality_summary(row: Dict[str, Any]) -> Dict[str, Any]:
         "intraday": intraday_check,
         "realtime": realtime_status,
         "order_book": order_book_status,
+        "foreign_room": foreign_room_status,
         "trade_tape": trade_tape_status,
         "profile": profile_status,
         "news": news_status,
@@ -1549,6 +1629,7 @@ def build_vietnam_data_quality_summary(row: Dict[str, Any]) -> Dict[str, Any]:
             "intraday": intraday_check,
             "realtime": realtime_status,
             "order_book": order_book_status,
+            "foreign_room": foreign_room_status,
             "trade_tape": trade_tape_status,
             "profile": profile_status,
             "news": news_status,
@@ -3263,6 +3344,7 @@ class VietnamMarketService:
             "intraday_cache": "disabled",
             "realtime_cache": "disabled",
             "order_book_cache": "disabled",
+            "foreign_room_cache": "disabled",
             "trade_tape_cache": "disabled",
             "news_cache": "disabled",
         }
@@ -3274,6 +3356,7 @@ class VietnamMarketService:
             "intraday_ohlcv": None,
             "realtime_snapshot": None,
             "order_book": None,
+            "foreign_room": None,
             "trade_tape": None,
             "news": None,
         }
@@ -3326,6 +3409,21 @@ class VietnamMarketService:
                 "status": "disabled",
                 "source": None,
                 "message": VN_ORDER_BOOK_DISABLED_REASON,
+                "reason_code": "disabled",
+                "classification": "disabled",
+                "ticker": symbol,
+            },
+        }
+
+    @staticmethod
+    def _disabled_foreign_room_payload(symbol: str) -> Dict[str, Any]:
+        return {
+            "foreign_room_source": None,
+            "foreign_room": None,
+            "foreign_room_status": {
+                "status": "disabled",
+                "source": None,
+                "message": VN_FOREIGN_ROOM_DISABLED_REASON,
                 "reason_code": "disabled",
                 "classification": "disabled",
                 "ticker": symbol,
@@ -3461,6 +3559,42 @@ class VietnamMarketService:
             "order_book_source": SSI_ORDER_BOOK_SOURCE,
             "order_book": None,
             "order_book_status": status_payload,
+        }
+
+    @staticmethod
+    def _ssi_foreign_room_unavailable_payload(
+        symbol: str,
+        *,
+        status: str = "unavailable",
+        reason: Optional[str] = None,
+        diagnostics: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        reason_text = reason or VN_FOREIGN_ROOM_UNAVAILABLE_REASON
+        public_status = _public_live_status(status)
+        reason_code = _classify_foreign_room_reason(status=public_status, reason=reason_text)
+        status_payload = {
+            "status": public_status,
+            "source": SSI_FOREIGN_ROOM_SOURCE,
+            "message": _status_message_from_reason(
+                section="foreign_room",
+                status=public_status,
+                reason_code=reason_code,
+                fallback=VN_FOREIGN_ROOM_UNAVAILABLE_REASON,
+            ),
+            "reason_code": reason_code,
+            "classification": reason_code,
+            "ticker": symbol,
+        }
+        safe_diagnostics = _live_failure_diagnostics(
+            diagnostics,
+            reason=reason_text if reason_text != VN_FOREIGN_ROOM_UNAVAILABLE_REASON else None,
+        )
+        if safe_diagnostics:
+            status_payload["diagnostics"] = safe_diagnostics
+        return {
+            "foreign_room_source": SSI_FOREIGN_ROOM_SOURCE,
+            "foreign_room": None,
+            "foreign_room_status": status_payload,
         }
 
     @staticmethod
@@ -3602,6 +3736,59 @@ class VietnamMarketService:
             "cached_at": row.get("cached_at"),
             "cache_ttl_seconds": _safe_int(row.get("cache_ttl_seconds")),
         }
+
+    @staticmethod
+    def _foreign_room_from_ssi(row: Dict[str, Any], symbol: str) -> Optional[Dict[str, Any]]:
+        if not isinstance(row, dict):
+            return None
+
+        def _text(value: Any) -> Optional[str]:
+            if value in (None, ""):
+                return None
+            text = str(value).replace("\r", " ").replace("\n", " ").strip()
+            return text[:120] if text else None
+
+        def _nonnegative(value: Any) -> Optional[float]:
+            number = _safe_float(value)
+            if number is None or number < 0:
+                return None
+            return number
+
+        ticker = str(row.get("ticker") or row.get("symbol") or symbol or "").strip().upper()
+        if ticker != symbol:
+            return None
+
+        metrics = {
+            "total_room": _nonnegative(row.get("total_room")),
+            "current_room": _nonnegative(row.get("current_room")),
+            "foreign_buy_volume": _nonnegative(row.get("foreign_buy_volume")),
+            "foreign_sell_volume": _nonnegative(row.get("foreign_sell_volume")),
+            "foreign_buy_value": _nonnegative(row.get("foreign_buy_value")),
+            "foreign_sell_value": _nonnegative(row.get("foreign_sell_value")),
+        }
+        if not any(value is not None for value in metrics.values()):
+            return None
+
+        foreign_room = {
+            "ticker": ticker,
+            "symbol": ticker,
+            "source": SSI_FOREIGN_ROOM_SOURCE,
+            "exchange": _text(row.get("exchange")),
+            "trading_date": _valid_date_string(row.get("trading_date")),
+            "time": _text(row.get("time")),
+            "received_at": row.get("received_at") or row.get("cached_at"),
+            "stream_timestamp": row.get("stream_timestamp"),
+            "stream_data_type": "R",
+            "r_type": _text(row.get("r_type")) or "R",
+            "age_seconds": _safe_int(row.get("age_seconds")),
+            "is_stale": row.get("is_stale") if isinstance(row.get("is_stale"), bool) else None,
+            "stale_reason": _text(row.get("stale_reason")),
+            "cached_at": row.get("cached_at"),
+            "cache_ttl_seconds": _safe_int(row.get("cache_ttl_seconds")),
+            "value_semantics_status": _text(row.get("value_semantics_status")) or "needs_semantics_proof",
+        }
+        foreign_room.update(metrics)
+        return foreign_room
 
     @staticmethod
     def _trade_change_fields(
@@ -3857,6 +4044,68 @@ class VietnamMarketService:
         if status == "disabled":
             return self._disabled_order_book_payload(symbol)
         return self._ssi_order_book_unavailable_payload(
+            symbol,
+            status=status or "unavailable",
+            reason=(payload.get("reason") or payload.get("message")) if isinstance(payload, dict) else None,
+            diagnostics=payload if isinstance(payload, dict) else None,
+        )
+
+    def _load_ssi_foreign_room_payload(self, symbol: str) -> Dict[str, Any]:
+        if not self.config.ssi_streaming_realtime_enabled:
+            return self._ssi_foreign_room_unavailable_payload(
+                symbol,
+                status="disabled",
+                reason=VN_FOREIGN_ROOM_DISABLED_REASON,
+                diagnostics={
+                    "streaming_status": "disabled",
+                    "manager_state": "disabled",
+                    "cache_status": "disabled",
+                    "live_adapter_status": "not_enabled",
+                },
+            )
+
+        fetcher = self._get_ssi_fetcher()
+        get_foreign_room = getattr(fetcher, "get_foreign_room", None)
+        if not callable(get_foreign_room):
+            return self._ssi_foreign_room_unavailable_payload(
+                symbol,
+                reason="SSI R foreign-room method unavailable.",
+                diagnostics={
+                    "streaming_status": "method_unavailable",
+                    "cache_status": "unavailable",
+                    "failure_class": "method_unavailable",
+                },
+            )
+
+        payload = get_foreign_room(symbol)
+        status = str(payload.get("status") or "").lower() if isinstance(payload, dict) else ""
+        if status == "ok":
+            foreign_room = self._foreign_room_from_ssi(payload.get("foreign_room") or {}, symbol)
+            if foreign_room:
+                safe_diagnostics = _live_failure_diagnostics(payload)
+                foreign_room_status = {
+                    "status": "ok",
+                    "source": SSI_FOREIGN_ROOM_SOURCE,
+                    "message": None,
+                    "reason_code": "cache_hit",
+                    "classification": "cache_hit",
+                    "ticker": symbol,
+                    "diagnostics": safe_diagnostics,
+                }
+                if not safe_diagnostics:
+                    foreign_room_status.pop("diagnostics", None)
+                return {
+                    "foreign_room_source": SSI_FOREIGN_ROOM_SOURCE,
+                    "foreign_room": foreign_room,
+                    "foreign_room_status": foreign_room_status,
+                }
+            return self._ssi_foreign_room_unavailable_payload(
+                symbol,
+                reason="SSI R foreign-room stream returned no usable room fields.",
+            )
+        if status == "disabled":
+            return self._disabled_foreign_room_payload(symbol)
+        return self._ssi_foreign_room_unavailable_payload(
             symbol,
             status=status or "unavailable",
             reason=(payload.get("reason") or payload.get("message")) if isinstance(payload, dict) else None,
@@ -5884,11 +6133,13 @@ class VietnamMarketService:
                 **self._disabled_intraday_payload(intraday_timeframe),
                 **self._disabled_realtime_payload(symbol),
                 **self._disabled_order_book_payload(symbol),
+                **self._disabled_foreign_room_payload(symbol),
                 **self._disabled_trade_tape_payload(symbol),
                 **self._disabled_session_status_payload(symbol),
                 "diagnostics": {
                     "realtime": {},
                     "order_book": {},
+                    "foreign_room": {},
                     "trade_tape": {},
                     "session_status": {},
                 },
@@ -6113,6 +6364,31 @@ class VietnamMarketService:
         if order_book_result["error"]:
             cache_errors["order_book"] = order_book_result["error"]
 
+        foreign_room_payload = self._disabled_foreign_room_payload(symbol)
+        foreign_room_key = _cache_key(
+            "foreign_room",
+            symbol,
+            provider=VN_PROVIDER_SSI,
+            streaming_enabled=self.config.ssi_streaming_realtime_enabled,
+        )
+        foreign_room_result = _read_cache(
+            foreign_room_key,
+            "foreign_room",
+            lambda: self._load_ssi_foreign_room_payload(symbol),
+            force_refresh=force_refresh,
+        )
+        foreign_room_payload = dict(foreign_room_result["value"])
+        foreign_room_status_payload = dict(foreign_room_payload.get("foreign_room_status") or {})
+        foreign_room_diagnostics = _live_failure_diagnostics(
+            foreign_room_status_payload.pop("diagnostics", {})
+        )
+        foreign_room_payload["foreign_room_status"] = foreign_room_status_payload
+        cache_status["foreign_room_cache"] = foreign_room_result["status"]
+        cache_last_fetched_at["foreign_room"] = _iso(foreign_room_result["entry"].fetched_at)
+        cache_next_refresh_at["foreign_room"] = _iso(foreign_room_result["entry"].expires_at)
+        if foreign_room_result["error"]:
+            cache_errors["foreign_room"] = foreign_room_result["error"]
+
         trade_tape_payload = self._disabled_trade_tape_payload(symbol)
         trade_tape_key = _cache_key(
             "trade_tape",
@@ -6328,11 +6604,13 @@ class VietnamMarketService:
             **intraday_payload,
             **realtime_payload,
             **order_book_payload,
+            **foreign_room_payload,
             **trade_tape_payload,
             **session_status_payload,
             "diagnostics": {
                 "realtime": realtime_diagnostics,
                 "order_book": order_book_diagnostics,
+                "foreign_room": foreign_room_diagnostics,
                 "trade_tape": trade_tape_diagnostics,
                 "session_status": session_status_diagnostics,
             },
