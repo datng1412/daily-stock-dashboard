@@ -916,6 +916,34 @@ describe('VietnamCompanyResearchPage', () => {
     expect(summary).not.toHaveTextContent(/RealtimeQuote|HTTP status|raw provider|attempted endpoints/i);
   });
 
+  it('renders at most three safe Community company-news headlines', async () => {
+    const snapshot = makeCompanySnapshot();
+    snapshot.news = {
+      status: 'ok',
+      source: 'Vnstock Community',
+      message: 'Vnstock Community company news loaded for FPT.',
+      items: [
+        { title: 'Safe absolute', url: 'https://example.test/news', providerMode: 'community_free_ticker_news', rightsStatus: 'personal_research_only' },
+        { title: 'Relative only', rawUrl: '/relative', url: null, providerMode: 'community_free_ticker_news', rightsStatus: 'personal_research_only' },
+        { title: 'Unsafe URL', rawUrl: 'javascript:alert(1)', url: 'javascript:alert(1)', providerMode: 'community_free_ticker_news', rightsStatus: 'personal_research_only' },
+        { title: 'Hidden fourth headline', url: null, providerMode: 'community_free_ticker_news', rightsStatus: 'personal_research_only' },
+      ],
+    };
+    vi.mocked(stocksApi.getVietnamCompanyResearch).mockResolvedValue(snapshot);
+
+    renderPage();
+
+    const safeLink = await screen.findByRole('link', { name: 'Safe absolute' });
+    expect(safeLink).toHaveAttribute('href', 'https://example.test/news');
+    expect(safeLink).toHaveAttribute('target', '_blank');
+    expect(safeLink).toHaveAttribute('rel', expect.stringContaining('noopener'));
+    expect(safeLink).toHaveAttribute('rel', expect.stringContaining('noreferrer'));
+    expect(screen.queryByRole('link', { name: 'Relative only' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Unsafe URL' })).not.toBeInTheDocument();
+    expect(screen.getAllByText('Personal research').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Hidden fourth headline')).not.toBeInTheDocument();
+  });
+
   it('does not use recommendation wording in the data quality summary', async () => {
     renderPage();
 

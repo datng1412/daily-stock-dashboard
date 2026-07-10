@@ -403,7 +403,7 @@ Diagnostics must not include:
 
 ## News Contract
 
-News is disabled until a separate VN news provider is implemented.
+News is disabled until a separate VN news provider is implemented. The production Vnstock News configuration remains a legal/terms gate, not a crawler. A separate `vnstock_news_personal` mode may be enabled only for local/personal research.
 
 Current public shape:
 
@@ -413,9 +413,34 @@ news_status.status = disabled
 news_status.source = disabled
 ```
 
-News disabled state must not be treated as a daily market-data failure. Mozyfin is not a VN runtime news fallback.
+When `VN_NEWS_PROVIDER=vnstock_news` is explicitly selected before written commercial and source-owner terms are recorded:
 
-Phase 5.1A defines the future `NewsProvider` planning contract only. It does not add a route, adapter, config flag, credential, provider call, or fallback provider.
+```text
+news = []
+news_status.status = unavailable
+news_status.source = Vnstock News
+news_status.provider = vnstock_news
+news_status.reason_code = blocked_pending_terms
+news_status.rights_status = blocked_pending_terms
+```
+
+When `VN_NEWS_PROVIDER=vnstock_news_personal` and `VNSTOCK_NEWS_PERSONAL_ENABLED=true` are selected locally, the service may lazily import the optional `vnstock_news` package and use only the documented RSS `Crawler.get_articles_from_feed` path with bounded sites, per-site limits, and process-local TTL cache. If the package is missing or fetch fails, `news=[]` and `news_status.status=unavailable` with `provider_package_missing`, `provider_error`, or `provider_no_items`.
+
+`VN_NEWS_PROVIDER=vnstock_community` is a separate local/personal ticker-news mode using the installed free `vnstock` Community package. It may call only `Reference().company(ticker).news()` for an explicit selected/company ticker, never for every watchlist row. It returns at most three rows and uses a bounded 30-minute per-ticker cache. Success is `status=ok`, `reason_code=community_news_ready`; unavailable states include `invalid_ticker`, `provider_package_missing`, `provider_timeout`, `provider_error`, and `provider_no_items`. General force refresh does not bypass this news cache.
+
+Personal-mode rows must include source URL/provenance and carry:
+
+```text
+news_status.provider = vnstock_news_personal
+news_status.provider_mode = local_personal_research_only
+news_status.rights_status = personal_research_only
+```
+
+Full article `content` is omitted by default. Ticker relevance is weak exact-symbol matching in title/summary only for the Sponsor RSS mode; it is not official ticker tagging. Community rows are already requested for the explicit ticker, but do not fabricate ticker metadata beyond that request context. Community `head` is unverified and is not exposed as a summary/source. A relative Community URL remains `raw_url`; `url=null` until a verified provider-specific article origin exists. An absolute `url` is exposed only after HTTP(S), hostname, and credential validation; the UI never uses `raw_url` as a link target.
+
+News disabled/unavailable state must not be treated as a daily market-data failure. Mozyfin is not a VN runtime news fallback.
+
+Phase 5.1B adds the explicit Vnstock status gate and offline normalization contract. Phase 5.1B-Local adds only an optional local personal RSS mode. Phase 5.1C adds a separate bounded Community ticker-news adapter. None of these modes adds credentials, market-data provider behavior, fallback provider, hosted production approval, or SSI ownership changes.
 
 Future normalized news rows should include:
 
@@ -511,7 +536,7 @@ The SSI-first rule is: if SSI can provide a market-data field, SSI owns it; if a
 | SSI `MI` stream | SSI streaming runtime proof | Market-index pulse may appear in `market_index_pulse`; channel/field live proof and UI remain deferred and must not replace DailyIndex or affect price ownership |
 | Future SSI `B` stream | SSI streaming after runtime proof | Realtime bars must remain separate source-labeled blocks; no fake placeholders and no request-handler stream starts |
 | Future SSI extended instrument metadata | SSI SecuritiesDetails/Securities after runtime proof | Derivative, covered warrant, ETF/fund, and bond fields require exact row-key evidence and instrument-specific semantics before exposure |
-| News | Future NewsProvider | Disabled now |
+| News | Future NewsProvider | Disabled by default; `vnstock_news` is unavailable with `blocked_pending_terms`; `vnstock_news_personal` is local/personal research only |
 | Financials | Future external provider | Not implemented |
 | Corporate actions | `CorporateActionsProvider` future external boundary | Disabled/not configured by default; no inference |
 | Mozyfin | Disabled for VN runtime | No fallback |

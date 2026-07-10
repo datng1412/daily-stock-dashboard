@@ -51,6 +51,14 @@ Result:
 * Public RSS/web pages remain `blocked_pending_terms`; browser scraping and unofficial endpoints remain `not_allowed_now`; NewsAPI and GDELT are `secondary_macro_context_only`, not first VN ticker-news targets.
 * No runtime provider, credentials, config, API/schema, frontend behavior, scraping path, fallback provider, fake news row, or SSI ownership rule changed.
 
+## Phase 5.1B Experimental Vnstock News Gate
+
+Vnstock News documentation proves a technical RSS `Crawler` API and normalized article fields, but its current license requires written approval for commercial product integration and keeps source-owner terms with the original publishers. The repository therefore accepts `VN_NEWS_PROVIDER=vnstock_news` only as an explicit `blocked_pending_terms` state. It makes no package import, network call, crawler request, cache write, or news-row response.
+
+This is a contract/status gate, not an approved Vnstock runtime adapter. SSI market-data ownership, `latest_price=SSI DailyOhlc`, no-fallback rules, and the licensed-provider priority remain unchanged.
+
+Phase 5.1B-Local adds only `VN_NEWS_PROVIDER=vnstock_news_personal` plus `VNSTOCK_NEWS_PERSONAL_ENABLED=true` for local/personal research. It is not a hosted/public/commercial provider, remains news-only, uses only bounded RSS `Crawler.get_articles_from_feed`, omits full content by default, and must not replace SSI market data or act as a fallback provider.
+
 Official docs reviewed:
 
 * [Vnstock docs](https://vnstocks.com/docs), [Vnstock free library](https://vnstocks.com/docs/vnstock), [market data](https://vnstocks.com/docs/vnstock/du-lieu-thi-truong-market-data), [financial analysis](https://vnstocks.com/docs/vnstock/phan-tich-co-ban-fundamental), [disclaimer](https://vnstocks.com/onboard/mien-tru-trach-nhiem), and [license](https://vnstocks.com/onboard/giay-phep-su-dung).
@@ -80,6 +88,8 @@ Official docs reviewed:
 | Realtime/tick/orderbook/trade tape | FiinQuant | FiinGroup trading data only after contract review | `deferred`; `candidate_after_entitlement` | Commercial live data entitlement, latency/SLA, storage/display/redistribution, stream lifecycle | No | Consider only if SSI streaming is insufficient; do not replace SSI-owned daily data | Yes |
 | Historical OHLCV fallback | None for production | Vnstock or FiinQuant for research comparison | `not_allowed_now` | Would need explicit source-ownership decision and exchange/vendor rights | No | SSI DailyOhlc remains canonical; do not add silent fallback | Yes |
 | Research/prototype-only data | Vnstock | FiinQuant sandbox after entitlement | `prototype_only` | Must not be redistributed or promoted into runtime without qualification | No | Useful for analyst exploration, not production dashboard data | Yes |
+
+Phase 5.1C is a narrow local/personal research exception for `VN_NEWS_PROVIDER=vnstock_community`: it is ticker-specific company news only, calls the installed Community package for the selected/company ticker, returns at most three cached headline rows, and does not alter this matrix's SSI ownership, production entitlement, or fallback rules.
 
 ### Phase 4.8F SSI-owned boundary before external providers
 

@@ -70,7 +70,7 @@ This document gives Codex and other agents enough context to resume project work
 - Phase 4.7C routes SSI trade tape through the existing background streaming manager only. Parsed `X-TRADE` messages with ticker, price, last volume, and timestamp populate a bounded process-local per-symbol event buffer (`SSI_TRADE_TAPE_BUFFER_SIZE`, default 50; `SSI_TRADE_TAPE_TTL_SECONDS`, default 60). Request handlers only read the buffer; they do not start streams, subscribe dynamically, use `X:ALL`, or probe the previous unverified REST candidate names. Historical time-and-sales remains unverified.
 - Mozyfin is disabled for VN dashboard runtime. Do not use it for news, social, OHLCV, chart, reference, foreign flow, index, metadata, intraday, realtime, trade tape, or fallback behavior.
 - KBS is legacy optional only and disabled by default. It must require explicit legacy flags before any diagnostic use and must not silently replace SSI-owned data.
-- VN news is disabled until a separate NewsProvider is implemented.
+- VN news is disabled by default. Phase 5.1B adds an explicit `VN_NEWS_PROVIDER=vnstock_news` legal/terms gate that returns `unavailable` with `blocked_pending_terms` and makes no package import or crawler request. Phase 5.1B-Local adds `VN_NEWS_PROVIDER=vnstock_news_personal` for local/personal research only when `VNSTOCK_NEWS_PERSONAL_ENABLED=true`; it is not a hosted/public/commercial provider. Phase 5.1C adds separate `VN_NEWS_PROVIDER=vnstock_community` local/personal company news using only `Reference().company(ticker).news()` for the selected/company ticker, capped at three rows and cached per ticker for 30 minutes.
 - The `/vietnam` frontend no longer has a default initial watchlist. Direct backend watchlist calls without `tickers` still use the existing service default, but the dashboard does not call that fallback on fresh init.
 - The `/vietnam` page is served by the built frontend through the FastAPI backend when running `python main.py --webui-only` or `python main.py --serve-only`.
 - The dashboard uses neutral condition labels only and must not add trading instruction wording.
@@ -84,10 +84,11 @@ This document gives Codex and other agents enough context to resume project work
 - Phase 5.0D completed a documentation-only external-provider qualification update. Vnstock is classified `prototype_only` unless commercial/source-owner rights are resolved; FiinQuant is `candidate_after_entitlement` for licensed realtime/tick/orderbook and research workflows; FiinGroup API Datafeed remains `preferred_after_entitlement` for corporate actions/dividends first, then financials, ratios, news, metadata fallback, macro, and source-labeled index context. Manual/provenance import remains an offline-only fallback for corporate actions.
 - Phase 5.1A completed documentation-only external news provider research. FiinGroup API Datafeed News is the preferred first NewsProvider candidate after entitlement because its public schema exposes ticker, source, source link, short/full content, publication, and update fields; Vietstock DataFeed and WiGroup WiFeed/WiData remain candidates after commercial/API/rights review. Public RSS/web pages are blocked pending terms, scraping/unofficial endpoints are not allowed, and NewsAPI/GDELT are secondary macro-context options only.
 - Phase 5.1A-2 documents current news/data provider access status: public docs/schema access is not legal/runtime API access. FiinGroup API Datafeed News remains `preferred_after_entitlement`, Vietstock DataFeed remains `candidate_after_entitlement`, and Vnstock/VNStock remains `prototype_only` for research/manual comparison only.
+- Phase 5.1B verified Vnstock News technical documentation but retained production `vnstock_news` status as `blocked_pending_terms`: its RSS `Crawler`/normalized field shape is documented, but commercial integration and source-owner rights require written approval. Phase 5.1B-Local adds an optional local personal mode using only bounded RSS `Crawler.get_articles_from_feed`; package missing/fetch failure stays non-fatal, full content is omitted by default, and SSI market-data ownership is unchanged. Phase 5.1C separately adds bounded Community ticker news with user-safe timeout/error states; its unverified `head` field is not shown, relative URLs are not guessed, and only validated absolute HTTP(S) URLs render as safe external links.
 - Phase 4.5A records VNStocks and FiinGroup as `candidate_external_provider` with `needs_verification` only; neither provider is authorized, configured, called, or used as fallback.
 - FiinGroup API Datafeed is the preferred automated candidate only after commercial access, rate-limit, storage, display, and redistribution terms are verified in writing.
 - Provenance-required manual import is the fallback strategy; public VSDC/HOSE/HNX/SSC/company pages must not be scraped without explicit approval and verified terms.
-- No external provider, credential, live adapter, fallback provider, scraping path, or production external-provider runtime is enabled yet.
+- No production external provider, credential, fallback provider, or scraping path is enabled. The narrow Vnstock local/personal news modes are optional research adapters only and are not production provider approval.
 - Financial statements, metadata fallback, ratios, news, macro, and explicit external VNINDEX remain deferred in the order recorded in `docs/VN_EXTERNAL_PROVIDER_STRATEGY.md`.
 - The existing portfolio subsystem is user-owned and separate from VN external market-data provider selection.
 
@@ -134,7 +135,7 @@ Vietnam cache TTLs are process-local and should be interpreted per source block:
 | SSI `X-QUOTE` order book | Separate optional live context; `X-QUOTE:{symbol}` rows may populate watchlist `order_book` only from the background stream cache. Malformed bid/ask levels are dropped rather than synthesized; unavailable state should not affect daily row validity |
 | SSI `F` trading session/status | Separate optional live context; `F:{symbol}` rows may populate watchlist `session_status` only from the background stream cache. Raw session/status codes remain unmapped until live evidence proves meanings; unavailable state should not affect daily row validity |
 | SSI `MI` market-index pulse | Separate optional live index context; `MI:{index_code}` rows may populate only the market-index pulse API from the background stream cache. Malformed numeric fields are dropped/null and unavailable state must not affect DailyIndex or stock daily row validity |
-| News | Disabled until a separate provider is implemented |
+| News | Disabled by default; `vnstock_news` is unavailable pending written terms; `vnstock_news_personal` is local/personal research only and optional; `vnstock_community` is selected/company-ticker only, capped at three rows with a 30-minute cache |
 
 `force_refresh=true` bypasses normal cache freshness checks for the requested watchlist call. Provider 404/unavailable is not the same as cache failure.
 
@@ -146,7 +147,7 @@ Vietnam cache TTLs are process-local and should be interpreted per source block:
 - Do not add FC Trading, order placement, account actions, cash transfer, stock transfer, or portfolio trading actions.
 - Mozyfin CLI/key/fixture configuration is not required for normal VN dashboard runtime.
 - KBS/vnstock is not required for normal VN dashboard runtime.
-- News/social is disabled until a separate NewsProvider exists.
+- News/social is disabled by default; the two Vnstock local/personal modes remain optional and are not production provider approval.
 
 ## Verification Endpoints
 
@@ -156,6 +157,7 @@ Vietnam cache TTLs are process-local and should be interpreted per source block:
 - Realtime snapshot contract: `GET /api/v1/stocks/vn/realtime?tickers=FPT,ACB,VCB`
 - Trade tape contract: `GET /api/v1/stocks/vn/realtime/trades?symbol=FPT&limit=100`
 - Company snapshot: `GET /api/v1/stocks/vn/company/FPT?force_refresh=true`
+- Selected-company news: `GET /api/v1/stocks/vn/company-news?ticker=FPT`
 - Index list: `GET /api/v1/stocks/vn/index-list?market=HOSE`
 - Index components: `GET /api/v1/stocks/vn/index-components?index_code=VN30`
 

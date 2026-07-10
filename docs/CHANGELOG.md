@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [documentation] Sync README_VN with implemented SSI-derived metrics and remaining SSI capability audit.
 - [documentation] Add SSI remaining data capability audit and prioritize future SSI-backed proof targets without runtime changes.
 - [documentation] Document current access status for VN news/data provider candidates and keep FiinGroup, Vietstock, and Vnstock behind entitlement/prototype gates.
+- [improvement] Add a no-network Vnstock News terms gate that reports explicit unavailable status without changing SSI market-data ownership.
+- [improvement] Add explicit local-personal Vnstock News mode with bounded optional RSS Crawler use and non-fatal unavailable states.
+- [improvement] Add bounded local-personal Vnstock Community company-news mode for selected/company tickers without SSI market-data changes.
+- [fix] Validate Community news link targets, preserve relative raw URLs as provenance only, and add safe external-link attributes in VN news views.
 - [documentation] Align product spec Phase 5.1A with News Provider Research & Planning and move corporate actions/dividends to deferred external-provider track.
 - [documentation] Add Phase 5.1A VN news provider research comparing FiinGroup, Vietstock, WiGroup, public RSS, scraping, NewsAPI, and GDELT without adding runtime providers.
 - [improvement] Add bounded frontend trade-tape warm-up refetch for pending SSI X-TRADE startup states and use dedicated yellow for SSI reference/equal/zero-change prices.

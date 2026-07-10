@@ -417,6 +417,71 @@ const PlaceholderSection: React.FC<{
   </SectionShell>
 );
 
+const newsText = (item: Record<string, unknown>, key: string) => {
+  const value = item[key];
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+};
+
+const safeExternalNewsUrl = (value: string | null | undefined): string | null => {
+  if (!value) return null;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? value : null;
+  } catch {
+    return null;
+  }
+};
+
+const isPersonalResearchNewsItem = (item: Record<string, unknown>) => (
+  newsText(item, 'providerMode') === 'local_personal_research_only'
+  || newsText(item, 'rightsStatus') === 'personal_research_only'
+);
+
+const CompanyNewsSection: React.FC<{ block: VietnamCompanyResearchResponse['news'] }> = ({ block }) => {
+  const items = block.items ?? [];
+  return (
+    <SectionShell title="News" source={block.source} status={block.status}>
+      {items.length ? (
+        <div className="grid gap-3">
+          {items.slice(0, 3).map((item, index) => {
+            const title = newsText(item, 'title') ?? 'Untitled news';
+            const url = safeExternalNewsUrl(newsText(item, 'url'));
+            const source = newsText(item, 'source') ?? block.source ?? null;
+            const sourceName = newsText(item, 'sourceName');
+            const category = newsText(item, 'category');
+            const publishedAt = newsText(item, 'publishedAt') ?? newsText(item, 'published_at');
+            const summary = newsText(item, 'summary');
+            return (
+              <article key={`${url ?? newsText(item, 'rawUrl') ?? title}-${index}`} className="rounded-lg border border-border/50 bg-elevated/35 p-3">
+                {url ? (
+                  <a href={url} target="_blank" rel="noopener noreferrer" className="text-sm font-medium text-cyan hover:underline">
+                    {title}
+                  </a>
+                ) : (
+                  <p className="text-sm font-medium text-foreground">{title}</p>
+                )}
+                <div className="mt-1 flex flex-wrap gap-2 text-xs text-secondary-text">
+                  {source ? <span>{source}</span> : null}
+                  {sourceName ? <span>{sourceName}</span> : null}
+                  {category ? <span>{category}</span> : null}
+                  {publishedAt ? <span>{publishedAt}</span> : null}
+                  {source === 'Vnstock Community' ? <Badge variant="info">Vnstock Community</Badge> : null}
+                  {isPersonalResearchNewsItem(item) ? <Badge variant="info">Personal research</Badge> : null}
+                </div>
+                {summary ? <p className="mt-2 line-clamp-2 text-sm text-secondary-text">{summary}</p> : null}
+              </article>
+            );
+          })}
+        </div>
+      ) : (
+        <p className="text-sm text-secondary-text">
+          {block.status === 'disabled' ? 'News disabled.' : block.message || 'Not implemented yet.'}
+        </p>
+      )}
+    </SectionShell>
+  );
+};
+
 const SourceCoveragePanel: React.FC<{ snapshot: VietnamCompanyResearchResponse }> = ({ snapshot }) => (
   <SectionShell title="Source coverage" source="Backend contract" status={snapshot.status}>
     <div className="grid gap-2">
@@ -835,7 +900,7 @@ const VietnamCompanyResearchPage: React.FC = () => {
         </SectionShell>
       </section>
       <section className="grid gap-4 lg:grid-cols-3">
-        <PlaceholderSection title="News" block={snapshot.news} />
+        <CompanyNewsSection block={snapshot.news} />
         <PlaceholderSection title="Financials" block={snapshot.financials} />
         <PlaceholderSection title="Events" block={snapshot.events} />
       </section>

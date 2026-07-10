@@ -222,6 +222,73 @@ Do not choose a provider purely by brand. Rank by:
 9. Cost/contact friction.
 10. Fit with future corporate-actions, financials, metadata, and macro provider planning.
 
+## Phase 5.1B experimental Vnstock News gate
+
+Phase 5.1B verified the current Vnstock News documentation and license. The documented package exposes `vnstock_news.Crawler` for bounded RSS/feed reads, while `BatchCrawler` and `AsyncBatchCrawler` are for sitemap/history collection and are not normal dashboard-runtime mechanisms. The documented normalized fields are `url`, `title`, `short_description`, `content`, `publish_time`, `author`, `category`, and `image_url`.
+
+The current Vnstock license requires written approval for commercial product integration, and Vnstock states that it is a technical connector rather than the source-data owner. Therefore the runtime classification is `blocked_pending_terms`, not `experimental_enabled_by_config`:
+
+* `VN_NEWS_PROVIDER=disabled` remains the default.
+* `VN_NEWS_PROVIDER=vnstock_news` exposes `news_status.status=unavailable`, `reason_code=blocked_pending_terms`, and `source=Vnstock News` without importing `vnstock_news`, making a network request, or returning a news row.
+* The repository contains an offline normalization contract proof only. It preserves URL/provenance and omits full content by default; it is not a crawler or a production adapter.
+* No Vnstock News package dependency, credentials, RSS/sitemap call, batch/async crawler, request-time crawl, or fallback provider is enabled.
+
+Before a runtime experiment can fetch even a bounded RSS feed, written commercial permission plus source-owner automation, display, cache/storage, attribution, redistribution, and full-text terms must be recorded. Production candidates remain FiinGroup, Vietstock, and WiGroup after entitlement.
+
+## Phase 5.1B-Local personal research mode
+
+Phase 5.1B-Local adds a separate opt-in local mode for the user's personal research dashboard:
+
+```text
+VN_NEWS_PROVIDER=vnstock_news_personal
+VNSTOCK_NEWS_PERSONAL_ENABLED=true
+```
+
+This does not approve Vnstock News for hosted, public, commercial, or redistributed dashboard use. It is news-only and must not be used for SSI-owned market data, `latest_price`, OHLCV, realtime quotes, order book, trade tape, foreign room, market index, or metadata.
+
+Runtime behavior:
+
+* `VN_NEWS_PROVIDER=disabled` remains the default.
+* `VN_NEWS_PROVIDER=vnstock_news` remains `blocked_pending_terms` and performs no import or crawl.
+* `VN_NEWS_PROVIDER=vnstock_news_personal` requires `VNSTOCK_NEWS_PERSONAL_ENABLED=true`; otherwise it returns `local_personal_research_disabled`.
+* The optional package is imported lazily only in personal mode. If it is missing, the API returns `provider_package_missing`.
+* The only allowed runtime call is documented RSS/feed usage through `vnstock_news.Crawler(...).get_articles_from_feed(limit_per_feed=N)`.
+* `BatchCrawler`, `AsyncBatchCrawler`, sitemap/history crawling, background crawler daemons, aggressive loops, credentials, and market-data calls are not part of the dashboard request path.
+* Full article `content` is omitted by default with `VNSTOCK_NEWS_INCLUDE_CONTENT=false`.
+* Returned rows preserve source URL/provenance and carry `rights_status=personal_research_only` and `provider_mode=local_personal_research_only`.
+* Ticker relevance is weak only: exact symbol matching in title/summary. It is not official provider ticker tagging.
+
+Configuration:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `VN_NEWS_PROVIDER` | `disabled` | `disabled`, `vnstock_news`, or local-only `vnstock_news_personal`. |
+| `VNSTOCK_NEWS_PERSONAL_ENABLED` | `false` | Required explicit gate for local personal research mode. |
+| `VNSTOCK_NEWS_SITES` | `vnexpress,cafef` | Bounded documented site names; exact full support list remains provider-doc dependent. |
+| `VNSTOCK_NEWS_LIMIT_PER_SITE` | `5` | Bounded RSS articles per site. |
+| `VNSTOCK_NEWS_TIMEOUT_SECONDS` | `10` | Best-effort package timeout value if the installed `Crawler` supports it. |
+| `VNSTOCK_NEWS_CACHE_TTL_SECONDS` | `1800` | Process-local cache TTL for personal news results. |
+| `VNSTOCK_NEWS_INCLUDE_CONTENT` | `false` | Keep full content out of API/UI by default. |
+
+Production runtime news still requires an entitled provider such as FiinGroup, Vietstock, or WiGroup with written display, storage, attribution, and redistribution terms.
+
+## Phase 5.1C Vnstock Community company news
+
+`vnstock_community` is a separate local/personal research mode for ticker-specific company headlines from the installed free `vnstock` Community package. It is not the Sponsor `vnstock_news` RSS crawler and it is never a market-data provider or SSI fallback.
+
+```text
+VN_NEWS_PROVIDER=vnstock_community
+VNSTOCK_COMMUNITY_NEWS_LIMIT_PER_TICKER=3
+VNSTOCK_COMMUNITY_NEWS_CACHE_TTL_SECONDS=1800
+VNSTOCK_COMMUNITY_NEWS_TIMEOUT_SECONDS=10
+```
+
+The adapter calls only `Reference().company(ticker).news()` for the currently selected dashboard ticker or the company-page ticker. It never fans out across watchlist/VN30 rows, and normal daily/realtime refreshes do not bypass its 30-minute per-ticker cache. The result is capped at three normalized headline rows.
+
+Installed Community version `4.0.4` exposes a DataFrame with `head`, `article_id`, `title`, `publish_time`, and `url` in the observed local contract. `article_id`, title, and publication time are used when present. `head` is not displayed as a summary or source because its semantics are unverified. The KBS adapter proves its API host but does not establish a public article-site origin for its relative paths, so those values remain in `raw_url` and are not made clickable. `url` is retained only for validated absolute `http`/`https` URLs; no hostname is inferred from branding or the API endpoint.
+
+This remains local/personal research only. Production/public display, cache, redistribution, source-owner rights, and automation terms require separate review. SSI remains the market-data owner and `latest_price` remains SSI DailyOhlc.
+
 ## Proposed first integration shape after entitlement
 
 This is architecture planning only. Do not implement NewsProvider runtime yet. The next step is Phase 5.1B - NewsProvider Entitlement Pack, not licensed adapter implementation.
@@ -275,8 +342,8 @@ No live adapter should be implemented until these are written down:
 
 ## Future phases
 
-* Phase 5.1B - NewsProvider Entitlement Pack: collect written provider terms, trial credential status, sample schema, licensed fixture, content-rights boundaries, and API/auth/rate-limit plan.
-* Phase 5.1C - Licensed NewsProvider Adapter: implement a disabled-by-default adapter only after Phase 5.1B passes.
+* Phase 5.1C - NewsProvider Entitlement Pack: collect written provider terms, trial credential status, sample schema, licensed fixture, content-rights boundaries, and API/auth/rate-limit plan.
+* Phase 5.1D - Licensed NewsProvider Adapter: implement a disabled-by-default adapter only after the entitlement pack passes.
 * Phase 5.1D - News UI Cards: render source-labeled company and market news cards after licensed API rows exist.
 
-Runtime remains unchanged after Phase 5.1A: `news=[]` and `news_status.status=disabled` until a later licensed provider adapter is implemented.
+Hosted/production runtime remains data-free after Phase 5.1B: `news=[]`; the default status is `disabled`, while the explicitly selected production Vnstock gate is `unavailable` with `blocked_pending_terms` until a later licensed provider adapter is implemented. Phase 5.1B-Local is a separate local/personal research option and is not a production provider approval.

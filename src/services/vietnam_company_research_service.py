@@ -63,6 +63,7 @@ class VietnamCompanyResearchService:
             [symbol],
             force_refresh=force_refresh,
             include_intraday=True,
+            include_news=True,
         )
         rows = watchlist_payload.get("watchlist") if isinstance(watchlist_payload, dict) else None
         row = rows[0] if isinstance(rows, list) and rows else None
@@ -289,6 +290,7 @@ class VietnamCompanyResearchService:
         if row.get("error"):
             errors["market_data"] = row.get("error")
 
+        news = self._news_block(row)
         return {
             "ticker": symbol,
             "status": status,
@@ -307,8 +309,19 @@ class VietnamCompanyResearchService:
                 "realtime": realtime_diagnostics,
                 "trade_tape": trade_tape_diagnostics,
             },
-            "source_coverage": source_coverage,
-            "news": self._placeholder("not_implemented", NEWS_FUTURE_SOURCE, NOT_IMPLEMENTED_MESSAGE),
+            "source_coverage": self._source_coverage(
+                profile,
+                price,
+                trading_stats,
+                foreign_flow,
+                technical,
+                daily_stock_price,
+                intraday,
+                realtime_status,
+                trade_tape_status,
+                news,
+            ),
+            "news": news,
             "financials": self._placeholder("not_implemented", EXTERNAL_FUTURE_SOURCE),
             "events": self._placeholder("not_implemented", EXTERNAL_FUTURE_SOURCE),
             "data_quality_summary": _dict(row.get("data_quality_summary")),
@@ -327,6 +340,7 @@ class VietnamCompanyResearchService:
         intraday: Optional[Dict[str, Any]] = None,
         realtime_status: Optional[Dict[str, Any]] = None,
         trade_tape_status: Optional[Dict[str, Any]] = None,
+        news: Optional[Dict[str, Any]] = None,
     ) -> list[Dict[str, Any]]:
         has_daily_stock_price_fields = any(
             price.get(field) is not None
@@ -353,7 +367,11 @@ class VietnamCompanyResearchService:
                 "source": profile.get("source") or SSI_SECURITIES_DETAILS_SOURCE,
                 "status": profile.get("quality_status") or profile.get("status", "unavailable"),
             },
-            {"block": "News", "source": NEWS_FUTURE_SOURCE, "status": "not_implemented"},
+            {
+                "block": "News",
+                "source": _dict(news).get("source") or NEWS_FUTURE_SOURCE,
+                "status": _dict(news).get("status") or "not_implemented",
+            },
             {"block": "Financials", "source": EXTERNAL_FUTURE_SOURCE, "status": "not_implemented"},
             {"block": "Corporate actions", "source": EXTERNAL_FUTURE_SOURCE, "status": "not_implemented"},
         ]
@@ -362,6 +380,19 @@ class VietnamCompanyResearchService:
         payload = {"items": [], "status": status, "source": source}
         if message is not None:
             payload["message"] = message
+        return payload
+
+    def _news_block(self, row: Dict[str, Any]) -> Dict[str, Any]:
+        status = _dict(row.get("news_status"))
+        state = str(status.get("status") or "not_implemented")
+        if state not in {"disabled", "unavailable", "ok"}:
+            return self._placeholder("not_implemented", NEWS_FUTURE_SOURCE, NOT_IMPLEMENTED_MESSAGE)
+        payload = self._placeholder(
+            state,
+            status.get("source") or (NEWS_FUTURE_SOURCE if state != "unavailable" else None),
+            status.get("message"),
+        )
+        payload["items"] = list(row.get("news") or [])
         return payload
 
     def _unavailable_payload(self, symbol: str, errors: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:

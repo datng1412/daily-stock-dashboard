@@ -12,7 +12,7 @@ This page is the current entry point for VN dashboard setup. The active runtime 
 - Foreign room comes from the optional SSI `R:{symbol}` live context when a usable streaming cache row exists and stays separate from DailyStockPrice daily foreign flow.
 - Market-index pulse comes from the optional SSI `MI:{index_code}` live context when usable streaming cache rows exist and stays separate from REST DailyIndex and stock rows.
 - VN30/index components are SSI-backed where available.
-- News, fundamentals, financial statements, ratios, macro data, research reports, and corporate actions/dividends/rights/splits are disabled / `not_implemented` until a separate qualified provider is added for those gaps.
+- News, fundamentals, financial statements, ratios, macro data, research reports, and corporate actions/dividends/rights/splits are disabled / `not_implemented` until a separate qualified provider is added for those gaps. `VN_NEWS_PROVIDER=vnstock_news` reports an explicit unavailable terms gate only. `VN_NEWS_PROVIDER=vnstock_news_personal` is local/personal research only, requires an explicit enable flag, and must not be used for hosted/public/commercial deployment. `VN_NEWS_PROVIDER=vnstock_community` is a separate local/personal selected-company headline mode, capped at three cached rows and never used for SSI market data. Its original article path remains provenance-only unless a validated absolute HTTP(S) URL is available; the UI never guesses a hostname.
 - Missing object data is represented as `null`; missing list data is represented as `[]`.
 
 Mozyfin owns no normal VN dashboard runtime path. KBS is legacy-only, disabled by default, and should appear only in explicitly labeled legacy diagnostics or historical notes.

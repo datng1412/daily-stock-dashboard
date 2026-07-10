@@ -86,7 +86,8 @@ Null/empty rules:
 - `order_book = null` when unavailable/no usable `X-QUOTE` row. A stale but usable cached `X-QUOTE` row may still return an `order_book` object with `is_stale=true` and `order_book_status.status=stale`.
 - `foreign_room = null` when unavailable/no usable `R` row.
 - `session_status = null` when unavailable/no usable `F` row.
-- `news = []` while disabled.
+- `news = []` while disabled or unavailable. `VN_NEWS_PROVIDER=vnstock_news` returns an explicit `news_status` gate with `status=unavailable` and `reason_code=blocked_pending_terms`; it does not fetch articles.
+- `GET /api/v1/stocks/vn/company-news?ticker=FPT` is selected-ticker-only for the optional Community mode and returns at most three rows. `raw_url` preserves the upstream string; `url` is a validated absolute HTTP(S) URL or `null`, so clients must never link `raw_url` directly.
 
 Implemented contract notes:
 
@@ -215,7 +216,7 @@ Implemented contract notes:
 - Profile can have `name = null` and `industry = null` while provider status is `ok`; this is provider OK plus `quality_status = partial`.
 - Profile fields include symbol, name/name_en, exchange, market, industry, sector, security type, issuer, lot size, listed shares, and listed date. Diagnostics contain only sanitized SSI endpoint attempts, row counts, selection source, field coverage, and failure classification.
 - Company price and trading stats now align shared daily values with SSI DailyOhlc; remaining numeric differences versus DailyStockPrice are intentional when fields are explicitly labeled as reference, matched, put-through, adjusted, or foreign-flow values.
-- News placeholders use `NewsProvider future`; financials/events/corporate-action placeholders use `external provider future`. `not_implemented` is allowed for future modules, not live-provider statuses.
+- News placeholders use `NewsProvider future` when no provider is selected; an explicitly selected but unauthorized Vnstock News connector is `unavailable` with `source=Vnstock News` and `reason_code=blocked_pending_terms`. Financials/events/corporate-action placeholders use `external provider future`. `not_implemented` is allowed for future modules, not live-provider statuses.
 
 Future changes:
 
@@ -368,7 +369,8 @@ Potential params:
 
 Planned response rules:
 
-- Current runtime remains `news=[]` and `news_status.status=disabled` until a licensed provider exists.
+- Current default remains `news=[]` with `news_status.status=disabled`. The explicit production Vnstock News gate returns `unavailable` plus `blocked_pending_terms` without calling the package.
+- Local personal mode may return bounded `Vnstock News` rows only when `VN_NEWS_PROVIDER=vnstock_news_personal` and `VNSTOCK_NEWS_PERSONAL_ENABLED=true`; package-missing or fetch failures return explicit unavailable reason codes and do not affect SSI market-data rows.
 - Future usable rows should include item ID, title, summary when allowed, source, source URL when available, published timestamp, tickers, market, category, language, provider, provider item ID, ingestion timestamp, and nullable sentiment/importance only if provider methodology is licensed.
 - News failure must not affect SSI DailyOhlc, DailyStockPrice, intraday, realtime, trade tape, index, or metadata sections.
 - Public RSS, public web pages, browser scraping, and unofficial endpoints are not accepted as production providers without explicit terms approval.

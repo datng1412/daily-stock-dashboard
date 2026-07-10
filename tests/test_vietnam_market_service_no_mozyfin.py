@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import sys
 from datetime import date, timedelta
+from types import SimpleNamespace
 
+from data_provider.vnstock_community_news_provider import clear_vnstock_community_news_cache
 from src.services.vietnam_company_research_service import VietnamCompanyResearchService
 from src.services import vietnam_market_service as vn_market_service
-from src.services.vietnam_market_service import VietnamDashboardConfig, VietnamMarketService
+from src.services.vietnam_market_service import VietnamDashboardConfig, VietnamMarketService, clear_vietnam_cache
 
 
 class ExplodingManager:
@@ -286,7 +289,208 @@ def test_missing_mozyfin_cli_does_not_affect_vn_watchlist(monkeypatch):
     assert "Mozyfin" not in " ".join(item["cache_errors"].values())
 
 
-def test_company_research_uses_ssi_and_not_implemented_placeholders():
+def test_vnstock_news_config_is_blocked_without_affecting_ssi_daily_rows():
+    service = VietnamMarketService(
+        manager=ExplodingManager(),
+        config=VietnamDashboardConfig(
+            daily_data_provider="ssi",
+            chart_data_provider="ssi",
+            daily_stock_price_provider="ssi",
+            index_data_provider="ssi",
+            intraday_data_provider="ssi",
+            realtime_data_provider="ssi",
+            trade_tape_provider="ssi",
+            news_provider="vnstock_news",
+            mozyfin_enabled=False,
+            mozyfin_news_enabled=False,
+        ),
+        ssi_fetcher=FakeSsiFetcher(),
+    )
+
+    item = service.build_watchlist(["FPT"], force_refresh=True)["watchlist"][0]
+
+    assert item["latest_price_source"] == "SSI DailyOhlc"
+    assert item["news"] == []
+    assert item["news_status"]["status"] == "unavailable"
+    assert item["news_status"]["reason_code"] == "blocked_pending_terms"
+    assert item["news_status"]["source"] == "Vnstock News"
+
+
+def test_vnstock_news_personal_package_missing_is_optional(monkeypatch):
+    clear_vietnam_cache()
+    monkeypatch.delitem(sys.modules, "vnstock_news", raising=False)
+    service = VietnamMarketService(
+        manager=ExplodingManager(),
+        config=VietnamDashboardConfig(
+            daily_data_provider="ssi",
+            chart_data_provider="ssi",
+            daily_stock_price_provider="ssi",
+            index_data_provider="ssi",
+            intraday_data_provider="ssi",
+            realtime_data_provider="ssi",
+            trade_tape_provider="ssi",
+            news_provider="vnstock_news_personal",
+            vnstock_news_personal_enabled=True,
+            mozyfin_enabled=False,
+            mozyfin_news_enabled=False,
+        ),
+        ssi_fetcher=FakeSsiFetcher(),
+    )
+
+    item = service.build_watchlist(["FPT"], force_refresh=True)["watchlist"][0]
+
+    assert item["latest_price_source"] == "SSI DailyOhlc"
+    assert item["news"] == []
+    assert item["news_status"]["status"] == "unavailable"
+    assert item["news_status"]["reason_code"] == "provider_package_missing"
+    assert item["cache_status"]["news_cache"] in {"miss", "refresh"}
+
+
+def test_vnstock_news_personal_mocked_success_keeps_ssi_daily_price(monkeypatch):
+    clear_vietnam_cache()
+
+    class FakeCrawler:
+        def __init__(self, site_name):
+            self.site_name = site_name
+
+        def get_articles_from_feed(self, limit_per_feed):
+            return [
+                {
+                    "url": f"https://example.test/{self.site_name}/fpt",
+                    "title": "FPT announces new data center",
+                    "short_description": "FPT expands technology infrastructure.",
+                    "content": "Full content is intentionally not included by default.",
+                    "publish_time": "2026-07-10T09:00:00+07:00",
+                    "category": "business",
+                },
+                {
+                    "url": f"https://example.test/{self.site_name}/general",
+                    "title": "General market update",
+                    "short_description": "No ticker match.",
+                },
+            ][:limit_per_feed]
+
+    monkeypatch.setitem(sys.modules, "vnstock_news", SimpleNamespace(Crawler=FakeCrawler))
+    service = VietnamMarketService(
+        manager=ExplodingManager(),
+        config=VietnamDashboardConfig(
+            daily_data_provider="ssi",
+            chart_data_provider="ssi",
+            daily_stock_price_provider="ssi",
+            index_data_provider="ssi",
+            intraday_data_provider="ssi",
+            realtime_data_provider="ssi",
+            trade_tape_provider="ssi",
+            news_provider="vnstock_news_personal",
+            vnstock_news_personal_enabled=True,
+            vnstock_news_sites="vnexpress",
+            vnstock_news_limit_per_site=2,
+            vnstock_news_include_content=False,
+            mozyfin_enabled=False,
+            mozyfin_news_enabled=False,
+        ),
+        ssi_fetcher=FakeSsiFetcher(),
+    )
+
+    item = service.build_watchlist(["FPT"], force_refresh=True)["watchlist"][0]
+
+    assert item["latest_price_source"] == "SSI DailyOhlc"
+    assert item["news_status"]["status"] == "ok"
+    assert item["news_status"]["reason_code"] == "local_personal_research_only"
+    assert item["news_status"]["rights_status"] == "personal_research_only"
+    assert len(item["news"]) == 1
+    assert item["news"][0]["title"] == "FPT announces new data center"
+    assert item["news"][0]["source"] == "Vnstock News"
+    assert item["news"][0]["content"] is None
+
+
+def test_vnstock_community_news_is_selected_ticker_only_and_keeps_ssi_prices(monkeypatch):
+    clear_vietnam_cache()
+    clear_vnstock_community_news_cache()
+    calls = []
+
+    class FakeCompany:
+        def __init__(self, ticker):
+            self.ticker = ticker
+
+        def news(self):
+            calls.append(self.ticker)
+            return [
+                {
+                    "article_id": f"{self.ticker}-1",
+                    "title": f"{self.ticker} company update",
+                    "publish_time": "2026-07-10T09:00:00+07:00",
+                    "url": "/relative-company-news",
+                }
+            ]
+
+    class FakeReference:
+        def company(self, ticker):
+            return FakeCompany(ticker)
+
+    monkeypatch.setitem(sys.modules, "vnstock", SimpleNamespace(Reference=FakeReference))
+    service = VietnamMarketService(
+        manager=ExplodingManager(),
+        config=VietnamDashboardConfig(
+            daily_data_provider="ssi",
+            chart_data_provider="ssi",
+            daily_stock_price_provider="ssi",
+            index_data_provider="ssi",
+            intraday_data_provider="ssi",
+            realtime_data_provider="ssi",
+            trade_tape_provider="ssi",
+            news_provider="vnstock_community",
+            vnstock_community_news_limit_per_ticker=3,
+            vnstock_community_news_cache_ttl_seconds=1800,
+            vnstock_community_news_timeout_seconds=10,
+            mozyfin_enabled=False,
+            mozyfin_news_enabled=False,
+        ),
+        ssi_fetcher=FakeSsiFetcher(),
+    )
+
+    watchlist = service.build_watchlist(["FPT", "HPG"], force_refresh=True)
+    assert calls == []
+    assert all(row["news"] == [] for row in watchlist["watchlist"])
+    assert all(row["latest_price_source"] == "SSI DailyOhlc" for row in watchlist["watchlist"])
+
+    selected = service.get_company_news("FPT")
+    cached = service.get_company_news("FPT")
+    assert calls == ["FPT"]
+    assert selected["status"] == "ok"
+    assert selected["news"][0]["ticker"] == "FPT"
+    assert selected["news"][0]["url"] is None
+    assert selected["news"][0]["raw_url"] == "/relative-company-news"
+    assert cached["cache"]["status"] == "hit"
+
+
+def test_vnstock_community_news_is_available_to_one_company_snapshot(monkeypatch):
+    clear_vietnam_cache()
+    clear_vnstock_community_news_cache()
+
+    class FakeReference:
+        def company(self, ticker):
+            self.ticker = ticker
+            return self
+
+        def news(self):
+            return [{"article_id": "fpt-1", "title": "FPT company update", "publish_time": "2026-07-10T09:00:00+07:00", "url": "/news"}]
+
+    monkeypatch.setitem(sys.modules, "vnstock", SimpleNamespace(Reference=FakeReference))
+    service = VietnamMarketService(
+        manager=ExplodingManager(),
+        config=VietnamDashboardConfig(news_provider="vnstock_community"),
+        ssi_fetcher=FakeSsiFetcher(),
+    )
+
+    snapshot = VietnamCompanyResearchService(market_service=service).get_company_research_snapshot("FPT")
+
+    assert snapshot["price"]["canonical_source"] == "SSI DailyOhlc"
+    assert snapshot["news"]["status"] == "ok"
+    assert len(snapshot["news"]["items"]) == 1
+
+
+def test_company_research_uses_ssi_and_disabled_news_placeholder():
     snapshot = VietnamCompanyResearchService(market_service=_service()).get_company_research_snapshot(
         "FPT",
         force_refresh=True,
@@ -302,7 +506,7 @@ def test_company_research_uses_ssi_and_not_implemented_placeholders():
     assert snapshot["news"]["source"] != "SSI"
     assert snapshot["financials"]["source"] != "SSI"
     assert snapshot["events"]["source"] != "SSI"
-    assert snapshot["news"]["status"] == "not_implemented"
+    assert snapshot["news"]["status"] == "disabled"
     assert snapshot["financials"]["status"] == "not_implemented"
     assert snapshot["events"]["status"] == "not_implemented"
     assert snapshot["data_quality_summary"]["canonical_price_source"] == "SSI DailyOhlc"

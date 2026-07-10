@@ -335,6 +335,22 @@ class VietnamWatchlistResponse(BaseModel):
     formulas: Dict[str, str] = Field(default_factory=dict)
 
 
+class VietnamCompanyNewsResponse(BaseModel):
+    """Optional source-labeled company news for one explicit VN ticker."""
+
+    ticker: Optional[str] = None
+    status: str = "disabled"
+    source: Optional[str] = None
+    provider: Optional[str] = None
+    provider_mode: Optional[str] = None
+    reason_code: Optional[str] = None
+    rights_status: Optional[str] = None
+    message: Optional[str] = None
+    fetched_at: Optional[str] = None
+    cache: Dict[str, Any] = Field(default_factory=dict)
+    news: List[Dict[str, Any]] = Field(default_factory=list)
+
+
 class VietnamChartResponse(BaseModel):
     """Selected Vietnam symbol daily chart response."""
 

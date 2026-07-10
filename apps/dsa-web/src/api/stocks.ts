@@ -213,8 +213,15 @@ export type VietnamWatchItem = {
   warnings: string[];
   news: Array<{
     title?: string;
-    url?: string;
+    url?: string | null;
+    rawUrl?: string | null;
+    id?: string | null;
+    ticker?: string | null;
     source?: string;
+    provider?: string | null;
+    providerMode?: string | null;
+    sourceName?: string | null;
+    sourceUrl?: string | null;
     publishedAt?: string | number | null;
     publishedDate?: string | number | null;
     publishedTime?: string | number | null;
@@ -223,11 +230,25 @@ export type VietnamWatchItem = {
     time?: string | number | null;
     timestamp?: string | number | null;
     summary?: string;
+    category?: string | null;
+    author?: string | null;
+    imageUrl?: string | null;
+    contentAvailable?: boolean | null;
+    content?: string | null;
+    fetchedAt?: string | null;
+    rightsStatus?: string | null;
+    tickerRelevance?: Record<string, unknown> | null;
   }>;
   newsStatus?: {
     status?: string | null;
     source?: string | null;
+    provider?: string | null;
+    providerMode?: string | null;
     message?: string | null;
+    reasonCode?: string | null;
+    rightsStatus?: string | null;
+    count?: number | null;
+    providerItemsCount?: number | null;
     items?: unknown[];
   };
   intradayTimeframe?: string | null;
@@ -385,6 +406,24 @@ export type VietnamSymbolMetadata = {
   missingFields?: string[];
   fieldCoverage?: Record<string, boolean>;
   diagnostics?: Record<string, unknown>;
+};
+
+export type VietnamCompanyNewsResponse = {
+  ticker?: string | null;
+  status: 'ok' | 'disabled' | 'unavailable' | 'stale' | string;
+  source?: string | null;
+  provider?: string | null;
+  providerMode?: string | null;
+  reasonCode?: string | null;
+  rightsStatus?: string | null;
+  message?: string | null;
+  fetchedAt?: string | null;
+  cache?: {
+    status?: string | null;
+    lastFetchedAt?: string | null;
+    nextRefreshAt?: string | null;
+  };
+  news: VietnamWatchItem['news'];
 };
 
 export type VietnamDailyStockPrice = {
@@ -1149,6 +1188,19 @@ export const stocksApi = {
     });
     const { toCamelCase } = await import('./utils');
     return normalizeVietnamCompanyResearchResponse(toCamelCase<VietnamCompanyResearchResponse>(response.data));
+  },
+
+  async getVietnamCompanyNews(
+    ticker: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<VietnamCompanyNewsResponse> {
+    const response = await apiClient.get('/api/v1/stocks/vn/company-news', {
+      params: { ticker },
+      timeout: 30000,
+      signal: options?.signal,
+    });
+    const { toCamelCase } = await import('./utils');
+    return toCamelCase<VietnamCompanyNewsResponse>(response.data);
   },
 
   async getVietnamIndexList(market = 'HOSE'): Promise<VietnamIndexListResponse> {

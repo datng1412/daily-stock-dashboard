@@ -35,6 +35,14 @@ from data_provider.ssi_streaming_realtime import (
     SSI_STREAMING_REALTIME_DISABLED_REASON,
     normalize_trade_side,
 )
+from data_provider.vnstock_news_provider import (
+    VNSTOCK_NEWS_PERSONAL_PROVIDER,
+    VnstockNewsProvider,
+)
+from data_provider.vnstock_community_news_provider import (
+    VNSTOCK_COMMUNITY_NEWS_PROVIDER,
+    VnstockCommunityNewsProvider,
+)
 from src.config import get_config
 from src.services.vietnam_observability import (
     monotonic_ms,
@@ -299,6 +307,27 @@ def normalize_vietnam_tickers(values: Optional[Iterable[str]]) -> List[str]:
     return symbols
 
 
+def _filter_vnstock_news_items_for_symbol(items: Iterable[Dict[str, Any]], symbol: str) -> List[Dict[str, Any]]:
+    ticker = vn_ticker(symbol)
+    if not ticker:
+        return []
+    pattern = re.compile(rf"(?<![A-Z0-9]){re.escape(ticker)}(?![A-Z0-9])", re.IGNORECASE)
+    matched: List[Dict[str, Any]] = []
+    for item in items:
+        text = " ".join(str(item.get(key) or "") for key in ("title", "summary"))
+        if not pattern.search(text):
+            continue
+        enriched = dict(item)
+        enriched["ticker"] = ticker
+        enriched["ticker_relevance"] = {
+            "method": "weak_exact_symbol_match",
+            "confidence": "weak",
+            "tickers": [ticker],
+        }
+        matched.append(enriched)
+    return matched
+
+
 def _get_cache_entry(key: Tuple[Any, ...]) -> Optional[_CacheEntry]:
     with _VN_CACHE_LOCK:
         return _VN_CACHE.get(key)
@@ -444,6 +473,15 @@ class VietnamDashboardConfig:
     intraday_timeframe: str = "1h"
     intraday_limit: int = 8
     news_provider: str = "disabled"
+    vnstock_news_personal_enabled: bool = False
+    vnstock_news_sites: str = "vnexpress,cafef"
+    vnstock_news_limit_per_site: int = 5
+    vnstock_news_timeout_seconds: int = 10
+    vnstock_news_cache_ttl_seconds: int = 1800
+    vnstock_news_include_content: bool = False
+    vnstock_community_news_limit_per_ticker: int = 3
+    vnstock_community_news_cache_ttl_seconds: int = 1800
+    vnstock_community_news_timeout_seconds: int = 10
     mozyfin_enabled: bool = False
     mozyfin_news_enabled: bool = False
     allow_legacy_mozyfin_provider: bool = False
@@ -487,6 +525,15 @@ def _default_dashboard_config() -> VietnamDashboardConfig:
         allow_legacy_kbs_provider=getattr(app_config, "vn_allow_legacy_kbs_provider", False),
         provider_comparison_enabled=getattr(app_config, "vn_provider_comparison_enabled", False),
         news_provider=getattr(app_config, "vn_news_provider", "disabled"),
+        vnstock_news_personal_enabled=getattr(app_config, "vnstock_news_personal_enabled", False),
+        vnstock_news_sites=getattr(app_config, "vnstock_news_sites", "vnexpress,cafef"),
+        vnstock_news_limit_per_site=getattr(app_config, "vnstock_news_limit_per_site", 5),
+        vnstock_news_timeout_seconds=getattr(app_config, "vnstock_news_timeout_seconds", 10),
+        vnstock_news_cache_ttl_seconds=getattr(app_config, "vnstock_news_cache_ttl_seconds", 1800),
+        vnstock_news_include_content=getattr(app_config, "vnstock_news_include_content", False),
+        vnstock_community_news_limit_per_ticker=getattr(app_config, "vnstock_community_news_limit_per_ticker", 3),
+        vnstock_community_news_cache_ttl_seconds=getattr(app_config, "vnstock_community_news_cache_ttl_seconds", 1800),
+        vnstock_community_news_timeout_seconds=getattr(app_config, "vnstock_community_news_timeout_seconds", 10),
         mozyfin_enabled=getattr(app_config, "mozyfin_enabled", False),
         mozyfin_news_enabled=getattr(app_config, "mozyfin_news_enabled", False),
         allow_legacy_mozyfin_provider=getattr(app_config, "vn_allow_legacy_mozyfin_provider", False),
@@ -3464,14 +3511,148 @@ class VietnamMarketService:
             "news": None,
         }
 
-    @staticmethod
-    def _news_status_block() -> Dict[str, Any]:
+    def _news_status_block(self) -> Dict[str, Any]:
+        provider = str(self.config.news_provider or "disabled").strip().lower()
+        if provider == "vnstock_news":
+            return VnstockNewsProvider.blocked_status()
+        if provider == VNSTOCK_COMMUNITY_NEWS_PROVIDER:
+            return {
+                "status": "ok",
+                "source": "Vnstock Community",
+                "provider": VNSTOCK_COMMUNITY_NEWS_PROVIDER,
+                "provider_mode": "community_free_ticker_news",
+                "items": [],
+                "message": "Company news loads only for the selected ticker.",
+                "reason_code": "selected_ticker_only",
+                "rights_status": "personal_research_only",
+            }
+        if provider == VNSTOCK_NEWS_PERSONAL_PROVIDER:
+            if not self.config.vnstock_news_personal_enabled:
+                return VnstockNewsProvider.personal_disabled_status()
+            return {
+                "status": "loading",
+                "source": "Vnstock News",
+                "provider": VNSTOCK_NEWS_PERSONAL_PROVIDER,
+                "provider_mode": "local_personal_research_only",
+                "items": [],
+                "message": "Vnstock News personal research mode is enabled.",
+                "reason_code": "local_personal_research_only",
+                "rights_status": "personal_research_only",
+            }
         return {
             "status": "disabled",
             "source": None,
             "items": [],
             "message": VN_NEWS_DISABLED_REASON,
         }
+
+    def _load_news_payload(self, symbol: str, *, force_refresh: bool = False) -> Dict[str, Any]:
+        provider = str(self.config.news_provider or "disabled").strip().lower()
+        if provider == VNSTOCK_COMMUNITY_NEWS_PROVIDER:
+            # General watchlist force refresh deliberately does not bypass this
+            # bounded ticker cache. Community news has its own 30-minute TTL.
+            payload = VnstockCommunityNewsProvider(
+                limit_per_ticker=self.config.vnstock_community_news_limit_per_ticker,
+                cache_ttl_seconds=self.config.vnstock_community_news_cache_ttl_seconds,
+                timeout_seconds=self.config.vnstock_community_news_timeout_seconds,
+            ).get_company_news(symbol)
+            return {
+                "news": [dict(item) for item in payload.get("items") or [] if isinstance(item, dict)],
+                "news_status": {key: value for key, value in payload.items() if key != "items"},
+                "cache_status": payload.get("cache_status") or "error",
+                "cache_last_fetched_at": payload.get("fetched_at"),
+                "cache_next_refresh_at": None,
+                "cache_error": None if payload.get("status") in {"ok", "stale"} else payload.get("reason_code"),
+            }
+        if provider != VNSTOCK_NEWS_PERSONAL_PROVIDER or not self.config.vnstock_news_personal_enabled:
+            return {
+                "news": [],
+                "news_status": self._news_status_block(),
+                "cache_status": "disabled",
+                "cache_last_fetched_at": None,
+                "cache_next_refresh_at": None,
+                "cache_error": None,
+            }
+
+        cache_key = _cache_key(
+            "news",
+            "ALL",
+            provider=provider,
+            enabled=self.config.vnstock_news_personal_enabled,
+            sites=self.config.vnstock_news_sites,
+            limit_per_site=self.config.vnstock_news_limit_per_site,
+            include_content=self.config.vnstock_news_include_content,
+        )
+
+        def _fetch() -> Dict[str, Any]:
+            return VnstockNewsProvider(
+                provider=provider,
+                personal_enabled=self.config.vnstock_news_personal_enabled,
+                sites=self.config.vnstock_news_sites,
+                limit_per_site=self.config.vnstock_news_limit_per_site,
+                timeout_seconds=self.config.vnstock_news_timeout_seconds,
+                include_content=self.config.vnstock_news_include_content,
+            ).fetch_recent_news()
+
+        result = _read_cache(
+            cache_key,
+            "news",
+            _fetch,
+            force_refresh=force_refresh,
+            ttl_resolver=lambda _payload: self.config.vnstock_news_cache_ttl_seconds,
+        )
+        base_status = dict(result["value"] or {})
+        all_items = [dict(item) for item in base_status.get("items") or [] if isinstance(item, dict)]
+        status = dict(base_status)
+        status["items"] = []
+        news_items = _filter_vnstock_news_items_for_symbol(all_items, symbol)
+        if status.get("status") == "ok":
+            status["count"] = len(news_items)
+            if news_items:
+                status["message"] = f"Vnstock News personal research feed loaded for {vn_ticker(symbol)}."
+                status["reason_code"] = "local_personal_research_only"
+            else:
+                status["message"] = (
+                    f"No recent Vnstock News articles matched {vn_ticker(symbol)} in title or summary."
+                )
+                status["reason_code"] = "ticker_no_weak_match"
+        return {
+            "news": news_items,
+            "news_status": status,
+            "cache_status": result["status"],
+            "cache_last_fetched_at": _iso(result["entry"].fetched_at),
+            "cache_next_refresh_at": _iso(result["entry"].expires_at),
+            "cache_error": result["error"],
+        }
+
+    def get_company_news(self, ticker: str) -> Dict[str, Any]:
+        """Return optional news for one explicit dashboard/company ticker only."""
+        symbol = vn_ticker(str(ticker or "").strip().upper())
+        if not symbol:
+            payload = VnstockCommunityNewsProvider.disabled_status()
+            payload.update(
+                {
+                    "status": "unavailable",
+                    "reason_code": "invalid_ticker",
+                    "message": "Company news requires a valid Vietnam ticker.",
+                    "ticker": None,
+                }
+            )
+            return payload
+        payload = self._load_news_payload(symbol, force_refresh=False)
+        status = dict(payload["news_status"])
+        status.update(
+            {
+                "ticker": symbol,
+                "news": payload["news"],
+                "cache": {
+                    "status": payload["cache_status"],
+                    "last_fetched_at": payload["cache_last_fetched_at"],
+                    "next_refresh_at": payload["cache_next_refresh_at"],
+                },
+            }
+        )
+        return status
 
     @staticmethod
     def _disabled_realtime_payload(symbol: str) -> Dict[str, Any]:
@@ -4930,6 +5111,7 @@ class VietnamMarketService:
         include_intraday: Optional[bool] = None,
         intraday_timeframe: Optional[str] = None,
         intraday_limit: Optional[int] = None,
+        include_news: Optional[bool] = None,
     ) -> Dict[str, Any]:
         symbols = normalize_vietnam_tickers(tickers)
         _observe(observe_mozyfin_watchlist_request, len(symbols))
@@ -4939,6 +5121,13 @@ class VietnamMarketService:
         use_intraday = self.config.include_intraday if include_intraday is None else include_intraday
         effective_intraday_timeframe = intraday_timeframe or self.config.intraday_timeframe
         effective_intraday_limit = intraday_limit or self.config.intraday_limit
+        # Community news is intentionally selected-ticker/company-only. Preserve
+        # the existing behavior for disabled and Sponsor modes.
+        use_news = (
+            self.config.news_provider != VNSTOCK_COMMUNITY_NEWS_PROVIDER
+            if include_news is None
+            else bool(include_news)
+        )
         for symbol in symbols:
             try:
                 rows.append(
@@ -4948,6 +5137,7 @@ class VietnamMarketService:
                         include_intraday=use_intraday,
                         intraday_timeframe=effective_intraday_timeframe,
                         intraday_limit=effective_intraday_limit,
+                        include_news=use_news,
                     )
                 )
             except Exception as exc:
@@ -6287,6 +6477,7 @@ class VietnamMarketService:
         include_intraday: bool = True,
         intraday_timeframe: str = "1h",
         intraday_limit: int = 8,
+        include_news: bool = True,
     ) -> Dict[str, Any]:
         daily_provider = self.config.daily_data_provider
         ohlcv_key = self._daily_ohlcv_cache_key(
@@ -6338,6 +6529,23 @@ class VietnamMarketService:
             cache_last_fetched_at.update(daily_stock_price_payload["cache_last_fetched_at"])
             cache_next_refresh_at.update(daily_stock_price_payload["cache_next_refresh_at"])
             cache_errors.update(daily_stock_price_payload["cache_errors"])
+            news_payload = (
+                self._load_news_payload(symbol, force_refresh=force_refresh)
+                if include_news
+                else {
+                    "news": [],
+                    "news_status": self._news_status_block(),
+                    "cache_status": "disabled",
+                    "cache_last_fetched_at": None,
+                    "cache_next_refresh_at": None,
+                    "cache_error": None,
+                }
+            )
+            cache_status["news_cache"] = news_payload["cache_status"]
+            cache_last_fetched_at["news"] = news_payload["cache_last_fetched_at"]
+            cache_next_refresh_at["news"] = news_payload["cache_next_refresh_at"]
+            if news_payload["cache_error"]:
+                cache_errors["news"] = news_payload["cache_error"]
             daily_stock_price_status = str(ssi_daily_stock_price.get("status") or "unavailable")
             price_limit_status = (
                 "ok"
@@ -6437,8 +6645,8 @@ class VietnamMarketService:
                     _status_detail("Watch", "info", "No OHLCV rows were returned for rule evaluation.", {})
                 ],
                 "warnings": [unavailable_reason],
-                "news": [],
-                "news_status": self._news_status_block(),
+                "news": news_payload["news"],
+                "news_status": news_payload["news_status"],
                 **self._disabled_intraday_payload(intraday_timeframe),
                 **self._disabled_realtime_payload(symbol),
                 **self._disabled_order_book_payload(symbol),
@@ -6775,7 +6983,24 @@ class VietnamMarketService:
             rows_loaded=len(df),
         )
         status_labels = [detail["label"] for detail in status_details]
-        news: List[Dict[str, Any]] = []
+        news_payload = (
+            self._load_news_payload(symbol, force_refresh=force_refresh)
+            if include_news
+            else {
+                "news": [],
+                "news_status": self._news_status_block(),
+                "cache_status": "disabled",
+                "cache_last_fetched_at": None,
+                "cache_next_refresh_at": None,
+                "cache_error": None,
+            }
+        )
+        cache_status["news_cache"] = news_payload["cache_status"]
+        cache_last_fetched_at["news"] = news_payload["cache_last_fetched_at"]
+        cache_next_refresh_at["news"] = news_payload["cache_next_refresh_at"]
+        if news_payload["cache_error"]:
+            cache_errors["news"] = news_payload["cache_error"]
+        news: List[Dict[str, Any]] = list(news_payload["news"])
 
         warnings: List[str] = []
         if ohlcv_result["status"] == "stale" or "stale" in cache_status.values():
@@ -6909,7 +7134,7 @@ class VietnamMarketService:
             "trend": {},
             "warnings": warnings,
             "news": news,
-            "news_status": self._news_status_block(),
+            "news_status": news_payload["news_status"],
             **intraday_payload,
             **realtime_payload,
             **order_book_payload,

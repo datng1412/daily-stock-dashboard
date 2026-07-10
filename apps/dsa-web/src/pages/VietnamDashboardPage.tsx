@@ -5,6 +5,7 @@ import {
   stocksApi,
   type VietnamChartPoint,
   type VietnamChartResponse,
+  type VietnamCompanyNewsResponse,
   type VietnamCorporateActionEvent,
   type VietnamCorporateActionsResponse,
   type VietnamDailyIndexResponse,
@@ -1336,14 +1337,35 @@ const mergeVn30BatchResponses = (
 const newsUnavailableText = (item: VietnamWatchItem) => (
   item.newsStatus?.status === 'disabled'
     ? 'News disabled'
+    : item.newsStatus?.status === 'ok'
+      ? item.newsStatus?.message ?? 'No recent ticker-matched news.'
     : item.newsStatus?.message ?? 'News not implemented.'
 );
+
+const safeExternalNewsUrl = (value?: string | null): string | null => {
+  if (!value) return null;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? value : null;
+  } catch {
+    return null;
+  }
+};
 
 const newsContextStatusLabel = (item: VietnamWatchItem, newsCount: number) => {
   if (newsCount > 0) return 'News available';
   if (item.newsStatus?.status === 'disabled') return 'News disabled';
+  if (item.newsStatus?.status === 'unavailable') return 'News unavailable';
+  if (item.newsStatus?.status === 'ok') return 'No matched news';
   return 'News not implemented';
 };
+
+const isPersonalResearchNews = (news: VietnamNewsItem, item?: VietnamWatchItem | null) => (
+  news.providerMode === 'local_personal_research_only'
+  || news.rightsStatus === 'personal_research_only'
+  || item?.newsStatus?.providerMode === 'local_personal_research_only'
+  || item?.newsStatus?.rightsStatus === 'personal_research_only'
+);
 
 const realtimeErrorMessage = (error?: string | null) => {
   if (!error) return null;
@@ -1896,19 +1918,27 @@ const WatchCard: React.FC<{ item: VietnamWatchItem; realtimeQuote?: VietnamRealt
           {newsItems.slice(0, 2).map((news, index) => {
             const timestamp = newsTimestamp(news);
             const absoluteTime = parseMozyTimestamp(timestamp) ? formatAbsoluteDateTime(timestamp) : undefined;
+            const url = safeExternalNewsUrl(news.url);
             return (
               <div key={`${news.title}-${news.url ?? index}`} className="min-w-0">
-                <a
-                  href={news.url || '#'}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="block truncate text-sm text-cyan hover:underline"
-                >
-                  {neutralizeRecommendationText(news.title) || 'Untitled news'}
-                </a>
+                {url ? (
+                  <a
+                    href={url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block truncate text-sm text-cyan hover:underline"
+                  >
+                    {neutralizeRecommendationText(news.title) || 'Untitled news'}
+                  </a>
+                ) : (
+                  <p className="block truncate text-sm text-foreground">{neutralizeRecommendationText(news.title) || 'Untitled news'}</p>
+                )}
                 <div className="truncate text-xs text-secondary-text" title={absoluteTime}>
                   {[news.source, formatRelativeTime(timestamp)].filter(Boolean).join(' · ')}
                 </div>
+                {isPersonalResearchNews(news, item) ? (
+                  <Badge variant="info">Personal research</Badge>
+                ) : null}
               </div>
             );
           })}
@@ -2440,6 +2470,7 @@ const SelectedTickerHeader: React.FC<{
                 <Badge variant="warning">{tradeTapeStatusBadgeText(tradeTapeStatus)}</Badge>
               ) : null}
               {item.newsStatus?.status === 'disabled' ? <Badge variant="default">News disabled</Badge> : null}
+              {item.newsStatus?.status === 'unavailable' ? <Badge variant="warning">News unavailable</Badge> : null}
             </div>
           </div>
 
@@ -3941,6 +3972,8 @@ const StockDetailView: React.FC<{
   corporateActions?: VietnamCorporateActionsResponse | null;
   corporateActionsLoading?: boolean;
   corporateActionsError?: string | null;
+  companyNews?: VietnamCompanyNewsResponse | null;
+  companyNewsLoading?: boolean;
   tradesLoading?: boolean;
   tradesError?: string | null;
   marketPhase: VietnamMarketPhase;
@@ -3953,6 +3986,8 @@ const StockDetailView: React.FC<{
   corporateActions = null,
   corporateActionsLoading = false,
   corporateActionsError,
+  companyNews = null,
+  companyNewsLoading = false,
   tradesLoading = false,
   tradesError,
   marketPhase,
@@ -4026,8 +4061,32 @@ const StockDetailView: React.FC<{
   const foreignNet20dLatestAvailable = indicators.foreignNet20dLatestAvailable;
   const foreignHistoryCount = indicators.foreignNetHistoryCount ?? 0;
   const ssiDerivedMetricsSource = indicators.ssiDerivedMetricsSource ?? 'SSI-derived';
-  const detailNewsItems = item.news ?? [];
-  const newsContextStatus = newsContextStatusLabel(item, detailNewsItems.length);
+  const companyNewsMatchesTicker = normalizeVietnamTicker(companyNews?.ticker ?? '') === item.ticker;
+  const useCompanyNews = companyNewsMatchesTicker && (
+    companyNews?.provider === 'vnstock_community'
+    || companyNews?.providerMode === 'community_free_ticker_news'
+    || !item.newsStatus?.status
+  );
+  const newsItem = useCompanyNews
+    ? {
+        ...item,
+        news: companyNews?.news ?? [],
+        newsStatus: {
+          ...item.newsStatus,
+          status: companyNews?.status,
+          source: companyNews?.source,
+          provider: companyNews?.provider,
+          providerMode: companyNews?.providerMode,
+          message: companyNews?.message,
+          reasonCode: companyNews?.reasonCode,
+          rightsStatus: companyNews?.rightsStatus,
+        },
+      }
+    : item;
+  const detailNewsItems = newsItem.news ?? [];
+  const newsContextStatus = companyNewsLoading && (!companyNews || useCompanyNews)
+    ? 'Loading news'
+    : newsContextStatusLabel(newsItem, detailNewsItems.length);
   const ssiDailyStockPrice = item.dailyStockPrice ?? {};
   const ssiReferencePrice = ssiDailyStockPrice.referencePrice ?? item.ssiReferencePrice ?? item.priceLimit?.referencePrice ?? null;
   const ssiCeilingPrice = ssiDailyStockPrice.ceilingPrice ?? item.ssiCeilingPrice ?? item.priceLimit?.ceilingPrice ?? null;
@@ -4698,30 +4757,51 @@ const StockDetailView: React.FC<{
       <SelectedTickerDisclosure title="News context">
       <div className="mt-4 rounded-lg border border-border/60 bg-elevated/30 p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-sm font-semibold text-foreground">News</h3>
-          <Badge variant={detailNewsItems.length ? 'info' : 'default'}>{newsContextStatus}</Badge>
+          <h3 className="text-sm font-semibold text-foreground">News for {item.ticker}</h3>
+          <span className="flex flex-wrap items-center gap-2">
+            {newsItem.newsStatus?.source === 'Vnstock Community' ? <Badge variant="info">Vnstock Community</Badge> : null}
+            <Badge variant={detailNewsItems.length ? 'info' : 'default'}>{newsContextStatus}</Badge>
+          </span>
         </div>
         {detailNewsItems.length ? (
           <div className="mt-3 grid gap-3">
-            {detailNewsItems.slice(0, DETAIL_NEWS_LIMIT).map((news, index) => {
+            {detailNewsItems.slice(0, newsItem.newsStatus?.providerMode === 'community_free_ticker_news' ? 3 : DETAIL_NEWS_LIMIT).map((news, index) => {
               const summaryHasArtifacts = hasEncodingArtifacts(news.summary);
               const titleHasArtifacts = hasEncodingArtifacts(news.title);
               const timestamp = newsTimestamp(news);
               const absoluteTime = parseMozyTimestamp(timestamp) ? formatAbsoluteDateTime(timestamp) : undefined;
+              const url = safeExternalNewsUrl(news.url);
               return (
                 <article key={`${item.ticker}-detail-news-${news.url ?? news.title ?? index}`} className="rounded-lg border border-border/50 bg-card/50 p-3">
-                  <a
-                    href={news.url || '#'}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-sm font-medium text-cyan hover:underline"
-                  >
-                    {neutralizeRecommendationText(news.title) || 'Untitled news'}
-                  </a>
+                  {url ? (
+                    <a
+                      href={url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-sm font-medium text-cyan hover:underline"
+                    >
+                      {neutralizeRecommendationText(news.title) || 'Untitled news'}
+                    </a>
+                  ) : (
+                    <p className="text-sm font-medium text-foreground">{neutralizeRecommendationText(news.title) || 'Untitled news'}</p>
+                  )}
                   <div className="mt-1 flex flex-wrap gap-2 text-xs text-secondary-text" title={absoluteTime}>
-                    {news.source ? <span>{news.source}</span> : null}
+                    {news.source === 'Vnstock Community' ? <Badge variant="info">Vnstock Community</Badge> : news.source ? <span>{news.source}</span> : null}
                     {news.source ? <span aria-hidden="true">·</span> : null}
+                    {news.sourceName ? (
+                      <>
+                        <span>{news.sourceName}</span>
+                        <span aria-hidden="true">-</span>
+                      </>
+                    ) : null}
+                    {news.category ? (
+                      <>
+                        <span>{news.category}</span>
+                        <span aria-hidden="true">-</span>
+                      </>
+                    ) : null}
                     <span>{formatRelativeTime(timestamp)}</span>
+                    {isPersonalResearchNews(news, newsItem) ? <Badge variant="info">Personal research</Badge> : null}
                   </div>
                   {news.summary && !summaryHasArtifacts ? (
                     <p className="mt-2 line-clamp-2 text-sm text-secondary-text">{neutralizeRecommendationText(news.summary)}</p>
@@ -4737,7 +4817,7 @@ const StockDetailView: React.FC<{
           </div>
         ) : (
           <p className="mt-3 text-sm text-secondary-text">
-            {newsUnavailableText(item)}
+            {companyNewsLoading && (!companyNews || useCompanyNews) ? 'Loading company news…' : newsUnavailableText(newsItem)}
           </p>
         )}
       </div>
@@ -4813,6 +4893,8 @@ const VietnamDashboardPage: React.FC = () => {
   const [corporateActions, setCorporateActions] = useState<VietnamCorporateActionsResponse | null>(null);
   const [corporateActionsLoading, setCorporateActionsLoading] = useState(false);
   const [corporateActionsError, setCorporateActionsError] = useState<string | null>(null);
+  const [selectedCompanyNews, setSelectedCompanyNews] = useState<VietnamCompanyNewsResponse | null>(null);
+  const [selectedCompanyNewsLoading, setSelectedCompanyNewsLoading] = useState(false);
   const [dailyIndex, setDailyIndex] = useState<VietnamDailyIndexResponse | null>(null);
   const [indexList, setIndexList] = useState<VietnamIndexListResponse | null>(null);
   const [indexComponents, setIndexComponents] = useState<VietnamIndexComponentsResponse | null>(null);
@@ -4876,6 +4958,7 @@ const VietnamDashboardPage: React.FC = () => {
   const tradesRequestIdRef = useRef(0);
   const selectedLiveContextRequestIdRef = useRef(0);
   const corporateActionsRequestIdRef = useRef(0);
+  const companyNewsRequestIdRef = useRef(0);
   const nextRefreshAtRef = useRef(0);
   const realtimeSnapshotNextRefreshAtRef = useRef(0);
   const tradeTapeNextRefreshAtRef = useRef(0);
@@ -5661,6 +5744,8 @@ const VietnamDashboardPage: React.FC = () => {
     setRealtimeTradesResponse(null);
     setCorporateActions(null);
     setCorporateActionsError(null);
+    setSelectedCompanyNews(null);
+    setSelectedCompanyNewsLoading(false);
     setLoading(false);
     setForceLoading(false);
     setError(null);
@@ -5722,6 +5807,45 @@ const VietnamDashboardPage: React.FC = () => {
   useEffect(() => {
     void loadCorporateActions(selectedTicker);
   }, [loadCorporateActions, selectedTicker]);
+
+  useEffect(() => {
+    const ticker = normalizeVietnamTicker(selectedTicker ?? '');
+    const requestId = companyNewsRequestIdRef.current + 1;
+    companyNewsRequestIdRef.current = requestId;
+    if (!ticker) {
+      setSelectedCompanyNews(null);
+      setSelectedCompanyNewsLoading(false);
+      return undefined;
+    }
+    const controller = new AbortController();
+    setSelectedCompanyNewsLoading(true);
+    void stocksApi.getVietnamCompanyNews(ticker, { signal: controller.signal })
+      .then((response) => {
+        if (requestId === companyNewsRequestIdRef.current) {
+          setSelectedCompanyNews(response);
+        }
+      })
+      .catch((err: unknown) => {
+        if (controller.signal.aborted || requestId !== companyNewsRequestIdRef.current) return;
+        setSelectedCompanyNews({
+          ticker,
+          status: 'unavailable',
+          source: 'Vnstock Community',
+          provider: 'vnstock_community',
+          providerMode: 'community_free_ticker_news',
+          reasonCode: 'provider_error',
+          rightsStatus: 'personal_research_only',
+          message: err instanceof Error ? 'Company news is temporarily unavailable.' : 'Company news is temporarily unavailable.',
+          news: [],
+        });
+      })
+      .finally(() => {
+        if (requestId === companyNewsRequestIdRef.current) {
+          setSelectedCompanyNewsLoading(false);
+        }
+      });
+    return () => controller.abort();
+  }, [selectedTicker]);
 
   useEffect(() => {
     const onVisibilityChange = () => {
@@ -6544,6 +6668,8 @@ const VietnamDashboardPage: React.FC = () => {
             corporateActions={corporateActions}
             corporateActionsLoading={corporateActionsLoading}
             corporateActionsError={corporateActionsError}
+            companyNews={selectedCompanyNews}
+            companyNewsLoading={selectedCompanyNewsLoading}
             tradesLoading={tradesLoading}
             tradesError={tradesError}
             marketPhase={marketPhase}

@@ -690,6 +690,15 @@ class Config:
     mozyfin_enabled: bool = False
     mozyfin_news_enabled: bool = False
     vn_news_provider: str = "disabled"
+    vnstock_news_personal_enabled: bool = False
+    vnstock_news_sites: str = "vnexpress,cafef"
+    vnstock_news_limit_per_site: int = 5
+    vnstock_news_timeout_seconds: int = 10
+    vnstock_news_cache_ttl_seconds: int = 1800
+    vnstock_news_include_content: bool = False
+    vnstock_community_news_limit_per_ticker: int = 3
+    vnstock_community_news_cache_ttl_seconds: int = 1800
+    vnstock_community_news_timeout_seconds: int = 10
     vn_allow_legacy_mozyfin_provider: bool = False
 
     # === AlphaSift optional stock screening integration ===
@@ -2060,9 +2069,60 @@ class Config:
             ),
             vn_news_provider=parse_env_choice(
                 os.getenv('VN_NEWS_PROVIDER'),
-                {'disabled'},
+                {'disabled', 'vnstock_news', 'vnstock_news_personal', 'vnstock_community'},
                 'disabled',
                 field_name='VN_NEWS_PROVIDER',
+            ),
+            vnstock_news_personal_enabled=parse_env_bool(
+                os.getenv('VNSTOCK_NEWS_PERSONAL_ENABLED'),
+                default=False,
+            ),
+            vnstock_news_sites=os.getenv('VNSTOCK_NEWS_SITES', 'vnexpress,cafef'),
+            vnstock_news_limit_per_site=parse_env_int(
+                os.getenv('VNSTOCK_NEWS_LIMIT_PER_SITE'),
+                5,
+                field_name='VNSTOCK_NEWS_LIMIT_PER_SITE',
+                minimum=1,
+                maximum=20,
+            ),
+            vnstock_news_timeout_seconds=parse_env_int(
+                os.getenv('VNSTOCK_NEWS_TIMEOUT_SECONDS'),
+                10,
+                field_name='VNSTOCK_NEWS_TIMEOUT_SECONDS',
+                minimum=1,
+                maximum=60,
+            ),
+            vnstock_news_cache_ttl_seconds=parse_env_int(
+                os.getenv('VNSTOCK_NEWS_CACHE_TTL_SECONDS'),
+                1800,
+                field_name='VNSTOCK_NEWS_CACHE_TTL_SECONDS',
+                minimum=60,
+                maximum=86400,
+            ),
+            vnstock_news_include_content=parse_env_bool(
+                os.getenv('VNSTOCK_NEWS_INCLUDE_CONTENT'),
+                default=False,
+            ),
+            vnstock_community_news_limit_per_ticker=parse_env_int(
+                os.getenv('VNSTOCK_COMMUNITY_NEWS_LIMIT_PER_TICKER'),
+                3,
+                field_name='VNSTOCK_COMMUNITY_NEWS_LIMIT_PER_TICKER',
+                minimum=1,
+                maximum=3,
+            ),
+            vnstock_community_news_cache_ttl_seconds=parse_env_int(
+                os.getenv('VNSTOCK_COMMUNITY_NEWS_CACHE_TTL_SECONDS'),
+                1800,
+                field_name='VNSTOCK_COMMUNITY_NEWS_CACHE_TTL_SECONDS',
+                minimum=60,
+                maximum=86400,
+            ),
+            vnstock_community_news_timeout_seconds=parse_env_int(
+                os.getenv('VNSTOCK_COMMUNITY_NEWS_TIMEOUT_SECONDS'),
+                10,
+                field_name='VNSTOCK_COMMUNITY_NEWS_TIMEOUT_SECONDS',
+                minimum=1,
+                maximum=60,
             ),
             vn_allow_legacy_mozyfin_provider=parse_env_bool(
                 os.getenv('VN_ALLOW_LEGACY_MOZYFIN_PROVIDER'),

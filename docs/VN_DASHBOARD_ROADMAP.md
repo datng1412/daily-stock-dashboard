@@ -56,7 +56,7 @@ This roadmap is the source of truth for Vietnam dashboard provider ownership. SS
 | Trade tape | SSI FastConnect Data streaming or future verified trade contract | Phase 4.7C adds a bounded process-local X-TRADE event buffer populated only by the background streaming manager; Phase 4.8E adds startup-owned `X-TRADE:{symbol}` subscriptions when trade tape is enabled; Phase 4.8E-2 returns buffered timestamped rows even when stream freshness is stale; Phase 4.8E-3 shows SSI-style B/S and change columns from explicit side/reference fields; Phase 4.8E-4 maps observed `BU`/`SD` side codes while preserving raw side audit fields; true historical list/history semantics still need confirmation | Keep latest-event tape separate from official daily OHLCV, DailyStockPrice, and realtime snapshot |
 | Trading session/status | SSI FastConnect Data streaming `F:{symbol}` | Phase 4.8G adds background lifecycle subscription, parser, dedicated cache, optional watchlist fields, and diagnostics for raw SSI `TradingSession` / `TradingStatus` context | Code meanings, final-close/finality semantics, and polished frontend UI remain deferred until live payload evidence proves them |
 | Legacy realtime snapshot/trade tape | KBS | Disabled by default; only available behind explicit legacy flags | Do not silently fallback from SSI to KBS |
-| News | Future NewsProvider | Disabled/not implemented; Phase 5.1A research completed | Do not call Mozyfin; return explicit disabled/not_implemented state until a licensed NewsProvider passes entitlement |
+| News | Future NewsProvider | Disabled by default; Phase 5.1B Vnstock status gate is `blocked_pending_terms`; Phase 5.1B-Local permits only explicit local/personal bounded RSS mode; Phase 5.1C permits only selected/company-ticker Community headlines (max 3, 30-minute cache) with validated absolute links only | Do not call Mozyfin; do not treat local personal Vnstock modes as production provider or SSI market-data fallback |
 | Unsupported fundamentals | External provider required | Not implemented | Keep explicitly labeled; do not mix with SSI market-data fields |
 | BCTC/KQKD, financial statements, financial ratios | External provider required | Not implemented | Investigate separately |
 | Corporate actions, dividends, rights, splits | External provider required | Stub/unavailable | Events must come from explicit source data |
@@ -1446,6 +1446,27 @@ Result:
 * Phase 5.1A-2 documents current access status: public docs/schema access is not legal/runtime API access; FiinGroup is `preferred_after_entitlement`, Vietstock is `candidate_after_entitlement`, and Vnstock/VNStock is `prototype_only` for research/manual comparison.
 * Classified public RSS/web pages as `blocked_pending_terms`, scraping/unofficial endpoints as `not_allowed_now`, and NewsAPI/GDELT as `secondary_macro_context_only`.
 * Left runtime unchanged: news remains disabled/not implemented with `news=[]`, no provider calls, no credentials, no fallback, no fake rows, and no change to `latest_price`.
+
+### Phase 5.1B - Experimental Vnstock News Provider
+
+Status: completed as a contract-only, no-network legal/terms gate.
+
+Result:
+
+* Verified the Vnstock News documentation for RSS `Crawler`, sitemap-oriented `BatchCrawler`/`AsyncBatchCrawler`, and its documented normalized article shape.
+* The current license requires written approval for commercial integration and Vnstock is not the source-data owner, so `VN_NEWS_PROVIDER=vnstock_news` returns `news=[]` with `news_status.status=unavailable` and `reason_code=blocked_pending_terms`.
+* Added offline normalization tests for URL/provenance preservation, bounded rows, and default full-content omission. No Vnstock package import/dependency, RSS/sitemap request, batch/async crawler, background job, cache write, credential, scraping, fake row, or fallback is enabled.
+* SSI remains the owner of all market-data paths and `latest_price` remains SSI DailyOhlc.
+
+### Phase 5.1B-Local - Vnstock News Personal Research Mode
+
+Status: implemented as an explicit local-only runtime option.
+
+* Added `VN_NEWS_PROVIDER=vnstock_news_personal` plus `VNSTOCK_NEWS_PERSONAL_ENABLED=true` for personal local research dashboards only.
+* Kept `VN_NEWS_PROVIDER=disabled` as the default and kept `VN_NEWS_PROVIDER=vnstock_news` as `blocked_pending_terms`.
+* Uses only lazy optional `vnstock_news.Crawler(...).get_articles_from_feed(limit_per_feed=N)` with bounded sites, per-site limits, TTL cache, and full content omitted by default.
+* Package-missing, provider-error, and empty-feed states return explicit unavailable statuses without breaking SSI daily/watchlist/company rows.
+* This mode is news-only and must not provide prices, OHLCV, realtime quotes, order book, trade tape, foreign room, market index, metadata, fallback data, or `latest_price` changes.
 
 Future news phases:
 

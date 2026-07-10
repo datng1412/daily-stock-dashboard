@@ -33,6 +33,7 @@ vi.mock('../../api/stocks', () => ({
     getVietnamCorporateActions: vi.fn(),
     getVietnamObservability: vi.fn(),
     getVietnamChart: vi.fn(),
+    getVietnamCompanyNews: vi.fn(),
     getVietnamIndexList: vi.fn(),
     getVietnamDailyIndex: vi.fn(),
     getVietnamIndexComponents: vi.fn(),
@@ -395,6 +396,7 @@ const mockedGetVietnamRealtimeTrades = vi.mocked(stocksApi.getVietnamRealtimeTra
 const mockedGetVietnamCorporateActions = vi.mocked(stocksApi.getVietnamCorporateActions);
 const mockedGetVietnamObservability = vi.mocked(stocksApi.getVietnamObservability);
 const mockedGetVietnamChart = vi.mocked(stocksApi.getVietnamChart);
+const mockedGetVietnamCompanyNews = vi.mocked(stocksApi.getVietnamCompanyNews);
 const mockedGetVietnamIndexList = vi.mocked(stocksApi.getVietnamIndexList);
 const mockedGetVietnamDailyIndex = vi.mocked(stocksApi.getVietnamDailyIndex);
 const mockedGetVietnamIndexComponents = vi.mocked(stocksApi.getVietnamIndexComponents);
@@ -847,6 +849,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     mockedGetVietnamCorporateActions.mockReset();
     mockedGetVietnamObservability.mockReset();
     mockedGetVietnamChart.mockReset();
+    mockedGetVietnamCompanyNews.mockReset();
     mockedGetVietnamIndexList.mockReset();
     mockedGetVietnamDailyIndex.mockReset();
     mockedGetVietnamIndexComponents.mockReset();
@@ -858,6 +861,13 @@ describe('VietnamDashboardPage watchlist loading', () => {
     mockedGetVietnamCorporateActions.mockImplementation(async (tickers) => makeCorporateActionsResponse(tickers));
     mockedGetVietnamObservability.mockImplementation(async () => makeObservabilityResponse());
     mockedGetVietnamChart.mockImplementation(async (symbol, range = '6M') => makeChartResponse(symbol, range));
+    mockedGetVietnamCompanyNews.mockImplementation(async (ticker) => ({
+      ticker,
+      status: 'disabled',
+      source: null,
+      message: 'News disabled.',
+      news: [],
+    }));
     mockedGetVietnamIndexList.mockImplementation(async () => makeIndexListResponse());
     mockedGetVietnamDailyIndex.mockImplementation(async () => makeDailyIndexResponse());
     mockedGetVietnamIndexComponents.mockImplementation(async () => makeIndexComponentsResponse());
@@ -4153,6 +4163,28 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(screen.queryByText(/Mozyfin.*error/i)).not.toBeInTheDocument();
   });
 
+  it('renders blocked experimental news as unavailable without articles', async () => {
+    const response = makeResponse(defaultTickers);
+    response.watchlist[0] = {
+      ...response.watchlist[0],
+      news: [],
+      newsStatus: {
+        status: 'unavailable',
+        source: 'Vnstock News',
+        provider: 'vnstock_news',
+        reasonCode: 'blocked_pending_terms',
+        message: 'Vnstock News is unavailable pending written commercial and source-owner terms.',
+      },
+    };
+    mockedGetVietnamWatchlist.mockResolvedValue(response);
+
+    render(<VietnamDashboardPage />);
+
+    expect((await screen.findAllByText('News unavailable')).length).toBeGreaterThan(0);
+    expect(screen.getByText('Vnstock News is unavailable pending written commercial and source-owner terms.')).toBeInTheDocument();
+    expect(screen.queryByText('Untitled news')).not.toBeInTheDocument();
+  });
+
   it('renders neutral SSI intraday unavailable state without Mozyfin text', async () => {
     const response = makeResponse(defaultTickers);
     response.watchlist[0] = {
@@ -5881,6 +5913,44 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(await screen.findByText(/No loaded ticker match/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Apply custom watchlist' })).toBeDisabled();
     expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(1);
+  });
+
+  it('loads bounded Community news only for the selected ticker and renders only safe external links', async () => {
+    mockedGetVietnamCompanyNews.mockImplementation(async (ticker) => ({
+      ticker,
+      status: 'ok',
+      source: 'Vnstock Community',
+      provider: 'vnstock_community',
+      providerMode: 'community_free_ticker_news',
+      rightsStatus: 'personal_research_only',
+      message: `Vnstock Community company news loaded for ${ticker}.`,
+      news: [
+        { id: `${ticker}-1`, ticker, title: `${ticker} absolute article`, url: 'https://example.test/article', publishedAt: '2026-07-10T09:00:00+07:00', providerMode: 'community_free_ticker_news', rightsStatus: 'personal_research_only' },
+        { id: `${ticker}-2`, ticker, title: `${ticker} relative article`, rawUrl: '/relative', url: null, publishedAt: '2026-07-09T09:00:00+07:00', providerMode: 'community_free_ticker_news', rightsStatus: 'personal_research_only' },
+        { id: `${ticker}-3`, ticker, title: `${ticker} unsafe article`, rawUrl: 'javascript:alert(1)', url: 'javascript:alert(1)', publishedAt: '2026-07-08T09:00:00+07:00', providerMode: 'community_free_ticker_news', rightsStatus: 'personal_research_only' },
+        { id: `${ticker}-4`, ticker, title: `${ticker} fourth article`, url: null, publishedAt: '2026-07-07T09:00:00+07:00', providerMode: 'community_free_ticker_news', rightsStatus: 'personal_research_only' },
+      ],
+    }));
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamCompanyNews).toHaveBeenCalledWith('FPT', expect.any(Object)));
+    expect(await screen.findByText('News for FPT')).toBeInTheDocument();
+    expect(screen.getByText('Vnstock Community')).toBeInTheDocument();
+    expect(screen.getAllByText('Personal research').length).toBeGreaterThan(0);
+    const safeLink = screen.getByRole('link', { name: 'FPT absolute article' });
+    expect(safeLink).toHaveAttribute('href', 'https://example.test/article');
+    expect(safeLink).toHaveAttribute('target', '_blank');
+    expect(safeLink).toHaveAttribute('rel', expect.stringContaining('noopener'));
+    expect(safeLink).toHaveAttribute('rel', expect.stringContaining('noreferrer'));
+    expect(screen.queryByRole('link', { name: 'FPT relative article' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'FPT unsafe article' })).not.toBeInTheDocument();
+    expect(screen.queryByText('FPT fourth article')).not.toBeInTheDocument();
+
+    const watchlistCalls = mockedGetVietnamWatchlist.mock.calls.length;
+    clickTickerRow('ACB');
+    await waitFor(() => expect(mockedGetVietnamCompanyNews).toHaveBeenCalledWith('ACB', expect.any(Object)));
+    expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistCalls);
   });
 
   it('does not render recommendation wording', async () => {

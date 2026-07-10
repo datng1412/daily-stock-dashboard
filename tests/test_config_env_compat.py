@@ -53,6 +53,49 @@ class ConfigEnvCompatibilityTestCase(unittest.TestCase):
 
     @patch("src.config.setup_env")
     @patch.object(Config, "_parse_litellm_yaml", return_value=[])
+    def test_load_from_env_accepts_explicit_vnstock_news_terms_gate(
+        self, _mock_parse_litellm_yaml, _mock_setup_env
+    ):
+        with patch.dict(
+            os.environ,
+            {"STOCK_LIST": "600519", "VN_NEWS_PROVIDER": "vnstock_news"},
+            clear=True,
+        ):
+            config = Config._load_from_env()
+
+        self.assertEqual(config.vn_news_provider, "vnstock_news")
+
+    @patch("src.config.setup_env")
+    @patch.object(Config, "_parse_litellm_yaml", return_value=[])
+    def test_load_from_env_accepts_vnstock_news_personal_bounds(
+        self, _mock_parse_litellm_yaml, _mock_setup_env
+    ):
+        with patch.dict(
+            os.environ,
+            {
+                "STOCK_LIST": "600519",
+                "VN_NEWS_PROVIDER": "vnstock_news_personal",
+                "VNSTOCK_NEWS_PERSONAL_ENABLED": "true",
+                "VNSTOCK_NEWS_SITES": "vnexpress,cafef",
+                "VNSTOCK_NEWS_LIMIT_PER_SITE": "50",
+                "VNSTOCK_NEWS_TIMEOUT_SECONDS": "0",
+                "VNSTOCK_NEWS_CACHE_TTL_SECONDS": "10",
+                "VNSTOCK_NEWS_INCLUDE_CONTENT": "true",
+            },
+            clear=True,
+        ):
+            config = Config._load_from_env()
+
+        self.assertEqual(config.vn_news_provider, "vnstock_news_personal")
+        self.assertTrue(config.vnstock_news_personal_enabled)
+        self.assertEqual(config.vnstock_news_sites, "vnexpress,cafef")
+        self.assertEqual(config.vnstock_news_limit_per_site, 20)
+        self.assertEqual(config.vnstock_news_timeout_seconds, 1)
+        self.assertEqual(config.vnstock_news_cache_ttl_seconds, 60)
+        self.assertTrue(config.vnstock_news_include_content)
+
+    @patch("src.config.setup_env")
+    @patch.object(Config, "_parse_litellm_yaml", return_value=[])
     def test_load_from_env_uses_stable_fundamental_timeout_defaults(
         self, _mock_parse_litellm_yaml, _mock_setup_env
     ):
@@ -522,6 +565,26 @@ class ConfigEnvCompatibilityTestCase(unittest.TestCase):
         stocks, emails = config.stock_email_groups[0]
         self.assertEqual(stocks, ["600519", "HK01810"])
         self.assertEqual(emails, ["user@example.com"])
+
+    @patch("src.config.setup_env")
+    @patch.object(Config, "_parse_litellm_yaml", return_value=[])
+    def test_vnstock_community_news_config_is_supported_and_bounded(
+        self,
+        _mock_parse_yaml,
+        _mock_setup_env,
+    ) -> None:
+        with patch.dict(os.environ, {
+            "VN_NEWS_PROVIDER": "vnstock_community",
+            "VNSTOCK_COMMUNITY_NEWS_LIMIT_PER_TICKER": "99",
+            "VNSTOCK_COMMUNITY_NEWS_CACHE_TTL_SECONDS": "10",
+            "VNSTOCK_COMMUNITY_NEWS_TIMEOUT_SECONDS": "0",
+        }, clear=True):
+            config = Config._load_from_env()
+
+        self.assertEqual(config.vn_news_provider, "vnstock_community")
+        self.assertEqual(config.vnstock_community_news_limit_per_ticker, 3)
+        self.assertEqual(config.vnstock_community_news_cache_ttl_seconds, 60)
+        self.assertEqual(config.vnstock_community_news_timeout_seconds, 1)
 
 
 if __name__ == "__main__":

@@ -108,6 +108,16 @@ These fields are additive Phase 4.8A metrics. They live under watchlist `indicat
 | `returned_rows_count` | Count of watchlist rows returned for the VN watchlist response | Service-derived from response rows | count | no | no | Watchlist completeness | Should match requested count for a complete normalized request; does not imply every row is fully available. |
 | `missing_tickers` | Normalized requested tickers not represented by any watchlist row | Service-derived from request/response comparison | list | no, empty list when complete | no | Watchlist completeness | Missing tickers should be explicit instead of silently disappearing. |
 
+## News Fields
+
+| Field | Meaning | Source | Nullable | UI placement | Known caveat |
+| --- | --- | --- | --- | --- | --- |
+| `news[]` | Optional source-labeled headline rows | Local Vnstock mode when explicitly selected | no, empty list when unavailable | Selected ticker / company news | Community mode is selected/company-ticker only and capped at three rows; it must not fan out across a watchlist. |
+| `news[].raw_url` | Original provider URL string | Vnstock Community | yes | Not normally displayed | Relative values are retained for provenance but never made clickable without a verified safe origin. |
+| `news[].url` | Safe absolute article URL | Provider-returned `http`/`https` URL | yes | Clickable title only when present | `null` for a relative/unverified origin, malformed, credentialed, local, `javascript:`, `data:`, `file:`, `ftp:`, or arbitrary protocol-relative URL. |
+| `news[].summary`, `author`, `category`, `image_url` | Optional article metadata | Vnstock Community | yes | Only if actually supplied/verified | Current Community contract does not fabricate these fields; `head` is not used pending semantics proof. |
+| `news_status.reason_code` | Optional news availability classification | News adapter | yes | Compact section state | Community values include `community_news_ready`, `provider_no_items`, `provider_package_missing`, `provider_timeout`, `provider_error`, and `invalid_ticker`. |
+
 ## Status And Quality Fields
 
 | Field | Meaning | Source | Unit | Nullable | Canonical | UI placement | Known caveat |
@@ -244,6 +254,9 @@ These fields are additive Phase 4.8A metrics. They live under watchlist `indicat
 - `SSI IndexList` / `SSI DailyIndex` / `SSI IndexComponents`: index identifiers, daily index context, and component rows.
 - `CorporateActionsProvider disabled`: default future-module state for corporate actions; no external provider call is made.
 - `disabled`: intentionally disabled public sections, including current VN news status.
+- `Vnstock News`: an experimental connector label. `VN_NEWS_PROVIDER=vnstock_news` remains blocked pending written commercial and source-owner terms. `VN_NEWS_PROVIDER=vnstock_news_personal` is local/personal research only and may return bounded RSS rows only when explicitly enabled.
+- `blocked_pending_terms`: external-provider legal/access gate; it is not a provider/network failure and must not affect SSI daily fields.
+- `personal_research_only`: local-only Vnstock News mode status; not approved for hosted/public/commercial deployment or redistribution.
 - `NewsProvider future`: future VN news domain; not implemented today.
 - `external provider future`: future financials/corporate-action domains; not implemented today.
 

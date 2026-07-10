@@ -27,6 +27,7 @@ from api.v1.schemas.stocks import (
     StockHistoryResponse,
     StockQuote,
     VietnamChartResponse,
+    VietnamCompanyNewsResponse,
     VietnamCompanyResearchResponse,
     VietnamCorporateActionsResponse,
     VietnamDailyIndexResponse,
@@ -437,7 +438,7 @@ def get_vietnam_watchlist_health(
     "/vn/watchlist",
     response_model=VietnamWatchlistResponse,
     summary="Vietnam watchlist dashboard",
-    description="Return Vietnam watchlist monitoring data from SSI-backed VN market data, with news disabled until a separate provider is implemented.",
+    description="Return Vietnam watchlist monitoring data from SSI-backed VN market data. News is disabled by default; the production Vnstock selector returns a terms-gated unavailable status, while personal Vnstock mode is local-only and optional.",
 )
 def get_vietnam_watchlist(
     tickers: Optional[str] = Query(None, description="Comma-separated VN tickers. Defaults to FPT,VPB,MSB,SCS,ACV,ACB"),
@@ -468,7 +469,7 @@ def get_vietnam_watchlist(
     "/vn/company/{ticker}",
     response_model=VietnamCompanyResearchResponse,
     summary="Vietnam company research snapshot",
-    description="Return a source-aware company research page skeleton for one VN ticker using SSI market data and explicit not-implemented placeholders.",
+    description="Return a source-aware company research page skeleton for one VN ticker using SSI market data and explicit unavailable or not-implemented future-module states.",
 )
 def get_vietnam_company_research(
     ticker: str,
@@ -529,6 +530,32 @@ def get_vietnam_index_list(
         raise HTTPException(
             status_code=500,
             detail={"error": "vn_index_list_failed", "message": str(e)},
+        )
+
+
+@router.get(
+    "/vn/company-news",
+    response_model=VietnamCompanyNewsResponse,
+    summary="Vietnam selected-company news",
+    description="Return optional local/personal company news for one explicit ticker. This endpoint never changes SSI market-data fields.",
+)
+def get_vietnam_company_news(
+    ticker: str = Query(..., description="VN ticker, for example FPT"),
+) -> VietnamCompanyNewsResponse:
+    try:
+        payload = VietnamMarketService().get_company_news(ticker)
+        return VietnamCompanyNewsResponse(**payload)
+    except Exception as e:
+        logger.error("Vietnam company news failed: %s", e, exc_info=True)
+        return VietnamCompanyNewsResponse(
+            ticker=ticker.strip().upper() or None,
+            status="unavailable",
+            source="Vnstock Community",
+            provider="vnstock_community",
+            provider_mode="community_free_ticker_news",
+            reason_code="provider_error",
+            rights_status="personal_research_only",
+            message="Company news is temporarily unavailable.",
         )
 
 
