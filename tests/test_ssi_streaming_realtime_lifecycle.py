@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from types import SimpleNamespace
 
 from fastapi import FastAPI
@@ -331,6 +332,84 @@ def test_shutdown_prevents_monitor_tick_from_reviving_manager():
 
     assert tick["runtime_status"] == "shutdown"
     assert client.stop_calls == 1
+
+
+def test_shutdown_during_blocking_bootstrap_stops_late_client_without_reviving_manager():
+    class BlockingStartClient(FakeStreamClient):
+        def __init__(self):
+            super().__init__()
+            self.start_entered = threading.Event()
+            self.allow_start_to_finish = threading.Event()
+
+        def start(self, on_message, on_error, channels):
+            self.start_entered.set()
+            assert self.allow_start_to_finish.wait(timeout=2)
+            super().start(on_message, on_error, channels)
+
+    client = BlockingStartClient()
+    bootstrap_thread = threading.Thread(
+        target=lambda: bootstrap_ssi_streaming_realtime(
+            config=_config(),
+            client_factory=lambda: client,
+            start_monitor=False,
+        ),
+        daemon=True,
+    )
+    bootstrap_thread.start()
+    assert client.start_entered.wait(timeout=2)
+
+    shutdown_ssi_streaming_realtime()
+    client.allow_start_to_finish.set()
+    bootstrap_thread.join(timeout=2)
+
+    manager = get_existing_ssi_streaming_realtime_manager()
+    assert manager is not None
+    assert client.stop_calls == 1
+    assert manager.status()["runtime_status"] == "shutdown"
+    assert is_ssi_streaming_realtime_monitor_running() is False
+
+
+def test_shutdown_before_bootstrap_requests_streaming_prevents_client_start(monkeypatch):
+    import src.services.ssi_streaming_realtime_lifecycle as lifecycle
+
+    client = FakeStreamClient()
+    bootstrap_context_entered = threading.Event()
+    allow_bootstrap_to_continue = threading.Event()
+    original_new_manager = lifecycle._new_manager
+
+    def gated_new_manager(**kwargs):
+        manager = original_new_manager(**kwargs)
+        original_set_context = manager.set_bootstrap_context
+
+        def gated_set_context(*args, **context_kwargs):
+            bootstrap_context_entered.set()
+            assert allow_bootstrap_to_continue.wait(timeout=2)
+            return original_set_context(*args, **context_kwargs)
+
+        manager.set_bootstrap_context = gated_set_context
+        return manager
+
+    monkeypatch.setattr(lifecycle, "_new_manager", gated_new_manager)
+    bootstrap_thread = threading.Thread(
+        target=lambda: lifecycle.bootstrap_ssi_streaming_realtime(
+            config=_config(),
+            client_factory=lambda: client,
+            start_monitor=False,
+        ),
+        daemon=True,
+    )
+    bootstrap_thread.start()
+    assert bootstrap_context_entered.wait(timeout=2)
+
+    lifecycle.shutdown_ssi_streaming_realtime()
+    allow_bootstrap_to_continue.set()
+    bootstrap_thread.join(timeout=2)
+
+    manager = lifecycle.get_existing_ssi_streaming_realtime_manager()
+    assert manager is not None
+    assert client.started is False
+    assert client.stop_calls == 0
+    assert manager.status()["runtime_status"] == "shutdown"
 
 
 def test_parse_bootstrap_symbols_dedupes_and_rejects_all_or_wildcards():

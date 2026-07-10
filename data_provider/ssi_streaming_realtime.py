@@ -1287,6 +1287,8 @@ class SsiStreamingRealtimeManager:
             if not self.enabled:
                 self._state = MANAGER_DISABLED
                 return self.status()
+            if self._shutdown_requested:
+                return self.status()
             if self._state == MANAGER_RUNNING:
                 return self.status()
             self._state = MANAGER_STARTING
@@ -1316,20 +1318,28 @@ class SsiStreamingRealtimeManager:
             return self.status()
 
         with self._lock:
-            self._client = client
-            self._channels = channels
-            self._state = MANAGER_RUNNING
-            started_at = float(self._time_func())
-            self._started_at_epoch = started_at
-            self._is_idle = False
-            self._idle_since = None
-            self._idle_since_epoch = None
-            self._next_reconnect_at = None
-            self._next_reconnect_epoch = None
-            self._reconnect_backoff_seconds = self.reconnect_initial_delay_seconds
-            self._last_reconnect_error = None
-            self._shutdown_requested = False
-            return self.status()
+            if self._shutdown_requested:
+                stop_after_start = True
+            else:
+                stop_after_start = False
+                self._client = client
+                self._channels = channels
+                self._state = MANAGER_RUNNING
+                started_at = float(self._time_func())
+                self._started_at_epoch = started_at
+                self._is_idle = False
+                self._idle_since = None
+                self._idle_since_epoch = None
+                self._next_reconnect_at = None
+                self._next_reconnect_epoch = None
+                self._reconnect_backoff_seconds = self.reconnect_initial_delay_seconds
+                self._last_reconnect_error = None
+        if stop_after_start:
+            try:
+                client.stop()
+            except Exception as exc:  # pragma: no cover - defensive shutdown path
+                self._record_error(exc, set_errored=False)
+        return self.status()
 
     def set_bootstrap_context(
         self,

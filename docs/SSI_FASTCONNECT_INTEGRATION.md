@@ -290,6 +290,8 @@ Phase 4.0C-10 adds runtime hardening for the process-local SSI streaming manager
 * The lifecycle monitor starts only when streaming is enabled and a safe non-empty bootstrap symbol list exists. Shutdown cancels the monitor, marks the manager as shutdown, stops the stream, and prevents later monitor ticks from reviving streaming.
 * Diagnostics remain sanitized: no raw callbacks, raw payloads, auth headers, tokens, consumer IDs, consumer secrets, account IDs, raw auth responses, stdout/stderr, or official package output are exposed.
 
+Phase 4.8R-Live after-hours proof on 2026-07-10 observed the actual classifier in `post_close` with `stream_health=market_closed` and per-context `after_hours_stale` labels. A bounded normal API sequence kept `subscription_count` equal to `expected_subscription_count` (154) and `reconnect_count=0` while messages and selected optional-context counters still advanced. Cached X-QUOTE ladders remained visible as stale last-known data; MI returned only the SSI-published subset. A duplicate-backend bind failure also exposed a late-start race: a background client could finish starting after lifecycle shutdown began. The manager now stops that late client and retains `runtime_status=shutdown`, with a focused regression test. This proves the after-hours no-reconnect classification, not active-session health or a live reconnect; those remain pending a future active-market window.
+
 ## Local Streaming Verification
 
 Phase 4.0C-7B added a dev-only verifier, Phase 4.0C-7C hardened it with callback/channel diagnostics, and Phase 4.0C-7D adds direct official-client handshake/subscription inspection:
