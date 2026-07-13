@@ -4715,7 +4715,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(chartCard.queryByText(/buy|sell|hold|recommendation/i)).not.toBeInTheDocument();
   });
 
-  it('renders existing short-term daily zones as optional chart bands without additional requests', async () => {
+  it('renders existing short-term daily zones only after enabling the master toggle, without additional requests', async () => {
     const response = makeResponse(defaultTickers);
     response.watchlist[0] = {
       ...response.watchlist[0],
@@ -4737,39 +4737,55 @@ describe('VietnamDashboardPage watchlist loading', () => {
     await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('FPT', '6M'));
 
     const chartCard = inspectChartCard();
-    const zonesToggle = chartCard.getByLabelText('S/R zones');
-    expect(zonesToggle).toBeChecked();
+    const zonesToggle = chartCard.getByLabelText('Show support and resistance zones');
+    expect(zonesToggle).not.toBeChecked();
     expect(zonesToggle.closest('label')).toHaveAttribute(
       'title',
-      'Show short-term support and resistance zones derived from the latest 60 daily sessions.',
+      'Show short-term daily support and resistance zones.',
     );
+    expect(chartCard.queryByTestId('inspect-chart-zone-S1')).not.toBeInTheDocument();
+    expect(chartCard.queryByTestId('inspect-chart-zone-label-S1')).not.toBeInTheDocument();
+
+    const chartRequestsBeforeToggle = mockedGetVietnamChart.mock.calls.length;
+    const watchlistRequestsBeforeToggle = mockedGetVietnamWatchlist.mock.calls.length;
+    await clickChartControl(zonesToggle);
+
+    expect(zonesToggle).toBeChecked();
     expect(chartCard.getByTestId('inspect-chart-zone-S1')).toBeInTheDocument();
     expect(chartCard.getByTestId('inspect-chart-zone-S2')).toBeInTheDocument();
     expect(chartCard.getByTestId('inspect-chart-zone-R1')).toBeInTheDocument();
     expect(chartCard.getByTestId('inspect-chart-zone-R2')).toBeInTheDocument();
     expect(chartCard.queryByTestId('inspect-chart-zone-S3')).not.toBeInTheDocument();
     expect(chartCard.queryByTestId('inspect-chart-zone-R3')).not.toBeInTheDocument();
-    expect(chartCard.getByTestId('inspect-chart-zone-label-S1')).toHaveTextContent('S1 0.12');
-    expect(chartCard.getByTestId('inspect-chart-zone-label-S2')).toHaveTextContent('S2 0.12–0.13');
-    expect(chartCard.getByTestId('inspect-chart-zone-label-R1')).toHaveTextContent('R1 0.14');
-    expect(chartCard.getByTestId('inspect-chart-zone-label-R2')).toHaveTextContent('R2 0.15–0.16');
-    expect(chartCard.getByTestId('inspect-legend-short-term-zones')).toHaveTextContent('Short-term daily zones');
+    expect(chartCard.getByTestId('inspect-chart-zone-marker-S1')).toHaveTextContent('S1 0.12');
+    expect(chartCard.getByTestId('inspect-chart-zone-marker-R1')).toHaveTextContent('R1 0.14');
+    expect(chartCard.getByTestId('inspect-chart-zone-marker-S2')).toHaveTextContent('S2');
+    expect(chartCard.getByTestId('inspect-chart-zone-marker-R2')).toHaveTextContent('R2');
+    expect(chartCard.getByTestId('inspect-chart-zone-title-S2')).toHaveTextContent('Support 2');
+    expect(chartCard.getByTestId('inspect-chart-zone-title-S2')).toHaveTextContent('0.12–0.13');
+    expect(chartCard.getByTestId('inspect-chart-zone-title-R2')).toHaveTextContent('Resistance 2');
+    expect(chartCard.getByTestId('inspect-chart-zone-title-R2')).toHaveTextContent('0.15–0.16');
+    expect(chartCard.getByTestId('inspect-chart-zone-line-S1')).not.toHaveAttribute('stroke-dasharray');
+    expect(chartCard.getByTestId('inspect-chart-zone-line-S2')).toHaveAttribute('stroke-dasharray', '4 4');
+    expect(chartCard.getByTestId('inspect-chart-zone-band-S1')).toHaveAttribute('fill', 'rgba(45,212,191,0.10)');
+    expect(chartCard.getByTestId('inspect-chart-zone-band-S2')).toHaveAttribute('fill', 'rgba(45,212,191,0.035)');
+    expect(Number(chartCard.getByTestId('inspect-chart-zone-line-S1').getAttribute('y1'))).toBeGreaterThan(
+      Number(chartCard.getByTestId('inspect-chart-zone-band-S1').getAttribute('y')),
+    );
 
-    const chartRequestsBeforeToggle = mockedGetVietnamChart.mock.calls.length;
-    const watchlistRequestsBeforeToggle = mockedGetVietnamWatchlist.mock.calls.length;
-    await clickChartControl(zonesToggle);
-
-    expect(chartCard.queryByTestId('inspect-chart-zone-S1')).not.toBeInTheDocument();
-    expect(chartCard.queryByTestId('inspect-chart-zone-R1')).not.toBeInTheDocument();
     expect(mockedGetVietnamChart).toHaveBeenCalledTimes(chartRequestsBeforeToggle);
     expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistRequestsBeforeToggle);
 
     await clickChartControl(chartCard.getByRole('button', { name: 'Expand chart' }));
     const dialog = within(screen.getByRole('dialog', { name: 'Expanded inspect chart' }));
-    expect(dialog.getByLabelText('S/R zones')).not.toBeChecked();
-    await clickChartControl(dialog.getByLabelText('S/R zones'));
+    expect(dialog.getByLabelText('Show support and resistance zones')).toBeChecked();
     expect(dialog.getByTestId('inspect-chart-zone-S1')).toBeInTheDocument();
     expect(dialog.getByTestId('inspect-chart-zone-R2')).toBeInTheDocument();
+    await clickChartControl(dialog.getByLabelText('Show support and resistance zones'));
+    expect(dialog.queryByTestId('inspect-chart-zone-S1')).not.toBeInTheDocument();
+    expect(chartCard.queryByTestId('inspect-chart-zone-S1')).not.toBeInTheDocument();
+    await clickChartControl(dialog.getByRole('button', { name: 'Close expanded chart' }));
+    expect(chartCard.getByLabelText('Show support and resistance zones')).not.toBeChecked();
     expect(mockedGetVietnamChart).toHaveBeenCalledTimes(chartRequestsBeforeToggle);
     expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistRequestsBeforeToggle);
   });
@@ -4801,6 +4817,8 @@ describe('VietnamDashboardPage watchlist loading', () => {
     await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('FPT', '6M'));
     const chartCard = inspectChartCard();
     expect(chartCard.queryByTestId('inspect-chart-zone-S1')).not.toBeInTheDocument();
+    expect(chartCard.queryByTestId('inspect-chart-zone-S2')).not.toBeInTheDocument();
+    await clickChartControl(chartCard.getByLabelText('Show support and resistance zones'));
     expect(chartCard.getByTestId('inspect-chart-zone-S2')).toBeInTheDocument();
     expect(chartCard.queryByTestId('inspect-chart-zone-R1')).not.toBeInTheDocument();
     expect(chartCard.queryByTestId('inspect-chart-zone-R2')).not.toBeInTheDocument();
@@ -4810,7 +4828,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     });
     await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('VPB', '6M'));
     expect(chartCard.queryByTestId('inspect-chart-zone-S2')).not.toBeInTheDocument();
-    expect(chartCard.getByLabelText('S/R zones')).toBeDisabled();
+    expect(chartCard.getByLabelText('Show support and resistance zones')).toBeDisabled();
   });
 
   it('renders SSI as the inspect chart source when the chart payload uses SSI', async () => {

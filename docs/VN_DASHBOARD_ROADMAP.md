@@ -1238,6 +1238,12 @@ Status: completed on 2026-07-13.
 
 The selected ticker's existing daily inspect chart now has an optional `S/R zones` overlay that reuses Phase 4.9A `indicators.short_term_zones` only. It draws at most S1/S2/R1/R2 as subtle support/resistance bands behind candles and technical lines, clips them to the price plot, and keeps the existing visible-candle y-domain unchanged. Compact and expanded chart views share the control and rendering path; unavailable or malformed ranges produce no band. The frontend does not calculate zones, make a request, alter polling, use realtime/intraday/order-book/trade inputs, or change `latest_price`.
 
+### Phase 4.9B-1 - Support/Resistance Overlay Readability
+
+Status: completed on 2026-07-13.
+
+The single `S/R` chart control now defaults off. When enabled, the same Phase 4.9A ranges use a two-level hierarchy: S1/R1 are primary solid midpoint lines with compact right-edge range labels, while S2/R2 are faint dashed lines with rank-only markers and title-only ranges. Faint bands remain clipped behind candles, label offsets are deterministic, and the candle y-domain, selected-ticker ownership guard, requests, polling, providers, and `latest_price` remain unchanged.
+
 ### Phase 4.8F - SSI Remaining Data Capability Audit
 
 Status: completed on 2026-07-08 as a documentation-only audit.

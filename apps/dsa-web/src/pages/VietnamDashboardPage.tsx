@@ -3454,6 +3454,12 @@ const chartZoneLabelPriority: Record<ShortTermChartZone['label'], number> = {
   R2: 3,
 };
 
+const chartZoneIsPrimary = (zone: ShortTermChartZone) => zone.label === 'S1' || zone.label === 'R1';
+const chartZoneTitle = (zone: ShortTermChartZone) => (
+  `${zone.kind === 'support' ? 'Support' : 'Resistance'} ${zone.label.slice(1)}\n${shortTermZoneRange(zone)}\nD1 · 60 sessions`
+);
+const CHART_ZONE_LABEL_MIN_SEPARATION = 14;
+
 const BrokerInspectChartSvg: React.FC<{
   points: VietnamChartPoint[];
   showMA20: boolean;
@@ -3492,19 +3498,21 @@ const BrokerInspectChartSvg: React.FC<{
         if (rawBottom < PRICE_TOP || rawTop > pricePlotBottom) return null;
         const top = Math.max(PRICE_TOP, rawTop);
         const bottom = Math.min(pricePlotBottom, rawBottom);
-        return { ...zone, top, height: Math.max(1, bottom - top) };
+        const representativeY = priceScale((zone.lower + zone.upper) / 2);
+        if (representativeY === null) return null;
+        return { ...zone, top, height: Math.max(0, bottom - top), representativeY };
       })
-      .filter((zone): zone is ShortTermChartZone & { top: number; height: number } => Boolean(zone))
+      .filter((zone): zone is ShortTermChartZone & { top: number; height: number; representativeY: number } => Boolean(zone))
     : [];
   const shortTermZoneLabelYs = new Map<ShortTermChartZone['label'], number>();
   const placedLabelYs: number[] = [];
   [...visibleShortTermZones]
     .sort((left, right) => chartZoneLabelPriority[left.label] - chartZoneLabelPriority[right.label])
     .forEach((zone) => {
-      const desiredY = Math.max(PRICE_TOP + 10, Math.min(pricePlotBottom - 3, zone.top + Math.min(zone.height / 2 + 4, 10)));
-      const candidateYs = [desiredY, desiredY + 12, desiredY - 12, desiredY + 24, desiredY - 24]
+      const desiredY = Math.max(PRICE_TOP + 10, Math.min(pricePlotBottom - 3, zone.representativeY + 4));
+      const candidateYs = [desiredY, desiredY + CHART_ZONE_LABEL_MIN_SEPARATION, desiredY - CHART_ZONE_LABEL_MIN_SEPARATION, desiredY + CHART_ZONE_LABEL_MIN_SEPARATION * 2, desiredY - CHART_ZONE_LABEL_MIN_SEPARATION * 2]
         .filter((y) => y >= PRICE_TOP + 10 && y <= pricePlotBottom - 3);
-      const labelY = candidateYs.find((y) => placedLabelYs.every((placed) => Math.abs(placed - y) >= 12));
+      const labelY = candidateYs.find((y) => placedLabelYs.every((placed) => Math.abs(placed - y) >= CHART_ZONE_LABEL_MIN_SEPARATION));
       if (labelY !== undefined) {
         placedLabelYs.push(labelY);
         shortTermZoneLabelYs.set(zone.label, labelY);
@@ -3548,25 +3556,26 @@ const BrokerInspectChartSvg: React.FC<{
         {visibleShortTermZones.length ? (
           <g clipPath={`url(#${pricePlotClipId})`} pointerEvents="none" aria-hidden="true">
             {visibleShortTermZones.map((zone) => {
-              const labelY = shortTermZoneLabelYs.get(zone.label);
-              const fill = zone.kind === 'support' ? 'rgba(34,197,94,0.12)' : 'rgba(244,114,182,0.12)';
-              const stroke = zone.kind === 'support' ? 'rgba(74,222,128,0.48)' : 'rgba(244,114,182,0.48)';
+              const primary = chartZoneIsPrimary(zone);
+              const fill = zone.kind === 'support'
+                ? primary ? 'rgba(45,212,191,0.10)' : 'rgba(45,212,191,0.035)'
+                : primary ? 'rgba(251,191,36,0.10)' : 'rgba(251,191,36,0.035)';
+              const stroke = zone.kind === 'support'
+                ? primary ? 'rgba(94,234,212,0.72)' : 'rgba(94,234,212,0.38)'
+                : primary ? 'rgba(251,191,36,0.72)' : 'rgba(251,191,36,0.38)';
               return (
                 <g key={zone.label} data-testid={`inspect-chart-zone-${zone.label}`}>
-                  <rect x={CHART_LEFT} y={zone.top} width={PLOT_WIDTH} height={zone.height} fill={fill} />
-                  <line x1={CHART_LEFT} x2={pricePlotRight} y1={zone.top} y2={zone.top} stroke={stroke} strokeWidth="1" />
-                  {labelY !== undefined ? (
-                    <text
-                      data-testid={`inspect-chart-zone-label-${zone.label}`}
-                      x={pricePlotRight - 4}
-                      y={labelY}
-                      fill={zone.kind === 'support' ? '#86efac' : '#f9a8d4'}
-                      fontSize="10"
-                      textAnchor="end"
-                    >
-                      {`${zone.label} ${shortTermZoneRange(zone)}`}
-                    </text>
-                  ) : null}
+                  <rect data-testid={`inspect-chart-zone-band-${zone.label}`} x={CHART_LEFT} y={zone.top} width={PLOT_WIDTH} height={zone.height} fill={fill} />
+                  <line
+                    data-testid={`inspect-chart-zone-line-${zone.label}`}
+                    x1={CHART_LEFT}
+                    x2={pricePlotRight}
+                    y1={zone.representativeY}
+                    y2={zone.representativeY}
+                    stroke={stroke}
+                    strokeWidth={primary ? '1.25' : '1'}
+                    strokeDasharray={primary ? undefined : '4 4'}
+                  />
                 </g>
               );
             })}
@@ -3604,6 +3613,33 @@ const BrokerInspectChartSvg: React.FC<{
             <path d={chartPath(points, 'bbMid', priceScale)} fill="none" stroke="#94a3b8" strokeWidth="1" strokeDasharray="5 5" />
             <path d={chartPath(points, 'bbLower', priceScale)} fill="none" stroke="#64748b" strokeWidth="1" />
           </>
+        ) : null}
+        {visibleShortTermZones.length ? (
+          <g pointerEvents="none" aria-hidden="true">
+            {visibleShortTermZones.map((zone) => {
+              const labelY = shortTermZoneLabelYs.get(zone.label);
+              if (labelY === undefined) return null;
+              const primary = chartZoneIsPrimary(zone);
+              const label = primary ? `${zone.label} ${shortTermZoneRange(zone)}` : zone.label;
+              const textFill = zone.kind === 'support' ? '#99f6e4' : '#fde68a';
+              return (
+                <g key={`label-${zone.label}`} data-testid={`inspect-chart-zone-label-${zone.label}`} aria-label={chartZoneTitle(zone)}>
+                  <title data-testid={`inspect-chart-zone-title-${zone.label}`}>{chartZoneTitle(zone)}</title>
+                  <text
+                    data-testid={`inspect-chart-zone-marker-${zone.label}`}
+                    x={pricePlotRight - 5}
+                    y={labelY}
+                    fill={textFill}
+                    fontSize={primary ? '10' : '9'}
+                    fontWeight={primary ? '600' : '500'}
+                    textAnchor="end"
+                  >
+                    {label}
+                  </text>
+                </g>
+              );
+            })}
+          </g>
         ) : null}
         <path d={chartPath(points, 'volumeMa20', volumeScale)} fill="none" stroke="#38bdf8" strokeWidth="1.4" />
         <path d={chartPath(points, 'volumeMa50', volumeScale)} fill="none" stroke="#f97316" strokeWidth="1.4" />
@@ -3729,16 +3765,17 @@ const ChartOverlayControls: React.FC<{
         !shortTermZonesAvailable && 'cursor-not-allowed opacity-60',
       )}
       title={shortTermZonesAvailable
-        ? 'Show short-term support and resistance zones derived from the latest 60 daily sessions.'
-        : 'Short-term support and resistance zones are unavailable for this ticker.'}
+        ? 'Show short-term daily support and resistance zones.'
+        : 'No short-term zones available for this ticker.'}
     >
       <input
         type="checkbox"
         checked={showShortTermZones}
         disabled={!shortTermZonesAvailable}
+        aria-label="Show support and resistance zones"
         onChange={(event) => onShowShortTermZonesChange(event.target.checked)}
       />
-      S/R zones
+      S/R
     </label>
   </div>
 );
@@ -3857,7 +3894,7 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
   const [showMA20, setShowMA20] = useState(true);
   const [showMA50, setShowMA50] = useState(true);
   const [showBollinger, setShowBollinger] = useState(false);
-  const [showShortTermZones, setShowShortTermZones] = useState(true);
+  const [showShortTermZones, setShowShortTermZones] = useState(false);
   const [chart, setChart] = useState<VietnamChartResponse | null>(null);
   const [visibleWindow, setVisibleWindow] = useState<ChartVisibleWindow>(fullChartWindow(0));
   const [isExpanded, setIsExpanded] = useState(false);
@@ -3981,7 +4018,6 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
             {showMA20 ? <span data-testid="inspect-legend-ma20">MA20</span> : null}
             {showMA50 ? <span data-testid="inspect-legend-ma50">MA50</span> : null}
             {showBollinger ? <span data-testid="inspect-legend-bollinger">Bollinger upper/mid/lower</span> : null}
-            {showShortTermZones && shortTermZones.length ? <span data-testid="inspect-legend-short-term-zones">Short-term daily zones</span> : null}
             <span>Daily volume MA20</span>
             <span>Daily volume MA50</span>
             <span>RSI14</span>
@@ -4070,7 +4106,6 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
               {showMA20 ? <span>MA20</span> : null}
               {showMA50 ? <span>MA50</span> : null}
               {showBollinger ? <span>Bollinger upper/mid/lower</span> : null}
-              {showShortTermZones && shortTermZones.length ? <span>Short-term daily zones</span> : null}
               <span>Daily volume MA20</span>
               <span>Daily volume MA50</span>
               <span>RSI14</span>
