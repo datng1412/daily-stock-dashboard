@@ -674,6 +674,12 @@ class Config:
     ssi_streaming_realtime_reconnect_max_attempts: int = 0
     ssi_trade_tape_buffer_size: int = 50
     ssi_trade_tape_ttl_seconds: int = 60
+    ssi_streaming_snapshot_enabled: bool = False
+    ssi_streaming_snapshot_path: str = "runtime/ssi_streaming_last_known.v1.json"
+    ssi_streaming_snapshot_write_interval_seconds: int = 5
+    ssi_streaming_snapshot_trade_limit: int = 50
+    ssi_streaming_snapshot_max_symbols: int = 128
+    ssi_streaming_snapshot_max_age_days: int = 7
     vn_daily_data_provider: str = "ssi"
     vn_chart_data_provider: str = "ssi"
     vn_daily_stock_price_provider: str = "ssi"
@@ -1988,6 +1994,41 @@ class Config:
                 60,
                 field_name='SSI_TRADE_TAPE_TTL_SECONDS',
                 minimum=1,
+            ),
+            ssi_streaming_snapshot_enabled=parse_env_bool(
+                os.getenv('SSI_STREAMING_SNAPSHOT_ENABLED'),
+                default=False,
+            ),
+            ssi_streaming_snapshot_path=(
+                os.getenv('SSI_STREAMING_SNAPSHOT_PATH')
+                or 'runtime/ssi_streaming_last_known.v1.json'
+            ).strip() or 'runtime/ssi_streaming_last_known.v1.json',
+            ssi_streaming_snapshot_write_interval_seconds=parse_env_int(
+                os.getenv('SSI_STREAMING_SNAPSHOT_WRITE_INTERVAL_SECONDS'),
+                5,
+                field_name='SSI_STREAMING_SNAPSHOT_WRITE_INTERVAL_SECONDS',
+                minimum=1,
+            ),
+            ssi_streaming_snapshot_trade_limit=parse_env_int(
+                os.getenv('SSI_STREAMING_SNAPSHOT_TRADE_LIMIT'),
+                50,
+                field_name='SSI_STREAMING_SNAPSHOT_TRADE_LIMIT',
+                minimum=1,
+                maximum=50,
+            ),
+            ssi_streaming_snapshot_max_symbols=parse_env_int(
+                os.getenv('SSI_STREAMING_SNAPSHOT_MAX_SYMBOLS'),
+                128,
+                field_name='SSI_STREAMING_SNAPSHOT_MAX_SYMBOLS',
+                minimum=1,
+                maximum=512,
+            ),
+            ssi_streaming_snapshot_max_age_days=parse_env_int(
+                os.getenv('SSI_STREAMING_SNAPSHOT_MAX_AGE_DAYS'),
+                7,
+                field_name='SSI_STREAMING_SNAPSHOT_MAX_AGE_DAYS',
+                minimum=1,
+                maximum=31,
             ),
             vn_daily_data_provider=parse_env_choice(
                 os.getenv('VN_DAILY_DATA_PROVIDER'),

@@ -36,6 +36,10 @@ export type VietnamOrderBook = {
   staleReason?: string | null;
   cachedAt?: string | null;
   cacheTtlSeconds?: number | null;
+  snapshotSource?: 'persisted' | string | null;
+  snapshotCapturedAt?: string | null;
+  snapshotTradingDate?: string | null;
+  snapshotSchemaVersion?: number | null;
 };
 
 export type VietnamOptionalLiveStatus = {
@@ -538,6 +542,10 @@ export type VietnamRealtimeQuote = {
   staleReason?: string | null;
   cachedAt?: string | null;
   cacheTtlSeconds?: number | null;
+  snapshotSource?: 'persisted' | string | null;
+  snapshotCapturedAt?: string | null;
+  snapshotTradingDate?: string | null;
+  snapshotSchemaVersion?: number | null;
   referencePrice?: number | null;
   referencePriceSource?: string | null;
   priceVsReference?: number | null;

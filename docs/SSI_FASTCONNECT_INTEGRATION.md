@@ -248,6 +248,10 @@ This is a background-service adapter, not a one-shot request path. If `SSI_STREA
 
 ## Backend Streaming Bootstrap
 
+### Bounded persisted last-known rows
+
+Phase 4.8S optionally persists one small versioned JSON file of already-normalized, user-safe X, X-QUOTE, X-TRADE, R, MI, and F cache rows. `SSI_STREAMING_SNAPSHOT_ENABLED=false` remains the default. This is operational restart continuity, not historical storage, a provider fallback, or a source of canonical daily prices. The lifecycle restores the file once before the existing bounded streaming manager starts, then live SSI rows supersede restored rows independently by context. Restored rows are always `persisted_stale`; corrupt, expired, or unsupported files do not block startup. Writes are bounded, debounced, atomically replaced, and may perform one final flush during orderly shutdown. Request handlers never restore, write, start, or subscribe.
+
 Phase 4.0C-8 adds FastAPI startup/shutdown wiring for the existing SSI streaming realtime manager. It remains disabled by default:
 
 ```text

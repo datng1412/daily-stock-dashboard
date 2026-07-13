@@ -19,6 +19,8 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any, Callable, Dict, Iterable, List, Optional, Protocol, Sequence, Tuple
 
+from data_provider.ssi_streaming_snapshot_store import SNAPSHOT_SCHEMA_VERSION, SsiStreamingSnapshotStore
+
 
 SSI_STREAMING_REALTIME_DISABLED_REASON = "SSI streaming realtime manager disabled."
 SSI_STREAMING_REALTIME_NOT_STARTED_REASON = "SSI streaming realtime manager not started."
@@ -325,6 +327,23 @@ def _utc_iso_from_epoch(value: float) -> str:
     return datetime.fromtimestamp(value, timezone.utc).isoformat()
 
 
+def _copy_persisted_snapshot_metadata(target: Dict[str, Any], source: Dict[str, Any]) -> Dict[str, Any]:
+    """Keep only lifecycle-added persisted markers through cache normalizers."""
+    if source.get("snapshot_source") != "persisted":
+        return target
+    target.update(
+        {
+            "snapshot_source": "persisted",
+            "snapshot_captured_at": source.get("snapshot_captured_at"),
+            "snapshot_trading_date": source.get("snapshot_trading_date"),
+            "snapshot_schema_version": SNAPSHOT_SCHEMA_VERSION,
+            "cache_status": "persisted_stale",
+            "is_stale": True,
+        }
+    )
+    return target
+
+
 def normalize_streaming_symbols(symbols: Iterable[str]) -> List[str]:
     normalized: List[str] = []
     seen = set()
@@ -519,10 +538,10 @@ class RealtimeSnapshotCache:
             age_seconds = max(0.0, now - entry.received_at)
             snapshot = dict(entry.snapshot)
             snapshot["age_seconds"] = int(age_seconds)
-            snapshot["is_stale"] = age_seconds > self.ttl_seconds
+            snapshot["is_stale"] = snapshot.get("snapshot_source") == "persisted" or age_seconds > self.ttl_seconds
             if snapshot["is_stale"]:
                 snapshot["stale_reason"] = SSI_STREAMING_REALTIME_CACHE_STALE_REASON
-                return snapshot, "stale", age_seconds
+                return snapshot, "persisted_stale" if snapshot.get("snapshot_source") == "persisted" else "stale", age_seconds
             return snapshot, "hit", age_seconds
 
     def get_many(self, symbols: Iterable[str]) -> Dict[str, Any]:
@@ -535,9 +554,9 @@ class RealtimeSnapshotCache:
             row, status, age_seconds = self.get(symbol)
             if age_seconds is not None:
                 ages[symbol] = int(age_seconds)
-            if status == "hit" and row is not None:
+            if status in {"hit", "persisted_stale"} and row is not None:
                 rows.append(row)
-            elif status == "stale":
+            elif status in {"stale", "persisted_stale"}:
                 stale_symbols.append(symbol)
             else:
                 empty_symbols.append(symbol)
@@ -618,14 +637,17 @@ class TradeTapeEventCache:
             age_seconds = max(0.0, now - event.received_at)
             trade = dict(event.trade)
             trade["age_seconds"] = int(age_seconds)
-            trade["is_stale"] = age_seconds > self.ttl_seconds
+            trade["is_stale"] = trade.get("snapshot_source") == "persisted" or age_seconds > self.ttl_seconds
+            if trade.get("snapshot_source") == "persisted":
+                trade["cache_status"] = "persisted_stale"
             rows.append(trade)
 
         newest_age = max(0.0, now - events[0].received_at)
         latest_trade_timestamp = events[0].trade.get("timestamp")
+        persisted_only = bool(events) and all(event.trade.get("snapshot_source") == "persisted" for event in events[:safe_limit])
         return {
             "rows": rows,
-            "status": "stale" if newest_age > self.ttl_seconds else "hit",
+            "status": "persisted_stale" if persisted_only else "stale" if newest_age > self.ttl_seconds else "hit",
             "row_count": len(rows),
             "buffer_row_count": len(events),
             "latest_trade_timestamp": latest_trade_timestamp,
@@ -687,11 +709,11 @@ class OrderBookCache:
         age_seconds = max(0.0, now - entry.received_at)
         row = dict(entry.order_book)
         row["age_seconds"] = int(age_seconds)
-        row["is_stale"] = age_seconds > self.ttl_seconds
+        row["is_stale"] = row.get("snapshot_source") == "persisted" or age_seconds > self.ttl_seconds
         if row["is_stale"]:
             row["stale_reason"] = SSI_STREAMING_REALTIME_CACHE_STALE_REASON
         return {
-            "status": "stale" if row["is_stale"] else "hit",
+            "status": "persisted_stale" if row.get("snapshot_source") == "persisted" else "stale" if row["is_stale"] else "hit",
             "row": row,
             "latest_order_book_timestamp": row.get("stream_timestamp") or row.get("time"),
             "latest_order_book_age_seconds": int(age_seconds),
@@ -708,7 +730,7 @@ class OrderBookCache:
         if not bids and not asks:
             return None
         cached_at = _utc_iso_from_epoch(now)
-        return {
+        return _copy_persisted_snapshot_metadata({
             "ticker": symbol,
             "symbol": symbol,
             "exchange": self._safe_text(row.get("exchange")),
@@ -723,7 +745,7 @@ class OrderBookCache:
             "received_at": cached_at,
             "cached_at": cached_at,
             "cache_ttl_seconds": self.ttl_seconds,
-        }
+        }, row)
 
     def _normalize_levels(self, levels: Any) -> List[Dict[str, Any]]:
         if not isinstance(levels, list):
@@ -839,11 +861,11 @@ class ForeignRoomCache:
         age_seconds = max(0.0, now - entry.received_at)
         row = dict(entry.foreign_room)
         row["age_seconds"] = int(age_seconds)
-        row["is_stale"] = age_seconds > self.ttl_seconds
+        row["is_stale"] = row.get("snapshot_source") == "persisted" or age_seconds > self.ttl_seconds
         if row["is_stale"]:
             row["stale_reason"] = SSI_STREAMING_REALTIME_CACHE_STALE_REASON
         return {
-            "status": "stale" if row["is_stale"] else "hit",
+            "status": "persisted_stale" if row.get("snapshot_source") == "persisted" else "stale" if row["is_stale"] else "hit",
             "row": row,
             "latest_foreign_room_timestamp": row.get("stream_timestamp") or row.get("time"),
             "latest_foreign_room_age_seconds": int(age_seconds),
@@ -901,7 +923,7 @@ class ForeignRoomCache:
             "value_semantics_status": "needs_semantics_proof",
         }
         foreign_room.update(numeric_fields)
-        return foreign_room
+        return _copy_persisted_snapshot_metadata(foreign_room, row)
 
     @staticmethod
     def _clean_key(key: Any) -> str:
@@ -995,8 +1017,10 @@ class MarketIndexPulseCache:
             age_seconds = max(0.0, now - entry.received_at)
             row = dict(entry.pulse)
             row["age_seconds"] = int(age_seconds)
-            row["is_stale"] = age_seconds > self.ttl_seconds
-            if row["is_stale"]:
+            row["is_stale"] = row.get("snapshot_source") == "persisted" or age_seconds > self.ttl_seconds
+            if row.get("snapshot_source") == "persisted":
+                rows.append(row)
+            elif row["is_stale"]:
                 row["stale_reason"] = SSI_STREAMING_REALTIME_CACHE_STALE_REASON
                 stale_rows.append(row)
             else:
@@ -1006,7 +1030,7 @@ class MarketIndexPulseCache:
                 latest_timestamp = row.get("stream_timestamp") or row.get("time")
 
         if rows:
-            status = "hit"
+            status = "persisted_stale" if all(row.get("snapshot_source") == "persisted" for row in rows) else "hit"
         elif stale_rows:
             status = "stale"
         else:
@@ -1074,7 +1098,7 @@ class MarketIndexPulseCache:
             "value_semantics_status": "needs_live_proof",
         }
         pulse.update(numeric_fields)
-        return pulse
+        return _copy_persisted_snapshot_metadata(pulse, row)
 
     @staticmethod
     def _clean_key(key: Any) -> str:
@@ -1167,11 +1191,11 @@ class SessionStatusCache:
         age_seconds = max(0.0, now - entry.received_at)
         row = dict(entry.status)
         row["age_seconds"] = int(age_seconds)
-        row["is_stale"] = age_seconds > self.ttl_seconds
+        row["is_stale"] = row.get("snapshot_source") == "persisted" or age_seconds > self.ttl_seconds
         if row["is_stale"]:
             row["stale_reason"] = SSI_STREAMING_REALTIME_CACHE_STALE_REASON
         return {
-            "status": "stale" if row["is_stale"] else "hit",
+            "status": "persisted_stale" if row.get("snapshot_source") == "persisted" else "stale" if row["is_stale"] else "hit",
             "row": row,
             "latest_session_timestamp": row.get("stream_timestamp") or row.get("time"),
             "latest_session_age_seconds": int(age_seconds),
@@ -1210,6 +1234,7 @@ class SsiStreamingRealtimeManager:
         market_index_codes: Optional[Iterable[str]] = None,
         trade_tape_enabled: bool = True,
         session_status_enabled: bool = True,
+        snapshot_store: Optional[SsiStreamingSnapshotStore] = None,
         time_func: Callable[[], float] = time.time,
     ) -> None:
         self.enabled = bool(enabled)
@@ -1239,6 +1264,7 @@ class SsiStreamingRealtimeManager:
         self.market_index_codes = normalize_streaming_symbols(market_index_codes or DEFAULT_MARKET_INDEX_CODES)
         self.trade_tape_enabled = bool(trade_tape_enabled)
         self.session_status_enabled = bool(session_status_enabled)
+        self._snapshot_store = snapshot_store
         self._time_func = time_func
         self._lock = threading.RLock()
         self._client: Optional[SsiRealtimeStreamClient] = None
@@ -1275,6 +1301,84 @@ class SsiStreamingRealtimeManager:
         self._last_reconnect_error: Optional[str] = None
         self._reconnect_in_progress = False
         self._shutdown_requested = False
+
+    def set_snapshot_store(self, store: Optional[SsiStreamingSnapshotStore]) -> None:
+        """Attach the lifecycle-owned store; request handlers never call it."""
+        with self._lock:
+            self._snapshot_store = store
+
+    def restore_persisted_snapshot(self, snapshot: Dict[str, Any]) -> Dict[str, int]:
+        """Restore validated rows into empty process-local caches as persisted stale data."""
+        contexts = snapshot.get("contexts") if isinstance(snapshot, dict) else None
+        if not isinstance(contexts, dict):
+            return {"realtime": 0, "order_book": 0, "trades": 0, "foreign_room": 0, "market_index": 0, "session": 0}
+        metadata = {
+            "snapshot_source": "persisted",
+            "snapshot_captured_at": snapshot.get("captured_at"),
+            "snapshot_trading_date": snapshot.get("trading_date"),
+            "snapshot_schema_version": SNAPSHOT_SCHEMA_VERSION,
+            "is_stale": True,
+            "cache_status": "persisted_stale",
+        }
+        restored = {"realtime": 0, "order_book": 0, "trades": 0, "foreign_room": 0, "market_index": 0, "session": 0}
+        for key, row in (contexts.get("realtime") or {}).items():
+            if self.cache.get(key)[0] is None and isinstance(row, dict):
+                restored["realtime"] += self.cache.put_rows([{**row, **metadata}])
+        for key, row in (contexts.get("order_book") or {}).items():
+            if self.order_book_cache.get(key).get("row") is None and isinstance(row, dict):
+                restored["order_book"] += self.order_book_cache.put_rows([{**row, **metadata}])
+        for key, rows in (contexts.get("trades") or {}).items():
+            if not self.trade_tape_cache.get(key, 1).get("rows") and isinstance(rows, list):
+                restored["trades"] += self.trade_tape_cache.put_rows([{**row, **metadata} for row in rows if isinstance(row, dict)])
+        for key, row in (contexts.get("foreign_room") or {}).items():
+            if self.foreign_room_cache.get(key).get("row") is None and isinstance(row, dict):
+                restored["foreign_room"] += self.foreign_room_cache.put_rows([{**row, **metadata}])
+        for key, row in (contexts.get("market_index") or {}).items():
+            if not self.market_index_cache.get_many([key]).get("rows") and isinstance(row, dict):
+                restored["market_index"] += self.market_index_cache.put_rows([{**row, **metadata}])
+        for key, row in (contexts.get("session") or {}).items():
+            if self.session_status_cache.get(key).get("row") is None and isinstance(row, dict):
+                restored["session"] += self.session_status_cache.put_rows([{**row, **metadata}])
+        return restored
+
+    def flush_streaming_snapshot_if_due(self) -> bool:
+        store = self._snapshot_store
+        return bool(store and store.flush_if_due(self._snapshot_contexts))
+
+    def flush_streaming_snapshot_now(self) -> bool:
+        store = self._snapshot_store
+        return bool(store and store.flush_now(self._snapshot_contexts))
+
+    def close_streaming_snapshot_store(self) -> bool:
+        store = self._snapshot_store
+        return bool(store and store.close(self._snapshot_contexts))
+
+    def _snapshot_contexts(self) -> Dict[str, Any]:
+        with self._lock:
+            symbols = list(self._requested_symbols or self._bootstrap_symbols)
+            indexes = list(self.market_index_codes)
+        contexts: Dict[str, Any] = {"realtime": {}, "order_book": {}, "trades": {}, "foreign_room": {}, "market_index": {}, "session": {}}
+        for symbol in symbols:
+            realtime, _, _ = self.cache.get(symbol)
+            if realtime:
+                contexts["realtime"][symbol] = realtime
+            order_book = self.order_book_cache.get(symbol).get("row")
+            if order_book:
+                contexts["order_book"][symbol] = order_book
+            trades = self.trade_tape_cache.get(symbol, self.trade_tape_cache.max_rows_per_symbol).get("rows") or []
+            if trades:
+                contexts["trades"][symbol] = trades
+            foreign_room = self.foreign_room_cache.get(symbol).get("row")
+            if foreign_room:
+                contexts["foreign_room"][symbol] = foreign_room
+            session = self.session_status_cache.get(symbol).get("row")
+            if session:
+                contexts["session"][symbol] = session
+        for index_code in indexes:
+            rows = self.market_index_cache.get_many([index_code]).get("rows") or []
+            if rows:
+                contexts["market_index"][index_code] = rows[0]
+        return contexts
 
     @property
     def state(self) -> str:
@@ -1413,6 +1517,10 @@ class SsiStreamingRealtimeManager:
                 self._trade_events_from_streaming_rows(snapshot_rows)
             )
             session_written = self.session_status_cache.put_rows(session_rows)
+            if any((written, order_book_written, foreign_room_written, market_index_written, trade_written, session_written)):
+                store = self._snapshot_store
+                if store is not None and not self._shutdown_requested:
+                    store.mark_dirty()
             with self._lock:
                 self._messages_observed += 1
                 self._parser_rows_observed += written
@@ -1562,14 +1670,23 @@ class SsiStreamingRealtimeManager:
             }
         )
         if cache_result["rows"]:
+            persisted_only = all(row.get("snapshot_source") == "persisted" for row in cache_result["rows"])
+            after_hours = not diagnostics.get("market_session_active")
+            reason = (
+                "Market closed — showing last known data."
+                if persisted_only and after_hours
+                else "Waiting for live SSI updates — showing last known data."
+                if persisted_only
+                else None
+            )
             return {
                 **base,
                 "status": "ok",
-                "reason": None,
+                "reason": reason,
                 "quotes": cache_result["rows"],
                 "count": len(cache_result["rows"]),
-                "streaming_status": "cache_hit",
-                "cache_status": "hit",
+                "streaming_status": "after_hours_stale" if persisted_only and after_hours else "persisted_stale" if persisted_only else "cache_hit",
+                "cache_status": "persisted_stale" if persisted_only else "hit",
                 "manager_state": manager_state,
                 "parsed_streaming_rows": diagnostics["parser_rows_observed"],
                 "diagnostics": diagnostics,
@@ -1741,7 +1858,7 @@ class SsiStreamingRealtimeManager:
                 "latest_order_book_age_seconds": cache_result["latest_order_book_age_seconds"],
             }
         )
-        if cache_status in {"hit", "stale"} and cache_result["row"]:
+        if cache_status in {"hit", "stale", "persisted_stale"} and cache_result["row"]:
             after_hours = not diagnostics.get("market_session_active")
             streaming_status = (
                 "market_closed"
@@ -1759,8 +1876,8 @@ class SsiStreamingRealtimeManager:
             diagnostics["streaming_status"] = streaming_status
             return {
                 **base,
-                "status": "stale" if after_hours or cache_status == "stale" else "ok",
-                "reason": "Market closed — showing last known data." if after_hours else None if cache_status == "hit" else "SSI X-QUOTE stream cache stale.",
+                "status": "stale" if after_hours or cache_status in {"stale", "persisted_stale"} else "ok",
+                "reason": "Market closed — showing last known data." if after_hours else "Waiting for live SSI updates — showing last known data." if cache_status == "persisted_stale" else None if cache_status == "hit" else "SSI X-QUOTE stream cache stale.",
                 "order_book": order_book_row,
                 "count": 1,
                 "streaming_status": streaming_status,
@@ -1932,15 +2049,15 @@ class SsiStreamingRealtimeManager:
                 "latest_foreign_room_age_seconds": cache_result["latest_foreign_room_age_seconds"],
             }
         )
-        if cache_status == "hit" and cache_result["row"]:
+        if cache_status in {"hit", "persisted_stale"} and cache_result["row"]:
             return {
                 **base,
                 "status": "ok",
-                "reason": None,
+                "reason": "Market closed — showing last known data." if not diagnostics.get("market_session_active") and cache_status == "persisted_stale" else "Waiting for live SSI updates — showing last known data." if cache_status == "persisted_stale" else None,
                 "foreign_room": cache_result["row"],
                 "count": 1,
-                "streaming_status": "cache_hit",
-                "cache_status": "hit",
+                "streaming_status": "persisted_stale" if cache_status == "persisted_stale" else "cache_hit",
+                "cache_status": cache_status,
                 "manager_state": manager_state,
                 "diagnostics": diagnostics,
             }
@@ -2115,14 +2232,15 @@ class SsiStreamingRealtimeManager:
             }
         )
         if rows:
+            persisted_only = cache_status == "persisted_stale"
             return {
                 **base,
                 "status": "ok" if len(rows) == len(requested_indexes) else "partial",
-                "reason": None if len(rows) == len(requested_indexes) else "Some SSI MI market-index rows unavailable.",
+                "reason": "Market closed — showing last known data." if persisted_only and not diagnostics.get("market_session_active") else "Waiting for live SSI updates — showing last known data." if persisted_only else None if len(rows) == len(requested_indexes) else "Some SSI MI market-index rows unavailable.",
                 "market_index_pulse": rows,
                 "count": len(rows),
-                "streaming_status": "cache_hit",
-                "cache_status": "hit",
+                "streaming_status": "after_hours_stale" if persisted_only and not diagnostics.get("market_session_active") else "persisted_stale" if persisted_only else "cache_hit",
+                "cache_status": "persisted_stale" if persisted_only else "hit",
                 "manager_state": manager_state,
                 "diagnostics": diagnostics,
             }
@@ -2287,11 +2405,12 @@ class SsiStreamingRealtimeManager:
         )
         if cache_result["rows"]:
             after_hours = not diagnostics.get("market_session_active")
+            persisted_only = cache_result["status"] == "persisted_stale"
             streaming_status = (
                 "market_closed"
                 if after_hours and cache_result["status"] == "hit"
                 else "after_hours_stale"
-                if after_hours
+                if after_hours or persisted_only
                 else "cache_stale"
                 if cache_result["status"] == "stale"
                 else "cache_hit"
@@ -2300,7 +2419,7 @@ class SsiStreamingRealtimeManager:
             return {
                 **base,
                 "status": "ok",
-                "reason": "Market closed — showing last known data." if after_hours else "Buffered SSI X-TRADE rows available." if cache_result["status"] == "stale" else None,
+                "reason": "Market closed — showing last known data." if after_hours else "Waiting for live SSI updates — showing last known data." if persisted_only else "Buffered SSI X-TRADE rows available." if cache_result["status"] == "stale" else None,
                 "trades": cache_result["rows"],
                 "count": len(cache_result["rows"]),
                 "streaming_status": streaming_status,
@@ -2470,15 +2589,15 @@ class SsiStreamingRealtimeManager:
                 "latest_session_age_seconds": cache_result["latest_session_age_seconds"],
             }
         )
-        if cache_status == "hit" and cache_result["row"]:
+        if cache_status in {"hit", "persisted_stale"} and cache_result["row"]:
             return {
                 **base,
                 "status": "ok",
-                "reason": None,
+                "reason": "Market closed — showing last known data." if not diagnostics.get("market_session_active") and cache_status == "persisted_stale" else "Waiting for live SSI updates — showing last known data." if cache_status == "persisted_stale" else None,
                 "session_status": cache_result["row"],
                 "count": 1,
-                "streaming_status": "cache_hit",
-                "cache_status": "hit",
+                "streaming_status": "persisted_stale" if cache_status == "persisted_stale" else "cache_hit",
+                "cache_status": cache_status,
                 "manager_state": manager_state,
                 "diagnostics": diagnostics,
             }
@@ -2558,6 +2677,20 @@ class SsiStreamingRealtimeManager:
             last_message_age_seconds = self._last_message_age_seconds_locked()
             market_session = vietnam_market_session_from_epoch(float(self._time_func()))
             stream_health = self._stream_health_locked(last_message_age_seconds, market_session)
+            snapshot_diagnostics = self._snapshot_store.diagnostics() if self._snapshot_store is not None else {
+                "snapshot_enabled": False,
+                "snapshot_loaded": False,
+                "snapshot_status": "disabled",
+                "snapshot_schema_version": SNAPSHOT_SCHEMA_VERSION,
+                "snapshot_captured_at": None,
+                "snapshot_trading_date": None,
+                "snapshot_age_seconds": None,
+                "snapshot_context_counts": {},
+                "snapshot_last_write_at": None,
+                "snapshot_write_count": 0,
+                "snapshot_write_error_count": 0,
+                "snapshot_restore_error_count": 0,
+            }
             return {
                 "enabled": self.enabled,
                 "manager_state": self._state,
@@ -2613,6 +2746,7 @@ class SsiStreamingRealtimeManager:
                 "last_reconnect_reason": self._last_reconnect_reason,
                 "last_reconnect_error": self._last_reconnect_error,
                 "runtime_status": self._runtime_status_locked(),
+                **snapshot_diagnostics,
             }
 
     def _record_error(self, error: Any, *, set_errored: bool) -> None:
@@ -2631,6 +2765,7 @@ class SsiStreamingRealtimeManager:
 
     def monitor_tick(self, *, wants_streaming: bool) -> Dict[str, Any]:
         """Run one deterministic idle/reconnect monitor iteration."""
+        self.flush_streaming_snapshot_if_due()
         action = self._prepare_reconnect_action(wants_streaming=bool(wants_streaming))
         if action is None:
             return self.status()

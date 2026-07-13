@@ -24,6 +24,7 @@ from data_provider.ssi_streaming_realtime import (
     normalize_streaming_symbols,
     sanitize_streaming_error,
 )
+from data_provider.ssi_streaming_snapshot_store import SsiStreamingSnapshotStore
 from src.config import get_config
 
 
@@ -33,6 +34,7 @@ _RUNTIME_STARTED_BY_LIFECYCLE = False
 _RUNTIME_WANTS_STREAMING = False
 _RUNTIME_SHUTDOWN_REQUESTED = False
 _RUNTIME_BOOTSTRAP_SYMBOLS: List[str] = []
+_RUNTIME_SNAPSHOT_RESTORED = False
 _RUNTIME_MONITOR_STOP: Optional[threading.Event] = None
 _RUNTIME_MONITOR_THREAD: Optional[threading.Thread] = None
 _RUNTIME_MONITOR_INTERVAL_SECONDS = 1.0
@@ -80,7 +82,7 @@ def is_ssi_streaming_realtime_monitor_running() -> bool:
 
 def reset_ssi_streaming_realtime_lifecycle_for_tests() -> None:
     """Reset process-local lifecycle state for deterministic tests."""
-    global _RUNTIME_MANAGER, _RUNTIME_STARTED_BY_LIFECYCLE, _RUNTIME_WANTS_STREAMING, _RUNTIME_SHUTDOWN_REQUESTED, _RUNTIME_BOOTSTRAP_SYMBOLS
+    global _RUNTIME_MANAGER, _RUNTIME_STARTED_BY_LIFECYCLE, _RUNTIME_WANTS_STREAMING, _RUNTIME_SHUTDOWN_REQUESTED, _RUNTIME_BOOTSTRAP_SYMBOLS, _RUNTIME_SNAPSHOT_RESTORED
     _stop_reconnect_monitor()
     with _RUNTIME_LOCK:
         manager = _RUNTIME_MANAGER
@@ -89,6 +91,7 @@ def reset_ssi_streaming_realtime_lifecycle_for_tests() -> None:
         _RUNTIME_WANTS_STREAMING = False
         _RUNTIME_SHUTDOWN_REQUESTED = False
         _RUNTIME_BOOTSTRAP_SYMBOLS = []
+        _RUNTIME_SNAPSHOT_RESTORED = False
     if manager is not None:
         manager.mark_shutdown()
         manager.stop()
@@ -167,7 +170,7 @@ def bootstrap_ssi_streaming_realtime(
     Startup remains best-effort and non-fatal. Request handlers do not call this
     function; they only read the process-local manager if startup created it.
     """
-    global _RUNTIME_MANAGER, _RUNTIME_STARTED_BY_LIFECYCLE, _RUNTIME_WANTS_STREAMING, _RUNTIME_BOOTSTRAP_SYMBOLS
+    global _RUNTIME_MANAGER, _RUNTIME_STARTED_BY_LIFECYCLE, _RUNTIME_WANTS_STREAMING, _RUNTIME_BOOTSTRAP_SYMBOLS, _RUNTIME_SNAPSHOT_RESTORED
 
     cfg = config or get_config()
     with _RUNTIME_LOCK:
@@ -200,6 +203,23 @@ def bootstrap_ssi_streaming_realtime(
         if manager is None:
             manager = _new_manager(config=cfg, client_factory=client_factory)
             _RUNTIME_MANAGER = manager
+        if not _RUNTIME_SNAPSHOT_RESTORED:
+            store = SsiStreamingSnapshotStore(
+                enabled=bool(getattr(cfg, "ssi_streaming_snapshot_enabled", False)),
+                path=getattr(cfg, "ssi_streaming_snapshot_path", "runtime/ssi_streaming_last_known.v1.json"),
+                write_interval_seconds=getattr(cfg, "ssi_streaming_snapshot_write_interval_seconds", 5),
+                trade_limit=min(
+                    int(getattr(cfg, "ssi_streaming_snapshot_trade_limit", 50) or 50),
+                    int(getattr(manager.trade_tape_cache, "max_rows_per_symbol", 50) or 50),
+                ),
+                max_symbols=getattr(cfg, "ssi_streaming_snapshot_max_symbols", 128),
+                max_age_days=getattr(cfg, "ssi_streaming_snapshot_max_age_days", 7),
+            )
+            manager.set_snapshot_store(store)
+            snapshot = store.load()
+            if snapshot.get("captured_at"):
+                manager.restore_persisted_snapshot(snapshot)
+            _RUNTIME_SNAPSHOT_RESTORED = True
 
     if not symbols:
         _stop_reconnect_monitor()
@@ -304,6 +324,7 @@ def shutdown_ssi_streaming_realtime() -> Dict[str, Any]:
         return {"bootstrap_status": "not_started", "manager_state": "stopped"}
     try:
         manager.mark_shutdown()
+        manager.close_streaming_snapshot_store()
         status = manager.stop()
         manager.set_bootstrap_context(
             status="stopped",

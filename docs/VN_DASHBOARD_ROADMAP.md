@@ -1279,6 +1279,12 @@ Boundaries:
 * Request handlers remain cache readers only and must not start streams, subscribe dynamically, use all-market channels, or call trading/order/account APIs.
 * `F` session/status context must not replace SSI DailyOhlc, DailyStockPrice, realtime snapshot, trade tape, or `latest_price`.
 
+### Phase 4.8S - Persist Last-Known SSI Streaming Snapshots
+
+Status: completed on 2026-07-13.
+
+Add disabled-by-default, bounded operational JSON persistence for user-safe normalized SSI streaming caches. The lifecycle restores once before existing manager startup; each restored X/X-QUOTE/X-TRADE/R/MI/F context is explicitly stale and is superseded only by a live row from that same context. Snapshots are atomic, debounced, bounded, gitignored, and non-fatal when missing/corrupt/expired. They are not historical storage, do not add subscriptions or request-time work, and do not affect SSI DailyOhlc `latest_price`.
+
 ### Phase 4.8H - SSI X-QUOTE Order Book Ladder
 
 Status: implemented on 2026-07-08 as a backend/API runtime-proof path.

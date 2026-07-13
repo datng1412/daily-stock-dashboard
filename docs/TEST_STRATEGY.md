@@ -56,6 +56,7 @@ Expected protection:
 
 - Realtime polling calls only `/api/v1/stocks/vn/realtime` and does not refresh watchlist, chart, company-like, or trade-tape paths.
 - Realtime polling failures keep previous daily rows, selected ticker, chart, and any previous successful realtime snapshot visible.
+- Streaming snapshot tests cover strict version/provider/timestamp validation, bounded allowlisted context rows, atomic/debounced writes, shutdown flush, corrupt/expired failure isolation, context independence, persisted-stale restore, and live-row precedence. They must use temporary directories and never print snapshot contents or secrets.
 - Hidden-tab visibility handling pauses/skips realtime polling and visible-tab restoration resumes realtime polling only, without a full dashboard reload.
 - Trade-tape auto-refresh tests should wait for the initial selected-ticker chart request before capturing no-refresh baselines, so the initial chart effect is not misclassified as a trade-tape timer refresh.
 

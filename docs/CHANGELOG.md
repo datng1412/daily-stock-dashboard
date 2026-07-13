@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [new feature] Add disabled-by-default bounded atomic persistence for normalized SSI streaming last-known cache rows, restored as stale per context without changing DailyOhlc price ownership or adding provider fallbacks.
 - [new feature] Add compact SSI DailyOhlc-derived short-term D1 support and resistance zones to the VN indicator table without new provider calls, realtime dependencies, fallback data, or a change to `latest_price` ownership.
 - [fix] Add market-session-aware SSI streaming health diagnostics, after-hours last-known live rows, stale-stream watchdog reconnects during active VN trading windows, and immediate selected live-context refresh when VN dashboard tabs regain focus.
 - [fix] Prevent a late SSI streaming client start from reviving the manager after lifecycle shutdown begins.

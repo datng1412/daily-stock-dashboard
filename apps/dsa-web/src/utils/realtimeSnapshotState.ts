@@ -41,6 +41,8 @@ export function getRealtimeSnapshotDisplayState(args: {
   ageSeconds?: number | null;
   isStale?: boolean | null;
   staleReason?: string | null;
+  snapshotSource?: string | null;
+  snapshotCapturedAt?: string | null;
   marketPhaseCode?: string | null;
   snapshotTimeDisplay?: string | null;
 }): RealtimeSnapshotDisplayResult {
@@ -76,6 +78,24 @@ export function getRealtimeSnapshotDisplayState(args: {
   const age = Math.max(0, Math.trunc(args.ageSeconds));
   const ageText = ageLabel(age);
   const rawStaleReason = args.staleReason ? ` Raw stale reason: ${args.staleReason}.` : '';
+
+  if (args.snapshotSource === 'persisted') {
+    const capturedText = args.snapshotCapturedAt ? ` Snapshot captured at ${args.snapshotCapturedAt}.` : '';
+    if (ACTIVE_PHASES.has(phaseCode)) {
+      return result(
+        'stale_during_trading',
+        'Last known SSI realtime',
+        `Waiting for live SSI updates — showing last known data. Raw age is ${ageText}.${capturedText}`,
+        'info',
+      );
+    }
+    return result(
+      'last_available_closed',
+      'Last known SSI realtime',
+      `Market closed — showing last known data. Raw age is ${ageText}.${capturedText}`,
+      'info',
+    );
+  }
 
   if (ACTIVE_PHASES.has(phaseCode)) {
     if (args.isStale === true || age > 180) {

@@ -525,6 +525,8 @@ const realtimeSnapshotState = (quote?: VietnamRealtimeQuote | null, marketPhaseC
     ageSeconds: quote?.ageSeconds ?? realtimeAgeSecondsFromTimestamp(quote),
     isStale: quote?.isStale,
     staleReason: quote?.staleReason,
+    snapshotSource: quote?.snapshotSource,
+    snapshotCapturedAt: quote?.snapshotCapturedAt,
     marketPhaseCode,
     snapshotTimeDisplay: realtimeSnapshotTimestamp(quote),
   });

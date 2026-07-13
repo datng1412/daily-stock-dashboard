@@ -155,6 +155,10 @@ These codes describe data availability only. They must not synthesize values, hi
 
 ## Live Section Contract
 
+### Persisted last-known streaming metadata
+
+When the optional lifecycle snapshot is enabled, normalized restored live rows may add `snapshot_source="persisted"`, `snapshot_captured_at`, `snapshot_trading_date`, `snapshot_schema_version=1`, `is_stale=true`, and `cache_status="persisted_stale"`. These fields are additive diagnostics/freshness metadata only. They never make X current/live, never replace `latest_price` or DailyOhlc, and never change empty/null contracts when no persisted row exists. During active sessions the user-facing state is waiting for live SSI updates; after close it is last-known stale data.
+
 This is the Phase 2 public contract. Missing live objects and lists must not be represented by placeholder objects or fake metric rows.
 
 ### Intraday
