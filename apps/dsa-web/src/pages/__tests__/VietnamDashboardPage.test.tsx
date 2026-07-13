@@ -274,6 +274,15 @@ const makeItem = (ticker: string): VietnamWatchItem => ({
     priceVsReferenceStatus: 'ok',
     dailyRangePct: 3,
     dailyRangeStatus: 'ok',
+    shortTermZones: {
+      status: 'ok',
+      reasonCode: 'short_term_zones_ready',
+      source: 'derived from SSI DailyOhlc',
+      timeframe: 'D1',
+      lookbackSessions: 60,
+      support: [{ lower: 70800, upper: 71300 }, { lower: 69200, upper: 69800 }],
+      resistance: [{ lower: 73500, upper: 74100 }, { lower: 75400, upper: 76000 }],
+    },
     ssiDerivedMetricsStatus: 'ok',
     ssiDerivedMetricsSource: 'SSI DailyOhlc + SSI DailyStockPrice',
   },
@@ -3491,6 +3500,18 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(indicatorTable.getByRole('button', { name: /Sort by % change/i })).toBeInTheDocument();
     expect(indicatorTable.getByRole('button', { name: /Sort by RSI14/i })).toBeInTheDocument();
     expect(indicatorTable.getByText('MA state')).toBeInTheDocument();
+    expect(indicatorTable.getByText('Support')).toBeInTheDocument();
+    expect(indicatorTable.getByText('Resistance')).toBeInTheDocument();
+    expect(indicatorTable.getAllByText('D1 · 60 sessions')).toHaveLength(2);
+    fireEvent.mouseEnter(indicatorTable.getByLabelText('Support information').parentElement as HTMLElement);
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(
+      'Recent price zones below the latest daily close, derived from swing lows in the last 60 daily sessions.',
+    );
+    fireEvent.mouseLeave(indicatorTable.getByLabelText('Support information').parentElement as HTMLElement);
+    fireEvent.mouseEnter(indicatorTable.getByLabelText('Resistance information').parentElement as HTMLElement);
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(
+      'Recent price zones above the latest daily close, derived from swing highs in the last 60 daily sessions.',
+    );
     expect(indicatorTable.getByRole('button', { name: /Sort by Volume \/ 20D avg/i })).toBeInTheDocument();
     expect(indicatorTable.getByRole('button', { name: /Sort by Foreign net volume/i })).toBeInTheDocument();
     expect(indicatorTable.getByRole('button', { name: /Sort by Data quality/i })).toBeInTheDocument();
@@ -3498,6 +3519,38 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(indicatorTable.getByTestId('indicator-row-FPT')).toHaveTextContent('OK');
     expect(indicatorTable.getByTestId('indicator-row-FPT')).toHaveTextContent('Above MA20');
     expect(indicatorTable.getByTestId('indicator-row-SCS')).toHaveTextContent('Unavailable');
+  });
+
+  it('renders compact DailyOhlc-derived zones and keeps unavailable zones explicit', async () => {
+    const response = makeResponse(defaultTickers);
+    response.watchlist[1] = {
+      ...response.watchlist[1],
+      indicators: {
+        ...response.watchlist[1].indicators,
+        shortTermZones: {
+          status: 'unavailable',
+          reasonCode: 'insufficient_daily_history',
+          source: 'derived from SSI DailyOhlc',
+          timeframe: 'D1',
+          lookbackSessions: 60,
+          support: [],
+          resistance: [],
+        },
+      },
+    };
+    mockedGetVietnamWatchlist.mockResolvedValue(response);
+
+    render(<VietnamDashboardPage />);
+
+    const fptRow = await screen.findByTestId('indicator-row-FPT');
+    expect(within(fptRow).getByText('S1')).toBeInTheDocument();
+    expect(within(fptRow).getByText('R1')).toBeInTheDocument();
+    expect(fptRow).toHaveTextContent('70.80–71.30');
+    expect(fptRow).toHaveTextContent('73.50–74.10');
+
+    const vpbRow = screen.getByTestId('indicator-row-VPB');
+    expect(within(vpbRow).getByLabelText('VPB support unavailable')).toHaveTextContent('—');
+    expect(within(vpbRow).getByLabelText('VPB resistance unavailable')).toHaveTextContent('—');
   });
 
   it('renders local scan filter controls and row count', async () => {

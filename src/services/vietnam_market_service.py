@@ -1984,6 +1984,114 @@ def calculate_rsi14(close: pd.Series) -> Optional[float]:
     return 100 - (100 / (1 + rs))
 
 
+SHORT_TERM_ZONE_LOOKBACK_SESSIONS = 60
+SHORT_TERM_ZONE_ATR_PERIOD = 14
+
+
+def _short_term_zone_result(reason_code: str, *, support: Optional[List[Dict[str, float]]] = None, resistance: Optional[List[Dict[str, float]]] = None) -> Dict[str, Any]:
+    return {
+        "status": "ok" if reason_code == "short_term_zones_ready" else "unavailable",
+        "reason_code": reason_code,
+        "source": "derived from SSI DailyOhlc",
+        "timeframe": "D1",
+        "lookback_sessions": SHORT_TERM_ZONE_LOOKBACK_SESSIONS,
+        "support": support or [],
+        "resistance": resistance or [],
+    }
+
+
+def _normalized_short_term_zone_history(df: pd.DataFrame) -> List[Dict[str, float]]:
+    if df is None or df.empty or not {"date", "high", "low", "close"}.issubset(df.columns):
+        return []
+    normalized: Dict[str, Dict[str, float]] = {}
+    for row in df.to_dict(orient="records"):
+        date = _valid_date_string(row.get("date"))
+        high = _safe_float(row.get("high"))
+        low = _safe_float(row.get("low"))
+        close = _safe_float(row.get("close"))
+        if not date or high is None or low is None or close is None:
+            continue
+        if not all(math.isfinite(value) for value in (high, low, close)) or close <= 0 or high < low:
+            continue
+        normalized[date] = {"date": date, "high": high, "low": low, "close": close}
+    return [normalized[date] for date in sorted(normalized)][-SHORT_TERM_ZONE_LOOKBACK_SESSIONS:]
+
+
+def _wilder_atr14(rows: List[Dict[str, float]]) -> Optional[float]:
+    if len(rows) < SHORT_TERM_ZONE_ATR_PERIOD + 1:
+        return None
+    ranges = [
+        max(
+            row["high"] - row["low"],
+            abs(row["high"] - previous["close"]),
+            abs(row["low"] - previous["close"]),
+        )
+        for previous, row in zip(rows, rows[1:])
+    ]
+    if len(ranges) < SHORT_TERM_ZONE_ATR_PERIOD:
+        return None
+    atr = sum(ranges[:SHORT_TERM_ZONE_ATR_PERIOD]) / SHORT_TERM_ZONE_ATR_PERIOD
+    for true_range in ranges[SHORT_TERM_ZONE_ATR_PERIOD:]:
+        atr = ((atr * (SHORT_TERM_ZONE_ATR_PERIOD - 1)) + true_range) / SHORT_TERM_ZONE_ATR_PERIOD
+    return atr if math.isfinite(atr) and atr > 0 else None
+
+
+def _cluster_short_term_pivots(pivots: List[float], atr: float) -> List[Dict[str, float]]:
+    threshold = atr * 0.5
+    clusters: List[List[float]] = []
+    for pivot in sorted(pivots):
+        if not clusters or pivot - clusters[-1][-1] > threshold:
+            clusters.append([pivot])
+        else:
+            clusters[-1].append(pivot)
+    zones: List[Dict[str, float]] = []
+    minimum_width = atr * 0.5
+    for cluster in clusters:
+        lower, upper = min(cluster), max(cluster)
+        if upper - lower < minimum_width:
+            midpoint = (lower + upper) / 2
+            lower, upper = midpoint - minimum_width / 2, midpoint + minimum_width / 2
+        if lower > 0 and upper >= lower:
+            zones.append({"lower": lower, "upper": upper})
+    merged: List[Dict[str, float]] = []
+    for zone in zones:
+        if merged and zone["lower"] <= merged[-1]["upper"]:
+            merged[-1]["upper"] = max(merged[-1]["upper"], zone["upper"])
+            merged[-1]["lower"] = min(merged[-1]["lower"], zone["lower"])
+        else:
+            merged.append(zone)
+    return merged
+
+
+def calculate_short_term_zones(df: pd.DataFrame) -> Dict[str, Any]:
+    """Derive compact D1 support/resistance zones from existing DailyOhlc history."""
+    rows = _normalized_short_term_zone_history(df)
+    if len(rows) < SHORT_TERM_ZONE_LOOKBACK_SESSIONS:
+        return _short_term_zone_result("insufficient_daily_history")
+    atr = _wilder_atr14(rows)
+    if atr is None:
+        return _short_term_zone_result("atr_unavailable")
+    low_pivots = []
+    high_pivots = []
+    for index in range(2, len(rows) - 2):
+        window = rows[index - 2:index + 3]
+        pivot = rows[index]
+        if pivot["low"] <= min(row["low"] for row in window):
+            low_pivots.append(pivot["low"])
+        if pivot["high"] >= max(row["high"] for row in window):
+            high_pivots.append(pivot["high"])
+    latest_close = rows[-1]["close"]
+    support = [zone for zone in _cluster_short_term_pivots(low_pivots, atr) if zone["upper"] < latest_close]
+    resistance = [zone for zone in _cluster_short_term_pivots(high_pivots, atr) if zone["lower"] > latest_close]
+    support.sort(key=lambda zone: zone["upper"], reverse=True)
+    resistance.sort(key=lambda zone: zone["lower"])
+    normalize = lambda zones: [
+        {"lower": _round_optional(zone["lower"]), "upper": _round_optional(zone["upper"])}
+        for zone in zones[:2]
+    ]
+    return _short_term_zone_result("short_term_zones_ready", support=normalize(support), resistance=normalize(resistance))
+
+
 def calculate_rsi14_series(close: pd.Series) -> pd.Series:
     """Calculate RSI14 series using the same Wilder/RMA smoothing as calculate_rsi14."""
     values = pd.to_numeric(close, errors="coerce")
@@ -2918,6 +3026,7 @@ def calculate_vietnam_indicators(
         "ssi_derived_metrics_source": "SSI DailyOhlc + SSI DailyStockPrice",
     }
     ssi_derived_metrics["ssi_derived_metrics_status"] = _ssi_derived_metrics_status(ssi_derived_metrics)
+    short_term_zones = calculate_short_term_zones(df)
 
     return {
         "close": _round_optional(latest_close),
@@ -2941,6 +3050,7 @@ def calculate_vietnam_indicators(
         "foreign_net_5d": _round_optional(foreign_net_5d, 0),
         "foreign_net_20d": _round_optional(foreign_net_20d, 0),
         "foreign_net_latest": _round_optional(_safe_float((foreign_latest or {}).get("net")), 0),
+        "short_term_zones": short_term_zones,
         **ssi_derived_metrics,
         **foreign_history_summary,
     }

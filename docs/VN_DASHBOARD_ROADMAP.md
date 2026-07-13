@@ -1226,6 +1226,12 @@ Result:
 * Phase 4.8A-Fix corrected frontend API adapter mapping for numeric-suffix fields (`52w`, `10d`, `3m`) so values render with their dates/statuses, and tightened backend valid-row rules for 52W, volume, reference, and daily-range formulas.
 * Left beta deferred pending SSI index data and methodology verification.
 
+### Phase 4.9A - Short-Term Daily Support and Resistance Zones
+
+Status: completed on 2026-07-10.
+
+The `/vietnam` indicator table now shows compact Support and Resistance columns from `indicators.short_term_zones`. The service derives up to two nearest zones on each side from exactly the latest 60 valid unique SSI DailyOhlc D1 sessions, using ATR14 Wilder/RMA and five-session swing pivots. Zones are source-labeled `derived from SSI DailyOhlc`, never cross the latest daily close, and remain unavailable rather than guessed when history or ATR is insufficient. This calculation adds no provider call, polling, realtime dependency, fallback, or change to `latest_price` ownership.
+
 ### Phase 4.8F - SSI Remaining Data Capability Audit
 
 Status: completed on 2026-07-08 as a documentation-only audit.

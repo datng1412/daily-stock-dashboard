@@ -131,6 +131,7 @@ Phase 4.8A adds these additive fields under watchlist `indicators` and company `
 | `avg_volume_3m` | Average volume from up to the latest 63 usable SSI DailyOhlc volume rows | `avg_volume_3m_coverage_status` is `complete` at >=60 rows, `partial` at >=30, and `insufficient` below 30. Value is null when insufficient. A usable volume row is numeric and >=0. |
 | `price_vs_reference_pct` | `(DailyOhlc close - DailyStockPrice reference_price) / reference_price * 100` | Requires positive DailyOhlc close and positive DailyStockPrice reference. Status is `ok`, `daily_close_unavailable`, or `reference_unavailable`. |
 | `daily_range_pct` | `(DailyOhlc high - DailyOhlc low) / DailyOhlc close * 100` | Requires numeric DailyOhlc high/low, positive close, and high >= low. Status is `ok` or `insufficient`. |
+| `short_term_zones` | Compact D1 support/resistance zones | Object with `status`, `reason_code`, `source`, `timeframe`, `lookback_sessions`, `support[]`, and `resistance[]`. Source is `derived from SSI DailyOhlc`; timeframe is `D1`; lookback is 60 valid unique sessions. Each public zone contains only numeric `lower` and `upper`. ATR14 Wilder/RMA plus two-before/two-after swing pivots define local zones. Zones crossing the latest daily close are excluded; support is nearest-first below, resistance nearest-first above, at most two each. Insufficient valid history or ATR returns `status=unavailable` and empty lists. No provider call, realtime input, fallback, or `latest_price` change is allowed. |
 | `ssi_derived_metrics_status`, `ssi_derived_metrics_source` | Aggregate source/status for the fields above | Source is `SSI DailyOhlc + SSI DailyStockPrice`; status is `ok`, `partial`, or `insufficient`. |
 
 Reason codes used for row-level partial/missing explanations include:
@@ -521,7 +522,7 @@ The SSI-first rule is: if SSI can provide a market-data field, SSI owns it; if a
 | Put-through volume/value | SSI DailyStockPrice | Use when available |
 | Latest foreign flow | SSI DailyStockPrice | Use latest matched-date row when available |
 | Foreign 5D/20D flow | SSI DailyStockPrice | Compute only from returned recent DailyStockPrice `foreign_net_volume` rows; null when history is insufficient |
-| Technical indicators and SSI-derived metrics | SSI-derived internal | MA20/MA50, RSI14, Bollinger 20,2, 20D average volume, 20D high/low, volume ratio, 52W high/low, 10D average volume, 3M average volume, price-vs-reference %, and daily range % are derived from SSI DailyOhlc and DailyStockPrice inputs and must not use external provider substitutes |
+| Technical indicators and SSI-derived metrics | SSI-derived internal | MA20/MA50, RSI14, Bollinger 20,2, 20D average volume, 20D high/low, volume ratio, 52W high/low, 10D average volume, 3M average volume, price-vs-reference %, daily range %, and short-term D1 zones are derived from SSI DailyOhlc and DailyStockPrice inputs where applicable and must not use external provider substitutes |
 | Deferred beta / market cap | SSI-derived or source-labeled after proof | Beta requires verified SSI index data and methodology; market cap requires verified share-count semantics before calculation |
 | Index list | SSI IndexList | Use SSI-returned index codes and identifiers |
 | Daily index | SSI DailyIndex | Optional index value/change/liquidity/breadth rows only after exact IndexList resolution |

@@ -197,6 +197,7 @@ Primary table/watchlist scan fields:
 * Percent change.
 * RSI14.
 * MA state.
+* Short-term DailyOhlc-derived support and resistance zones.
 * Volume / 20D average.
 * Foreign net volume.
 * Data quality.
@@ -206,7 +207,7 @@ Source ownership:
 
 * Daily close, OHLCV, and chart: SSI DailyOhlc.
 * Foreign net volume: SSI DailyStockPrice.
-* Indicators: derived from SSI DailyOhlc.
+* Indicators: derived from SSI DailyOhlc. The indicator table may show up to two compact support zones below and resistance zones above the latest daily close from the latest 60 valid D1 sessions; unavailable history stays explicit and no zone is a recommendation.
 
 ### Tier 2 - Selected Ticker Explanation
 

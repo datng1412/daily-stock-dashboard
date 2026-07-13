@@ -1,6 +1,6 @@
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, Banknote, DatabaseZap, Loader2, Maximize2, RefreshCw, RotateCcw, Search, ShieldAlert, X } from 'lucide-react';
+import { Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, Banknote, DatabaseZap, Info, Loader2, Maximize2, RefreshCw, RotateCcw, Search, ShieldAlert, X } from 'lucide-react';
 import {
   stocksApi,
   type VietnamChartPoint,
@@ -18,7 +18,7 @@ import {
   type VietnamWatchItem,
   type VietnamWatchlistResponse,
 } from '../api/stocks';
-import { AppPage, Badge, Button, Loading } from '../components/common';
+import { AppPage, Badge, Button, Loading, Tooltip } from '../components/common';
 import { DataQualitySummary, OrderBookLadder } from '../components/dashboard';
 import { cn } from '../utils/cn';
 import { buildVietnamConditionSummary, VIETNAM_CONDITION_SUMMARY_SUBTITLE } from '../utils/vietnamConditionSummary';
@@ -2876,6 +2876,29 @@ const nextIndicatorSortState = (
     : { key, direction: 'asc' }
 );
 
+const shortTermZoneRange = (zone: { lower?: number | null; upper?: number | null }) => {
+  const lower = zone.lower;
+  const upper = zone.upper;
+  if (!hasDisplayValue(lower) || !hasDisplayValue(upper)) return '—';
+  const lowerText = formatPrice(lower);
+  const upperText = formatPrice(upper);
+  return lowerText === upperText ? lowerText : `${lowerText}–${upperText}`;
+};
+
+const ShortTermZoneCell: React.FC<{
+  zones?: Array<{ lower?: number | null; upper?: number | null }>;
+  prefix: 'S' | 'R';
+  ticker: string;
+}> = ({ zones, prefix, ticker }) => {
+  const visibleZones = (zones ?? []).filter((zone) => hasDisplayValue(zone.lower) && hasDisplayValue(zone.upper)).slice(0, 2);
+  if (!visibleZones.length) return <span aria-label={`${ticker} ${prefix === 'S' ? 'support' : 'resistance'} unavailable`}>—</span>;
+  return (
+    <div className="space-y-0.5 tabular-nums">
+      {visibleZones.map((zone, index) => <div key={`${prefix}-${index}`}><span className="mr-2 text-xs text-secondary-text">{prefix}{index + 1}</span>{shortTermZoneRange(zone)}</div>)}
+    </div>
+  );
+};
+
 const IndicatorTable: React.FC<{
   items: Vn30WatchItem[];
   realtimeQuotes: Record<string, VietnamRealtimeQuote | undefined>;
@@ -3086,7 +3109,7 @@ const IndicatorTable: React.FC<{
       ) : null}
       {filteredItems.length ? (
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[1040px] text-left text-sm">
+        <table className="w-full min-w-[1240px] text-left text-sm">
           <thead className="border-b border-border/70 text-xs uppercase text-secondary-text">
             <tr>
               <th className="py-2 pr-3">{sortButton('ticker', 'Ticker')}</th>
@@ -3094,6 +3117,22 @@ const IndicatorTable: React.FC<{
               <th className="px-3 py-2 text-right">{sortButton('changePct', '% change', 'ml-auto')}</th>
               <th className="px-3 py-2 text-right">{sortButton('rsi14', 'RSI14', 'ml-auto')}</th>
               <th className="px-3 py-2">MA state</th>
+              <th className="px-3 py-2">
+                <div className="flex items-start gap-1">
+                  <div>Support<div className="mt-0.5 text-[10px] font-normal normal-case text-muted">D1 · 60 sessions</div></div>
+                  <Tooltip content="Recent price zones below the latest daily close, derived from swing lows in the last 60 daily sessions." focusable>
+                    <span aria-label="Support information"><Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted" aria-hidden="true" /></span>
+                  </Tooltip>
+                </div>
+              </th>
+              <th className="px-3 py-2">
+                <div className="flex items-start gap-1">
+                  <div>Resistance<div className="mt-0.5 text-[10px] font-normal normal-case text-muted">D1 · 60 sessions</div></div>
+                  <Tooltip content="Recent price zones above the latest daily close, derived from swing highs in the last 60 daily sessions." focusable>
+                    <span aria-label="Resistance information"><Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted" aria-hidden="true" /></span>
+                  </Tooltip>
+                </div>
+              </th>
               <th className="px-3 py-2 text-right">{sortButton('volumeRatio', 'Volume / 20D avg', 'ml-auto')}</th>
               <th className="px-3 py-2 text-right">{sortButton('foreignNetVolume', 'Foreign net volume', 'ml-auto')}</th>
               <th className="px-3 py-2">{sortButton('dataQuality', 'Data quality')}</th>
@@ -3119,7 +3158,7 @@ const IndicatorTable: React.FC<{
                         {item.membershipSource ?? 'SSI IndexComponents'} membership
                       </div>
                     </td>
-                    {(['Daily close', '% change', 'RSI14', 'MA state', 'Volume / 20D avg', 'Foreign net volume'] as const).map((label) => (
+                    {(['Daily close', '% change', 'RSI14', 'MA state', 'Support', 'Resistance', 'Volume / 20D avg', 'Foreign net volume'] as const).map((label) => (
                       <td
                         key={label}
                         className={cn('px-3 py-3', label !== 'MA state' && 'text-right tabular-nums')}
@@ -3196,6 +3235,8 @@ const IndicatorTable: React.FC<{
                       {maState.label}
                     </Badge>
                   </td>
+                  <td className="px-3 py-3 text-right"><ShortTermZoneCell zones={item.indicators.shortTermZones?.support} prefix="S" ticker={item.ticker} /></td>
+                  <td className="px-3 py-3 text-right"><ShortTermZoneCell zones={item.indicators.shortTermZones?.resistance} prefix="R" ticker={item.ticker} /></td>
                   <td className="px-3 py-3 text-right tabular-nums">
                     {volumeRatio === null ? missingValue(missingCellReason(item, 'volumeRatio')) : `${formatNumber(volumeRatio, 2)}x`}
                   </td>

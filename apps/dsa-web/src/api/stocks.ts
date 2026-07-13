@@ -200,6 +200,15 @@ export type VietnamWatchItem = {
     foreignNet20dLatestAvailable?: number | null;
     foreignNetLatestAvailableDate?: string | null;
     foreignNetHistoryCount?: number | null;
+    shortTermZones?: {
+      status?: string | null;
+      reasonCode?: string | null;
+      source?: string | null;
+      timeframe?: string | null;
+      lookbackSessions?: number | null;
+      support?: Array<{ lower?: number | null; upper?: number | null }>;
+      resistance?: Array<{ lower?: number | null; upper?: number | null }>;
+    } | null;
   };
   statusLabels: string[];
   statusDetails?: Array<{
