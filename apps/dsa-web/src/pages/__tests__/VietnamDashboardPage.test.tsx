@@ -4715,6 +4715,104 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(chartCard.queryByText(/buy|sell|hold|recommendation/i)).not.toBeInTheDocument();
   });
 
+  it('renders existing short-term daily zones as optional chart bands without additional requests', async () => {
+    const response = makeResponse(defaultTickers);
+    response.watchlist[0] = {
+      ...response.watchlist[0],
+      indicators: {
+        ...response.watchlist[0].indicators,
+        shortTermZones: {
+          status: 'ok',
+          timeframe: 'D1',
+          lookbackSessions: 60,
+          support: [{ lower: 120, upper: 121 }, { lower: 123, upper: 125 }, { lower: 127, upper: 128 }],
+          resistance: [{ lower: 140, upper: 142 }, { lower: 150, upper: 155 }, { lower: 157, upper: 158 }],
+        },
+      },
+    };
+    mockedGetVietnamWatchlist.mockResolvedValue(response);
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('FPT', '6M'));
+
+    const chartCard = inspectChartCard();
+    const zonesToggle = chartCard.getByLabelText('S/R zones');
+    expect(zonesToggle).toBeChecked();
+    expect(zonesToggle.closest('label')).toHaveAttribute(
+      'title',
+      'Show short-term support and resistance zones derived from the latest 60 daily sessions.',
+    );
+    expect(chartCard.getByTestId('inspect-chart-zone-S1')).toBeInTheDocument();
+    expect(chartCard.getByTestId('inspect-chart-zone-S2')).toBeInTheDocument();
+    expect(chartCard.getByTestId('inspect-chart-zone-R1')).toBeInTheDocument();
+    expect(chartCard.getByTestId('inspect-chart-zone-R2')).toBeInTheDocument();
+    expect(chartCard.queryByTestId('inspect-chart-zone-S3')).not.toBeInTheDocument();
+    expect(chartCard.queryByTestId('inspect-chart-zone-R3')).not.toBeInTheDocument();
+    expect(chartCard.getByTestId('inspect-chart-zone-label-S1')).toHaveTextContent('S1 0.12');
+    expect(chartCard.getByTestId('inspect-chart-zone-label-S2')).toHaveTextContent('S2 0.12–0.13');
+    expect(chartCard.getByTestId('inspect-chart-zone-label-R1')).toHaveTextContent('R1 0.14');
+    expect(chartCard.getByTestId('inspect-chart-zone-label-R2')).toHaveTextContent('R2 0.15–0.16');
+    expect(chartCard.getByTestId('inspect-legend-short-term-zones')).toHaveTextContent('Short-term daily zones');
+
+    const chartRequestsBeforeToggle = mockedGetVietnamChart.mock.calls.length;
+    const watchlistRequestsBeforeToggle = mockedGetVietnamWatchlist.mock.calls.length;
+    await clickChartControl(zonesToggle);
+
+    expect(chartCard.queryByTestId('inspect-chart-zone-S1')).not.toBeInTheDocument();
+    expect(chartCard.queryByTestId('inspect-chart-zone-R1')).not.toBeInTheDocument();
+    expect(mockedGetVietnamChart).toHaveBeenCalledTimes(chartRequestsBeforeToggle);
+    expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistRequestsBeforeToggle);
+
+    await clickChartControl(chartCard.getByRole('button', { name: 'Expand chart' }));
+    const dialog = within(screen.getByRole('dialog', { name: 'Expanded inspect chart' }));
+    expect(dialog.getByLabelText('S/R zones')).not.toBeChecked();
+    await clickChartControl(dialog.getByLabelText('S/R zones'));
+    expect(dialog.getByTestId('inspect-chart-zone-S1')).toBeInTheDocument();
+    expect(dialog.getByTestId('inspect-chart-zone-R2')).toBeInTheDocument();
+    expect(mockedGetVietnamChart).toHaveBeenCalledTimes(chartRequestsBeforeToggle);
+    expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistRequestsBeforeToggle);
+  });
+
+  it('ignores malformed or unavailable short-term zones without breaking the daily chart', async () => {
+    const response = makeResponse(defaultTickers);
+    response.watchlist[0] = {
+      ...response.watchlist[0],
+      indicators: {
+        ...response.watchlist[0].indicators,
+        shortTermZones: {
+          status: 'ok',
+          support: [{ lower: -1, upper: 121 }, { lower: 123, upper: 125 }],
+          resistance: [{ lower: 150, upper: 140 }, { lower: Number.POSITIVE_INFINITY, upper: 160 }],
+        },
+      },
+    };
+    response.watchlist[1] = {
+      ...response.watchlist[1],
+      indicators: {
+        ...response.watchlist[1].indicators,
+        shortTermZones: { status: 'unavailable', support: [], resistance: [] },
+      },
+    };
+    mockedGetVietnamWatchlist.mockResolvedValue(response);
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('FPT', '6M'));
+    const chartCard = inspectChartCard();
+    expect(chartCard.queryByTestId('inspect-chart-zone-S1')).not.toBeInTheDocument();
+    expect(chartCard.getByTestId('inspect-chart-zone-S2')).toBeInTheDocument();
+    expect(chartCard.queryByTestId('inspect-chart-zone-R1')).not.toBeInTheDocument();
+    expect(chartCard.queryByTestId('inspect-chart-zone-R2')).not.toBeInTheDocument();
+
+    await act(async () => {
+      clickTickerRow('VPB');
+    });
+    await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('VPB', '6M'));
+    expect(chartCard.queryByTestId('inspect-chart-zone-S2')).not.toBeInTheDocument();
+    expect(chartCard.getByLabelText('S/R zones')).toBeDisabled();
+  });
+
   it('renders SSI as the inspect chart source when the chart payload uses SSI', async () => {
     mockedGetVietnamChart.mockResolvedValue(makeChartResponse('FPT', '6M', makeChartData(), { source: 'SSI' }));
 

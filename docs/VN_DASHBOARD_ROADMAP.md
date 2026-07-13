@@ -1232,6 +1232,12 @@ Status: completed on 2026-07-10.
 
 The `/vietnam` indicator table now shows compact Support and Resistance columns from `indicators.short_term_zones`. The service derives up to two nearest zones on each side from exactly the latest 60 valid unique SSI DailyOhlc D1 sessions, using ATR14 Wilder/RMA and five-session swing pivots. Zones are source-labeled `derived from SSI DailyOhlc`, never cross the latest daily close, and remain unavailable rather than guessed when history or ATR is insufficient. This calculation adds no provider call, polling, realtime dependency, fallback, or change to `latest_price` ownership.
 
+### Phase 4.9B - Short-Term Support/Resistance Chart Overlay
+
+Status: completed on 2026-07-13.
+
+The selected ticker's existing daily inspect chart now has an optional `S/R zones` overlay that reuses Phase 4.9A `indicators.short_term_zones` only. It draws at most S1/S2/R1/R2 as subtle support/resistance bands behind candles and technical lines, clips them to the price plot, and keeps the existing visible-candle y-domain unchanged. Compact and expanded chart views share the control and rendering path; unavailable or malformed ranges produce no band. The frontend does not calculate zones, make a request, alter polling, use realtime/intraday/order-book/trade inputs, or change `latest_price`.
+
 ### Phase 4.8F - SSI Remaining Data Capability Audit
 
 Status: completed on 2026-07-08 as a documentation-only audit.

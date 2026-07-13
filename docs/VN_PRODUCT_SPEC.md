@@ -207,7 +207,7 @@ Source ownership:
 
 * Daily close, OHLCV, and chart: SSI DailyOhlc.
 * Foreign net volume: SSI DailyStockPrice.
-* Indicators: derived from SSI DailyOhlc. The indicator table may show up to two compact support zones below and resistance zones above the latest daily close from the latest 60 valid D1 sessions; unavailable history stays explicit and no zone is a recommendation.
+* Indicators: derived from SSI DailyOhlc. The indicator table may show up to two compact support zones below and resistance zones above the latest daily close from the latest 60 valid D1 sessions; unavailable history stays explicit and no zone is a recommendation. The selected ticker's daily inspect chart may optionally visualize those same existing ranges as subtle S1/S2/R1/R2 bands; the UI does not calculate or request zones, alter the candle scale, or use live inputs.
 
 ### Tier 2 - Selected Ticker Explanation
 

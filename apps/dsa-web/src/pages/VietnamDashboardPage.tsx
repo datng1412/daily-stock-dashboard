@@ -1,5 +1,5 @@
 import type React from 'react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, Banknote, DatabaseZap, Info, Loader2, Maximize2, RefreshCw, RotateCcw, Search, ShieldAlert, X } from 'lucide-react';
 import {
   stocksApi,
@@ -3408,13 +3408,62 @@ const chartPath = (
     .join(' ');
 };
 
+type ShortTermPriceZone = {
+  lower?: number | null;
+  upper?: number | null;
+};
+
+type ShortTermChartZone = {
+  label: 'S1' | 'S2' | 'R1' | 'R2';
+  lower: number;
+  upper: number;
+  kind: 'support' | 'resistance';
+};
+
+const validShortTermPriceZone = (zone: ShortTermPriceZone): zone is { lower: number; upper: number } => (
+  typeof zone.lower === 'number'
+  && Number.isFinite(zone.lower)
+  && zone.lower > 0
+  && typeof zone.upper === 'number'
+  && Number.isFinite(zone.upper)
+  && zone.upper > 0
+  && zone.lower <= zone.upper
+);
+
+const chartShortTermZones = (
+  zones?: VietnamWatchItem['indicators']['shortTermZones'],
+): ShortTermChartZone[] => {
+  if (!zones || zones.status === 'unavailable') return [];
+  const support = (zones.support ?? []).slice(0, 2).flatMap((zone, index) => (
+    validShortTermPriceZone(zone)
+      ? [{ label: `S${index + 1}` as 'S1' | 'S2', lower: zone.lower, upper: zone.upper, kind: 'support' as const }]
+      : []
+  ));
+  const resistance = (zones.resistance ?? []).slice(0, 2).flatMap((zone, index) => (
+    validShortTermPriceZone(zone)
+      ? [{ label: `R${index + 1}` as 'R1' | 'R2', lower: zone.lower, upper: zone.upper, kind: 'resistance' as const }]
+      : []
+  ));
+  return [...support, ...resistance];
+};
+
+const chartZoneLabelPriority: Record<ShortTermChartZone['label'], number> = {
+  S1: 0,
+  R1: 1,
+  S2: 2,
+  R2: 3,
+};
+
 const BrokerInspectChartSvg: React.FC<{
   points: VietnamChartPoint[];
   showMA20: boolean;
   showMA50: boolean;
   showBollinger: boolean;
-}> = ({ points, showMA20, showMA50, showBollinger }) => {
+  showShortTermZones: boolean;
+  shortTermZones: ShortTermChartZone[];
+}> = ({ points, showMA20, showMA50, showBollinger, showShortTermZones, shortTermZones }) => {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
+  const pricePlotClipId = useId().replaceAll(':', '');
   const priceKeys: Array<keyof VietnamChartPoint> = ['high', 'low', 'open', 'close'];
   if (showMA20) priceKeys.push('ma20');
   if (showMA50) priceKeys.push('ma50');
@@ -3430,6 +3479,37 @@ const BrokerInspectChartSvg: React.FC<{
   const candleWidth = Math.max(3, Math.min(11, PLOT_WIDTH / Math.max(points.length, 1) * 0.62));
   const hoverPoint = hoverIndex === null ? null : points[hoverIndex] ?? null;
   const dateTicks = chartDateTicks(points);
+  const pricePlotBottom = PRICE_TOP + PRICE_HEIGHT;
+  const pricePlotRight = CHART_WIDTH - CHART_RIGHT;
+  const visibleShortTermZones = showShortTermZones
+    ? shortTermZones
+      .map((zone) => {
+        const yTop = priceScale(zone.upper);
+        const yBottom = priceScale(zone.lower);
+        if (yTop === null || yBottom === null) return null;
+        const rawTop = Math.min(yTop, yBottom);
+        const rawBottom = Math.max(yTop, yBottom);
+        if (rawBottom < PRICE_TOP || rawTop > pricePlotBottom) return null;
+        const top = Math.max(PRICE_TOP, rawTop);
+        const bottom = Math.min(pricePlotBottom, rawBottom);
+        return { ...zone, top, height: Math.max(1, bottom - top) };
+      })
+      .filter((zone): zone is ShortTermChartZone & { top: number; height: number } => Boolean(zone))
+    : [];
+  const shortTermZoneLabelYs = new Map<ShortTermChartZone['label'], number>();
+  const placedLabelYs: number[] = [];
+  [...visibleShortTermZones]
+    .sort((left, right) => chartZoneLabelPriority[left.label] - chartZoneLabelPriority[right.label])
+    .forEach((zone) => {
+      const desiredY = Math.max(PRICE_TOP + 10, Math.min(pricePlotBottom - 3, zone.top + Math.min(zone.height / 2 + 4, 10)));
+      const candidateYs = [desiredY, desiredY + 12, desiredY - 12, desiredY + 24, desiredY - 24]
+        .filter((y) => y >= PRICE_TOP + 10 && y <= pricePlotBottom - 3);
+      const labelY = candidateYs.find((y) => placedLabelYs.every((placed) => Math.abs(placed - y) >= 12));
+      if (labelY !== undefined) {
+        placedLabelYs.push(labelY);
+        shortTermZoneLabelYs.set(zone.label, labelY);
+      }
+    });
 
   const handleMove = (event: React.MouseEvent<SVGSVGElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -3449,6 +3529,11 @@ const BrokerInspectChartSvg: React.FC<{
         onMouseMove={handleMove}
         onMouseLeave={() => setHoverIndex(null)}
       >
+        <defs>
+          <clipPath id={pricePlotClipId}>
+            <rect x={CHART_LEFT} y={PRICE_TOP} width={PLOT_WIDTH} height={PRICE_HEIGHT} />
+          </clipPath>
+        </defs>
         {[PRICE_TOP, PRICE_TOP + PRICE_HEIGHT, VOLUME_TOP, VOLUME_TOP + VOLUME_HEIGHT, RSI_TOP, RSI_TOP + RSI_HEIGHT].map((y) => (
           <line key={`grid-${y}`} x1={CHART_LEFT} x2={CHART_WIDTH - CHART_RIGHT} y1={y} y2={y} stroke="rgba(148,163,184,0.18)" />
         ))}
@@ -3459,6 +3544,34 @@ const BrokerInspectChartSvg: React.FC<{
         <line x1={CHART_LEFT} x2={CHART_WIDTH - CHART_RIGHT} y1={rsiScale(70) ?? 0} y2={rsiScale(70) ?? 0} stroke="#64748b" strokeDasharray="5 5" />
         <text x={CHART_WIDTH - CHART_RIGHT - 24} y={(rsiScale(30) ?? 0) - 4} fill="#94a3b8" fontSize="11">30</text>
         <text x={CHART_WIDTH - CHART_RIGHT - 24} y={(rsiScale(70) ?? 0) - 4} fill="#94a3b8" fontSize="11">70</text>
+
+        {visibleShortTermZones.length ? (
+          <g clipPath={`url(#${pricePlotClipId})`} pointerEvents="none" aria-hidden="true">
+            {visibleShortTermZones.map((zone) => {
+              const labelY = shortTermZoneLabelYs.get(zone.label);
+              const fill = zone.kind === 'support' ? 'rgba(34,197,94,0.12)' : 'rgba(244,114,182,0.12)';
+              const stroke = zone.kind === 'support' ? 'rgba(74,222,128,0.48)' : 'rgba(244,114,182,0.48)';
+              return (
+                <g key={zone.label} data-testid={`inspect-chart-zone-${zone.label}`}>
+                  <rect x={CHART_LEFT} y={zone.top} width={PLOT_WIDTH} height={zone.height} fill={fill} />
+                  <line x1={CHART_LEFT} x2={pricePlotRight} y1={zone.top} y2={zone.top} stroke={stroke} strokeWidth="1" />
+                  {labelY !== undefined ? (
+                    <text
+                      data-testid={`inspect-chart-zone-label-${zone.label}`}
+                      x={pricePlotRight - 4}
+                      y={labelY}
+                      fill={zone.kind === 'support' ? '#86efac' : '#f9a8d4'}
+                      fontSize="10"
+                      textAnchor="end"
+                    >
+                      {`${zone.label} ${shortTermZoneRange(zone)}`}
+                    </text>
+                  ) : null}
+                </g>
+              );
+            })}
+          </g>
+        ) : null}
 
         {points.map((point, index) => {
           const x = chartX(index, points.length);
@@ -3580,16 +3693,22 @@ const ChartOverlayControls: React.FC<{
   showMA20: boolean;
   showMA50: boolean;
   showBollinger: boolean;
+  showShortTermZones: boolean;
+  shortTermZonesAvailable: boolean;
   onShowMA20Change: (value: boolean) => void;
   onShowMA50Change: (value: boolean) => void;
   onShowBollingerChange: (value: boolean) => void;
+  onShowShortTermZonesChange: (value: boolean) => void;
 }> = ({
   showMA20,
   showMA50,
   showBollinger,
+  showShortTermZones,
+  shortTermZonesAvailable,
   onShowMA20Change,
   onShowMA50Change,
   onShowBollingerChange,
+  onShowShortTermZonesChange,
 }) => (
   <div className="flex flex-wrap gap-2">
     <label className="inline-flex h-8 items-center gap-2 rounded-md border border-border/70 bg-card/60 px-3 text-xs text-secondary-text">
@@ -3603,6 +3722,23 @@ const ChartOverlayControls: React.FC<{
     <label className="inline-flex h-8 items-center gap-2 rounded-md border border-border/70 bg-card/60 px-3 text-xs text-secondary-text">
       <input type="checkbox" checked={showBollinger} onChange={(event) => onShowBollingerChange(event.target.checked)} />
       Bollinger
+    </label>
+    <label
+      className={cn(
+        'inline-flex h-8 items-center gap-2 rounded-md border border-border/70 bg-card/60 px-3 text-xs text-secondary-text',
+        !shortTermZonesAvailable && 'cursor-not-allowed opacity-60',
+      )}
+      title={shortTermZonesAvailable
+        ? 'Show short-term support and resistance zones derived from the latest 60 daily sessions.'
+        : 'Short-term support and resistance zones are unavailable for this ticker.'}
+    >
+      <input
+        type="checkbox"
+        checked={showShortTermZones}
+        disabled={!shortTermZonesAvailable}
+        onChange={(event) => onShowShortTermZonesChange(event.target.checked)}
+      />
+      S/R zones
     </label>
   </div>
 );
@@ -3721,15 +3857,20 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
   const [showMA20, setShowMA20] = useState(true);
   const [showMA50, setShowMA50] = useState(true);
   const [showBollinger, setShowBollinger] = useState(false);
+  const [showShortTermZones, setShowShortTermZones] = useState(true);
   const [chart, setChart] = useState<VietnamChartResponse | null>(null);
   const [visibleWindow, setVisibleWindow] = useState<ChartVisibleWindow>(fullChartWindow(0));
   const [isExpanded, setIsExpanded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const requestIdRef = useRef(0);
+  const chartBelongsToItem = Boolean(
+    chart && normalizeVietnamTicker(chart.symbol) === normalizeVietnamTicker(item.ticker),
+  );
   const points = useMemo(() => (
-    chart?.points?.length ? chart.points : chart?.candles ?? []
-  ), [chart]);
+    chartBelongsToItem && chart?.points?.length ? chart.points : chartBelongsToItem ? chart?.candles ?? [] : []
+  ), [chart, chartBelongsToItem]);
+  const shortTermZones = useMemo(() => chartShortTermZones(item.indicators.shortTermZones), [item.indicators.shortTermZones]);
   const clampedVisibleWindow = clampChartWindow(visibleWindow, points.length);
   const visiblePoints = useMemo(
     () => points.slice(clampedVisibleWindow.start, clampedVisibleWindow.end),
@@ -3806,9 +3947,12 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
           showMA20={showMA20}
           showMA50={showMA50}
           showBollinger={showBollinger}
+          showShortTermZones={showShortTermZones}
+          shortTermZonesAvailable={shortTermZones.length > 0}
           onShowMA20Change={setShowMA20}
           onShowMA50Change={setShowMA50}
           onShowBollingerChange={setShowBollinger}
+          onShowShortTermZonesChange={setShowShortTermZones}
         />
       </div>
 
@@ -3837,11 +3981,19 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
             {showMA20 ? <span data-testid="inspect-legend-ma20">MA20</span> : null}
             {showMA50 ? <span data-testid="inspect-legend-ma50">MA50</span> : null}
             {showBollinger ? <span data-testid="inspect-legend-bollinger">Bollinger upper/mid/lower</span> : null}
+            {showShortTermZones && shortTermZones.length ? <span data-testid="inspect-legend-short-term-zones">Short-term daily zones</span> : null}
             <span>Daily volume MA20</span>
             <span>Daily volume MA50</span>
             <span>RSI14</span>
           </div>
-          <BrokerInspectChartSvg points={visiblePoints} showMA20={showMA20} showMA50={showMA50} showBollinger={showBollinger} />
+          <BrokerInspectChartSvg
+            points={visiblePoints}
+            showMA20={showMA20}
+            showMA50={showMA50}
+            showBollinger={showBollinger}
+            showShortTermZones={showShortTermZones}
+            shortTermZones={shortTermZones}
+          />
           <p className="text-xs text-secondary-text">RSI14 numeric guides: 30 and 70.</p>
         </div>
       ) : (
@@ -3886,9 +4038,12 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
                 showMA20={showMA20}
                 showMA50={showMA50}
                 showBollinger={showBollinger}
+                showShortTermZones={showShortTermZones}
+                shortTermZonesAvailable={shortTermZones.length > 0}
                 onShowMA20Change={setShowMA20}
                 onShowMA50Change={setShowMA50}
                 onShowBollingerChange={setShowBollinger}
+                onShowShortTermZonesChange={setShowShortTermZones}
               />
             </div>
 
@@ -3915,13 +4070,21 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
               {showMA20 ? <span>MA20</span> : null}
               {showMA50 ? <span>MA50</span> : null}
               {showBollinger ? <span>Bollinger upper/mid/lower</span> : null}
+              {showShortTermZones && shortTermZones.length ? <span>Short-term daily zones</span> : null}
               <span>Daily volume MA20</span>
               <span>Daily volume MA50</span>
               <span>RSI14</span>
             </div>
 
             <div className="mt-3 min-h-0 flex-1 overflow-y-auto pr-1 [&_svg]:h-[min(68vh,760px)]">
-              <BrokerInspectChartSvg points={visiblePoints} showMA20={showMA20} showMA50={showMA50} showBollinger={showBollinger} />
+              <BrokerInspectChartSvg
+                points={visiblePoints}
+                showMA20={showMA20}
+                showMA50={showMA50}
+                showBollinger={showBollinger}
+                showShortTermZones={showShortTermZones}
+                shortTermZones={shortTermZones}
+              />
               <div className="mt-3 space-y-1 text-xs text-secondary-text">
                 <p>RSI14 numeric guides: 30 and 70.</p>
                 <p>Daily OHLCV source: {chartSourceLabel}</p>
