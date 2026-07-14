@@ -3,6 +3,8 @@ import type {
   CandlestickData,
   HistogramData,
   LineData,
+  Time,
+  UTCTimestamp,
 } from 'lightweight-charts';
 import type { VietnamChartPoint, VietnamWatchItem } from '../../api/stocks';
 import { formatCompactVnPrice } from '../../utils/vietnamNumberFormat';
@@ -11,17 +13,61 @@ export const VN_CHART_PRICE_MIN_MOVE = 10;
 export const VN_CHART_PRICE_UNIT = 'raw VND/share with board-style thousand-VND display';
 
 export type LightweightChartData = {
-  candles: CandlestickData<BusinessDay>[];
-  volume: HistogramData<BusinessDay>[];
-  ma20: LineData<BusinessDay>[];
-  ma50: LineData<BusinessDay>[];
-  volumeMa20: LineData<BusinessDay>[];
-  volumeMa50: LineData<BusinessDay>[];
-  rsi14: LineData<BusinessDay>[];
-  bbUpper: LineData<BusinessDay>[];
-  bbMid: LineData<BusinessDay>[];
-  bbLower: LineData<BusinessDay>[];
+  candles: CandlestickData<Time>[];
+  volume: HistogramData<Time>[];
+  ma20: LineData<Time>[];
+  ma50: LineData<Time>[];
+  volumeMa20: LineData<Time>[];
+  volumeMa50: LineData<Time>[];
+  rsi14: LineData<Time>[];
+  bbUpper: LineData<Time>[];
+  bbMid: LineData<Time>[];
+  bbLower: LineData<Time>[];
 };
+
+export type VietnamChartTimeframe = '1D' | '1m';
+
+const VIETNAM_CHART_TIME_ZONE = 'Asia/Ho_Chi_Minh';
+const VIETNAM_INTRADAY_TICK_FORMATTER = new Intl.DateTimeFormat('en-GB', {
+  timeZone: VIETNAM_CHART_TIME_ZONE,
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+});
+const VIETNAM_INTRADAY_CROSSHAIR_FORMATTER = new Intl.DateTimeFormat('en-GB', {
+  timeZone: VIETNAM_CHART_TIME_ZONE,
+  day: '2-digit',
+  month: '2-digit',
+  year: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+});
+
+export const formatVietnamChartTime = (time: Time) => {
+  if (typeof time === 'object' && 'year' in time) {
+    return `${time.year}-${String(time.month).padStart(2, '0')}-${String(time.day).padStart(2, '0')}`;
+  }
+  if (typeof time === 'number') {
+    const parts = Object.fromEntries(
+      VIETNAM_INTRADAY_CROSSHAIR_FORMATTER
+        .formatToParts(new Date(time * 1000))
+        .map((part) => [part.type, part.value]),
+    );
+    return `${parts.day}/${parts.month}/${parts.year} ${parts.hour}:${parts.minute} VN`;
+  }
+  return String(time);
+};
+
+export const formatVietnamIntradayTick = (time: Time): string | null => (
+  typeof time === 'number'
+    ? VIETNAM_INTRADAY_TICK_FORMATTER.format(new Date(time * 1000))
+    : null
+);
+
+export const formatVietnamChartTick = (time: Time, timeframe: VietnamChartTimeframe): string | null => (
+  timeframe === '1m' ? formatVietnamIntradayTick(time) : null
+);
 
 export type ShortTermChartZone = {
   label: 'S1' | 'S2' | 'R1' | 'R2';
@@ -67,18 +113,26 @@ const validPoint = (point: VietnamChartPoint) => {
     && point.low <= Math.min(point.open, point.close, point.high);
 };
 
-const linePoint = (time: BusinessDay, value?: number | null): LineData<BusinessDay> | null => (
+const linePoint = (time: Time, value?: number | null): LineData<Time> | null => (
   typeof value === 'number' && Number.isFinite(value) ? { time, value } : null
 );
 
-export const normalizeLightweightChartData = (points: VietnamChartPoint[]): LightweightChartData => {
-  const byDate = new Map<string, { time: BusinessDay; point: VietnamChartPoint }>();
+export const normalizeLightweightChartData = (
+  points: VietnamChartPoint[],
+  timeframe: VietnamChartTimeframe = '1D',
+): LightweightChartData => {
+  const byTime = new Map<string, { time: Time; point: VietnamChartPoint }>();
   points.forEach((point) => {
-    const time = parseVietnamBusinessDay(point.date);
+    const time = timeframe === '1m'
+      ? (typeof point.time === 'number' && Number.isInteger(point.time) && point.time > 0
+        ? point.time as UTCTimestamp
+        : null)
+      : parseVietnamBusinessDay(point.date);
     if (!time || !validPoint(point)) return;
-    byDate.set(businessDayKey(time), { time, point });
+    const key = typeof time === 'number' ? String(time).padStart(12, '0') : businessDayKey(time);
+    byTime.set(key, { time, point });
   });
-  const rows = [...byDate.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([, row]) => row);
+  const rows = [...byTime.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([, row]) => row);
   const result: LightweightChartData = {
     candles: [], volume: [], ma20: [], ma50: [], volumeMa20: [], volumeMa50: [], rsi14: [], bbUpper: [], bbMid: [], bbLower: [],
   };
@@ -98,6 +152,12 @@ export const normalizeLightweightChartData = (points: VietnamChartPoint[]): Ligh
 };
 
 export const formatVietnamChartPrice = (value: number) => formatCompactVnPrice(value, '—');
+
+export const formatVietnamRsiValue = (value: number) => (
+  Number.isFinite(value)
+    ? value.toFixed(2).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1')
+    : '—'
+);
 
 export const formatShortTermZoneRange = (lower: number, upper: number) => {
   const lowerText = formatVietnamChartPrice(lower);

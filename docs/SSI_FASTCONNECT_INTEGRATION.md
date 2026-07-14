@@ -16,6 +16,11 @@ Current phase:
 * Dashboard detail rendering for SSI DailyStockPrice fields when SSI provides them.
 * SSI IntradayOhlc candles for compact watchlist/company intraday pulse.
 * SSI IntradayOhlc provider-rate-limit cooldown guardrails.
+* A separate completed-session chart path calls `IntradayOhlc` once with `symbol`, equal `fromDate`/`toDate`, `pageIndex=1`, `pageSize=1000`, `ascending=true`, and `resolution=1`. It does not reuse the compact pulse request variants or cache.
+
+### Completed-session 1m cache and normalization
+
+Phase 4.11C uses a separate process-local LRU capped at 500 entries. Successful and provider-confirmed empty dates cache for 86,400 seconds; unavailable results cache for 60 seconds; usable history may recover stale for at most seven days without being overwritten by an unavailable refresh. Provider dates/times are parsed strictly in `Asia/Ho_Chi_Minh`; duplicate minute buckets keep the latest raw timestamp and then last stable occurrence. Gaps are never filled. The path supports completed dates only and does not add current-session bars, higher intervals, aggregation, page 2, DailyOhlc substitution, streaming candles, or fallback providers.
 * SSI realtime snapshot and trade-tape contracts for dashboard/company realtime blocks.
 * SSI realtime REST endpoint discovery concluded that no supported FastConnect realtime snapshot endpoint is identified in this repository.
 * SSI streaming realtime parser coverage for buffered `X`, `X-QUOTE`, `X-TRADE`, `F`, `R`, and `MI` messages.

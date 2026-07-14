@@ -1416,6 +1416,64 @@ class SsiFastConnectFetcher:
                 )
         return payload
 
+    def get_completed_intraday_1m(
+        self,
+        symbol: str,
+        trading_date: str,
+    ) -> Dict[str, Any]:
+        """Fetch one completed SSI IntradayOhlc date with one fixed request.
+
+        This narrow chart-history path intentionally does not reuse the compact
+        intraday pulse paging, parameter variants, retries, or cache.
+        """
+        normalized_symbol = str(symbol or "").strip().upper()
+        provider_date = format_ssi_date(trading_date)
+        params: Dict[str, Any] = {
+            "symbol": normalized_symbol,
+            "fromDate": provider_date,
+            "toDate": provider_date,
+            "pageIndex": 1,
+            "pageSize": 1000,
+            "ascending": True,
+            "resolution": 1,
+        }
+        if not self.intraday_enabled:
+            return {
+                "status": "unavailable",
+                "source": SSI_SOURCE,
+                "reason": INTRADAY_DISABLED_REASON,
+                "rows": [],
+                "count": 0,
+            }
+
+        payload = self._request("IntradayOhlc", params)
+        if isinstance(payload, dict) and payload.get("status") == "unavailable":
+            return {
+                "status": "unavailable",
+                "source": SSI_SOURCE,
+                "reason": str(payload.get("reason") or REQUEST_FAILED_REASON),
+                "failure_class": payload.get("failure_class"),
+                "http_status": payload.get("http_status"),
+                "code": payload.get("code"),
+                "rows": [],
+                "count": 0,
+            }
+
+        rows: List[Dict[str, Any]]
+        data = _pick_ci(payload, "data")
+        explicit_rows = _pick_ci(data, "items", "rows", "result") if isinstance(data, dict) else None
+        if isinstance(explicit_rows, list):
+            rows = [dict(row) for row in explicit_rows if isinstance(row, dict)]
+        else:
+            rows = _extract_rows(payload)
+        return {
+            "status": "ok",
+            "source": SSI_SOURCE,
+            "rows": rows,
+            "count": len(rows),
+            "total_record": _total_record(payload),
+        }
+
     def get_realtime_snapshot(self, symbols: List[str]) -> Dict[str, Any]:
         """Return the current SSI realtime contract state.
 

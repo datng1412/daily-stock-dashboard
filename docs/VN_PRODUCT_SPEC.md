@@ -16,6 +16,10 @@ The product should answer:
 * Which optional live or enrichment sections are safe to display?
 * Which provider limitations still need investigation?
 
+### Historical chart timeframes
+
+The selected-ticker chart defaults to `1D` from SSI `DailyOhlc`. `Timeframe` contains only `1D` and `1m history`; the separate `Range` group contains the D1-only `1M`, `3M`, `6M`, and `1Y` presets. Users may select `1m history` for one explicit completed Vietnam date sourced only from SSI `IntradayOhlc`; the date control replaces the daily range group and current-day history is not offered. Indicators use the active chart bars, RSI retains its canonical 0–100 numeric scale, and support/resistance remains the existing backend-owned daily context labelled `Daily S/R` in 1-minute mode. This is historical inspection, not a realtime chart.
+
 ## Non-Goals
 
 The Vietnam dashboard must not:
@@ -206,6 +210,8 @@ Primary table/watchlist scan fields:
 The daily inspect chart uses the official open-source `lightweight-charts` 5.2 npm package as its sole renderer. SSI DailyOhlc remains the owner of daily bars and `latest_price`; daily dates map directly to timezone-safe `BusinessDay` values, and no TradingView market data is used. Native candlesticks, volume and RSI panes, MA20/MA50/Bollinger line series, and a passive series primitive render backend-provided S1/S2/R1/R2 ranges. S/R remains default-off, and native chart interaction makes no market-data request. The former custom SVG renderer and migration flag have been removed.
 
 Phase 4.11A hardens this renderer without changing product scope. Lightweight Charts owns responsive sizing through `autoSize`; compact pane proportions are 68% price / 14% volume / 18% RSI and expanded proportions are 70% / 12% / 18%. The native right price scale keeps a stable 148 px minimum so S/R range labels do not resize the plot when toggled. Ticker or range-preset changes discard the prior logical range and fit the new daily series, while compact/expanded transitions restore the owned logical range. Volume and RSI remain always-visible panes; no new pane toggle or market-data path was added.
+
+Phase 4.11C-2 fixes presentation ownership only. The RSI series owns pane 2's visible right scale, uses its own numeric formatter, and fixes autoscale coverage to 0–100 with exact 30/70 guides; the chart-level board-price formatter does not apply to this pane. Completed-session one-minute tick marks show Vietnam `HH:mm`, and native crosshair plus HTML tooltip labels use `Asia/Ho_Chi_Minh`. Unix-second data and D1 `BusinessDay` behavior are unchanged.
 
 Source ownership:
 

@@ -3,12 +3,14 @@
 
 from __future__ import annotations
 
-import math
+import copy
 import logging
+import math
 import os
 import re
 import statistics
 import time
+from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from threading import Lock, RLock
@@ -56,6 +58,11 @@ LIQUIDITY_TARGET_AVG_VOLUME = 1_000_000
 FOREIGN_HISTORY_LIMIT = 20
 VN_CHART_HISTORY_DAYS = 400
 VN_CHART_POINT_LIMIT = 260
+VN_INTRADAY_CHART_PAGE_SIZE = 1000
+VN_INTRADAY_CHART_CACHE_TTL_SECONDS = 86_400
+VN_INTRADAY_CHART_NEGATIVE_CACHE_TTL_SECONDS = 60
+VN_INTRADAY_CHART_STALE_MAX_SECONDS = 7 * 86_400
+VN_INTRADAY_CHART_CACHE_MAX_ENTRIES = 500
 VN_WATCHLIST = ("FPT", "VPB", "MSB", "SCS", "ACV", "ACB")
 VN_EXCHANGE_MAP = {
     "FPT": "HOSE",
@@ -262,10 +269,23 @@ class _CacheEntry:
     expires_at: datetime
 
 
+@dataclass
+class _IntradayChartCacheEntry:
+    value: Dict[str, Any]
+    fetched_at: datetime
+    expires_at: datetime
+    stale_until: datetime
+    usable: bool
+
+
 _VN_CACHE: Dict[Tuple[Any, ...], _CacheEntry] = {}
 _VN_CACHE_LOCK = RLock()
 _VN_INFLIGHT_LOCKS: Dict[Tuple[Any, ...], Lock] = {}
 _VN_INFLIGHT_LOCKS_LOCK = RLock()
+_VN_INTRADAY_CHART_CACHE: "OrderedDict[Tuple[Any, ...], _IntradayChartCacheEntry]" = OrderedDict()
+_VN_INTRADAY_CHART_CACHE_LOCK = RLock()
+_VN_INTRADAY_CHART_INFLIGHT_LOCKS: Dict[Tuple[Any, ...], Lock] = {}
+_VN_INTRADAY_CHART_INFLIGHT_LOCKS_LOCK = RLock()
 
 
 def clear_vietnam_cache() -> None:
@@ -274,6 +294,10 @@ def clear_vietnam_cache() -> None:
         _VN_CACHE.clear()
     with _VN_INFLIGHT_LOCKS_LOCK:
         _VN_INFLIGHT_LOCKS.clear()
+    with _VN_INTRADAY_CHART_CACHE_LOCK:
+        _VN_INTRADAY_CHART_CACHE.clear()
+    with _VN_INTRADAY_CHART_INFLIGHT_LOCKS_LOCK:
+        _VN_INTRADAY_CHART_INFLIGHT_LOCKS.clear()
 
 
 def _utc_now() -> datetime:
@@ -282,6 +306,66 @@ def _utc_now() -> datetime:
 
 def _iso(value: Optional[datetime]) -> Optional[str]:
     return value.isoformat() if value else None
+
+
+def _intraday_chart_cache_key(ticker: str, trading_date: str) -> Tuple[Any, ...]:
+    return ("intraday_chart", vn_ticker(ticker), "1m", trading_date, "page", 1)
+
+
+def _get_intraday_chart_lock(key: Tuple[Any, ...]) -> Lock:
+    with _VN_INTRADAY_CHART_INFLIGHT_LOCKS_LOCK:
+        lock = _VN_INTRADAY_CHART_INFLIGHT_LOCKS.get(key)
+        if lock is None:
+            lock = Lock()
+            _VN_INTRADAY_CHART_INFLIGHT_LOCKS[key] = lock
+        return lock
+
+
+def _get_intraday_chart_cache_entry(key: Tuple[Any, ...]) -> Optional[_IntradayChartCacheEntry]:
+    with _VN_INTRADAY_CHART_CACHE_LOCK:
+        entry = _VN_INTRADAY_CHART_CACHE.get(key)
+        if entry is not None:
+            _VN_INTRADAY_CHART_CACHE.move_to_end(key)
+        return entry
+
+
+def _set_intraday_chart_cache_entry(
+    key: Tuple[Any, ...],
+    value: Dict[str, Any],
+    *,
+    ttl_seconds: int,
+    usable: bool,
+) -> _IntradayChartCacheEntry:
+    now = _utc_now()
+    entry = _IntradayChartCacheEntry(
+        value=copy.deepcopy(value),
+        fetched_at=now,
+        expires_at=now + timedelta(seconds=ttl_seconds),
+        stale_until=now + timedelta(seconds=VN_INTRADAY_CHART_STALE_MAX_SECONDS),
+        usable=usable,
+    )
+    with _VN_INTRADAY_CHART_CACHE_LOCK:
+        _VN_INTRADAY_CHART_CACHE[key] = entry
+        _VN_INTRADAY_CHART_CACHE.move_to_end(key)
+        while len(_VN_INTRADAY_CHART_CACHE) > VN_INTRADAY_CHART_CACHE_MAX_ENTRIES:
+            _VN_INTRADAY_CHART_CACHE.popitem(last=False)
+    return entry
+
+
+def _intraday_chart_cache_payload(
+    entry: _IntradayChartCacheEntry,
+    *,
+    status: str,
+    is_stale: bool,
+) -> Dict[str, Any]:
+    payload = copy.deepcopy(entry.value)
+    payload["cache"] = {
+        "status": status,
+        "is_stale": is_stale,
+        "fetched_at": _iso(entry.fetched_at),
+        "expires_at": _iso(entry.expires_at),
+    }
+    return payload
 
 
 def _cache_key(data_type: str, symbol: str, **params: Any) -> Tuple[Any, ...]:
@@ -3056,12 +3140,8 @@ def calculate_vietnam_indicators(
     }
 
 
-def normalize_daily_chart_data(df: Optional[pd.DataFrame], limit: int = VN_CHART_POINT_LIMIT) -> List[Dict[str, Any]]:
-    """Normalize daily OHLCV rows and matching indicators for inspect charts."""
-    if df is None or df.empty:
-        return []
-
-    chart_df = df.sort_values("date").tail(limit).reset_index(drop=True).copy()
+def _chart_indicator_series(chart_df: pd.DataFrame) -> Dict[str, pd.Series]:
+    """Return the canonical indicator series used by every VN chart cadence."""
     close = pd.to_numeric(chart_df.get("close"), errors="coerce")
     volume = pd.to_numeric(chart_df.get("volume"), errors="coerce")
     ma20 = close.rolling(20).mean()
@@ -3072,6 +3152,26 @@ def normalize_daily_chart_data(df: Optional[pd.DataFrame], limit: int = VN_CHART
     bb_upper = ma20 + (2 * bb_std)
     bb_lower = ma20 - (2 * bb_std)
     rsi14 = calculate_rsi14_series(close)
+    return {
+        "volume": volume,
+        "volume_ma20": volume_ma20,
+        "volume_ma50": volume_ma50,
+        "ma20": ma20,
+        "ma50": ma50,
+        "rsi14": rsi14,
+        "bb_upper": bb_upper,
+        "bb_mid": ma20,
+        "bb_lower": bb_lower,
+    }
+
+
+def normalize_daily_chart_data(df: Optional[pd.DataFrame], limit: int = VN_CHART_POINT_LIMIT) -> List[Dict[str, Any]]:
+    """Normalize daily OHLCV rows and matching indicators for inspect charts."""
+    if df is None or df.empty:
+        return []
+
+    chart_df = df.sort_values("date").tail(limit).reset_index(drop=True).copy()
+    indicators = _chart_indicator_series(chart_df)
 
     rows: List[Dict[str, Any]] = []
     for index, raw in chart_df.iterrows():
@@ -3083,18 +3183,126 @@ def normalize_daily_chart_data(df: Optional[pd.DataFrame], limit: int = VN_CHART
                 "high": _round_optional(_safe_float(raw.get("high"))),
                 "low": _round_optional(_safe_float(raw.get("low"))),
                 "close": _round_optional(_safe_float(raw.get("close"))),
-                "volume": _round_optional(_safe_float(volume.iloc[index]), 0),
-                "volume_ma20": _round_optional(_safe_float(volume_ma20.iloc[index]), 0),
-                "volume_ma50": _round_optional(_safe_float(volume_ma50.iloc[index]), 0),
-                "ma20": _round_optional(_safe_float(ma20.iloc[index])),
-                "ma50": _round_optional(_safe_float(ma50.iloc[index])),
-                "rsi14": _round_optional(_safe_float(rsi14.iloc[index])),
-                "bb_upper": _round_optional(_safe_float(bb_upper.iloc[index])),
-                "bb_mid": _round_optional(_safe_float(ma20.iloc[index])),
-                "bb_lower": _round_optional(_safe_float(bb_lower.iloc[index])),
+                "volume": _round_optional(_safe_float(indicators["volume"].iloc[index]), 0),
+                "volume_ma20": _round_optional(_safe_float(indicators["volume_ma20"].iloc[index]), 0),
+                "volume_ma50": _round_optional(_safe_float(indicators["volume_ma50"].iloc[index]), 0),
+                "ma20": _round_optional(_safe_float(indicators["ma20"].iloc[index])),
+                "ma50": _round_optional(_safe_float(indicators["ma50"].iloc[index])),
+                "rsi14": _round_optional(_safe_float(indicators["rsi14"].iloc[index])),
+                "bb_upper": _round_optional(_safe_float(indicators["bb_upper"].iloc[index])),
+                "bb_mid": _round_optional(_safe_float(indicators["bb_mid"].iloc[index])),
+                "bb_lower": _round_optional(_safe_float(indicators["bb_lower"].iloc[index])),
             }
         )
     return rows
+
+
+def normalize_completed_intraday_chart_rows(
+    rows: Iterable[Dict[str, Any]],
+    trading_date: str,
+) -> Dict[str, Any]:
+    """Strictly normalize sparse SSI 1-minute bars for one completed VN date."""
+    try:
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(trading_date or "")):
+            raise ValueError
+        requested_date = datetime.strptime(trading_date, "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        return {"status": "failed", "bars": [], "returned_rows": 0, "rejected_rows": 0, "duplicate_minute_buckets": 0}
+
+    raw_rows = [row for row in rows if isinstance(row, dict)]
+    valid: List[Dict[str, Any]] = []
+    rejected_rows = 0
+    for occurrence, raw in enumerate(raw_rows):
+        lower = {str(key).lower(): value for key, value in raw.items()}
+        try:
+            original_datetime = datetime.strptime(
+                f"{str(lower.get('tradingdate') or '').strip()} {str(lower.get('time') or '').strip()}",
+                "%d/%m/%Y %H:%M:%S",
+            ).replace(tzinfo=VN_TIMEZONE)
+        except (TypeError, ValueError):
+            rejected_rows += 1
+            continue
+        if original_datetime.date() != requested_date:
+            rejected_rows += 1
+            continue
+
+        open_value = _safe_float(lower.get("open"))
+        high_value = _safe_float(lower.get("high"))
+        low_value = _safe_float(lower.get("low"))
+        close_value = _safe_float(lower.get("close"))
+        volume_value = _safe_float(lower.get("volume"))
+        numeric_values = (open_value, high_value, low_value, close_value, volume_value)
+        if any(value is None or not math.isfinite(value) for value in numeric_values):
+            rejected_rows += 1
+            continue
+        assert open_value is not None and high_value is not None and low_value is not None
+        assert close_value is not None and volume_value is not None
+        if (
+            min(open_value, high_value, low_value, close_value) <= 0
+            or volume_value < 0
+            or high_value < max(open_value, close_value, low_value)
+            or low_value > min(open_value, close_value, high_value)
+        ):
+            rejected_rows += 1
+            continue
+        valid.append(
+            {
+                "original_datetime": original_datetime,
+                "occurrence": occurrence,
+                "time": int(original_datetime.replace(second=0, microsecond=0).timestamp()),
+                "open": open_value,
+                "high": high_value,
+                "low": low_value,
+                "close": close_value,
+                "volume": volume_value,
+            }
+        )
+
+    valid.sort(key=lambda row: (row["original_datetime"], row["occurrence"]))
+    by_minute: Dict[int, Dict[str, Any]] = {}
+    duplicate_minute_buckets = 0
+    for row in valid:
+        if row["time"] in by_minute:
+            duplicate_minute_buckets += 1
+        by_minute[row["time"]] = row
+    normalized = [by_minute[key] for key in sorted(by_minute)]
+    if len(normalized) > VN_INTRADAY_CHART_PAGE_SIZE:
+        return {
+            "status": "failed",
+            "bars": [],
+            "returned_rows": len(raw_rows),
+            "rejected_rows": rejected_rows,
+            "duplicate_minute_buckets": duplicate_minute_buckets,
+        }
+
+    chart_df = pd.DataFrame(
+        [{key: row[key] for key in ("open", "high", "low", "close", "volume")} for row in normalized]
+    )
+    indicators = _chart_indicator_series(chart_df) if not chart_df.empty else {}
+    bars: List[Dict[str, Any]] = []
+    for index, row in enumerate(normalized):
+        bar = {key: row[key] for key in ("time", "open", "high", "low", "close", "volume")}
+        if indicators:
+            bar.update(
+                {
+                    "volume_ma20": _round_optional(_safe_float(indicators["volume_ma20"].iloc[index]), 0),
+                    "volume_ma50": _round_optional(_safe_float(indicators["volume_ma50"].iloc[index]), 0),
+                    "ma20": _round_optional(_safe_float(indicators["ma20"].iloc[index])),
+                    "ma50": _round_optional(_safe_float(indicators["ma50"].iloc[index])),
+                    "rsi14": _round_optional(_safe_float(indicators["rsi14"].iloc[index])),
+                    "bb_upper": _round_optional(_safe_float(indicators["bb_upper"].iloc[index])),
+                    "bb_mid": _round_optional(_safe_float(indicators["bb_mid"].iloc[index])),
+                    "bb_lower": _round_optional(_safe_float(indicators["bb_lower"].iloc[index])),
+                }
+            )
+        bars.append(bar)
+    return {
+        "status": "ready" if bars or not raw_rows else "failed",
+        "bars": bars,
+        "returned_rows": len(raw_rows),
+        "rejected_rows": rejected_rows,
+        "duplicate_minute_buckets": duplicate_minute_buckets,
+    }
 
 
 def filter_chart_points_by_range(points: List[Dict[str, Any]], range_label: str) -> List[Dict[str, Any]]:
@@ -5213,6 +5421,131 @@ class VietnamMarketService:
             "points": points,
             "candles": points,
         }
+
+    def build_intraday_chart(
+        self,
+        ticker: str,
+        *,
+        interval: str,
+        trading_date: str,
+        force_refresh: bool = False,
+    ) -> Dict[str, Any]:
+        """Build one completed-session SSI 1-minute history response."""
+        normalized_ticker = vn_ticker(ticker)
+        if not re.fullmatch(r"[A-Z0-9]{1,10}", normalized_ticker):
+            raise ValueError("Invalid Vietnam ticker")
+        if interval != "1m":
+            raise ValueError("Only interval=1m is supported")
+        try:
+            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(trading_date or "")):
+                raise ValueError
+            requested_date = datetime.strptime(trading_date, "%Y-%m-%d").date()
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Date must use YYYY-MM-DD") from exc
+        current_vietnam_date = _utc_now().astimezone(VN_TIMEZONE).date()
+        if requested_date >= current_vietnam_date:
+            raise ValueError("Intraday history date must be before the current Vietnam date")
+
+        provider_date = requested_date.strftime("%d/%m/%Y")
+        key = _intraday_chart_cache_key(normalized_ticker, trading_date)
+        now = _utc_now()
+        observed_entry = _get_intraday_chart_cache_entry(key)
+        if observed_entry is not None and not force_refresh and observed_entry.expires_at > now:
+            return _intraday_chart_cache_payload(observed_entry, status="hit", is_stale=False)
+
+        lock = _get_intraday_chart_lock(key)
+        with lock:
+            now = _utc_now()
+            current_entry = _get_intraday_chart_cache_entry(key)
+            if current_entry is not None and current_entry.expires_at > now:
+                if not force_refresh or current_entry is not observed_entry:
+                    return _intraday_chart_cache_payload(current_entry, status="hit", is_stale=False)
+
+            fetcher = self._get_ssi_fetcher()
+            provider_result = fetcher.get_completed_intraday_1m(normalized_ticker, trading_date)
+            if provider_result.get("status") == "ok":
+                normalized = normalize_completed_intraday_chart_rows(provider_result.get("rows") or [], trading_date)
+                diagnostics = {
+                    "requested_date": trading_date,
+                    "provider_date": provider_date,
+                    "returned_rows": normalized["returned_rows"],
+                    "usable_bars": len(normalized["bars"]),
+                    "rejected_rows": normalized["rejected_rows"],
+                    "duplicate_minute_buckets": normalized["duplicate_minute_buckets"],
+                    "result": "no_data" if normalized["status"] == "ready" and not normalized["bars"] else normalized["status"],
+                }
+                if normalized["status"] == "failed":
+                    stale_entry = current_entry if current_entry and current_entry.usable else observed_entry
+                    if stale_entry is not None and stale_entry.usable and stale_entry.stale_until > now:
+                        stale_payload = _intraday_chart_cache_payload(stale_entry, status="stale", is_stale=True)
+                        stale_payload["diagnostics"]["recovery"] = "stale_if_error"
+                        stale_payload["diagnostics"]["refresh_result"] = "normalization_failed"
+                        return stale_payload
+                value = {
+                    "ticker": normalized_ticker,
+                    "interval": "1m",
+                    "trading_date": trading_date,
+                    "timezone": str(VN_TIMEZONE),
+                    "status": normalized["status"],
+                    "reason": "SSI IntradayOhlc returned malformed rows." if normalized["status"] == "failed" else None,
+                    "bars": normalized["bars"],
+                    "source": {"provider": "ssi_fastconnect", "dataset": "IntradayOhlc"},
+                    "diagnostics": diagnostics,
+                }
+                entry = _set_intraday_chart_cache_entry(
+                    key,
+                    value,
+                    ttl_seconds=(
+                        VN_INTRADAY_CHART_CACHE_TTL_SECONDS
+                        if normalized["status"] == "ready"
+                        else VN_INTRADAY_CHART_NEGATIVE_CACHE_TTL_SECONDS
+                    ),
+                    usable=normalized["status"] == "ready",
+                )
+                return _intraday_chart_cache_payload(
+                    entry,
+                    status="refresh" if force_refresh else "miss",
+                    is_stale=False,
+                )
+
+            stale_entry = current_entry if current_entry and current_entry.usable else observed_entry
+            if stale_entry is not None and stale_entry.usable and stale_entry.stale_until > now:
+                stale_payload = _intraday_chart_cache_payload(stale_entry, status="stale", is_stale=True)
+                stale_payload["diagnostics"]["recovery"] = "stale_if_error"
+                return stale_payload
+
+            failure_class = provider_result.get("failure_class")
+            value = {
+                "ticker": normalized_ticker,
+                "interval": "1m",
+                "trading_date": trading_date,
+                "timezone": str(VN_TIMEZONE),
+                "status": "unavailable",
+                "reason": "SSI IntradayOhlc is unavailable.",
+                "bars": [],
+                "source": {"provider": "ssi_fastconnect", "dataset": "IntradayOhlc"},
+                "diagnostics": {
+                    "requested_date": trading_date,
+                    "provider_date": provider_date,
+                    "returned_rows": 0,
+                    "usable_bars": 0,
+                    "rejected_rows": 0,
+                    "duplicate_minute_buckets": 0,
+                    "result": "provider_unavailable",
+                    "failure_class": str(failure_class)[:80] if failure_class else None,
+                },
+            }
+            entry = _set_intraday_chart_cache_entry(
+                key,
+                value,
+                ttl_seconds=VN_INTRADAY_CHART_NEGATIVE_CACHE_TTL_SECONDS,
+                usable=False,
+            )
+            return _intraday_chart_cache_payload(
+                entry,
+                status="refresh" if force_refresh else "miss",
+                is_stale=False,
+            )
 
     def build_watchlist(
         self,

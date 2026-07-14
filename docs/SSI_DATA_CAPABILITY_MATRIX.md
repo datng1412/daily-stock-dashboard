@@ -12,6 +12,8 @@ Last local audit baseline: 2026-06-24, using `FPT,VPB,ACB,SSI,GMD,GAS,POW,VNM` a
 
 Latest bounded live gate: 2026-06-29, using sanitized SSI smoke output plus local API smoke. SSI DailyStockPrice history populated 20 recent foreign-flow rows for FPT/HPG/SSI; VN30 DailyIndex remained partial because the public row lacked a usable positive `index_value` and `exchange`; exact `VNINDEX` remained unresolved; VN30 IndexComponents returned 30 rows.
 
+Phase 4.11C implements the verified completed-session slice of `IntradayOhlc`: one explicit prior HOSE date, `resolution=1`, page 1, size 1,000, ascending, and no retry or alternate parameters. This is historical 1-minute chart data, not realtime. Current-session support, 5m/15m/30m/1h, aggregation, additional pages, HNX/UPCOM proof, and official volume-unit documentation remain unverified/deferred.
+
 ## Status Vocabulary
 
 | Status | Meaning |

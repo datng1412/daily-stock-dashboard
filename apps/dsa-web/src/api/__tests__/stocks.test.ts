@@ -98,4 +98,35 @@ describe('stocksApi Vietnam SSI-derived metric mapping', () => {
     expect(result.technical.priceVsReferencePct).toBe(1.3);
     expect(result.technical.dailyRangePct).toBe(1.77);
   });
+
+  it('requests completed-session 1m history with explicit ticker and date identity', async () => {
+    get.mockResolvedValueOnce({
+      data: {
+        ticker: 'FPT',
+        interval: '1m',
+        trading_date: '2026-06-24',
+        timezone: 'Asia/Ho_Chi_Minh',
+        status: 'ready',
+        bars: [{ time: 1782266400, open: 1, high: 2, low: 1, close: 2, volume: 3 }],
+        source: { provider: 'ssi_fastconnect', dataset: 'IntradayOhlc' },
+        cache: { status: 'miss', is_stale: false },
+        diagnostics: { requested_date: '2026-06-24', usable_bars: 1 },
+      },
+    });
+    const controller = new AbortController();
+
+    const result = await stocksApi.getVietnamIntradayChart('FPT', '2026-06-24', {
+      forceRefresh: true,
+      signal: controller.signal,
+    });
+
+    expect(get).toHaveBeenCalledWith('/api/v1/stocks/vn/intraday-chart', {
+      params: { ticker: 'FPT', interval: '1m', date: '2026-06-24', force_refresh: true },
+      timeout: 120000,
+      signal: controller.signal,
+    });
+    expect(result.tradingDate).toBe('2026-06-24');
+    expect(result.bars[0].time).toBe(1782266400);
+    expect(result.cache.isStale).toBe(false);
+  });
 });

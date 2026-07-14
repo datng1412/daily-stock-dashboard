@@ -4,6 +4,7 @@ import { Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, Banknote, Databa
 import {
   stocksApi,
   type VietnamChartResponse,
+  type VietnamIntradayChartResponse,
   type VietnamCompanyNewsResponse,
   type VietnamCorporateActionEvent,
   type VietnamCorporateActionsResponse,
@@ -71,6 +72,27 @@ const INSPECT_RANGES = [
   { label: '1Y', days: 366 },
 ] as const;
 type InspectRangeLabel = typeof INSPECT_RANGES[number]['label'];
+type InspectTimeframe = '1D' | '1m';
+
+const vietnamTodayIso = () => {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: '2-digit', day: '2-digit',
+    }).formatToParts(new Date()).map((part) => [part.type, part.value]),
+  );
+  return `${parts.year}-${parts.month}-${parts.day}`;
+};
+
+const previousIsoDate = (isoDate: string) => {
+  const date = new Date(`${isoDate}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() - 1);
+  return date.toISOString().slice(0, 10);
+};
+
+const completedVietnamChartDate = (...values: Array<string | null | undefined>) => {
+  const today = vietnamTodayIso();
+  return values.find((value) => /^\d{4}-\d{2}-\d{2}$/.test(value ?? '') && value! < today) ?? '';
+};
 type BadgeVariant = NonNullable<React.ComponentProps<typeof Badge>['variant']>;
 type WatchlistScanLabel = 'Strong' | 'Improving' | 'Neutral' | 'Weakening' | 'Risk elevated' | 'Data unavailable';
 type VietnamDashboardPresetId = 'vn30' | 'banks' | 'securities' | 'real-estate' | 'consumer' | 'logistics' | 'tech' | 'oil-gas' | 'electricity';
@@ -3274,7 +3296,7 @@ const ChartRangeControls: React.FC<{
   rangeLabel: InspectRangeLabel;
   onRangeChange: (range: InspectRangeLabel) => void;
 }> = ({ rangeLabel, onRangeChange }) => (
-  <div className="flex flex-wrap gap-1">
+  <div className="flex flex-wrap gap-1" aria-label="Daily range presets">
     {INSPECT_RANGES.map((range) => (
       <button
         key={range.label}
@@ -3300,6 +3322,7 @@ const ChartOverlayControls: React.FC<{
   showBollinger: boolean;
   showShortTermZones: boolean;
   shortTermZonesAvailable: boolean;
+  shortTermZonesLabel?: string;
   onShowMA20Change: (value: boolean) => void;
   onShowMA50Change: (value: boolean) => void;
   onShowBollingerChange: (value: boolean) => void;
@@ -3310,6 +3333,7 @@ const ChartOverlayControls: React.FC<{
   showBollinger,
   showShortTermZones,
   shortTermZonesAvailable,
+  shortTermZonesLabel = 'S/R',
   onShowMA20Change,
   onShowMA50Change,
   onShowBollingerChange,
@@ -3328,74 +3352,121 @@ const ChartOverlayControls: React.FC<{
       <input type="checkbox" checked={showBollinger} onChange={(event) => onShowBollingerChange(event.target.checked)} />
       Bollinger
     </label>
-    <label
-      className={cn(
-        'inline-flex h-8 items-center gap-2 rounded-md border border-border/70 bg-card/60 px-3 text-xs text-secondary-text',
-        !shortTermZonesAvailable && 'cursor-not-allowed opacity-60',
-      )}
-      title={shortTermZonesAvailable
+    <Tooltip content={shortTermZonesAvailable
         ? 'Show short-term daily support and resistance zones.'
-        : 'No short-term zones available for this ticker.'}
-    >
-      <input
-        type="checkbox"
-        checked={showShortTermZones}
-        disabled={!shortTermZonesAvailable}
-        aria-label="Show support and resistance zones"
-        onChange={(event) => onShowShortTermZonesChange(event.target.checked)}
-      />
-      S/R
-    </label>
+        : 'No short-term zones available for this ticker.'}>
+      <label
+        className={cn(
+          'inline-flex h-8 items-center gap-2 rounded-md border border-border/70 bg-card/60 px-3 text-xs text-secondary-text',
+          !shortTermZonesAvailable && 'cursor-not-allowed opacity-60',
+        )}
+      >
+        <input
+          type="checkbox"
+          checked={showShortTermZones}
+          disabled={!shortTermZonesAvailable}
+          aria-label="Show support and resistance zones"
+          onChange={(event) => onShowShortTermZonesChange(event.target.checked)}
+        />
+        {shortTermZonesLabel}
+      </label>
+    </Tooltip>
   </div>
 );
 
 
 const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
   const [rangeLabel, setRangeLabel] = useState<InspectRangeLabel>('6M');
+  const [timeframe, setTimeframe] = useState<InspectTimeframe>('1D');
+  const [intradayDate, setIntradayDate] = useState('');
   const [showMA20, setShowMA20] = useState(true);
   const [showMA50, setShowMA50] = useState(true);
   const [showBollinger, setShowBollinger] = useState(false);
   const [showShortTermZones, setShowShortTermZones] = useState(false);
-  const [chart, setChart] = useState<VietnamChartResponse | null>(null);
+  const [dailyChart, setDailyChart] = useState<VietnamChartResponse | null>(null);
+  const [intradayChart, setIntradayChart] = useState<VietnamIntradayChartResponse | null>(null);
   const [isExpanded, setIsExpanded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [chartError, setChartError] = useState<{ requestKey: string; message: string } | null>(null);
   const requestIdRef = useRef(0);
   const lightweightLogicalRangeRef = useRef<{ from: number; to: number } | null>(null);
-  const requestKey = `${normalizeVietnamTicker(item.ticker)}:${rangeLabel}`;
+  const normalizedTicker = normalizeVietnamTicker(item.ticker);
+  const requestKey = timeframe === '1D'
+    ? `daily-chart:${normalizedTicker}:${rangeLabel}`
+    : `intraday-chart:${normalizedTicker}:1m:${intradayDate}`;
   const currentError = chartError?.requestKey === requestKey ? chartError.message : null;
-  const chartBelongsToItem = Boolean(
-    chart
-    && normalizeVietnamTicker(chart.symbol) === normalizeVietnamTicker(item.ticker)
-    && (!chart.range || chart.range === rangeLabel),
+  const dailyBelongsToItem = Boolean(
+    dailyChart
+    && normalizeVietnamTicker(dailyChart.symbol) === normalizedTicker
+    && (!dailyChart.range || dailyChart.range === rangeLabel),
   );
-  const points = useMemo(() => (
-    chartBelongsToItem && chart?.points?.length ? chart.points : chartBelongsToItem ? chart?.candles ?? [] : []
-  ), [chart, chartBelongsToItem]);
+  const intradayBelongsToItem = Boolean(
+    intradayChart
+    && normalizeVietnamTicker(intradayChart.ticker) === normalizedTicker
+    && intradayChart.interval === '1m'
+    && intradayChart.tradingDate === intradayDate,
+  );
+  const points = useMemo(() => {
+    if (timeframe === '1m') return intradayBelongsToItem ? intradayChart?.bars ?? [] : [];
+    if (!dailyBelongsToItem) return [];
+    return dailyChart?.points?.length ? dailyChart.points : dailyChart?.candles ?? [];
+  }, [dailyBelongsToItem, dailyChart, intradayBelongsToItem, intradayChart, timeframe]);
   const lightweightShortTermZones = useMemo(
     () => normalizeShortTermChartZones(item.indicators.shortTermZones),
     [item.indicators.shortTermZones],
   );
-  const chartSourceLabel = chartBelongsToItem && chart?.status === 'unavailable'
-    ? 'SSI unavailable'
-    : chartBelongsToItem ? chart?.source || 'SSI' : 'SSI';
-  const chartIsLoading = loading || (!chartBelongsToItem && !currentError);
+  const chartSourceLabel = timeframe === '1m'
+    ? intradayBelongsToItem ? `SSI ${intradayChart?.source.dataset ?? 'IntradayOhlc'}` : 'SSI IntradayOhlc'
+    : dailyBelongsToItem && dailyChart?.status === 'unavailable'
+      ? 'SSI unavailable'
+      : dailyBelongsToItem ? dailyChart?.source || 'SSI' : 'SSI';
+  const activeResponseReady = timeframe === '1m'
+    ? intradayBelongsToItem && intradayChart?.status === 'ready'
+    : false;
+  const activeResponseFailed = timeframe === '1m' && intradayBelongsToItem && intradayChart?.status === 'failed';
+  const chartIsLoading = loading;
   const chartSectionState: SectionState = chartIsLoading
     ? 'Loading'
-    : points.length
+    : points.length || activeResponseReady
       ? 'Ready'
-      : currentError
+      : currentError || activeResponseFailed
         ? 'Failed'
         : 'Unavailable';
+  const maxIntradayDate = previousIsoDate(vietnamTodayIso());
+
+  const preferredCompletedDate = useCallback(() => completedVietnamChartDate(
+    dailyChart?.latestDate,
+    item.latestPriceDate,
+    item.ohlcvDate,
+    item.date,
+  ), [dailyChart?.latestDate, item.date, item.latestPriceDate, item.ohlcvDate]);
 
   const handleRangeChange = useCallback((nextRange: InspectRangeLabel) => {
-    if (nextRange === rangeLabel) return;
+    if (nextRange === rangeLabel || timeframe !== '1D') return;
     lightweightLogicalRangeRef.current = null;
-    setChart(null);
+    setDailyChart(null);
     setChartError(null);
     setLoading(true);
     setRangeLabel(nextRange);
-  }, [rangeLabel]);
+  }, [rangeLabel, timeframe]);
+
+  const handleTimeframeChange = useCallback((nextTimeframe: InspectTimeframe) => {
+    if (nextTimeframe === timeframe) return;
+    lightweightLogicalRangeRef.current = null;
+    setChartError(null);
+    setLoading(nextTimeframe === '1D' || Boolean(preferredCompletedDate()));
+    if (nextTimeframe === '1m') {
+      setIntradayChart(null);
+      setIntradayDate(preferredCompletedDate());
+    }
+    setTimeframe(nextTimeframe);
+  }, [preferredCompletedDate, timeframe]);
+
+  useEffect(() => {
+    if (timeframe !== '1m') return;
+    setIntradayChart(null);
+    setIntradayDate(preferredCompletedDate());
+  }, [item.ticker, preferredCompletedDate, timeframe]); // reset date ownership when the selected ticker changes
 
   useEffect(() => {
     if (!isExpanded) return undefined;
@@ -3409,21 +3480,38 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
   useEffect(() => {
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
-    const ownedRequestKey = `${normalizeVietnamTicker(item.ticker)}:${rangeLabel}`;
+    const controller = new AbortController();
     lightweightLogicalRangeRef.current = null;
-    setChart(null);
-    setLoading(true);
     setChartError(null);
+    if (timeframe === '1m' && !intradayDate) {
+      setIntradayChart(null);
+      setLoading(false);
+      return () => controller.abort();
+    }
+    setLoading(true);
+    if (timeframe === '1m') setIntradayChart(null);
+    else setDailyChart(null);
     const loadChart = async () => {
       try {
-        const response = await stocksApi.getVietnamChart(item.ticker, rangeLabel);
-        if (requestId !== requestIdRef.current) return;
-        setChart(response);
+        if (timeframe === '1m') {
+          const response = await stocksApi.getVietnamIntradayChart(item.ticker, intradayDate, { signal: controller.signal });
+          if (requestId !== requestIdRef.current) return;
+          if (
+            normalizeVietnamTicker(response.ticker) !== normalizedTicker
+            || response.interval !== '1m'
+            || response.tradingDate !== intradayDate
+          ) return;
+          setIntradayChart(response);
+        } else {
+          const response = await stocksApi.getVietnamChart(item.ticker, rangeLabel);
+          if (requestId !== requestIdRef.current) return;
+          if (normalizeVietnamTicker(response.symbol) !== normalizedTicker || (response.range && response.range !== rangeLabel)) return;
+          setDailyChart(response);
+        }
       } catch (err) {
-        if (requestId !== requestIdRef.current) return;
-        setChart(null);
+        if (requestId !== requestIdRef.current || controller.signal.aborted) return;
         setChartError({
-          requestKey: ownedRequestKey,
+          requestKey,
           message: err instanceof Error ? err.message : 'Chart data unavailable',
         });
       } finally {
@@ -3431,7 +3519,66 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
       }
     };
     void loadChart();
-  }, [item.ticker, rangeLabel]);
+    return () => {
+      controller.abort();
+      if (requestIdRef.current === requestId) requestIdRef.current += 1;
+    };
+  }, [intradayDate, item.ticker, normalizedTicker, rangeLabel, requestKey, timeframe]);
+
+  const timeframeControls = (
+    <div className="flex flex-wrap items-stretch gap-2" aria-label="Chart controls">
+      <div
+        className="flex items-center gap-2 rounded-md border border-border/60 bg-elevated/40 px-2 py-1"
+        role="group"
+        aria-label="Timeframe"
+      >
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">Timeframe</span>
+        <div className="flex gap-1">
+          {(['1D', '1m'] as const).map((value) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => handleTimeframeChange(value)}
+              aria-pressed={timeframe === value}
+              className={cn(
+                'h-8 rounded-md border px-3 text-xs font-medium transition-colors',
+                timeframe === value ? 'border-cyan bg-cyan/10 text-cyan' : 'border-border/70 bg-card/60 text-secondary-text hover:bg-hover hover:text-foreground',
+              )}
+            >
+              {value === '1m' ? '1m history' : value}
+            </button>
+          ))}
+        </div>
+      </div>
+      {timeframe === '1D' ? (
+        <div
+          className="flex items-center gap-2 rounded-md border border-border/60 bg-elevated/40 px-2 py-1"
+          role="group"
+          aria-label="Daily range"
+        >
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">Range</span>
+          <ChartRangeControls rangeLabel={rangeLabel} onRangeChange={handleRangeChange} />
+        </div>
+      ) : (
+        <label className="flex items-center gap-2 rounded-md border border-border/60 bg-elevated/40 px-2 py-1 text-xs text-secondary-text">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">Trading date</span>
+          <input
+            type="date"
+            value={intradayDate}
+            max={maxIntradayDate}
+            onChange={(event) => {
+              lightweightLogicalRangeRef.current = null;
+              setIntradayChart(null);
+              setChartError(null);
+              setIntradayDate(event.target.value);
+            }}
+            className="h-8 rounded-md border border-border/70 bg-card/60 px-2 text-foreground"
+            aria-label="Completed trading date"
+          />
+        </label>
+      )}
+    </div>
+  );
 
   return (
     <div className="mt-4 rounded-lg border border-border/60 bg-elevated/30 p-4" data-testid="inspect-chart-card">
@@ -3441,9 +3588,9 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
             <h3 className="text-sm font-semibold text-foreground">Inspect chart</h3>
             <Badge variant={sectionStateVariant(chartSectionState)}>{chartSectionState}</Badge>
           </div>
-          <p className="mt-1 text-xs text-secondary-text">Daily OHLCV from {chartSourceLabel}. SSI realtime remains separate.</p>
+          <p className="mt-1 text-xs text-secondary-text">{timeframe === '1m' ? 'Completed-session 1-minute history' : 'Daily OHLCV'} from {chartSourceLabel}. SSI realtime remains separate.</p>
         </div>
-        <ChartRangeControls rangeLabel={rangeLabel} onRangeChange={handleRangeChange} />
+        {timeframeControls}
       </div>
 
       <div className="mt-3">
@@ -3453,6 +3600,7 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
           showBollinger={showBollinger}
           showShortTermZones={showShortTermZones}
           shortTermZonesAvailable={lightweightShortTermZones.length > 0}
+          shortTermZonesLabel={timeframe === '1m' ? 'Daily S/R' : 'S/R'}
           onShowMA20Change={setShowMA20}
           onShowMA50Change={setShowMA50}
           onShowBollingerChange={setShowBollinger}
@@ -3481,8 +3629,8 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
             {showMA20 ? <span data-testid="inspect-legend-ma20">MA20</span> : null}
             {showMA50 ? <span data-testid="inspect-legend-ma50">MA50</span> : null}
             {showBollinger ? <span data-testid="inspect-legend-bollinger">Bollinger upper/mid/lower</span> : null}
-            <span>Daily volume MA20</span>
-            <span>Daily volume MA50</span>
+            <span>{timeframe === '1m' ? '1m' : 'Daily'} volume MA20</span>
+            <span>{timeframe === '1m' ? '1m' : 'Daily'} volume MA50</span>
             <span>RSI14</span>
           </div>
           {!isExpanded ? (
@@ -3494,6 +3642,8 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
               showMA50={showMA50}
               showBollinger={showBollinger}
               showShortTermZones={showShortTermZones}
+              timeframe={timeframe}
+              requestKey={requestKey}
               initialLogicalRange={lightweightLogicalRangeRef.current}
               onLogicalRangeChange={(range) => { lightweightLogicalRangeRef.current = range; }}
             />
@@ -3501,14 +3651,24 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
           <p className="text-xs text-secondary-text">RSI14 numeric guides: 30 and 70.</p>
         </div>
       ) : (
-        <p className="mt-4 text-sm text-secondary-text">Chart data unavailable</p>
+        <p className="mt-4 text-sm text-secondary-text">
+          {timeframe === '1m' && !intradayDate
+            ? 'Choose a completed trading date after daily history is available.'
+            : timeframe === '1m' && activeResponseReady
+              ? 'No 1-minute bars for the selected completed date.'
+              : 'Chart data unavailable'}
+        </p>
       )}
       {currentError ? <p className="mt-2 text-xs text-secondary-text">Chart endpoint unavailable: {currentError}</p> : null}
+      {timeframe === '1m' && intradayBelongsToItem && intradayChart?.status !== 'ready' && intradayChart?.reason ? (
+        <p className="mt-2 text-xs text-secondary-text">{intradayChart.reason}</p>
+      ) : null}
 
       <div className="mt-3 space-y-1 text-xs text-secondary-text">
-        <p>Daily OHLCV source: {chartSourceLabel}</p>
-        <p>SSI realtime is separate and not used as daily close.</p>
-        {chartBelongsToItem && chart?.latestDate ? <p>Latest chart date: {chart.latestDate}</p> : null}
+        <p>{timeframe === '1m' ? '1-minute history' : 'Daily OHLCV'} source: {chartSourceLabel}</p>
+        <p>SSI realtime is separate and not used as {timeframe === '1m' ? 'chart history' : 'daily close'}.</p>
+        {timeframe === '1m' && intradayBelongsToItem && intradayChart?.cache.isStale ? <p>Showing stale cached history after a provider refresh error.</p> : null}
+        {timeframe === '1D' && dailyBelongsToItem && dailyChart?.latestDate ? <p>Latest chart date: {dailyChart.latestDate}</p> : null}
       </div>
       {isExpanded && points.length ? (
         <div
@@ -3521,7 +3681,7 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <h3 id="inspect-chart-expanded-title" className="text-base font-semibold text-foreground">Expanded inspect chart</h3>
-                <p className="mt-1 text-xs text-secondary-text">Daily OHLCV from {chartSourceLabel}. SSI realtime remains separate.</p>
+                <p className="mt-1 text-xs text-secondary-text">{timeframe === '1m' ? 'Completed-session 1-minute history' : 'Daily OHLCV'} from {chartSourceLabel}. SSI realtime remains separate.</p>
               </div>
               <button
                 type="button"
@@ -3534,7 +3694,7 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
             </div>
 
             <div className="mt-3">
-              <ChartRangeControls rangeLabel={rangeLabel} onRangeChange={handleRangeChange} />
+              {timeframeControls}
             </div>
 
             <div className="mt-3">
@@ -3544,6 +3704,7 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
                 showBollinger={showBollinger}
                 showShortTermZones={showShortTermZones}
                 shortTermZonesAvailable={lightweightShortTermZones.length > 0}
+                shortTermZonesLabel={timeframe === '1m' ? 'Daily S/R' : 'S/R'}
                 onShowMA20Change={setShowMA20}
                 onShowMA50Change={setShowMA50}
                 onShowBollingerChange={setShowBollinger}
@@ -3556,8 +3717,8 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
               {showMA20 ? <span>MA20</span> : null}
               {showMA50 ? <span>MA50</span> : null}
               {showBollinger ? <span>Bollinger upper/mid/lower</span> : null}
-              <span>Daily volume MA20</span>
-              <span>Daily volume MA50</span>
+              <span>{timeframe === '1m' ? '1m' : 'Daily'} volume MA20</span>
+              <span>{timeframe === '1m' ? '1m' : 'Daily'} volume MA50</span>
               <span>RSI14</span>
             </div>
 
@@ -3570,15 +3731,17 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
                 showMA50={showMA50}
                 showBollinger={showBollinger}
                 showShortTermZones={showShortTermZones}
+                timeframe={timeframe}
+                requestKey={requestKey}
                 expanded
                 initialLogicalRange={lightweightLogicalRangeRef.current}
                 onLogicalRangeChange={(range) => { lightweightLogicalRangeRef.current = range; }}
               />
               <div className="mt-3 space-y-1 text-xs text-secondary-text">
                 <p>RSI14 numeric guides: 30 and 70.</p>
-                <p>Daily OHLCV source: {chartSourceLabel}</p>
-                <p>SSI realtime is separate and not used as daily close.</p>
-                {chartBelongsToItem && chart?.latestDate ? <p>Latest chart date: {chart.latestDate}</p> : null}
+                <p>{timeframe === '1m' ? '1-minute history' : 'Daily OHLCV'} source: {chartSourceLabel}</p>
+                <p>SSI realtime is separate and not used as {timeframe === '1m' ? 'chart history' : 'daily close'}.</p>
+                {timeframe === '1D' && dailyBelongsToItem && dailyChart?.latestDate ? <p>Latest chart date: {dailyChart.latestDate}</p> : null}
               </div>
             </div>
           </div>

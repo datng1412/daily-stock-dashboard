@@ -14,10 +14,17 @@ python -m pytest tests/test_vietnam_market_service_no_mozyfin.py -q
 python -m pytest tests/test_ssi_fastconnect_fetcher.py -q
 python -m pytest tests/test_vietnam_market_service_realtime.py -q
 python -m pytest tests/test_vietnam_market_service_intraday.py -q
+python -m pytest tests/test_vietnam_intraday_chart.py -q
 python -m pytest tests/test_ssi_streaming_realtime.py -q
 python -m pytest tests/test_ssi_streaming_realtime_lifecycle.py -q
 python -m pytest tests/test_verify_ssi_streaming_realtime_script.py -q
 ```
+
+Phase 4.11C frontend coverage must run the stocks API client test, Lightweight Charts data/component tests, ShortTermZones primitive test, and `VietnamDashboardPage.test.tsx`. It verifies numeric Unix-second 1m bars, Vietnam-time tooltip output, explicit completed-date ownership, no request without a date, stale-response rejection, active-timeframe indicators, `Daily S/R`, and no request on indicator/S/R/expand interactions. Deterministic tests must never call live SSI.
+
+Phase 4.11C-1 additionally verifies that canonical D1/1m RSI values reach the chart unchanged, the RSI series owns a numeric 0–100 scale rather than the board-price formatter, price/volume formatting remains unchanged, timeframe and daily range are separate accessible groups, daily ranges disappear in 1m history, and unsupported intervals return the endpoint-specific 422 contract with zero SSI service calls.
+
+Phase 4.11C-2 verifies the runtime formatter boundary: no chart-level board-price formatter may override pane 2; RSI owns the pane-scoped visible right scale with a 0–100 autoscale and exact 30/70 guides. Deterministic helpers must prove verified Unix instants render as 09:15, 13:00, and 14:45 in `Asia/Ho_Chi_Minh`, while D1 returns `null` from the intraday tick override so Lightweight Charts retains `BusinessDay` tick behavior. Component coverage must prove formatter changes use `applyOptions` without chart recreation or data requests.
 
 Expected protection:
 

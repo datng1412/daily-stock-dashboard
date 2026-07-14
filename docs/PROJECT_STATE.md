@@ -1,6 +1,6 @@
 # Project State
 
-Last updated: 2026-07-09
+Last updated: 2026-07-14
 
 ## Purpose
 
@@ -161,6 +161,7 @@ Vietnam cache TTLs are process-local and should be interpreted per source block:
 - Health: `GET /api/v1/stocks/vn/watchlist/health`
 - Watchlist: `GET /api/v1/stocks/vn/watchlist?tickers=FPT,VPB,MSB&force_refresh=true&include_intraday=true`
 - Chart: `GET /api/v1/stocks/vn/chart?symbol=FPT&range=6M`
+- Completed-session 1m chart: `GET /api/v1/stocks/vn/intraday-chart?ticker=FPT&interval=1m&date=2026-06-24`
 - Realtime snapshot contract: `GET /api/v1/stocks/vn/realtime?tickers=FPT,ACB,VCB`
 - Trade tape contract: `GET /api/v1/stocks/vn/realtime/trades?symbol=FPT&limit=100`
 - Company snapshot: `GET /api/v1/stocks/vn/company/FPT?force_refresh=true`
@@ -178,3 +179,17 @@ news_status.status: disabled
 ```
 
 Optional SSI intraday/realtime/trade-tape sections may be unavailable while daily SSI rows remain OK.
+
+Phase 4.11C is implemented for one explicit completed date only. The 1-minute endpoint uses SSI `IntradayOhlc`, strict Vietnam-time parsing, sparse Unix-second bars, and a dedicated bounded process-local cache. The dashboard defaults to D1, derives an initial prior date from loaded DailyOhlc history, owns ticker/interval/date/request identity, and labels the existing daily zones as `Daily S/R` in 1-minute mode. Current-session bars, higher intervals, aggregation, page 2, realtime candle substitution, and fallback providers remain deferred.
+
+Phase 4.11C automated browser validation was blocked before navigation by the known browser-runtime error `Cannot redefine property: process`. No visual or browser-network pass is claimed; deterministic API, request-ownership, chart, and dashboard tests are the available evidence pending manual browser validation.
+
+Phase 4.11C validation passed 160 focused backend tests and all 196 `VietnamDashboardPage` tests, plus TypeScript, ESLint, and the production Web build. The broader frontend suite retained four unrelated baseline failures (UI-governance legacy `title` attributes, stock-name truncation copy, a ReportMarkdownDrawer lazy-boundary timeout, and an LLMChannelEditor dialog-name expectation); the legacy Mozyfin adapter suite retained 29 provider-era contract failures and was not changed by this SSI-only phase.
+
+Phase 4.11C-1 fixes the runtime RSI display defect as a series-formatter issue: canonical Wilder/RMA values remain unchanged and now render on the existing dedicated 0–100 pane rather than through the board-price formatter. `Timeframe` and D1-only `Range` are separate labelled groups, with the completed-date control replacing range presets in 1m history. Unsupported intervals now use the endpoint-specific 422 contract before any SSI service call. The 148 px right price scale and nullable extra intraday bar fields were deliberately retained because neither optional cleanup had evidence sufficient to justify risk.
+
+Phase 4.11C-1 validation passed 160 backend tests, 226 focused frontend tests, Python compilation, TypeScript, ESLint, and production build. The broader frontend suite retained the same four unrelated failures with 837 passes and two skips. A current-repository backend runtime confirmed the custom unsupported-interval and current-date 422 responses; a final spaced, single-call valid-history request returned `status=unavailable`, `failure_class=network_error`, and zero bars in the restricted validation environment, so no new 226-bar proof is claimed. Automated browser setup again failed before navigation with `Cannot redefine property: process`; responsive, RSI visual, and browser-network behavior remain unverified rather than inferred.
+
+Phase 4.11C-2 corrects two frontend presentation defects confirmed by prior browser evidence. The root cause of the 0.00–0.10 RSI axis was Lightweight Charts' chart-level board-price `localization.priceFormatter` overriding the pane-2 series formatter. Removing that global override leaves explicit per-series price/volume/RSI formats; pane 2 exclusively owns its visible right scale, canonical RSI stays unchanged, autoscale remains 0–100, and guides remain 30/70. Completed-session one-minute tick, native crosshair, and HTML tooltip labels now use timezone-aware `Asia/Ho_Chi_Minh` formatting, while D1 retains `BusinessDay` tick fallback. No backend, provider, cache, API, request, or source-ownership behavior changed.
+
+Phase 4.11C-2 deterministic validation passed 228 focused frontend tests, the 18 chart-data tests under `TZ=America/New_York`, 8 focused backend regression tests, TypeScript, ESLint, and the production build. The broader frontend suite retained the same four unrelated failures with 839 passes and two skips. Automated browser connection again failed before navigation with `Cannot redefine property: process`, so no new D1/1m visual, responsive, or request-network proof is claimed; the implementation proof is the supported Lightweight Charts 5.2 options plus deterministic tests.

@@ -670,6 +670,34 @@ export type VietnamChartResponse = {
   candles?: VietnamChartPoint[];
 };
 
+export type VietnamIntradayChartResponse = {
+  ticker: string;
+  interval: '1m';
+  tradingDate: string;
+  timezone: 'Asia/Ho_Chi_Minh' | string;
+  status: 'ready' | 'unavailable' | 'failed' | string;
+  reason?: string | null;
+  bars: VietnamChartPoint[];
+  source: { provider?: string | null; dataset?: string | null };
+  cache: {
+    status?: 'hit' | 'miss' | 'refresh' | 'stale' | string | null;
+    isStale?: boolean;
+    fetchedAt?: string | null;
+    expiresAt?: string | null;
+  };
+  diagnostics: {
+    requestedDate?: string | null;
+    providerDate?: string | null;
+    returnedRows?: number | null;
+    usableBars?: number | null;
+    rejectedRows?: number | null;
+    duplicateMinuteBuckets?: number | null;
+    result?: string | null;
+    recovery?: string | null;
+    failureClass?: string | null;
+  };
+};
+
 export type VietnamCompanyProfile = {
   ticker: string;
   name?: string | null;
@@ -1189,13 +1217,37 @@ export const stocksApi = {
     return toCamelCase<VietnamWatchlistHealthResponse>(response.data);
   },
 
-  async getVietnamChart(symbol: string, range = '6M'): Promise<VietnamChartResponse> {
+  async getVietnamChart(
+    symbol: string,
+    range = '6M',
+    options?: { signal?: AbortSignal },
+  ): Promise<VietnamChartResponse> {
     const response = await apiClient.get('/api/v1/stocks/vn/chart', {
       params: { symbol, range },
       timeout: 120000,
+      signal: options?.signal,
     });
     const { toCamelCase } = await import('./utils');
     return toCamelCase<VietnamChartResponse>(response.data);
+  },
+
+  async getVietnamIntradayChart(
+    ticker: string,
+    tradingDate: string,
+    options?: { forceRefresh?: boolean; signal?: AbortSignal },
+  ): Promise<VietnamIntradayChartResponse> {
+    const response = await apiClient.get('/api/v1/stocks/vn/intraday-chart', {
+      params: {
+        ticker,
+        interval: '1m',
+        date: tradingDate,
+        ...(options?.forceRefresh ? { force_refresh: true } : {}),
+      },
+      timeout: 120000,
+      signal: options?.signal,
+    });
+    const { toCamelCase } = await import('./utils');
+    return toCamelCase<VietnamIntradayChartResponse>(response.data);
   },
 
   async getVietnamCompanyResearch(ticker: string, forceRefresh = false): Promise<VietnamCompanyResearchResponse> {

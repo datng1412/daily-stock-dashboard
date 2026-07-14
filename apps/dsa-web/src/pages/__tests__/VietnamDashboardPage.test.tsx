@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   stocksApi,
   type VietnamChartResponse,
+  type VietnamIntradayChartResponse,
   type VietnamCorporateActionsResponse,
   type VietnamDailyIndexResponse,
   type VietnamIndexComponentsResponse,
@@ -33,6 +34,7 @@ vi.mock('../../api/stocks', () => ({
     getVietnamCorporateActions: vi.fn(),
     getVietnamObservability: vi.fn(),
     getVietnamChart: vi.fn(),
+    getVietnamIntradayChart: vi.fn(),
     getVietnamCompanyNews: vi.fn(),
     getVietnamIndexList: vi.fn(),
     getVietnamDailyIndex: vi.fn(),
@@ -53,6 +55,8 @@ vi.mock('../../components/charts/VietnamLightweightChart', () => ({
     showMA50,
     showBollinger,
     showShortTermZones,
+    timeframe = '1D',
+    requestKey = '',
     expanded = false,
     initialLogicalRange = null,
     onLogicalRangeChange,
@@ -64,6 +68,8 @@ vi.mock('../../components/charts/VietnamLightweightChart', () => ({
     showMA50: boolean;
     showBollinger: boolean;
     showShortTermZones: boolean;
+    timeframe?: '1D' | '1m';
+    requestKey?: string;
     expanded?: boolean;
     initialLogicalRange?: { from: number; to: number } | null;
     onLogicalRangeChange?: (range: { from: number; to: number } | null) => void;
@@ -81,6 +87,8 @@ vi.mock('../../components/charts/VietnamLightweightChart', () => ({
       data-ma50={String(showMA50)}
       data-bollinger={String(showBollinger)}
       data-short-term-zones={String(showShortTermZones)}
+      data-timeframe={timeframe}
+      data-request-key={requestKey}
       onClick={() => onLogicalRangeChange?.({ from: 10, to: 40 })}
     >
       {showShortTermZones
@@ -455,10 +463,31 @@ const mockedGetVietnamRealtimeTrades = vi.mocked(stocksApi.getVietnamRealtimeTra
 const mockedGetVietnamCorporateActions = vi.mocked(stocksApi.getVietnamCorporateActions);
 const mockedGetVietnamObservability = vi.mocked(stocksApi.getVietnamObservability);
 const mockedGetVietnamChart = vi.mocked(stocksApi.getVietnamChart);
+const mockedGetVietnamIntradayChart = vi.mocked(stocksApi.getVietnamIntradayChart);
 const mockedGetVietnamCompanyNews = vi.mocked(stocksApi.getVietnamCompanyNews);
 const mockedGetVietnamIndexList = vi.mocked(stocksApi.getVietnamIndexList);
 const mockedGetVietnamDailyIndex = vi.mocked(stocksApi.getVietnamDailyIndex);
 const mockedGetVietnamIndexComponents = vi.mocked(stocksApi.getVietnamIndexComponents);
+
+const makeIntradayChartResponse = (
+  ticker = 'FPT',
+  tradingDate = '2026-06-09',
+  overrides: Partial<VietnamIntradayChartResponse> = {},
+): VietnamIntradayChartResponse => ({
+  ticker,
+  interval: '1m',
+  tradingDate,
+  timezone: 'Asia/Ho_Chi_Minh',
+  status: 'ready',
+  bars: [
+    { time: 1_780_980_600, open: 100, high: 102, low: 99, close: 101, volume: 1_000 },
+    { time: 1_780_980_720, open: 101, high: 103, low: 100, close: 102, volume: 2_000 },
+  ],
+  source: { provider: 'ssi_fastconnect', dataset: 'IntradayOhlc' },
+  cache: { status: 'miss', isStale: false },
+  diagnostics: { requestedDate: tradingDate, providerDate: '09/06/2026', returnedRows: 2, usableBars: 2 },
+  ...overrides,
+});
 
 const makeIndexListResponse = (overrides: Partial<VietnamIndexListResponse> = {}): VietnamIndexListResponse => ({
   status: 'ok',
@@ -905,6 +934,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     mockedGetVietnamCorporateActions.mockReset();
     mockedGetVietnamObservability.mockReset();
     mockedGetVietnamChart.mockReset();
+    mockedGetVietnamIntradayChart.mockReset();
     mockedGetVietnamCompanyNews.mockReset();
     mockedGetVietnamIndexList.mockReset();
     mockedGetVietnamDailyIndex.mockReset();
@@ -917,6 +947,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     mockedGetVietnamCorporateActions.mockImplementation(async (tickers) => makeCorporateActionsResponse(tickers));
     mockedGetVietnamObservability.mockImplementation(async () => makeObservabilityResponse());
     mockedGetVietnamChart.mockImplementation(async (symbol, range = '6M') => makeChartResponse(symbol, range));
+    mockedGetVietnamIntradayChart.mockImplementation(async (ticker, tradingDate) => makeIntradayChartResponse(ticker, tradingDate));
     mockedGetVietnamCompanyNews.mockImplementation(async (ticker) => ({
       ticker,
       status: 'disabled',
@@ -4731,6 +4762,11 @@ describe('VietnamDashboardPage watchlist loading', () => {
     const chartCard = inspectChartCard();
 
     expect(chartCard.getByText('Daily OHLCV from SSI. SSI realtime remains separate.')).toBeInTheDocument();
+    expect(chartCard.getByRole('group', { name: 'Timeframe' })).toBeInTheDocument();
+    expect(chartCard.getByRole('group', { name: 'Daily range' })).toBeInTheDocument();
+    expect(chartCard.getByText('Timeframe')).toBeInTheDocument();
+    expect(chartCard.getByText('Range')).toBeInTheDocument();
+    expect(within(chartCard.getByRole('group', { name: 'Timeframe' })).getAllByRole('button')).toHaveLength(2);
     expect(chartCard.getByRole('button', { name: '1M' })).toBeInTheDocument();
     expect(chartCard.getByRole('button', { name: '3M' })).toBeInTheDocument();
     expect(chartCard.getByRole('button', { name: '6M' })).toHaveAttribute('aria-pressed', 'true');
@@ -4786,10 +4822,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     const chartCard = inspectChartCard();
     const zonesToggle = chartCard.getByLabelText('Show support and resistance zones');
     expect(zonesToggle).not.toBeChecked();
-    expect(zonesToggle.closest('label')).toHaveAttribute(
-      'title',
-      'Show short-term daily support and resistance zones.',
-    );
+    expect(zonesToggle.closest('label')).not.toHaveAttribute('title');
     expect(chartCard.getByTestId('vietnam-lightweight-chart')).toHaveAttribute('data-short-term-zones', 'false');
     expect(chartCard.queryByTestId('lightweight-zone-S1')).not.toBeInTheDocument();
 
@@ -4963,6 +4996,96 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(chartCard.getByTestId('vietnam-lightweight-chart')).toHaveAttribute('data-points-count', '70');
     expect(chartCard.getByTestId('vietnam-lightweight-chart')).toHaveAttribute('data-ticker', 'FPT');
     expect(chartCard.queryByText(/buy|sell|hold|recommendation/i)).not.toBeInTheDocument();
+  });
+
+  it('loads one explicit completed date for 1m history and keeps daily controls separate', async () => {
+    render(<VietnamDashboardPage />);
+    await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('FPT', '6M'));
+    const chartCard = inspectChartCard();
+
+    await clickChartControl(chartCard.getByRole('button', { name: '1m history' }));
+    await waitFor(() => expect(mockedGetVietnamIntradayChart).toHaveBeenCalledWith(
+      'FPT',
+      '2026-06-09',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    ));
+
+    expect(chartCard.getByRole('button', { name: '1m history' })).toHaveAttribute('aria-pressed', 'true');
+    expect(chartCard.getByRole('group', { name: 'Timeframe' })).toBeInTheDocument();
+    expect(chartCard.queryByRole('group', { name: 'Daily range' })).not.toBeInTheDocument();
+    expect(chartCard.queryByRole('button', { name: '6M' })).not.toBeInTheDocument();
+    expect(chartCard.getByLabelText('Completed trading date')).toHaveValue('2026-06-09');
+    expect(chartCard.getByText('Daily S/R')).toBeInTheDocument();
+    await waitFor(() => expect(chartCard.getByTestId('vietnam-lightweight-chart')).toHaveAttribute('data-timeframe', '1m'));
+    expect(chartCard.getByTestId('vietnam-lightweight-chart')).toHaveAttribute(
+      'data-request-key',
+      'intraday-chart:FPT:1m:2026-06-09',
+    );
+    expect(mockedGetVietnamChart).toHaveBeenCalledTimes(1);
+
+    await clickChartControl(chartCard.getByRole('button', { name: '1m history' }));
+    expect(mockedGetVietnamIntradayChart).toHaveBeenCalledTimes(1);
+
+    const intradayRequestsBeforeLocalActions = mockedGetVietnamIntradayChart.mock.calls.length;
+    await clickChartControl(chartCard.getByLabelText('MA20'));
+    await clickChartControl(chartCard.getByLabelText('Show support and resistance zones'));
+    await clickChartControl(chartCard.getByRole('button', { name: 'Expand chart' }));
+    expect(screen.getByRole('dialog', { name: 'Expanded inspect chart' })).toBeInTheDocument();
+    expect(mockedGetVietnamIntradayChart).toHaveBeenCalledTimes(intradayRequestsBeforeLocalActions);
+  });
+
+  it('does not request 1m history when no completed DailyOhlc date is available', async () => {
+    const response = makeResponse(defaultTickers);
+    response.watchlist[0] = {
+      ...response.watchlist[0],
+      date: null,
+      latestPriceDate: null,
+      ohlcvDate: null,
+    };
+    mockedGetVietnamWatchlist.mockResolvedValue(response);
+    mockedGetVietnamChart.mockResolvedValue(makeChartResponse('FPT', '6M', [], { latestDate: null }));
+
+    render(<VietnamDashboardPage />);
+    await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('FPT', '6M'));
+    const chartCard = inspectChartCard();
+    await clickChartControl(chartCard.getByRole('button', { name: '1m history' }));
+
+    expect(mockedGetVietnamIntradayChart).not.toHaveBeenCalled();
+    expect(chartCard.getByText('Choose a completed trading date after daily history is available.')).toBeInTheDocument();
+    expect(chartCard.getByLabelText('Completed trading date')).toHaveValue('');
+  });
+
+  it('rejects a late 1m response after the selected completed date changes', async () => {
+    let resolveFirst: ((value: VietnamIntradayChartResponse) => void) | undefined;
+    mockedGetVietnamIntradayChart.mockImplementation((ticker, tradingDate) => {
+      if (tradingDate === '2026-06-09') {
+        return new Promise((resolve) => { resolveFirst = resolve; });
+      }
+      return Promise.resolve(makeIntradayChartResponse(ticker, tradingDate, {
+        bars: [{ time: 1_780_894_200, open: 200, high: 202, low: 199, close: 201, volume: 3_000 }],
+      }));
+    });
+
+    render(<VietnamDashboardPage />);
+    await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('FPT', '6M'));
+    const chartCard = inspectChartCard();
+    await clickChartControl(chartCard.getByRole('button', { name: '1m history' }));
+    await waitFor(() => expect(mockedGetVietnamIntradayChart).toHaveBeenCalledTimes(1));
+    fireEvent.change(chartCard.getByLabelText('Completed trading date'), { target: { value: '2026-06-08' } });
+
+    await waitFor(() => expect(mockedGetVietnamIntradayChart).toHaveBeenCalledWith(
+      'FPT',
+      '2026-06-08',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    ));
+    await waitFor(() => expect(chartCard.getByTestId('vietnam-lightweight-chart')).toHaveAttribute('data-first-close', '201'));
+    await act(async () => {
+      resolveFirst?.(makeIntradayChartResponse('FPT', '2026-06-09', {
+        bars: [{ time: 1_780_980_600, open: 900, high: 902, low: 899, close: 901, volume: 4_000 }],
+      }));
+      await Promise.resolve();
+    });
+    expect(chartCard.getByTestId('vietnam-lightweight-chart')).toHaveAttribute('data-first-close', '201');
   });
 
   it('replaces the chart bars when switching the selected range', async () => {

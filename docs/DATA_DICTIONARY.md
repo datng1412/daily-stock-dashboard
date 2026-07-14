@@ -276,6 +276,7 @@ These fields are contract design only and are not present in a production endpoi
 - `SSI-derived/internal`: metrics calculated from SSI-owned inputs, including existing MA/RSI/Bollinger/20D indicators and Phase 4.8A metrics such as 52W high/low, 10D/3M average volume, price-vs-reference %, and daily range %.
 - `SSI Securities` / `SSI SecuritiesDetails`: security metadata and profile fields when available.
 - `SSI IntradayOhlc`: intraday candles and derived intraday pulse.
+- `intraday-chart`: completed-session SSI `IntradayOhlc` history for one explicit prior date. `interval` is `1m`; `trading_date` is ISO; `timezone` is `Asia/Ho_Chi_Minh`; `bars[].time` is Unix seconds; `source.provider=ssi_fastconnect`; `source.dataset=IntradayOhlc`. `cache.is_stale` distinguishes stale recovery, and diagnostics count returned, usable, rejected, and duplicate-minute rows. Sparse minutes are preserved.
 - `SSI realtime contract`: optional FastConnect streaming realtime snapshot contract; live support is not confirmed by this label or by parser/cache/adapter test presence.
 - `SSI trade-tape contract`: optional trade-tape contract; live support is not confirmed by this label.
 - `SSI IndexList` / `SSI DailyIndex` / `SSI IndexComponents`: index identifiers, daily index context, and component rows.

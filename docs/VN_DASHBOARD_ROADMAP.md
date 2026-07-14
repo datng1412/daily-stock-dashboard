@@ -12,6 +12,30 @@ The dashboard must remain:
 * Clear about stale or unavailable data
 * Neutral in wording
 
+## Phase 4.11C - Completed-session SSI 1m history (implemented)
+
+- Added the isolated `/vn/intraday-chart` contract for one explicit prior Vietnam date using only SSI `IntradayOhlc` resolution 1, fixed page 1/1,000, one call per cache miss, strict Vietnam-time normalization, sparse gaps, and deterministic duplicate-minute selection.
+- Added a bounded 500-entry process-local LRU with 24-hour positive/no-data TTL, 60-second negative TTL, and seven-day stale-if-error recovery.
+- Added dashboard `1D | 1m history` ownership, explicit completed-date selection, request-ID stale-response guards, Unix-second Lightweight Charts data, active-bar indicators, and `Daily S/R` labelling.
+- Deferred current-session history, 5m/15m/30m/1h, aggregation, further pagination, HNX/UPCOM verification, realtime candles, and external/fallback providers.
+- Automated browser smoke remains pending because the local browser integration failed before navigation with `Cannot redefine property: process`; do not treat deterministic tests as visual/network proof.
+
+### Phase 4.11C-1 - Runtime validation fixes
+
+- Fixed the RSI pane display defect without changing Wilder/RMA calculations: canonical 0–100 RSI values now use an explicit numeric series formatter and the existing supported 0–100 autoscale instead of inheriting the board-price formatter.
+- Separated `Timeframe` (`1D`, `1m history`) from the D1-only `Range` (`1M`, `3M`, `6M`, `1Y`) controls. The completed-date control replaces the range group in 1m history.
+
+### Phase 4.11C-2 - Runtime scale and Vietnam-time formatting
+
+- Removed chart-level board-price formatter ownership after browser evidence showed it overrode the RSI series formatter. Pane 2 now exclusively owns its visible right scale, retains canonical RSI values, fixes the supported autoscale to 0–100, and keeps guides at exactly 30 and 70.
+- Added deterministic `Asia/Ho_Chi_Minh` formatting for one-minute axis ticks (`HH:mm`), native crosshair labels, and HTML tooltips without shifting Unix timestamps. Daily mode continues to use `BusinessDay` tick fallback and date labels.
+- This is frontend presentation work only: no backend, provider, cache, endpoint, request ownership, timeframe, aggregation, or data-source behavior changed. Automated browser proof remains subject to the documented in-app browser setup limitation.
+- Validation passed 228 focused frontend tests, 18 formatter tests under a non-Vietnam process timezone, 8 endpoint regression tests, TypeScript, ESLint, and production build. The broader suite retained the known four unrelated failures (839 passed, two skipped); browser setup again stopped before navigation with `Cannot redefine property: process`, so visual and network proof remain explicitly unverified.
+- Removed pre-route regex interception for `interval`; unsupported values now return `422`, `vn_intraday_chart_invalid_request`, and `Only interval=1m is supported` before the SSI service is called.
+- Retained the 148 px right price-scale minimum because browser automation remained blocked before navigation and no responsive evidence justified changing readable S/R labels.
+- Focused validation passed 160 backend tests and 226 frontend tests, Python compilation, TypeScript, ESLint, and production build. The broader frontend suite retained four unrelated baseline failures with 837 passes and two skips.
+- A current-repository backend runtime verified both custom 422 contracts. A final spaced, single-call valid-history attempt returned `status=unavailable`, `failure_class=network_error`, and zero bars in the restricted validation environment, so the earlier 226-bar runtime proof remains the latest usable-session evidence and no new visual/network success is claimed.
+
 Companion product docs:
 
 * `docs/VN_PRODUCT_SPEC.md` defines the product goal, screens, UX principles, MVP scope, and milestones.

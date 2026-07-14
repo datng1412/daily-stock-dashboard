@@ -369,6 +369,21 @@ class VietnamChartResponse(BaseModel):
     candles: List[VietnamChartPoint] = Field(default_factory=list)
 
 
+class VietnamIntradayChartResponse(BaseModel):
+    """One completed Vietnam trading date of SSI one-minute chart history."""
+
+    ticker: str
+    interval: str = "1m"
+    trading_date: str
+    timezone: str = "Asia/Ho_Chi_Minh"
+    status: str = "ready"
+    reason: Optional[str] = None
+    bars: List[VietnamChartPoint] = Field(default_factory=list)
+    source: Dict[str, Any] = Field(default_factory=dict)
+    cache: Dict[str, Any] = Field(default_factory=dict)
+    diagnostics: Dict[str, Any] = Field(default_factory=dict)
+
+
 class VietnamIndexInfo(BaseModel):
     """SSI IndexList row for Vietnam index metadata."""
 

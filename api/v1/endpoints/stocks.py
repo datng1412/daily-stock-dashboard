@@ -27,6 +27,7 @@ from api.v1.schemas.stocks import (
     StockHistoryResponse,
     StockQuote,
     VietnamChartResponse,
+    VietnamIntradayChartResponse,
     VietnamCompanyNewsResponse,
     VietnamCompanyResearchResponse,
     VietnamCorporateActionsResponse,
@@ -531,6 +532,41 @@ def get_vietnam_index_list(
             status_code=500,
             detail={"error": "vn_index_list_failed", "message": str(e)},
         )
+
+
+@router.get(
+    "/vn/intraday-chart",
+    response_model=VietnamIntradayChartResponse,
+    summary="Vietnam completed-session one-minute chart history",
+    description="Return sparse SSI IntradayOhlc one-minute bars for one completed Vietnam date.",
+)
+def get_vietnam_intraday_chart(
+    ticker: str = Query(..., description="VN ticker, for example FPT"),
+    interval: str = Query("1m", description="Only completed-session 1m history is supported; supported value: 1m"),
+    trading_date: str = Query(..., alias="date", description="Completed Vietnam date in YYYY-MM-DD format"),
+    force_refresh: bool = Query(False, description="Bypass the dedicated process-local intraday chart cache"),
+) -> VietnamIntradayChartResponse:
+    try:
+        if interval != "1m":
+            raise ValueError("Only interval=1m is supported")
+        payload = VietnamMarketService().build_intraday_chart(
+            ticker,
+            interval=interval,
+            trading_date=trading_date,
+            force_refresh=force_refresh,
+        )
+        return VietnamIntradayChartResponse(**payload)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"error": "vn_intraday_chart_invalid_request", "message": str(exc)},
+        ) from exc
+    except Exception as exc:
+        logger.error("Vietnam intraday chart failed: %s", exc, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={"error": "vn_intraday_chart_failed", "message": "Vietnam intraday chart request failed"},
+        ) from exc
 
 
 @router.get(

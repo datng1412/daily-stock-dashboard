@@ -4,6 +4,14 @@
 
 This document defines the public data contract for the VN dashboard and company research page. It is intentionally data-quality-first: valid daily SSI data should remain visible even when optional live or enrichment sections are unavailable.
 
+## Completed-session 1-minute chart history (Phase 4.11C)
+
+`GET /api/v1/stocks/vn/intraday-chart?ticker=FPT&interval=1m&date=YYYY-MM-DD` returns one completed Vietnam date from SSI `IntradayOhlc`. Only `1m` is accepted, and the date must be strictly before the current `Asia/Ho_Chi_Minh` date. `ready` may contain sparse bars or `bars=[]` for a provider-confirmed no-data date; `unavailable` means SSI could not be reached and no usable cache exists; `failed` means a nonempty response had no usable bars. Stale-if-error data remains `ready` and is disclosed by `cache.is_stale=true`.
+
+Unsupported intervals are validated by this endpoint before SSI is called and return HTTP 422 with `error=vn_intraday_chart_invalid_request` and `message=Only interval=1m is supported`. Invalid current/future dates use the same error code with the completed-date message. The broader global request-validation copy does not own these intraday allowlist errors.
+
+Provider `DD/MM/YYYY` plus `HH:MM:SS` values are interpreted in `Asia/Ho_Chi_Minh`, floored to minute start, and returned as Unix seconds. OHLC must be finite and positive, volume finite and non-negative, and invalid or wrong-date rows are rejected. If multiple rows normalize to one minute, the latest original provider timestamp wins; identical timestamps keep the last stable occurrence. Missing minutes remain gaps. D1 remains SSI `DailyOhlc`; current-session candles, higher intervals, aggregation, pagination beyond page 1, realtime candle substitution, and provider fallback are not supported.
+
 ## Status Enum
 
 Public section statuses should use:
