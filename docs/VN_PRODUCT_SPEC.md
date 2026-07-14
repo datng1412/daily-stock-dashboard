@@ -205,6 +205,8 @@ Primary table/watchlist scan fields:
 
 The daily inspect chart uses the official open-source `lightweight-charts` 5.2 npm package as its sole renderer. SSI DailyOhlc remains the owner of daily bars and `latest_price`; daily dates map directly to timezone-safe `BusinessDay` values, and no TradingView market data is used. Native candlesticks, volume and RSI panes, MA20/MA50/Bollinger line series, and a passive series primitive render backend-provided S1/S2/R1/R2 ranges. S/R remains default-off, and native chart interaction makes no market-data request. The former custom SVG renderer and migration flag have been removed.
 
+Phase 4.11A hardens this renderer without changing product scope. Lightweight Charts owns responsive sizing through `autoSize`; compact pane proportions are 68% price / 14% volume / 18% RSI and expanded proportions are 70% / 12% / 18%. The native right price scale keeps a stable 148 px minimum so S/R range labels do not resize the plot when toggled. Ticker or range-preset changes discard the prior logical range and fit the new daily series, while compact/expanded transitions restore the owned logical range. Volume and RSI remain always-visible panes; no new pane toggle or market-data path was added.
+
 Source ownership:
 
 * Daily close, OHLCV, and chart: SSI DailyOhlc.

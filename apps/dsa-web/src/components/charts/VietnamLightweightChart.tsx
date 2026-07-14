@@ -34,6 +34,15 @@ type TooltipState = {
   top: number;
 };
 
+const TOOLTIP_WIDTH_PX = 180;
+const TOOLTIP_HEIGHT_PX = 150;
+const TOOLTIP_MARGIN_PX = 8;
+const TOOLTIP_OFFSET_PX = 14;
+
+export const VN_CHART_PRICE_SCALE_MIN_WIDTH = 148;
+export const VN_CHART_COMPACT_PANE_STRETCH = [68, 14, 18] as const;
+export const VN_CHART_EXPANDED_PANE_STRETCH = [70, 12, 18] as const;
+
 type SeriesRefs = {
   candles: ISeriesApi<'Candlestick'>;
   volume: ISeriesApi<'Histogram'>;
@@ -90,6 +99,9 @@ export const VietnamLightweightChart: React.FC<VietnamLightweightChartProps> = (
   const latestRangeHandlerRef = useRef(onLogicalRangeChange);
   const latestTickerRef = useRef(ticker);
   const previousTickerRef = useRef<string | null>(null);
+  const initialFallbackHeightRef = useRef(expanded ? 680 : 520);
+  const tooltipElementRef = useRef<HTMLDivElement | null>(null);
+  const tooltipContentKeyRef = useRef<string | null>(null);
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
   const chartData = useMemo(() => normalizeLightweightChartData(points), [points]);
 
@@ -99,9 +111,10 @@ export const VietnamLightweightChart: React.FC<VietnamLightweightChartProps> = (
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return undefined;
+    let disposed = false;
     const chart = createChart(container, {
       autoSize: true,
-      height: expanded ? 680 : 520,
+      height: initialFallbackHeightRef.current,
       layout: {
         background: { type: ColorType.Solid, color: '#07111d' },
         textColor: '#94a3b8',
@@ -112,7 +125,10 @@ export const VietnamLightweightChart: React.FC<VietnamLightweightChartProps> = (
         horzLines: { color: 'rgba(148,163,184,0.10)' },
       },
       crosshair: { mode: CrosshairMode.Normal },
-      rightPriceScale: { borderColor: 'rgba(148,163,184,0.28)', minimumWidth: 80 },
+      rightPriceScale: {
+        borderColor: 'rgba(148,163,184,0.28)',
+        minimumWidth: VN_CHART_PRICE_SCALE_MIN_WIDTH,
+      },
       timeScale: {
         borderColor: 'rgba(148,163,184,0.28)',
         timeVisible: false,
@@ -146,27 +162,55 @@ export const VietnamLightweightChart: React.FC<VietnamLightweightChartProps> = (
     const bbLower = chart.addSeries(LineSeries, { color: '#64748b', lineWidth: 1, priceFormat, priceLineVisible: false, lastValueVisible: false }, 0);
     const primitive = new ShortTermZonesPrimitive();
     candles.attachPrimitive(primitive);
-    const panes = chart.panes();
-    panes[0]?.setStretchFactor(3);
-    panes[1]?.setStretchFactor(1);
-    panes[2]?.setStretchFactor(1);
 
     const handleCrosshairMove = (param: Parameters<IChartApi['subscribeCrosshairMove']>[0] extends (value: infer P) => void ? P : never) => {
+      if (disposed) return;
       const candle = param.seriesData.get(candles);
       if (!param.point || !param.time || !candle || !('open' in candle)) {
+        tooltipContentKeyRef.current = null;
         setTooltip(null);
         return;
       }
       const volumePoint = param.seriesData.get(volume);
-      setTooltip({
+      const nextTooltip: TooltipState = {
         ticker: latestTickerRef.current,
         date: businessDayLabel(param.time), open: candle.open, high: candle.high, low: candle.low, close: candle.close,
         volume: volumePoint && 'value' in volumePoint ? volumePoint.value : undefined,
-        left: Math.max(8, Math.min(param.point.x + 14, container.clientWidth - 190)),
-        top: Math.max(8, Math.min(param.point.y + 14, container.clientHeight - 150)),
-      });
+        left: Math.max(
+          TOOLTIP_MARGIN_PX,
+          Math.min(
+            param.point.x + TOOLTIP_OFFSET_PX,
+            container.clientWidth - TOOLTIP_WIDTH_PX - TOOLTIP_MARGIN_PX,
+          ),
+        ),
+        top: Math.max(
+          TOOLTIP_MARGIN_PX,
+          Math.min(
+            param.point.y + TOOLTIP_OFFSET_PX,
+            container.clientHeight - TOOLTIP_HEIGHT_PX - TOOLTIP_MARGIN_PX,
+          ),
+        ),
+      };
+      const contentKey = [
+        nextTooltip.ticker,
+        nextTooltip.date,
+        nextTooltip.open,
+        nextTooltip.high,
+        nextTooltip.low,
+        nextTooltip.close,
+        nextTooltip.volume ?? '',
+      ].join('|');
+      if (tooltipContentKeyRef.current === contentKey && tooltipElementRef.current) {
+        tooltipElementRef.current.style.left = `${nextTooltip.left}px`;
+        tooltipElementRef.current.style.top = `${nextTooltip.top}px`;
+        return;
+      }
+      tooltipContentKeyRef.current = contentKey;
+      setTooltip(nextTooltip);
     };
-    const handleRange = (range: IRange<number> | null) => latestRangeHandlerRef.current?.(range);
+    const handleRange = (range: IRange<number> | null) => {
+      if (!disposed) latestRangeHandlerRef.current?.(range);
+    };
     chart.subscribeCrosshairMove(handleCrosshairMove);
     chart.timeScale().subscribeVisibleLogicalRangeChange(handleRange);
     chartRef.current = chart;
@@ -174,15 +218,27 @@ export const VietnamLightweightChart: React.FC<VietnamLightweightChartProps> = (
     zonesPrimitiveRef.current = primitive;
 
     return () => {
+      disposed = true;
       chart.unsubscribeCrosshairMove(handleCrosshairMove);
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(handleRange);
       candles.detachPrimitive(primitive);
       primitive.clear();
+      tooltipContentKeyRef.current = null;
+      tooltipElementRef.current = null;
       zonesPrimitiveRef.current = null;
       seriesRef.current = null;
       chartRef.current = null;
       chart.remove();
     };
+  }, []);
+
+  useEffect(() => {
+    const panes = chartRef.current?.panes();
+    if (!panes) return;
+    const stretch = expanded ? VN_CHART_EXPANDED_PANE_STRETCH : VN_CHART_COMPACT_PANE_STRETCH;
+    panes[0]?.setStretchFactor(stretch[0]);
+    panes[1]?.setStretchFactor(stretch[1]);
+    panes[2]?.setStretchFactor(stretch[2]);
   }, [expanded]);
 
   useEffect(() => {
@@ -199,8 +255,9 @@ export const VietnamLightweightChart: React.FC<VietnamLightweightChartProps> = (
     series.bbUpper.setData(chartData.bbUpper);
     series.bbMid.setData(chartData.bbMid);
     series.bbLower.setData(chartData.bbLower);
-    if (initialLogicalRange) chart.timeScale().setVisibleLogicalRange(initialLogicalRange);
-    else if (ticker !== previousTickerRef.current || previousTickerRef.current === null) chart.timeScale().fitContent();
+    const tickerChanged = previousTickerRef.current !== null && ticker !== previousTickerRef.current;
+    if (tickerChanged || (!initialLogicalRange && previousTickerRef.current === null)) chart.timeScale().fitContent();
+    else if (initialLogicalRange) chart.timeScale().setVisibleLogicalRange(initialLogicalRange);
     previousTickerRef.current = ticker;
   }, [chartData, initialLogicalRange, ticker]);
 
@@ -212,23 +269,27 @@ export const VietnamLightweightChart: React.FC<VietnamLightweightChartProps> = (
     seriesRef.current?.bbLower.applyOptions({ visible: showBollinger });
   }, [showBollinger]);
   useEffect(() => {
-    zonesPrimitiveRef.current?.setZones(showShortTermZones ? shortTermZones : []);
-    chartRef.current?.priceScale('right', 0).applyOptions({ minimumWidth: showShortTermZones ? 148 : 80 });
-  }, [shortTermZones, showShortTermZones]);
+    zonesPrimitiveRef.current?.setZones(
+      showShortTermZones && !loading && !unavailable ? shortTermZones : [],
+    );
+  }, [loading, shortTermZones, showShortTermZones, ticker, unavailable]);
 
   return (
-    <div className="relative" data-testid="vietnam-lightweight-chart" data-ticker={ticker}>
+    <div className="relative min-w-0 overflow-hidden" data-testid="vietnam-lightweight-chart" data-ticker={ticker}>
       <div
         ref={containerRef}
-        className={expanded ? 'h-[min(68vh,760px)] w-full overflow-hidden rounded-lg border border-border/60' : 'h-[540px] w-full overflow-hidden rounded-lg border border-border/60'}
+        className={expanded
+          ? 'h-[clamp(480px,68vh,760px)] min-w-0 w-full overflow-hidden rounded-lg border border-border/60'
+          : 'h-[clamp(420px,58vh,540px)] min-w-0 w-full overflow-hidden rounded-lg border border-border/60'}
         aria-label={`${ticker} daily candlestick chart`}
       />
       {loading ? <div className="absolute inset-0 grid place-items-center bg-[#07111d]/85 text-sm text-secondary-text">Loading chart data...</div> : null}
       {unavailable ? <div className="absolute inset-0 grid place-items-center bg-[#07111d]/90 text-sm text-secondary-text">SSI daily chart data unavailable.</div> : null}
       {tooltip && tooltip.ticker === ticker && !loading && !unavailable ? (
         <div
+          ref={tooltipElementRef}
           data-testid="lightweight-chart-tooltip"
-          className="pointer-events-none absolute z-10 w-[180px] rounded-lg border border-border/70 bg-card/95 p-3 text-xs shadow-soft-card"
+          className="pointer-events-none absolute z-10 w-[180px] max-w-[calc(100%-1rem)] rounded-lg border border-border/70 bg-card/95 p-3 text-xs shadow-soft-card"
           style={{ left: tooltip.left, top: tooltip.top }}
         >
           <p className="font-semibold text-foreground">{tooltip.date}</p>

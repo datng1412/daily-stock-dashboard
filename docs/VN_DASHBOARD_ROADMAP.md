@@ -1256,6 +1256,18 @@ The temporary development-only engine flag and custom SVG renderer were removed 
 
 The production cutover was user-directed despite the browser-tooling blocker. Manual browser parity and request-network inspection remain a follow-up because the available in-app browser integration could not initialize before navigation, including after a clean reconnect. This is a validation-environment limitation rather than evidence of runtime failure. When browser tooling is available, verify DailyOhlc OHLC/date/price parity, native interaction, compact/expanded ownership, S/R price-axis readability, responsive layout, attribution visibility, and absence of unexpected external market-data traffic.
 
+### Phase 4.11A - Lightweight Charts Runtime Hardening
+
+Status: deterministic hardening complete on 2026-07-14; automated browser and interaction-network proof remain blocked before navigation.
+
+The chart now creates once per mounted component and uses refs for every chart API object. Cleanup marks callbacks disposed before unsubscribing crosshair and logical-range handlers, detaches and clears the S/R primitive, drops refs, and removes the chart. Changing indicator visibility, S/R, data, pane proportions, or the `expanded` prop does not reconstruct the mounted chart. The dashboard architecture still mounts only one compact or expanded chart at a time and transfers already-loaded props without a market-data request.
+
+Lightweight Charts `autoSize` is the only resize owner; there is no custom `ResizeObserver`, timer, animation frame, or device-pixel-ratio path. Compact height is clamped to 420–540 px and uses 68% price / 14% volume / 18% RSI stretch factors. Expanded height is clamped to 480–760 px and uses 70% / 12% / 18%. Volume and RSI remain always visible, so repeated pane visibility toggling is not a supported state. The native right scale keeps a constant 148 px minimum for board-formatted price and full S/R range labels, avoiding plot-width changes when S/R is toggled.
+
+Crosshair tooltip content remains component-local, pointer-transparent, bounded to the chart container, and visually suppressed for loading, unavailable, missing-series, or mismatched-ticker states. Repeated movement over the same bar updates its position through the tooltip element ref rather than rerendering the dashboard. Ticker and range-preset changes clear the old chart, diagnostics ownership, and saved logical range before loading; late responses remain request-ID guarded. Compact/expanded transitions alone retain the latest logical range, while a new ticker deliberately fits its own data.
+
+Validation covers 60, 250, and 500 mapped daily sessions; 24 focused chart tests and 193 Vietnam dashboard tests pass, as do TypeScript, ESLint, and the production build. The broader suite reported 829 passes, 2 skips, the same four unrelated Phase 4.10L baseline failures, and one HomePage async failure that passed all 16 tests in isolation. The local backend and frontend were already listening on 127.0.0.1:8000 and :5173, but browser setup again failed with `Cannot redefine property: process`; therefore visual resize/interaction proof and browser network capture remain pending and are not claimed as passed.
+
 ### Phase 4.8F - SSI Remaining Data Capability Audit
 
 Status: completed on 2026-07-08 as a documentation-only audit.

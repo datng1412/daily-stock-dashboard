@@ -54,15 +54,19 @@ vi.mock('../../components/charts/VietnamLightweightChart', () => ({
     showBollinger,
     showShortTermZones,
     expanded = false,
+    initialLogicalRange = null,
+    onLogicalRangeChange,
   }: {
     ticker: string;
-    points: Array<{ date?: string | null }>;
+    points: Array<{ date?: string | null; close?: number | null }>;
     shortTermZones: Array<{ label: string; lower: number; upper: number }>;
     showMA20: boolean;
     showMA50: boolean;
     showBollinger: boolean;
     showShortTermZones: boolean;
     expanded?: boolean;
+    initialLogicalRange?: { from: number; to: number } | null;
+    onLogicalRangeChange?: (range: { from: number; to: number } | null) => void;
   }) => (
     <div
       data-testid="vietnam-lightweight-chart"
@@ -71,10 +75,13 @@ vi.mock('../../components/charts/VietnamLightweightChart', () => ({
       data-points-count={String(points.length)}
       data-first-date={points[0]?.date ?? ''}
       data-last-date={points[points.length - 1]?.date ?? ''}
+      data-first-close={String(points[0]?.close ?? '')}
+      data-initial-logical-range={initialLogicalRange ? `${initialLogicalRange.from}:${initialLogicalRange.to}` : ''}
       data-ma20={String(showMA20)}
       data-ma50={String(showMA50)}
       data-bollinger={String(showBollinger)}
       data-short-term-zones={String(showShortTermZones)}
+      onClick={() => onLogicalRangeChange?.({ from: 10, to: 40 })}
     >
       {showShortTermZones
         ? shortTermZones.map((zone) => (
@@ -4893,6 +4900,8 @@ describe('VietnamDashboardPage watchlist loading', () => {
     await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('FPT', '6M'));
 
     const chartCard = inspectChartCard();
+    fireEvent.click(chartCard.getByTestId('vietnam-lightweight-chart'));
+    const chartRequestsBeforeExpand = mockedGetVietnamChart.mock.calls.length;
     await clickChartControl(chartCard.getByRole('button', { name: 'Expand chart' }));
 
     const dialogElement = screen.getByRole('dialog', { name: 'Expanded inspect chart' });
@@ -4906,7 +4915,9 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(expandedChart).toHaveAttribute('data-ticker', 'FPT');
     expect(expandedChart).toHaveAttribute('data-points-count', '70');
     expect(expandedChart).toHaveAttribute('data-expanded', 'true');
+    expect(expandedChart).toHaveAttribute('data-initial-logical-range', '10:40');
     expect(screen.getAllByTestId('vietnam-lightweight-chart')).toHaveLength(1);
+    expect(mockedGetVietnamChart).toHaveBeenCalledTimes(chartRequestsBeforeExpand);
     expect(dialog.queryByTestId('inspect-candlestick-chart')).not.toBeInTheDocument();
 
     await clickChartControl(dialog.getByLabelText('Bollinger'));
@@ -4916,6 +4927,8 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     await clickChartControl(dialog.getByRole('button', { name: 'Close expanded chart' }));
     expect(screen.queryByRole('dialog', { name: 'Expanded inspect chart' })).not.toBeInTheDocument();
+    expect(chartCard.getByTestId('vietnam-lightweight-chart')).toHaveAttribute('data-initial-logical-range', '10:40');
+    expect(mockedGetVietnamChart).toHaveBeenCalledTimes(chartRequestsBeforeExpand);
 
     await clickChartControl(chartCard.getByRole('button', { name: 'Expand chart' }));
     expect(screen.getByRole('dialog', { name: 'Expanded inspect chart' })).toBeInTheDocument();
@@ -4964,13 +4977,57 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     const chartCard = inspectChartCard();
     expect(chartCard.getByTestId('vietnam-lightweight-chart')).toHaveAttribute('data-points-count', '70');
+    fireEvent.click(chartCard.getByTestId('vietnam-lightweight-chart'));
+    expect(chartCard.getByTestId('vietnam-lightweight-chart')).toHaveAttribute('data-initial-logical-range', '');
 
     await clickChartControl(chartCard.getByRole('button', { name: '1M' }));
 
     await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('FPT', '1M'));
     await waitFor(() => expect(chartCard.getByTestId('vietnam-lightweight-chart')).toHaveAttribute('data-points-count', '30'));
+    expect(chartCard.getByTestId('vietnam-lightweight-chart')).toHaveAttribute('data-initial-logical-range', '');
     expect(chartCard.getByRole('button', { name: '1M' })).toHaveAttribute('aria-pressed', 'true');
     expect(chartCard.queryByRole('button', { name: 'Reset chart zoom' })).not.toBeInTheDocument();
+  });
+
+  it('clears old chart state during rapid ticker switching and ignores late responses', async () => {
+    let resolveVpb: ((value: VietnamChartResponse) => void) | undefined;
+    let resolveMsb: ((value: VietnamChartResponse) => void) | undefined;
+    let fptCalls = 0;
+    mockedGetVietnamChart.mockImplementation((symbol, range = '6M') => {
+      if (symbol === 'VPB') {
+        return new Promise((resolve) => { resolveVpb = resolve; });
+      }
+      if (symbol === 'MSB') {
+        return new Promise((resolve) => { resolveMsb = resolve; });
+      }
+      fptCalls += 1;
+      const close = fptCalls === 1 ? 100 : 444;
+      return Promise.resolve(makeChartResponse(symbol, range, [{ ...makeChartData()[0], close }]));
+    });
+
+    render(<VietnamDashboardPage />);
+    await waitFor(() => expect(inspectChartCard().getByTestId('vietnam-lightweight-chart')).toHaveAttribute('data-ticker', 'FPT'));
+    fireEvent.click(inspectChartCard().getByTestId('vietnam-lightweight-chart'));
+
+    await act(async () => { clickTickerRow('VPB'); });
+    await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('VPB', '6M'));
+    expect(inspectChartCard().getByText('Loading chart data...')).toBeInTheDocument();
+    expect(inspectChartCard().queryByTestId('vietnam-lightweight-chart')).not.toBeInTheDocument();
+
+    await act(async () => { clickTickerRow('MSB'); });
+    await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('MSB', '6M'));
+    await act(async () => { clickTickerRow('FPT'); });
+    await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledTimes(4));
+    await waitFor(() => expect(inspectChartCard().getByTestId('vietnam-lightweight-chart')).toHaveAttribute('data-first-close', '444'));
+    expect(inspectChartCard().getByTestId('vietnam-lightweight-chart')).toHaveAttribute('data-initial-logical-range', '');
+
+    await act(async () => {
+      resolveVpb?.(makeChartResponse('VPB', '6M', [{ ...makeChartData()[0], close: 222 }]));
+      resolveMsb?.(makeChartResponse('MSB', '6M', [{ ...makeChartData()[0], close: 333 }]));
+      await Promise.resolve();
+    });
+    expect(inspectChartCard().getByTestId('vietnam-lightweight-chart')).toHaveAttribute('data-ticker', 'FPT');
+    expect(inspectChartCard().getByTestId('vietnam-lightweight-chart')).toHaveAttribute('data-first-close', '444');
   });
 
   it('renders chart data unavailable when selected ticker has no chart points', async () => {

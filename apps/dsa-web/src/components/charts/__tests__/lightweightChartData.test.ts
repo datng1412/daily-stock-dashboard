@@ -56,6 +56,23 @@ describe('lightweight VN chart data', () => {
     expect(data.bbUpper[0].time).toEqual(data.candles[0].time);
   });
 
+  it.each([60, 250, 500])('maps %i daily sessions without dropping aligned series', (size) => {
+    const start = Date.UTC(2024, 0, 1);
+    const input = Array.from({ length: size }, (_, index) => (
+      point(new Date(start + index * 86_400_000).toISOString().slice(0, 10), {
+        open: 70_000 + index,
+        high: 72_000 + index,
+        low: 69_000 + index,
+        close: 71_000 + index,
+      })
+    ));
+    const data = normalizeLightweightChartData(input);
+    expect(data.candles).toHaveLength(size);
+    expect(data.volume).toHaveLength(size);
+    expect(data.rsi14).toHaveLength(size);
+    expect(data.candles[0].time).toEqual({ year: 2024, month: 1, day: 1 });
+  });
+
   it('uses raw DailyOhlc values while formatting the existing board-style display unit', () => {
     const data = normalizeLightweightChartData([point('2026-07-10', { close: 72_100, high: 73_000 })]);
     expect(data.candles[0]).toMatchObject({ close: 72_100 });

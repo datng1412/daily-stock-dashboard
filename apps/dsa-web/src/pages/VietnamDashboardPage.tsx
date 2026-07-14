@@ -3359,11 +3359,15 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
   const [chart, setChart] = useState<VietnamChartResponse | null>(null);
   const [isExpanded, setIsExpanded] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [chartError, setChartError] = useState<{ requestKey: string; message: string } | null>(null);
   const requestIdRef = useRef(0);
   const lightweightLogicalRangeRef = useRef<{ from: number; to: number } | null>(null);
+  const requestKey = `${normalizeVietnamTicker(item.ticker)}:${rangeLabel}`;
+  const currentError = chartError?.requestKey === requestKey ? chartError.message : null;
   const chartBelongsToItem = Boolean(
-    chart && normalizeVietnamTicker(chart.symbol) === normalizeVietnamTicker(item.ticker),
+    chart
+    && normalizeVietnamTicker(chart.symbol) === normalizeVietnamTicker(item.ticker)
+    && (!chart.range || chart.range === rangeLabel),
   );
   const points = useMemo(() => (
     chartBelongsToItem && chart?.points?.length ? chart.points : chartBelongsToItem ? chart?.candles ?? [] : []
@@ -3372,16 +3376,26 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
     () => normalizeShortTermChartZones(item.indicators.shortTermZones),
     [item.indicators.shortTermZones],
   );
-  const chartSourceLabel = chart?.status === 'unavailable'
+  const chartSourceLabel = chartBelongsToItem && chart?.status === 'unavailable'
     ? 'SSI unavailable'
-    : chart?.source || 'SSI';
-  const chartSectionState: SectionState = loading
+    : chartBelongsToItem ? chart?.source || 'SSI' : 'SSI';
+  const chartIsLoading = loading || (!chartBelongsToItem && !currentError);
+  const chartSectionState: SectionState = chartIsLoading
     ? 'Loading'
     : points.length
       ? 'Ready'
-      : error
+      : currentError
         ? 'Failed'
         : 'Unavailable';
+
+  const handleRangeChange = useCallback((nextRange: InspectRangeLabel) => {
+    if (nextRange === rangeLabel) return;
+    lightweightLogicalRangeRef.current = null;
+    setChart(null);
+    setChartError(null);
+    setLoading(true);
+    setRangeLabel(nextRange);
+  }, [rangeLabel]);
 
   useEffect(() => {
     if (!isExpanded) return undefined;
@@ -3395,9 +3409,12 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
   useEffect(() => {
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
+    const ownedRequestKey = `${normalizeVietnamTicker(item.ticker)}:${rangeLabel}`;
+    lightweightLogicalRangeRef.current = null;
+    setChart(null);
+    setLoading(true);
+    setChartError(null);
     const loadChart = async () => {
-      setLoading(true);
-      setError(null);
       try {
         const response = await stocksApi.getVietnamChart(item.ticker, rangeLabel);
         if (requestId !== requestIdRef.current) return;
@@ -3405,7 +3422,10 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
       } catch (err) {
         if (requestId !== requestIdRef.current) return;
         setChart(null);
-        setError(err instanceof Error ? err.message : 'Chart data unavailable');
+        setChartError({
+          requestKey: ownedRequestKey,
+          message: err instanceof Error ? err.message : 'Chart data unavailable',
+        });
       } finally {
         if (requestId === requestIdRef.current) setLoading(false);
       }
@@ -3423,7 +3443,7 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
           </div>
           <p className="mt-1 text-xs text-secondary-text">Daily OHLCV from {chartSourceLabel}. SSI realtime remains separate.</p>
         </div>
-        <ChartRangeControls rangeLabel={rangeLabel} onRangeChange={setRangeLabel} />
+        <ChartRangeControls rangeLabel={rangeLabel} onRangeChange={handleRangeChange} />
       </div>
 
       <div className="mt-3">
@@ -3440,7 +3460,7 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
         />
       </div>
 
-      {loading ? (
+      {chartIsLoading ? (
         <p className="mt-4 text-sm text-secondary-text">Loading chart data...</p>
       ) : points.length ? (
         <div className="mt-4 space-y-3">
@@ -3483,12 +3503,12 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
       ) : (
         <p className="mt-4 text-sm text-secondary-text">Chart data unavailable</p>
       )}
-      {error ? <p className="mt-2 text-xs text-secondary-text">Chart endpoint unavailable: {error}</p> : null}
+      {currentError ? <p className="mt-2 text-xs text-secondary-text">Chart endpoint unavailable: {currentError}</p> : null}
 
       <div className="mt-3 space-y-1 text-xs text-secondary-text">
         <p>Daily OHLCV source: {chartSourceLabel}</p>
         <p>SSI realtime is separate and not used as daily close.</p>
-        {chart?.latestDate ? <p>Latest chart date: {chart.latestDate}</p> : null}
+        {chartBelongsToItem && chart?.latestDate ? <p>Latest chart date: {chart.latestDate}</p> : null}
       </div>
       {isExpanded && points.length ? (
         <div
@@ -3514,7 +3534,7 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
             </div>
 
             <div className="mt-3">
-              <ChartRangeControls rangeLabel={rangeLabel} onRangeChange={setRangeLabel} />
+              <ChartRangeControls rangeLabel={rangeLabel} onRangeChange={handleRangeChange} />
             </div>
 
             <div className="mt-3">
@@ -3558,7 +3578,7 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
                 <p>RSI14 numeric guides: 30 and 70.</p>
                 <p>Daily OHLCV source: {chartSourceLabel}</p>
                 <p>SSI realtime is separate and not used as daily close.</p>
-                {chart?.latestDate ? <p>Latest chart date: {chart.latestDate}</p> : null}
+                {chartBelongsToItem && chart?.latestDate ? <p>Latest chart date: {chart.latestDate}</p> : null}
               </div>
             </div>
           </div>
