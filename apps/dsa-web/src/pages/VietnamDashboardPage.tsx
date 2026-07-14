@@ -1,9 +1,8 @@
 import type React from 'react';
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, Banknote, DatabaseZap, Info, Loader2, Maximize2, RefreshCw, RotateCcw, Search, ShieldAlert, X } from 'lucide-react';
 import {
   stocksApi,
-  type VietnamChartPoint,
   type VietnamChartResponse,
   type VietnamCompanyNewsResponse,
   type VietnamCorporateActionEvent,
@@ -19,6 +18,8 @@ import {
   type VietnamWatchlistResponse,
 } from '../api/stocks';
 import { AppPage, Badge, Button, Loading, Tooltip } from '../components/common';
+import { VietnamLightweightChart } from '../components/charts/VietnamLightweightChart';
+import { normalizeShortTermChartZones } from '../components/charts/lightweightChartData';
 import { DataQualitySummary, OrderBookLadder } from '../components/dashboard';
 import { cn } from '../utils/cn';
 import { buildVietnamConditionSummary, VIETNAM_CONDITION_SUMMARY_SUBTITLE } from '../utils/vietnamConditionSummary';
@@ -3267,439 +3268,7 @@ const IndicatorTable: React.FC<{
   );
 };
 
-const CHART_WIDTH = 960;
-const PRICE_TOP = 24;
-const PRICE_HEIGHT = 300;
-const VOLUME_TOP = 352;
-const VOLUME_HEIGHT = 110;
-const RSI_TOP = 498;
-const RSI_HEIGHT = 108;
-const AXIS_TOP = RSI_TOP + RSI_HEIGHT + 16;
-const AXIS_LABEL_Y = AXIS_TOP + 20;
-const CHART_HEIGHT = 652;
-const CHART_LEFT = 58;
-const CHART_RIGHT = 20;
-const PLOT_WIDTH = CHART_WIDTH - CHART_LEFT - CHART_RIGHT;
-const MIN_VISIBLE_CANDLES = 20;
 
-type ChartVisibleWindow = {
-  start: number;
-  end: number;
-};
-
-const chartX = (index: number, count: number) => (
-  CHART_LEFT + (count <= 1 ? PLOT_WIDTH / 2 : (index / (count - 1)) * PLOT_WIDTH)
-);
-
-const minimumVisibleCandles = (total: number) => Math.min(MIN_VISIBLE_CANDLES, Math.max(total, 0));
-
-const clampChartWindow = (window: ChartVisibleWindow, total: number): ChartVisibleWindow => {
-  if (total <= 0) return { start: 0, end: 0 };
-  const minimumSize = minimumVisibleCandles(total);
-  const requestedSize = window.end - window.start;
-  const size = Math.min(total, Math.max(minimumSize, requestedSize || total));
-  const start = Math.max(0, Math.min(total - size, window.start));
-  return { start, end: start + size };
-};
-
-const fullChartWindow = (total: number): ChartVisibleWindow => ({ start: 0, end: Math.max(0, total) });
-
-const chartWindowAroundCenter = (window: ChartVisibleWindow, total: number, size: number): ChartVisibleWindow => {
-  if (total <= 0) return fullChartWindow(total);
-  const currentSize = Math.max(1, window.end - window.start);
-  const center = window.start + (currentSize - 1) / 2;
-  const start = Math.round(center - (size - 1) / 2);
-  return clampChartWindow({ start, end: start + size }, total);
-};
-
-const zoomChartWindow = (window: ChartVisibleWindow, total: number, direction: 'in' | 'out'): ChartVisibleWindow => {
-  const currentSize = window.end - window.start;
-  if (total <= 0 || currentSize <= 0) return fullChartWindow(total);
-  const minimumSize = minimumVisibleCandles(total);
-  const targetSize = direction === 'in'
-    ? Math.max(minimumSize, Math.round(currentSize * 0.68))
-    : Math.min(total, Math.round(currentSize / 0.68));
-  return chartWindowAroundCenter(window, total, targetSize);
-};
-
-const panChartWindow = (window: ChartVisibleWindow, total: number, direction: 'left' | 'right'): ChartVisibleWindow => {
-  const size = window.end - window.start;
-  if (total <= 0 || size <= 0) return fullChartWindow(total);
-  const step = Math.max(1, Math.round(size * 0.2));
-  const nextStart = direction === 'left' ? window.start - step : window.start + step;
-  return clampChartWindow({ start: nextStart, end: nextStart + size }, total);
-};
-
-const numericChartValues = (points: VietnamChartPoint[], keys: Array<keyof VietnamChartPoint>) =>
-  points.flatMap((point) => keys.map((key) => point[key])).filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
-
-const parseChartDate = (value?: string | null) => {
-  if (!value) return null;
-  const parsed = new Date(`${value}T00:00:00`);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
-};
-
-const formatChartAxisLabel = (value: string, spanDays: number) => {
-  const parsed = parseChartDate(value);
-  if (!parsed) return value;
-  if (spanDays <= 45) {
-    return new Intl.DateTimeFormat('en-US', { month: '2-digit', day: '2-digit' }).format(parsed);
-  }
-  if (spanDays <= 120) {
-    return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(parsed);
-  }
-  return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, '0')}`;
-};
-
-const chartDateTicks = (points: VietnamChartPoint[]) => {
-  const datedPoints = points
-    .map((point, index) => ({ index, date: point.date, parsed: parseChartDate(point.date) }))
-    .filter((point): point is { index: number; date: string; parsed: Date } => Boolean(point.date && point.parsed));
-  if (datedPoints.length < 2) return [];
-
-  const firstDate = datedPoints[0].parsed;
-  const lastDate = datedPoints[datedPoints.length - 1].parsed;
-  const spanDays = Math.max(1, Math.round((lastDate.getTime() - firstDate.getTime()) / 86_400_000));
-  const desiredCount = datedPoints.length >= 80 ? 6 : datedPoints.length >= 40 ? 5 : Math.min(4, datedPoints.length);
-  const seenIndexes = new Set<number>();
-  const seenLabels = new Set<string>();
-
-  return Array.from({ length: desiredCount }, (_, tickIndex) => {
-    const sourceIndex = Math.round((tickIndex * (datedPoints.length - 1)) / Math.max(desiredCount - 1, 1));
-    return datedPoints[sourceIndex];
-  })
-    .filter((point) => {
-      if (seenIndexes.has(point.index)) return false;
-      seenIndexes.add(point.index);
-      return true;
-    })
-    .map((point) => ({ ...point, label: formatChartAxisLabel(point.date, spanDays) }))
-    .filter((point) => {
-      if (seenLabels.has(point.label)) return false;
-      seenLabels.add(point.label);
-      return true;
-    });
-};
-
-const chartScale = (min: number, max: number, top: number, height: number) => {
-  const padding = (max - min) * 0.08 || Math.max(Math.abs(max) * 0.08, 1);
-  const low = min - padding;
-  const high = max + padding;
-  return (value?: number | null) => {
-    if (value === null || value === undefined || !Number.isFinite(value)) return null;
-    return top + ((high - value) / (high - low || 1)) * height;
-  };
-};
-
-const chartPath = (
-  points: VietnamChartPoint[],
-  key: keyof VietnamChartPoint,
-  yScale: (value?: number | null) => number | null,
-) => {
-  let started = false;
-  return points.map((point, index) => {
-    const y = yScale(point[key] as number | null | undefined);
-    if (y === null) return null;
-    const command = started ? 'L' : 'M';
-    started = true;
-    return `${command} ${chartX(index, points.length).toFixed(1)} ${y.toFixed(1)}`;
-  })
-    .filter(Boolean)
-    .join(' ');
-};
-
-type ShortTermPriceZone = {
-  lower?: number | null;
-  upper?: number | null;
-};
-
-type ShortTermChartZone = {
-  label: 'S1' | 'S2' | 'R1' | 'R2';
-  lower: number;
-  upper: number;
-  kind: 'support' | 'resistance';
-};
-
-const validShortTermPriceZone = (zone: ShortTermPriceZone): zone is { lower: number; upper: number } => (
-  typeof zone.lower === 'number'
-  && Number.isFinite(zone.lower)
-  && zone.lower > 0
-  && typeof zone.upper === 'number'
-  && Number.isFinite(zone.upper)
-  && zone.upper > 0
-  && zone.lower <= zone.upper
-);
-
-const chartShortTermZones = (
-  zones?: VietnamWatchItem['indicators']['shortTermZones'],
-): ShortTermChartZone[] => {
-  if (!zones || zones.status === 'unavailable') return [];
-  const support = (zones.support ?? []).slice(0, 2).flatMap((zone, index) => (
-    validShortTermPriceZone(zone)
-      ? [{ label: `S${index + 1}` as 'S1' | 'S2', lower: zone.lower, upper: zone.upper, kind: 'support' as const }]
-      : []
-  ));
-  const resistance = (zones.resistance ?? []).slice(0, 2).flatMap((zone, index) => (
-    validShortTermPriceZone(zone)
-      ? [{ label: `R${index + 1}` as 'R1' | 'R2', lower: zone.lower, upper: zone.upper, kind: 'resistance' as const }]
-      : []
-  ));
-  return [...support, ...resistance];
-};
-
-const chartZoneLabelPriority: Record<ShortTermChartZone['label'], number> = {
-  S1: 0,
-  R1: 1,
-  S2: 2,
-  R2: 3,
-};
-
-const chartZoneIsPrimary = (zone: ShortTermChartZone) => zone.label === 'S1' || zone.label === 'R1';
-const chartZoneTitle = (zone: ShortTermChartZone) => (
-  `${zone.kind === 'support' ? 'Support' : 'Resistance'} ${zone.label.slice(1)}\n${shortTermZoneRange(zone)}\nD1 · 60 sessions`
-);
-const CHART_ZONE_LABEL_MIN_SEPARATION = 14;
-
-const BrokerInspectChartSvg: React.FC<{
-  points: VietnamChartPoint[];
-  showMA20: boolean;
-  showMA50: boolean;
-  showBollinger: boolean;
-  showShortTermZones: boolean;
-  shortTermZones: ShortTermChartZone[];
-}> = ({ points, showMA20, showMA50, showBollinger, showShortTermZones, shortTermZones }) => {
-  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
-  const pricePlotClipId = useId().replaceAll(':', '');
-  const priceKeys: Array<keyof VietnamChartPoint> = ['high', 'low', 'open', 'close'];
-  if (showMA20) priceKeys.push('ma20');
-  if (showMA50) priceKeys.push('ma50');
-  if (showBollinger) priceKeys.push('bbUpper', 'bbMid', 'bbLower');
-  const priceValues = numericChartValues(points, priceKeys);
-  const volumeValues = numericChartValues(points, ['volume', 'volumeMa20', 'volumeMa50']);
-  if (!priceValues.length) {
-    return <p className="text-sm text-secondary-text">Chart data unavailable</p>;
-  }
-  const priceScale = chartScale(Math.min(...priceValues), Math.max(...priceValues), PRICE_TOP, PRICE_HEIGHT);
-  const volumeScale = chartScale(0, Math.max(...volumeValues, 1), VOLUME_TOP, VOLUME_HEIGHT);
-  const rsiScale = chartScale(0, 100, RSI_TOP, RSI_HEIGHT);
-  const candleWidth = Math.max(3, Math.min(11, PLOT_WIDTH / Math.max(points.length, 1) * 0.62));
-  const hoverPoint = hoverIndex === null ? null : points[hoverIndex] ?? null;
-  const dateTicks = chartDateTicks(points);
-  const pricePlotBottom = PRICE_TOP + PRICE_HEIGHT;
-  const pricePlotRight = CHART_WIDTH - CHART_RIGHT;
-  const visibleShortTermZones = showShortTermZones
-    ? shortTermZones
-      .map((zone) => {
-        const yTop = priceScale(zone.upper);
-        const yBottom = priceScale(zone.lower);
-        if (yTop === null || yBottom === null) return null;
-        const rawTop = Math.min(yTop, yBottom);
-        const rawBottom = Math.max(yTop, yBottom);
-        if (rawBottom < PRICE_TOP || rawTop > pricePlotBottom) return null;
-        const top = Math.max(PRICE_TOP, rawTop);
-        const bottom = Math.min(pricePlotBottom, rawBottom);
-        const representativeY = priceScale((zone.lower + zone.upper) / 2);
-        if (representativeY === null) return null;
-        return { ...zone, top, height: Math.max(0, bottom - top), representativeY };
-      })
-      .filter((zone): zone is ShortTermChartZone & { top: number; height: number; representativeY: number } => Boolean(zone))
-    : [];
-  const shortTermZoneLabelYs = new Map<ShortTermChartZone['label'], number>();
-  const placedLabelYs: number[] = [];
-  [...visibleShortTermZones]
-    .sort((left, right) => chartZoneLabelPriority[left.label] - chartZoneLabelPriority[right.label])
-    .forEach((zone) => {
-      const desiredY = Math.max(PRICE_TOP + 10, Math.min(pricePlotBottom - 3, zone.representativeY + 4));
-      const candidateYs = [desiredY, desiredY + CHART_ZONE_LABEL_MIN_SEPARATION, desiredY - CHART_ZONE_LABEL_MIN_SEPARATION, desiredY + CHART_ZONE_LABEL_MIN_SEPARATION * 2, desiredY - CHART_ZONE_LABEL_MIN_SEPARATION * 2]
-        .filter((y) => y >= PRICE_TOP + 10 && y <= pricePlotBottom - 3);
-      const labelY = candidateYs.find((y) => placedLabelYs.every((placed) => Math.abs(placed - y) >= CHART_ZONE_LABEL_MIN_SEPARATION));
-      if (labelY !== undefined) {
-        placedLabelYs.push(labelY);
-        shortTermZoneLabelYs.set(zone.label, labelY);
-      }
-    });
-
-  const handleMove = (event: React.MouseEvent<SVGSVGElement>) => {
-    const rect = event.currentTarget.getBoundingClientRect();
-    const x = (event.clientX - rect.left) / rect.width * CHART_WIDTH;
-    const rawIndex = Math.round((x - CHART_LEFT) / (PLOT_WIDTH / Math.max(points.length - 1, 1)));
-    setHoverIndex(Math.max(0, Math.min(points.length - 1, rawIndex)));
-  };
-
-  return (
-    <div className="relative">
-      <svg
-        role="img"
-        aria-label="Candlestick price chart with volume and RSI panels"
-        data-testid="inspect-candlestick-chart"
-        viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
-        className="h-[540px] w-full rounded-lg border border-border/60 bg-[#07111d]"
-        onMouseMove={handleMove}
-        onMouseLeave={() => setHoverIndex(null)}
-      >
-        <defs>
-          <clipPath id={pricePlotClipId}>
-            <rect x={CHART_LEFT} y={PRICE_TOP} width={PLOT_WIDTH} height={PRICE_HEIGHT} />
-          </clipPath>
-        </defs>
-        {[PRICE_TOP, PRICE_TOP + PRICE_HEIGHT, VOLUME_TOP, VOLUME_TOP + VOLUME_HEIGHT, RSI_TOP, RSI_TOP + RSI_HEIGHT].map((y) => (
-          <line key={`grid-${y}`} x1={CHART_LEFT} x2={CHART_WIDTH - CHART_RIGHT} y1={y} y2={y} stroke="rgba(148,163,184,0.18)" />
-        ))}
-        <text x={14} y={PRICE_TOP + 18} fill="#94a3b8" fontSize="12">Price</text>
-        <text x={14} y={VOLUME_TOP + 18} fill="#94a3b8" fontSize="12">Daily volume</text>
-        <text x={14} y={RSI_TOP + 18} fill="#94a3b8" fontSize="12">RSI14</text>
-        <line x1={CHART_LEFT} x2={CHART_WIDTH - CHART_RIGHT} y1={rsiScale(30) ?? 0} y2={rsiScale(30) ?? 0} stroke="#64748b" strokeDasharray="5 5" />
-        <line x1={CHART_LEFT} x2={CHART_WIDTH - CHART_RIGHT} y1={rsiScale(70) ?? 0} y2={rsiScale(70) ?? 0} stroke="#64748b" strokeDasharray="5 5" />
-        <text x={CHART_WIDTH - CHART_RIGHT - 24} y={(rsiScale(30) ?? 0) - 4} fill="#94a3b8" fontSize="11">30</text>
-        <text x={CHART_WIDTH - CHART_RIGHT - 24} y={(rsiScale(70) ?? 0) - 4} fill="#94a3b8" fontSize="11">70</text>
-
-        {visibleShortTermZones.length ? (
-          <g clipPath={`url(#${pricePlotClipId})`} pointerEvents="none" aria-hidden="true">
-            {visibleShortTermZones.map((zone) => {
-              const primary = chartZoneIsPrimary(zone);
-              const fill = zone.kind === 'support'
-                ? primary ? 'rgba(45,212,191,0.10)' : 'rgba(45,212,191,0.035)'
-                : primary ? 'rgba(251,191,36,0.10)' : 'rgba(251,191,36,0.035)';
-              const stroke = zone.kind === 'support'
-                ? primary ? 'rgba(94,234,212,0.72)' : 'rgba(94,234,212,0.38)'
-                : primary ? 'rgba(251,191,36,0.72)' : 'rgba(251,191,36,0.38)';
-              return (
-                <g key={zone.label} data-testid={`inspect-chart-zone-${zone.label}`}>
-                  <rect data-testid={`inspect-chart-zone-band-${zone.label}`} x={CHART_LEFT} y={zone.top} width={PLOT_WIDTH} height={zone.height} fill={fill} />
-                  <line
-                    data-testid={`inspect-chart-zone-line-${zone.label}`}
-                    x1={CHART_LEFT}
-                    x2={pricePlotRight}
-                    y1={zone.representativeY}
-                    y2={zone.representativeY}
-                    stroke={stroke}
-                    strokeWidth={primary ? '1.25' : '1'}
-                    strokeDasharray={primary ? undefined : '4 4'}
-                  />
-                </g>
-              );
-            })}
-          </g>
-        ) : null}
-
-        {points.map((point, index) => {
-          const x = chartX(index, points.length);
-          const openY = priceScale(point.open);
-          const closeY = priceScale(point.close);
-          const highY = priceScale(point.high);
-          const lowY = priceScale(point.low);
-          const volumeY = volumeScale(point.volume);
-          const color = point.close != null && point.open != null && point.close >= point.open ? '#22c55e' : '#ef4444';
-          const bodyTop = Math.min(openY ?? 0, closeY ?? 0);
-          const bodyHeight = Math.max(1.5, Math.abs((openY ?? 0) - (closeY ?? 0)));
-          return (
-            <g key={`${point.date}-${index}`}>
-              {highY !== null && lowY !== null ? <line x1={x} x2={x} y1={highY} y2={lowY} stroke={color} strokeWidth="1.3" /> : null}
-              {openY !== null && closeY !== null ? (
-                <rect x={x - candleWidth / 2} y={bodyTop} width={candleWidth} height={bodyHeight} fill={color} rx="1" />
-              ) : null}
-              {volumeY !== null ? (
-                <rect x={x - candleWidth / 2} y={volumeY} width={candleWidth} height={VOLUME_TOP + VOLUME_HEIGHT - volumeY} fill={color} opacity="0.35" />
-              ) : null}
-            </g>
-          );
-        })}
-
-        {showMA20 ? <path d={chartPath(points, 'ma20', priceScale)} fill="none" stroke="#a78bfa" strokeWidth="1.6" /> : null}
-        {showMA50 ? <path d={chartPath(points, 'ma50', priceScale)} fill="none" stroke="#f59e0b" strokeWidth="1.6" /> : null}
-        {showBollinger ? (
-          <>
-            <path d={chartPath(points, 'bbUpper', priceScale)} fill="none" stroke="#64748b" strokeWidth="1" />
-            <path d={chartPath(points, 'bbMid', priceScale)} fill="none" stroke="#94a3b8" strokeWidth="1" strokeDasharray="5 5" />
-            <path d={chartPath(points, 'bbLower', priceScale)} fill="none" stroke="#64748b" strokeWidth="1" />
-          </>
-        ) : null}
-        {visibleShortTermZones.length ? (
-          <g pointerEvents="none" aria-hidden="true">
-            {visibleShortTermZones.map((zone) => {
-              const labelY = shortTermZoneLabelYs.get(zone.label);
-              if (labelY === undefined) return null;
-              const primary = chartZoneIsPrimary(zone);
-              const label = primary ? `${zone.label} ${shortTermZoneRange(zone)}` : zone.label;
-              const textFill = zone.kind === 'support' ? '#99f6e4' : '#fde68a';
-              return (
-                <g key={`label-${zone.label}`} data-testid={`inspect-chart-zone-label-${zone.label}`} aria-label={chartZoneTitle(zone)}>
-                  <title data-testid={`inspect-chart-zone-title-${zone.label}`}>{chartZoneTitle(zone)}</title>
-                  <text
-                    data-testid={`inspect-chart-zone-marker-${zone.label}`}
-                    x={pricePlotRight - 5}
-                    y={labelY}
-                    fill={textFill}
-                    fontSize={primary ? '10' : '9'}
-                    fontWeight={primary ? '600' : '500'}
-                    textAnchor="end"
-                  >
-                    {label}
-                  </text>
-                </g>
-              );
-            })}
-          </g>
-        ) : null}
-        <path d={chartPath(points, 'volumeMa20', volumeScale)} fill="none" stroke="#38bdf8" strokeWidth="1.4" />
-        <path d={chartPath(points, 'volumeMa50', volumeScale)} fill="none" stroke="#f97316" strokeWidth="1.4" />
-        <path d={chartPath(points, 'rsi14', rsiScale)} fill="none" stroke="#22c55e" strokeWidth="1.8" />
-
-        {dateTicks.length ? (
-          <g aria-label="Chart date axis">
-            <line x1={CHART_LEFT} x2={CHART_WIDTH - CHART_RIGHT} y1={AXIS_TOP} y2={AXIS_TOP} stroke="rgba(148,163,184,0.22)" />
-            {dateTicks.map((tick) => {
-              const x = chartX(tick.index, points.length);
-              return (
-                <g key={`date-tick-${tick.index}`}>
-                  <line x1={x} x2={x} y1={AXIS_TOP} y2={AXIS_TOP + 5} stroke="rgba(148,163,184,0.45)" />
-                  <text
-                    data-testid="inspect-chart-date-label"
-                    x={x}
-                    y={AXIS_LABEL_Y}
-                    fill="#94a3b8"
-                    fontSize="11"
-                    textAnchor={tick.index === 0 ? 'start' : tick.index === points.length - 1 ? 'end' : 'middle'}
-                  >
-                    {tick.label}
-                  </text>
-                </g>
-              );
-            })}
-          </g>
-        ) : null}
-
-        {hoverIndex !== null ? (
-          <line x1={chartX(hoverIndex, points.length)} x2={chartX(hoverIndex, points.length)} y1={PRICE_TOP} y2={RSI_TOP + RSI_HEIGHT} stroke="rgba(226,232,240,0.45)" strokeDasharray="4 4" />
-        ) : null}
-      </svg>
-      {hoverPoint ? (
-        <div className="pointer-events-none absolute right-3 top-3 rounded-lg border border-border/70 bg-card/95 p-3 text-xs shadow-soft-card">
-          <p className="font-semibold text-foreground">{hoverPoint.date ?? '-'}</p>
-          <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-secondary-text">
-            <dt>Open</dt><dd className="text-right text-foreground">{formatPrice(hoverPoint.open)}</dd>
-            <dt>High</dt><dd className="text-right text-foreground">{formatPrice(hoverPoint.high)}</dd>
-            <dt>Low</dt><dd className="text-right text-foreground">{formatPrice(hoverPoint.low)}</dd>
-            <dt>Close</dt><dd className="text-right text-foreground">{formatPrice(hoverPoint.close)}</dd>
-            <dt>Daily volume</dt><dd className="text-right text-foreground" title={formatFullSharesTitle(hoverPoint.volume)}>{formatVolume(hoverPoint.volume)}</dd>
-            <dt>MA20</dt><dd className="text-right text-foreground">{formatPrice(hoverPoint.ma20)}</dd>
-            <dt>MA50</dt><dd className="text-right text-foreground">{formatPrice(hoverPoint.ma50)}</dd>
-            <dt>Daily volume MA20</dt><dd className="text-right text-foreground" title={formatFullSharesTitle(hoverPoint.volumeMa20)}>{formatVolume(hoverPoint.volumeMa20)}</dd>
-            <dt>Daily volume MA50</dt><dd className="text-right text-foreground" title={formatFullSharesTitle(hoverPoint.volumeMa50)}>{formatVolume(hoverPoint.volumeMa50)}</dd>
-            <dt>RSI14</dt><dd className="text-right text-foreground">{formatNumber(hoverPoint.rsi14, 2)}</dd>
-            {showBollinger ? (
-              <>
-                <dt>Bollinger upper</dt><dd className="text-right text-foreground">{formatPrice(hoverPoint.bbUpper)}</dd>
-                <dt>Bollinger mid</dt><dd className="text-right text-foreground">{formatPrice(hoverPoint.bbMid)}</dd>
-                <dt>Bollinger lower</dt><dd className="text-right text-foreground">{formatPrice(hoverPoint.bbLower)}</dd>
-              </>
-            ) : null}
-          </dl>
-        </div>
-      ) : null}
-    </div>
-  );
-};
 
 const ChartRangeControls: React.FC<{
   rangeLabel: InspectRangeLabel;
@@ -3780,114 +3349,6 @@ const ChartOverlayControls: React.FC<{
   </div>
 );
 
-const ChartWindowControls: React.FC<{
-  pointsLength: number;
-  visibleCount: number;
-  canZoomIn: boolean;
-  canZoomOut: boolean;
-  canPanLeft: boolean;
-  canPanRight: boolean;
-  isZoomed: boolean;
-  visibleCountTestId: string;
-  onZoomIn: () => void;
-  onZoomOut: () => void;
-  onPanLeft: () => void;
-  onPanRight: () => void;
-  onReset: () => void;
-  onExpand?: () => void;
-}> = ({
-  pointsLength,
-  visibleCount,
-  canZoomIn,
-  canZoomOut,
-  canPanLeft,
-  canPanRight,
-  isZoomed,
-  visibleCountTestId,
-  onZoomIn,
-  onZoomOut,
-  onPanLeft,
-  onPanRight,
-  onReset,
-  onExpand,
-}) => (
-  <div className="flex flex-wrap items-center gap-1">
-    <button
-      type="button"
-      onClick={onZoomIn}
-      disabled={!canZoomIn}
-      aria-label="Zoom in chart"
-      className={cn(
-        'h-8 rounded-md border px-3 text-xs font-medium transition-colors',
-        canZoomIn ? 'border-border/70 bg-card/60 text-secondary-text hover:bg-hover hover:text-foreground' : 'cursor-not-allowed border-border/40 bg-card/30 text-secondary-text/50',
-      )}
-    >
-      +
-    </button>
-    <button
-      type="button"
-      onClick={onZoomOut}
-      disabled={!canZoomOut}
-      aria-label="Zoom out chart"
-      className={cn(
-        'h-8 rounded-md border px-3 text-xs font-medium transition-colors',
-        canZoomOut ? 'border-border/70 bg-card/60 text-secondary-text hover:bg-hover hover:text-foreground' : 'cursor-not-allowed border-border/40 bg-card/30 text-secondary-text/50',
-      )}
-    >
-      -
-    </button>
-    <button
-      type="button"
-      onClick={onPanLeft}
-      disabled={!canPanLeft}
-      aria-label="Pan left"
-      className={cn(
-        'h-8 rounded-md border px-3 text-xs font-medium transition-colors',
-        canPanLeft ? 'border-border/70 bg-card/60 text-secondary-text hover:bg-hover hover:text-foreground' : 'cursor-not-allowed border-border/40 bg-card/30 text-secondary-text/50',
-      )}
-    >
-      Left
-    </button>
-    <button
-      type="button"
-      onClick={onPanRight}
-      disabled={!canPanRight}
-      aria-label="Pan right"
-      className={cn(
-        'h-8 rounded-md border px-3 text-xs font-medium transition-colors',
-        canPanRight ? 'border-border/70 bg-card/60 text-secondary-text hover:bg-hover hover:text-foreground' : 'cursor-not-allowed border-border/40 bg-card/30 text-secondary-text/50',
-      )}
-    >
-      Right
-    </button>
-    <button
-      type="button"
-      onClick={onReset}
-      disabled={!isZoomed}
-      aria-label="Reset chart zoom"
-      className={cn(
-        'h-8 rounded-md border px-3 text-xs font-medium transition-colors',
-        isZoomed ? 'border-border/70 bg-card/60 text-secondary-text hover:bg-hover hover:text-foreground' : 'cursor-not-allowed border-border/40 bg-card/30 text-secondary-text/50',
-      )}
-    >
-      Reset
-    </button>
-    {onExpand ? (
-      <button
-        type="button"
-        onClick={onExpand}
-        aria-label="Expand chart"
-        className="inline-flex h-8 items-center gap-2 rounded-md border border-border/70 bg-card/60 px-3 text-xs font-medium text-secondary-text transition-colors hover:bg-hover hover:text-foreground"
-      >
-        <Maximize2 className="h-3.5 w-3.5" aria-hidden="true" />
-        Expand
-      </button>
-    ) : null}
-    <span className="ml-2 text-xs text-secondary-text" data-testid={visibleCountTestId}>
-      Showing {visibleCount} of {pointsLength}
-    </span>
-  </div>
-);
 
 const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
   const [rangeLabel, setRangeLabel] = useState<InspectRangeLabel>('6M');
@@ -3896,29 +3357,21 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
   const [showBollinger, setShowBollinger] = useState(false);
   const [showShortTermZones, setShowShortTermZones] = useState(false);
   const [chart, setChart] = useState<VietnamChartResponse | null>(null);
-  const [visibleWindow, setVisibleWindow] = useState<ChartVisibleWindow>(fullChartWindow(0));
   const [isExpanded, setIsExpanded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const requestIdRef = useRef(0);
+  const lightweightLogicalRangeRef = useRef<{ from: number; to: number } | null>(null);
   const chartBelongsToItem = Boolean(
     chart && normalizeVietnamTicker(chart.symbol) === normalizeVietnamTicker(item.ticker),
   );
   const points = useMemo(() => (
     chartBelongsToItem && chart?.points?.length ? chart.points : chartBelongsToItem ? chart?.candles ?? [] : []
   ), [chart, chartBelongsToItem]);
-  const shortTermZones = useMemo(() => chartShortTermZones(item.indicators.shortTermZones), [item.indicators.shortTermZones]);
-  const clampedVisibleWindow = clampChartWindow(visibleWindow, points.length);
-  const visiblePoints = useMemo(
-    () => points.slice(clampedVisibleWindow.start, clampedVisibleWindow.end),
-    [points, clampedVisibleWindow.start, clampedVisibleWindow.end],
+  const lightweightShortTermZones = useMemo(
+    () => normalizeShortTermChartZones(item.indicators.shortTermZones),
+    [item.indicators.shortTermZones],
   );
-  const visibleCount = visiblePoints.length;
-  const canZoomIn = points.length > minimumVisibleCandles(points.length) && visibleCount > minimumVisibleCandles(points.length);
-  const canZoomOut = visibleCount < points.length;
-  const canPanLeft = clampedVisibleWindow.start > 0;
-  const canPanRight = clampedVisibleWindow.end < points.length;
-  const isZoomed = visibleCount > 0 && visibleCount < points.length;
   const chartSourceLabel = chart?.status === 'unavailable'
     ? 'SSI unavailable'
     : chart?.source || 'SSI';
@@ -3929,10 +3382,6 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
       : error
         ? 'Failed'
         : 'Unavailable';
-
-  const updateVisibleWindow = (updater: (window: ChartVisibleWindow) => ChartVisibleWindow) => {
-    setVisibleWindow((current) => clampChartWindow(updater(clampChartWindow(current, points.length)), points.length));
-  };
 
   useEffect(() => {
     if (!isExpanded) return undefined;
@@ -3953,11 +3402,9 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
         const response = await stocksApi.getVietnamChart(item.ticker, rangeLabel);
         if (requestId !== requestIdRef.current) return;
         setChart(response);
-        setVisibleWindow(fullChartWindow(response.points.length));
       } catch (err) {
         if (requestId !== requestIdRef.current) return;
         setChart(null);
-        setVisibleWindow(fullChartWindow(0));
         setError(err instanceof Error ? err.message : 'Chart data unavailable');
       } finally {
         if (requestId === requestIdRef.current) setLoading(false);
@@ -3985,7 +3432,7 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
           showMA50={showMA50}
           showBollinger={showBollinger}
           showShortTermZones={showShortTermZones}
-          shortTermZonesAvailable={shortTermZones.length > 0}
+          shortTermZonesAvailable={lightweightShortTermZones.length > 0}
           onShowMA20Change={setShowMA20}
           onShowMA50Change={setShowMA50}
           onShowBollingerChange={setShowBollinger}
@@ -3997,22 +3444,18 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
         <p className="mt-4 text-sm text-secondary-text">Loading chart data...</p>
       ) : points.length ? (
         <div className="mt-4 space-y-3">
-          <ChartWindowControls
-            pointsLength={points.length}
-            visibleCount={visibleCount}
-            canZoomIn={canZoomIn}
-            canZoomOut={canZoomOut}
-            canPanLeft={canPanLeft}
-            canPanRight={canPanRight}
-            isZoomed={isZoomed}
-            visibleCountTestId="inspect-chart-visible-count"
-            onZoomIn={() => updateVisibleWindow((window) => zoomChartWindow(window, points.length, 'in'))}
-            onZoomOut={() => updateVisibleWindow((window) => zoomChartWindow(window, points.length, 'out'))}
-            onPanLeft={() => updateVisibleWindow((window) => panChartWindow(window, points.length, 'left'))}
-            onPanRight={() => updateVisibleWindow((window) => panChartWindow(window, points.length, 'right'))}
-            onReset={() => setVisibleWindow(fullChartWindow(points.length))}
-            onExpand={() => setIsExpanded(true)}
-          />
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setIsExpanded(true)}
+              aria-label="Expand chart"
+              className="inline-flex h-8 items-center gap-2 rounded-md border border-border/70 bg-card/60 px-3 text-xs font-medium text-secondary-text transition-colors hover:bg-hover hover:text-foreground"
+            >
+              <Maximize2 className="h-3.5 w-3.5" aria-hidden="true" />
+              Expand
+            </button>
+            <span className="text-xs text-secondary-text">Native wheel/pinch zoom and drag pan</span>
+          </div>
           <div className="flex flex-wrap gap-2 text-xs text-secondary-text">
             <span data-testid="inspect-legend-candles">Candlesticks</span>
             {showMA20 ? <span data-testid="inspect-legend-ma20">MA20</span> : null}
@@ -4022,14 +3465,19 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
             <span>Daily volume MA50</span>
             <span>RSI14</span>
           </div>
-          <BrokerInspectChartSvg
-            points={visiblePoints}
-            showMA20={showMA20}
-            showMA50={showMA50}
-            showBollinger={showBollinger}
-            showShortTermZones={showShortTermZones}
-            shortTermZones={shortTermZones}
-          />
+          {!isExpanded ? (
+            <VietnamLightweightChart
+              ticker={item.ticker}
+              points={points}
+              shortTermZones={lightweightShortTermZones}
+              showMA20={showMA20}
+              showMA50={showMA50}
+              showBollinger={showBollinger}
+              showShortTermZones={showShortTermZones}
+              initialLogicalRange={lightweightLogicalRangeRef.current}
+              onLogicalRangeChange={(range) => { lightweightLogicalRangeRef.current = range; }}
+            />
+          ) : null}
           <p className="text-xs text-secondary-text">RSI14 numeric guides: 30 and 70.</p>
         </div>
       ) : (
@@ -4075,29 +3523,11 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
                 showMA50={showMA50}
                 showBollinger={showBollinger}
                 showShortTermZones={showShortTermZones}
-                shortTermZonesAvailable={shortTermZones.length > 0}
+                shortTermZonesAvailable={lightweightShortTermZones.length > 0}
                 onShowMA20Change={setShowMA20}
                 onShowMA50Change={setShowMA50}
                 onShowBollingerChange={setShowBollinger}
                 onShowShortTermZonesChange={setShowShortTermZones}
-              />
-            </div>
-
-            <div className="mt-4">
-              <ChartWindowControls
-                pointsLength={points.length}
-                visibleCount={visibleCount}
-                canZoomIn={canZoomIn}
-                canZoomOut={canZoomOut}
-                canPanLeft={canPanLeft}
-                canPanRight={canPanRight}
-                isZoomed={isZoomed}
-                visibleCountTestId="inspect-chart-expanded-visible-count"
-                onZoomIn={() => updateVisibleWindow((window) => zoomChartWindow(window, points.length, 'in'))}
-                onZoomOut={() => updateVisibleWindow((window) => zoomChartWindow(window, points.length, 'out'))}
-                onPanLeft={() => updateVisibleWindow((window) => panChartWindow(window, points.length, 'left'))}
-                onPanRight={() => updateVisibleWindow((window) => panChartWindow(window, points.length, 'right'))}
-                onReset={() => setVisibleWindow(fullChartWindow(points.length))}
               />
             </div>
 
@@ -4111,14 +3541,18 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
               <span>RSI14</span>
             </div>
 
-            <div className="mt-3 min-h-0 flex-1 overflow-y-auto pr-1 [&_svg]:h-[min(68vh,760px)]">
-              <BrokerInspectChartSvg
-                points={visiblePoints}
+            <div className="mt-3 min-h-0 flex-1 overflow-y-auto pr-1">
+              <VietnamLightweightChart
+                ticker={item.ticker}
+                points={points}
+                shortTermZones={lightweightShortTermZones}
                 showMA20={showMA20}
                 showMA50={showMA50}
                 showBollinger={showBollinger}
                 showShortTermZones={showShortTermZones}
-                shortTermZones={shortTermZones}
+                expanded
+                initialLogicalRange={lightweightLogicalRangeRef.current}
+                onLogicalRangeChange={(range) => { lightweightLogicalRangeRef.current = range; }}
               />
               <div className="mt-3 space-y-1 text-xs text-secondary-text">
                 <p>RSI14 numeric guides: 30 and 70.</p>

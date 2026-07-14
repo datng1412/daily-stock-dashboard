@@ -44,6 +44,49 @@ vi.mock('../../utils/vietnamMarketPhase', () => ({
   getVietnamMarketPhase: () => mockedGetVietnamMarketPhase(),
 }));
 
+vi.mock('../../components/charts/VietnamLightweightChart', () => ({
+  VietnamLightweightChart: ({
+    ticker,
+    points,
+    shortTermZones,
+    showMA20,
+    showMA50,
+    showBollinger,
+    showShortTermZones,
+    expanded = false,
+  }: {
+    ticker: string;
+    points: Array<{ date?: string | null }>;
+    shortTermZones: Array<{ label: string; lower: number; upper: number }>;
+    showMA20: boolean;
+    showMA50: boolean;
+    showBollinger: boolean;
+    showShortTermZones: boolean;
+    expanded?: boolean;
+  }) => (
+    <div
+      data-testid="vietnam-lightweight-chart"
+      data-ticker={ticker}
+      data-expanded={expanded ? 'true' : 'false'}
+      data-points-count={String(points.length)}
+      data-first-date={points[0]?.date ?? ''}
+      data-last-date={points[points.length - 1]?.date ?? ''}
+      data-ma20={String(showMA20)}
+      data-ma50={String(showMA50)}
+      data-bollinger={String(showBollinger)}
+      data-short-term-zones={String(showShortTermZones)}
+    >
+      {showShortTermZones
+        ? shortTermZones.map((zone) => (
+            <span key={zone.label} data-testid={`lightweight-zone-${zone.label}`}>
+              {`${zone.label} ${zone.lower}-${zone.upper}`}
+            </span>
+          ))
+        : null}
+    </div>
+  ),
+}));
+
 const defaultTickers = ['FPT', 'VPB', 'MSB', 'SCS', 'ACV', 'ACB'];
 const vn30BatchSize = VN30_WATCHLIST_BATCH_SIZE_DEFAULT;
 const customWatchlistStorageKey = 'vnDashboard.customWatchlist.v1';
@@ -745,9 +788,6 @@ const keyDownChartControl = async (target: Window | Document | Element, eventIni
     fireEvent.keyDown(target, eventInit);
   });
 };
-
-const inspectDateLabels = (chartCard: ReturnType<typeof within>) =>
-  chartCard.queryAllByTestId('inspect-chart-date-label').map((label: HTMLElement) => label.textContent ?? '');
 
 const foreignNetVolumeSummaryCard = () => within(screen.getByTestId('foreign-net-volume-summary-card'));
 
@@ -4691,17 +4731,17 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(chartCard.getByLabelText('MA20')).toBeChecked();
     expect(chartCard.getByLabelText('MA50')).toBeChecked();
     expect(chartCard.getByLabelText('Bollinger')).not.toBeChecked();
-    expect(chartCard.getByRole('button', { name: 'Zoom in chart' })).toBeInTheDocument();
-    expect(chartCard.getByRole('button', { name: 'Zoom out chart' })).toBeDisabled();
-    expect(chartCard.getByRole('button', { name: 'Pan left' })).toBeDisabled();
-    expect(chartCard.getByRole('button', { name: 'Pan right' })).toBeDisabled();
-    expect(chartCard.getByRole('button', { name: 'Reset chart zoom' })).toBeDisabled();
     expect(chartCard.getByRole('button', { name: 'Expand chart' })).toBeInTheDocument();
-    expect(chartCard.getByTestId('inspect-chart-visible-count')).toHaveTextContent('Showing 70 of 70');
-    expect(chartCard.getByTestId('inspect-candlestick-chart')).toBeInTheDocument();
-    expect(chartCard.getAllByTestId('inspect-chart-date-label').length).toBeGreaterThanOrEqual(4);
-    expect(chartCard.getByText('Apr 1')).toBeInTheDocument();
-    expect(chartCard.getByText('Jun 9')).toBeInTheDocument();
+    const chart = chartCard.getByTestId('vietnam-lightweight-chart');
+    expect(chart).toHaveAttribute('data-ticker', 'FPT');
+    expect(chart).toHaveAttribute('data-points-count', '70');
+    expect(chart).toHaveAttribute('data-first-date', '2026-04-01');
+    expect(chart).toHaveAttribute('data-last-date', '2026-06-09');
+    expect(chart).toHaveAttribute('data-ma20', 'true');
+    expect(chart).toHaveAttribute('data-ma50', 'true');
+    expect(chart).toHaveAttribute('data-bollinger', 'false');
+    expect(chartCard.queryByTestId('inspect-candlestick-chart')).not.toBeInTheDocument();
+    expect(chartCard.queryByRole('button', { name: 'Zoom in chart' })).not.toBeInTheDocument();
     expect(chartCard.getByTestId('inspect-legend-candles')).toHaveTextContent('Candlesticks');
     expect(chartCard.getByTestId('inspect-legend-ma20')).toBeInTheDocument();
     expect(chartCard.getByTestId('inspect-legend-ma50')).toBeInTheDocument();
@@ -4743,35 +4783,21 @@ describe('VietnamDashboardPage watchlist loading', () => {
       'title',
       'Show short-term daily support and resistance zones.',
     );
-    expect(chartCard.queryByTestId('inspect-chart-zone-S1')).not.toBeInTheDocument();
-    expect(chartCard.queryByTestId('inspect-chart-zone-label-S1')).not.toBeInTheDocument();
+    expect(chartCard.getByTestId('vietnam-lightweight-chart')).toHaveAttribute('data-short-term-zones', 'false');
+    expect(chartCard.queryByTestId('lightweight-zone-S1')).not.toBeInTheDocument();
 
     const chartRequestsBeforeToggle = mockedGetVietnamChart.mock.calls.length;
     const watchlistRequestsBeforeToggle = mockedGetVietnamWatchlist.mock.calls.length;
     await clickChartControl(zonesToggle);
 
     expect(zonesToggle).toBeChecked();
-    expect(chartCard.getByTestId('inspect-chart-zone-S1')).toBeInTheDocument();
-    expect(chartCard.getByTestId('inspect-chart-zone-S2')).toBeInTheDocument();
-    expect(chartCard.getByTestId('inspect-chart-zone-R1')).toBeInTheDocument();
-    expect(chartCard.getByTestId('inspect-chart-zone-R2')).toBeInTheDocument();
-    expect(chartCard.queryByTestId('inspect-chart-zone-S3')).not.toBeInTheDocument();
-    expect(chartCard.queryByTestId('inspect-chart-zone-R3')).not.toBeInTheDocument();
-    expect(chartCard.getByTestId('inspect-chart-zone-marker-S1')).toHaveTextContent('S1 0.12');
-    expect(chartCard.getByTestId('inspect-chart-zone-marker-R1')).toHaveTextContent('R1 0.14');
-    expect(chartCard.getByTestId('inspect-chart-zone-marker-S2')).toHaveTextContent('S2');
-    expect(chartCard.getByTestId('inspect-chart-zone-marker-R2')).toHaveTextContent('R2');
-    expect(chartCard.getByTestId('inspect-chart-zone-title-S2')).toHaveTextContent('Support 2');
-    expect(chartCard.getByTestId('inspect-chart-zone-title-S2')).toHaveTextContent('0.12–0.13');
-    expect(chartCard.getByTestId('inspect-chart-zone-title-R2')).toHaveTextContent('Resistance 2');
-    expect(chartCard.getByTestId('inspect-chart-zone-title-R2')).toHaveTextContent('0.15–0.16');
-    expect(chartCard.getByTestId('inspect-chart-zone-line-S1')).not.toHaveAttribute('stroke-dasharray');
-    expect(chartCard.getByTestId('inspect-chart-zone-line-S2')).toHaveAttribute('stroke-dasharray', '4 4');
-    expect(chartCard.getByTestId('inspect-chart-zone-band-S1')).toHaveAttribute('fill', 'rgba(45,212,191,0.10)');
-    expect(chartCard.getByTestId('inspect-chart-zone-band-S2')).toHaveAttribute('fill', 'rgba(45,212,191,0.035)');
-    expect(Number(chartCard.getByTestId('inspect-chart-zone-line-S1').getAttribute('y1'))).toBeGreaterThan(
-      Number(chartCard.getByTestId('inspect-chart-zone-band-S1').getAttribute('y')),
-    );
+    expect(chartCard.getByTestId('vietnam-lightweight-chart')).toHaveAttribute('data-short-term-zones', 'true');
+    expect(chartCard.getByTestId('lightweight-zone-S1')).toHaveTextContent('S1 120-121');
+    expect(chartCard.getByTestId('lightweight-zone-S2')).toHaveTextContent('S2 123-125');
+    expect(chartCard.getByTestId('lightweight-zone-R1')).toHaveTextContent('R1 140-142');
+    expect(chartCard.getByTestId('lightweight-zone-R2')).toHaveTextContent('R2 150-155');
+    expect(chartCard.queryByTestId('lightweight-zone-S3')).not.toBeInTheDocument();
+    expect(chartCard.queryByTestId('lightweight-zone-R3')).not.toBeInTheDocument();
 
     expect(mockedGetVietnamChart).toHaveBeenCalledTimes(chartRequestsBeforeToggle);
     expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistRequestsBeforeToggle);
@@ -4779,11 +4805,12 @@ describe('VietnamDashboardPage watchlist loading', () => {
     await clickChartControl(chartCard.getByRole('button', { name: 'Expand chart' }));
     const dialog = within(screen.getByRole('dialog', { name: 'Expanded inspect chart' }));
     expect(dialog.getByLabelText('Show support and resistance zones')).toBeChecked();
-    expect(dialog.getByTestId('inspect-chart-zone-S1')).toBeInTheDocument();
-    expect(dialog.getByTestId('inspect-chart-zone-R2')).toBeInTheDocument();
+    expect(dialog.getByTestId('vietnam-lightweight-chart')).toHaveAttribute('data-short-term-zones', 'true');
+    expect(dialog.getByTestId('lightweight-zone-S1')).toBeInTheDocument();
+    expect(dialog.getByTestId('lightweight-zone-R2')).toBeInTheDocument();
     await clickChartControl(dialog.getByLabelText('Show support and resistance zones'));
-    expect(dialog.queryByTestId('inspect-chart-zone-S1')).not.toBeInTheDocument();
-    expect(chartCard.queryByTestId('inspect-chart-zone-S1')).not.toBeInTheDocument();
+    expect(dialog.getByTestId('vietnam-lightweight-chart')).toHaveAttribute('data-short-term-zones', 'false');
+    expect(dialog.queryByTestId('lightweight-zone-S1')).not.toBeInTheDocument();
     await clickChartControl(dialog.getByRole('button', { name: 'Close expanded chart' }));
     expect(chartCard.getByLabelText('Show support and resistance zones')).not.toBeChecked();
     expect(mockedGetVietnamChart).toHaveBeenCalledTimes(chartRequestsBeforeToggle);
@@ -4816,18 +4843,18 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('FPT', '6M'));
     const chartCard = inspectChartCard();
-    expect(chartCard.queryByTestId('inspect-chart-zone-S1')).not.toBeInTheDocument();
-    expect(chartCard.queryByTestId('inspect-chart-zone-S2')).not.toBeInTheDocument();
+    expect(chartCard.queryByTestId('lightweight-zone-S1')).not.toBeInTheDocument();
+    expect(chartCard.queryByTestId('lightweight-zone-S2')).not.toBeInTheDocument();
     await clickChartControl(chartCard.getByLabelText('Show support and resistance zones'));
-    expect(chartCard.getByTestId('inspect-chart-zone-S2')).toBeInTheDocument();
-    expect(chartCard.queryByTestId('inspect-chart-zone-R1')).not.toBeInTheDocument();
-    expect(chartCard.queryByTestId('inspect-chart-zone-R2')).not.toBeInTheDocument();
+    expect(chartCard.getByTestId('lightweight-zone-S2')).toBeInTheDocument();
+    expect(chartCard.queryByTestId('lightweight-zone-R1')).not.toBeInTheDocument();
+    expect(chartCard.queryByTestId('lightweight-zone-R2')).not.toBeInTheDocument();
 
     await act(async () => {
       clickTickerRow('VPB');
     });
     await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('VPB', '6M'));
-    expect(chartCard.queryByTestId('inspect-chart-zone-S2')).not.toBeInTheDocument();
+    expect(chartCard.queryByTestId('lightweight-zone-S2')).not.toBeInTheDocument();
     expect(chartCard.getByLabelText('Show support and resistance zones')).toBeDisabled();
   });
 
@@ -4860,70 +4887,6 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(chartCard.queryByText(/buy|sell|hold|recommendation/i)).not.toBeInTheDocument();
   });
 
-  it('zooms the inspect chart visible candle window in and out', async () => {
-    render(<VietnamDashboardPage />);
-
-    await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('FPT', '6M'));
-
-    const chartCard = inspectChartCard();
-    const initialLabels = inspectDateLabels(chartCard);
-    expect(chartCard.getByTestId('inspect-chart-visible-count')).toHaveTextContent('Showing 70 of 70');
-
-    await clickChartControl(chartCard.getByRole('button', { name: 'Zoom in chart' }));
-
-    expect(chartCard.getByTestId('inspect-chart-visible-count')).toHaveTextContent('Showing 48 of 70');
-    expect(inspectDateLabels(chartCard)).not.toEqual(initialLabels);
-    expect(chartCard.queryByText('Apr 1')).not.toBeInTheDocument();
-    expect(chartCard.queryByText('Jun 9')).not.toBeInTheDocument();
-    expect(chartCard.getByRole('button', { name: 'Zoom out chart' })).toBeEnabled();
-
-    await clickChartControl(chartCard.getByRole('button', { name: 'Zoom out chart' }));
-
-    expect(chartCard.getByTestId('inspect-chart-visible-count')).toHaveTextContent('Showing 70 of 70');
-    expect(inspectDateLabels(chartCard)).toEqual(initialLabels);
-  });
-
-  it('pans the inspect chart visible window left and right', async () => {
-    render(<VietnamDashboardPage />);
-
-    await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('FPT', '6M'));
-
-    const chartCard = inspectChartCard();
-    await clickChartControl(chartCard.getByRole('button', { name: 'Zoom in chart' }));
-    const zoomedLabels = inspectDateLabels(chartCard);
-
-    expect(chartCard.getByRole('button', { name: 'Pan left' })).toBeEnabled();
-    expect(chartCard.getByRole('button', { name: 'Pan right' })).toBeEnabled();
-
-    await clickChartControl(chartCard.getByRole('button', { name: 'Pan left' }));
-
-    const leftLabels = inspectDateLabels(chartCard);
-    expect(leftLabels).not.toEqual(zoomedLabels);
-    expect(chartCard.getByTestId('inspect-chart-visible-count')).toHaveTextContent('Showing 48 of 70');
-
-    await clickChartControl(chartCard.getByRole('button', { name: 'Pan right' }));
-
-    expect(inspectDateLabels(chartCard)).not.toEqual(leftLabels);
-    expect(chartCard.getByTestId('inspect-chart-visible-count')).toHaveTextContent('Showing 48 of 70');
-  });
-
-  it('resets the inspect chart visible window to the selected range', async () => {
-    render(<VietnamDashboardPage />);
-
-    await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('FPT', '6M'));
-
-    const chartCard = inspectChartCard();
-    await clickChartControl(chartCard.getByRole('button', { name: 'Zoom in chart' }));
-    expect(chartCard.getByTestId('inspect-chart-visible-count')).toHaveTextContent('Showing 48 of 70');
-
-    await clickChartControl(chartCard.getByRole('button', { name: 'Reset chart zoom' }));
-
-    expect(chartCard.getByTestId('inspect-chart-visible-count')).toHaveTextContent('Showing 70 of 70');
-    expect(chartCard.getByText('Apr 1')).toBeInTheDocument();
-    expect(chartCard.getByText('Jun 9')).toBeInTheDocument();
-    expect(chartCard.getByRole('button', { name: 'Reset chart zoom' })).toBeDisabled();
-  });
-
   it('opens an expanded inspect chart with the same controls and closes it', async () => {
     render(<VietnamDashboardPage />);
 
@@ -4939,19 +4902,16 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(dialog.getByLabelText('MA20')).toBeChecked();
     expect(dialog.getByLabelText('MA50')).toBeChecked();
     expect(dialog.getByLabelText('Bollinger')).not.toBeChecked();
-    expect(dialog.getByRole('button', { name: 'Zoom in chart' })).toBeInTheDocument();
-    expect(dialog.getByRole('button', { name: 'Pan left' })).toBeDisabled();
-    expect(dialog.getByRole('button', { name: 'Reset chart zoom' })).toBeDisabled();
-    expect(dialog.getByTestId('inspect-chart-expanded-visible-count')).toHaveTextContent('Showing 70 of 70');
-    expect(dialog.getByTestId('inspect-candlestick-chart')).toBeInTheDocument();
-
-    await clickChartControl(dialog.getByRole('button', { name: 'Zoom in chart' }));
-
-    expect(dialog.getByTestId('inspect-chart-expanded-visible-count')).toHaveTextContent('Showing 48 of 70');
-    expect(chartCard.getByTestId('inspect-chart-visible-count')).toHaveTextContent('Showing 48 of 70');
+    const expandedChart = dialog.getByTestId('vietnam-lightweight-chart');
+    expect(expandedChart).toHaveAttribute('data-ticker', 'FPT');
+    expect(expandedChart).toHaveAttribute('data-points-count', '70');
+    expect(expandedChart).toHaveAttribute('data-expanded', 'true');
+    expect(screen.getAllByTestId('vietnam-lightweight-chart')).toHaveLength(1);
+    expect(dialog.queryByTestId('inspect-candlestick-chart')).not.toBeInTheDocument();
 
     await clickChartControl(dialog.getByLabelText('Bollinger'));
     expect(dialog.getByText('Bollinger upper/mid/lower')).toBeInTheDocument();
+    expect(dialog.getByTestId('vietnam-lightweight-chart')).toHaveAttribute('data-bollinger', 'true');
     expect(dialog.queryByText(/buy|sell|hold|recommendation/i)).not.toBeInTheDocument();
 
     await clickChartControl(dialog.getByRole('button', { name: 'Close expanded chart' }));
@@ -4987,13 +4947,12 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('FPT', '1Y'));
     expect(chartCard.getByRole('button', { name: '1Y' })).toHaveAttribute('aria-pressed', 'true');
-    expect(chartCard.getAllByTestId('inspect-chart-date-label').length).toBeGreaterThanOrEqual(4);
-    expect(chartCard.getByText('Apr 1')).toBeInTheDocument();
-    expect(chartCard.getByText('Jun 9')).toBeInTheDocument();
+    expect(chartCard.getByTestId('vietnam-lightweight-chart')).toHaveAttribute('data-points-count', '70');
+    expect(chartCard.getByTestId('vietnam-lightweight-chart')).toHaveAttribute('data-ticker', 'FPT');
     expect(chartCard.queryByText(/buy|sell|hold|recommendation/i)).not.toBeInTheDocument();
   });
 
-  it('resets chart zoom when switching the selected range', async () => {
+  it('replaces the chart bars when switching the selected range', async () => {
     mockedGetVietnamChart.mockImplementation(async (symbol, range = '6M') => {
       const points = range === '1M' ? makeChartData().slice(40) : makeChartData();
       return makeChartResponse(symbol, range, points);
@@ -5004,15 +4963,14 @@ describe('VietnamDashboardPage watchlist loading', () => {
     await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('FPT', '6M'));
 
     const chartCard = inspectChartCard();
-    await clickChartControl(chartCard.getByRole('button', { name: 'Zoom in chart' }));
-    expect(chartCard.getByTestId('inspect-chart-visible-count')).toHaveTextContent('Showing 48 of 70');
+    expect(chartCard.getByTestId('vietnam-lightweight-chart')).toHaveAttribute('data-points-count', '70');
 
     await clickChartControl(chartCard.getByRole('button', { name: '1M' }));
 
     await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('FPT', '1M'));
-    await waitFor(() => expect(chartCard.getByTestId('inspect-chart-visible-count')).toHaveTextContent('Showing 30 of 30'));
-    expect(chartCard.getByRole('button', { name: 'Reset chart zoom' })).toBeDisabled();
+    await waitFor(() => expect(chartCard.getByTestId('vietnam-lightweight-chart')).toHaveAttribute('data-points-count', '30'));
     expect(chartCard.getByRole('button', { name: '1M' })).toHaveAttribute('aria-pressed', 'true');
+    expect(chartCard.queryByRole('button', { name: 'Reset chart zoom' })).not.toBeInTheDocument();
   });
 
   it('renders chart data unavailable when selected ticker has no chart points', async () => {
@@ -5024,12 +4982,8 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     const chartCard = inspectChartCard();
     expect(chartCard.getByText('Chart data unavailable')).toBeInTheDocument();
-    expect(chartCard.queryByRole('button', { name: 'Zoom in chart' })).not.toBeInTheDocument();
-    expect(chartCard.queryByRole('button', { name: 'Zoom out chart' })).not.toBeInTheDocument();
-    expect(chartCard.queryByRole('button', { name: 'Pan left' })).not.toBeInTheDocument();
-    expect(chartCard.queryByRole('button', { name: 'Pan right' })).not.toBeInTheDocument();
-    expect(chartCard.queryByRole('button', { name: 'Reset chart zoom' })).not.toBeInTheDocument();
-    expect(chartCard.queryAllByTestId('inspect-chart-date-label')).toHaveLength(0);
+    expect(chartCard.queryByTestId('vietnam-lightweight-chart')).not.toBeInTheDocument();
+    expect(chartCard.queryByTestId('inspect-candlestick-chart')).not.toBeInTheDocument();
   });
 
   it('keeps the watchlist rendered when the chart endpoint fails', async () => {
