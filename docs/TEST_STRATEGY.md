@@ -205,24 +205,38 @@ Audit outcome rules:
 
 These deterministic tests are required before implementing the future endpoint/UI; none should call live SSI:
 
-Phase 4.11B-2 fixture guidance is evidence-bound: a future sanitized fixture may use raw fields `TradingDate`, `Time`, `Open`, `High`, `Low`, `Close`, `Volume`, `Value`, and `Symbol`, with `DD/MM/YYYY` plus `HH:MM:SS`. It must not label `resolution=1` as verified `1m`, must preserve irregular second-bearing timestamps and lunch gaps, and must not invent provider pagination or unsupported-interval error shapes. Numeric resolutions 5/15/30/60 returned minute-like rows rather than their requested cadence.
+Phase 4.11B-3 fixtures remain sanitized and deterministic. They may use `TradingDate`, `Time`, `Open`, `High`, `Low`, `Close`, and `Volume` with transformed values that preserve only the evidence-backed shape. Cover nonzero seconds, unique minute buckets, an intentional missing minute, lunch gap, final 14:45 row, malformed timestamp, duplicate normalized bucket, malformed OHLC, non-numeric volume, and one completed-session DailyOhlc reconciliation example. Never copy or commit a raw provider response. Numeric resolutions 5/15/30/60 returned minute-like rows rather than their requested cadence.
 
-1. Verified interval accepted; unsupported interval rejected before provider call.
-2. Public interval maps to the exact verified provider resolution; accepted-but-cadence-mismatched values are rejected.
-3. Separate SSI `TradingDate`/`Time` values convert from `Asia/Ho_Chi_Minh` to the correct Unix-second instant without the current naive-as-UTC shift.
-4. Bars sort ascending and duplicate timestamps use stable last-provider-row-wins handling; lunch gaps do not become interval mismatches.
-5. Invalid OHLC/volume rows are rejected and counted without hiding remaining valid bars; numeric-string volume normalization and verified unit semantics are covered separately.
-6. Range, limit, page count, timeout, concurrency, and maximum bar count are enforced, including a sanitized page-boundary fixture only after real page-2 evidence exists.
-7. Cache keys separate ticker, interval, normalized Vietnam trading-date window, and provider page; second-level public ranges filter cached windows without fragmenting provider cache. Daily, compact-pulse, intraday-history, and streaming persistence caches remain independent.
-8. Active, lunch, post-close, historical, negative, and stale-recovery TTL rules are deterministic.
-9. Force refresh bypasses cache lookup but not validation, single-flight, pacing, or cooldown.
-10. Provider unavailable never becomes empty `ready`; explicit successful no-data remains distinguishable.
-11. DailyStockPrice, X, X-QUOTE, X-TRADE, and persisted streaming rows are never called as candle sources.
-12. D1 uses the daily endpoint; verified intraday uses the intraday endpoint.
-13. Old interval/ticker responses cannot replace the newest owned request, and interval change clears old presentation.
-14. Unsupported intervals do not render as buttons; the chart component makes no request.
-15. Indicators use active timeframe bars, while intraday overlays label Phase 4.9A zones `Daily S/R`.
-16. Provider `DD/MM/YYYY` request dates remain distinct from public RFC3339 instants, and unsupported provider response shapes remain sanitized.
+1. `DD/MM/YYYY` plus `HH:MM:SS` parses in `Asia/Ho_Chi_Minh`.
+2. Timestamp conversion is independent of server-local and browser-local timezone.
+3. Raw seconds floor to minute start only under the verified completed-session rule.
+4. Normalized one-minute timestamps are unique.
+5. Duplicate normalized buckets resolve deterministically with stable last-provider-row-wins diagnostics.
+6. Rows sort ascending.
+7. Missing minute buckets and lunch are preserved as gaps.
+8. No filler or artificial zero-volume candle is synthesized.
+9. OHLCV remains unchanged when the timestamp is normalized.
+10. Invalid OHLC rows are rejected and counted.
+11. Non-numeric volume follows the explicit row-rejection contract; UI copy remains `Volume`.
+12. DailyOhlc is reconciliation-only and never substitutes for IntradayOhlc.
+13. Exactly one completed Vietnam date is enforced.
+14. Current/future dates are rejected or unavailable before an SSI call.
+15. Output above 1,000 bars is bounded and the initial implementation does not page.
+16. `5m`, `15m`, `30m`, and `1h` return unsupported before provider calls.
+17. Cache identity uses normalized ticker, `1m`, Vietnam trading date, and page 1.
+18. Public ISO date converts to SSI `DD/MM/YYYY`.
+19. Public `ticker` converts to provider `symbol`.
+20. DailyStockPrice, X, X-QUOTE, X-TRADE, and persisted streaming rows have no candle-source path.
+21. D1 uses the daily request.
+22. 1m uses the separate intraday request.
+23. Selected date participates in the request key.
+24. An old date response cannot replace a newer date.
+25. An old interval response cannot replace a newer interval.
+26. An old ticker response cannot replace a newer ticker.
+27. The chart component performs no request and receives normalized bars only.
+28. Missing minutes remain visible chart gaps.
+29. Indicators use the active timeframe bars.
+30. Phase 4.9A overlays read `Daily S/R` on 1m.
 
 Phase 4.11D requires separate tests for provisional last bars, late/out-of-order events, reconnect, and reconciliation. Do not fold those cases into Phase 4.11C.
 

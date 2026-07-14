@@ -188,7 +188,7 @@ Sanitized intraday diagnostics may include:
 
 Diagnostics must not include raw response bodies, tokens, auth headers, account IDs, consumer IDs, consumer secrets, or raw auth responses.
 
-## Phase 4.11B Historical Intraday Contract Audit
+## Phase 4.11B / 4.11B-3 Historical Intraday Contract Audit
 
 Current paths are intentionally distinct:
 
@@ -206,15 +206,19 @@ The installed `ssi_fc_data` 2.2.2 model declares `intraday_ohlc(symbol, fromDate
 
 Existing deterministic tests cover sorted mapping, combined TradingDate/Time input, pagination, latest-row limiting, sanitized provider failures, cooldown, and detected 1m/5m/1h cadence. They use synthetic rows. Historical live notes show minute-like returned spacing even when the request hint was `1h`, plus later provider code `429`; neither proves a supported `1m` or `1h` query parameter.
 
-Phase 4.11B-2 diagnosed the earlier `network_error` as the local sandbox denying the provider socket: an approved credential-free check resolved DNS and completed TLS 1.3 successfully. Six of seven allowed IntradayOhlc calls were then used for FPT on the repository-confirmed completed `2026-06-24` session. An ISO-date request reached SSI but returned HTTP 200/provider code `Error`; the official `24/06/2026` shape succeeded with `resolution=1`, 226 rows, and `totalRecord=226`. No page-2 call was needed.
+Phase 4.11B-2 diagnosed the earlier `network_error` as the local sandbox denying the provider socket: an approved credential-free check resolved DNS and completed TLS 1.3 successfully. It established that SSI requires `DD/MM/YYYY`, that `resolution=1` returns minute-like data, and that values 5/15/30/60 do not select their apparent cadence.
 
-The successful raw fields were `TradingDate`, `Time`, `Open`, `High`, `Low`, `Close`, `Volume`, `Value`, and `Symbol`. All timestamps parsed, all OHLC rows passed consistency checks, and there were no duplicate or out-of-order timestamps. Raw times ran from `09:15:58` to `14:45:00`; most-common spacing was 60 seconds, minimum 33 seconds, maximum 5,462 seconds, and only 27.68% of same-session deltas were exactly 60 seconds. `resolution=1` is therefore partially verified minute-like data, not yet an approved `1m` contract.
+Phase 4.11B-3 used four paced `IntradayOhlc` and four matching `DailyOhlc` calls for FPT and HPG on completed HOSE sessions 2026-06-23 and 2026-06-24. All calls succeeded. Each intraday response contained 226 rows/records with the same `TradingDate`, `Time`, `Open`, `High`, `Low`, `Close`, `Volume`, `Value`, and `Symbol` shape. Across all four sessions there were no invalid timestamps, raw/bucket duplicates, or ordering errors.
 
-Direct `resolution=5`, `15`, `30`, and `60` calls were accepted but each returned the same 226-row minute-like summary, first/last timestamps, and fields. None produced its numeric cadence, so those numeric mappings are unsupported for production use. The response `Volume` values were numeric strings with no missing/zero/negative entries and 118 decreases; this is inconsistent with a monotonically cumulative-session field, but exact units and final per-bar semantics remain unverified.
+Raw-second variance is not cadence variance: 225 of 226 raw timestamps per session had nonzero seconds, but flooring the Vietnam wall time produced 226 unique minute buckets. Continuous-session buckets covered 09:15-11:29 and 13:00-14:29 with 100% of within-segment transitions at 60 seconds; the lunch break was excluded and the separate final row was 14:45. Raw `Time` is classified `likely_last_trade_time_but_not_fully_verified`; the future chart timestamp floors that local time to minute start before Unix-second conversion. This preserves OHLCV and removes server/browser timezone dependence.
 
-The verified live timestamp is separate timezone-free `TradingDate=DD/MM/YYYY` plus `Time=HH:MM:SS`. The future chart contract must interpret those SSI wall-clock values in `Asia/Ho_Chi_Minh`, then emit Unix seconds representing actual instants. The current helper assigns UTC to a naive parsed datetime, so its derived `timestamp` must not be treated as canonical until corrected in a later implementation phase.
+For every sample, first open, maximum high, minimum low, and final close exactly matched DailyOhlc. Intraday `Volume` was positive, non-cumulative, and summed exactly to DailyOhlc volume (ratio 1.0 for all four sessions), supporting `likely_per_bar_shares`; the public label remains `Volume` because SSI's inspected materials do not explicitly define the unit. The 09:15 open and 14:45 close reconcile, but exact ATO/ATC aggregation remains ambiguous. Do not synthesize absent buckets or forward-fill OHLCV.
 
-The repository's session classifier is HOSE-like and holiday-unaware: ATO 09:00-09:15, continuous morning 09:15-11:30, lunch 11:30-13:00, continuous afternoon 13:00-14:30, ATC 14:30-14:45, and post-close until 15:00. The one completed FPT response observed no 09:00 row, began at 09:15:58, resumed at 13:00 after the large lunch gap, and ended at 14:45:00. The last timestamp is ambiguous rather than proof of how SSI aggregates ATC. Post-close/negotiated rows, final-bar timing, suspended symbols, half sessions, holidays, and HNX/UPCOM differences remain unknown.
+Direct `resolution=5`, `15`, `30`, and `60` calls from Phase 4.11B-2 were accepted but each returned the same 226-row minute-like summary. Values 5, 15, 30, and 60 were accepted by the endpoint but did not select corresponding output cadence in tested SSI behavior, so those mappings remain unexposed.
+
+The verified live timestamp is separate timezone-free `TradingDate=DD/MM/YYYY` plus `Time=HH:MM:SS`. Phase 4.11C must interpret those SSI wall-clock values in `Asia/Ho_Chi_Minh`, floor to minute start, then emit Unix seconds. The current helper assigns UTC to a naive parsed datetime, so its derived `timestamp` must not be reused as canonical.
+
+The repository's session classifier is HOSE-like and holiday-unaware. The restricted gate therefore accepts only one date strictly before the current Vietnam date, `interval=1m`, and at most 1,000 rows from page 1. All tested sessions fit one page (`totalRecord=226`), but pagination is not verified. Current sessions, multi-day ranges, realtime updates, higher-timeframe aggregation, HNX/UPCOM generalization, and fallback remain deferred. The current runtime allowlist stays empty until Phase 4.11C implements this separate contract.
 
 ## Official Python Streaming Client Inspection
 

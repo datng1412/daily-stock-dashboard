@@ -244,13 +244,13 @@ These fields are contract design only and are not present in a production endpoi
 | Field | Meaning | Source | Type | Nullable | Notes |
 | --- | --- | --- | --- | --- | --- |
 | `ticker` | Normalized public VN ticker | Request/SSI metadata | text | no | StockClock public APIs use `ticker`; the SSI request model continues to call this field `symbol`. |
-| `interval` | Verified public intraday interval | Request allowlist | enum | no | Allowlist is currently empty; candidates must not be exposed before verification. |
+| `interval` | Verified public intraday interval | Request allowlist | enum | no | Phase 4.11C gate allows only `1m` for one completed date; the current runtime allowlist remains empty until implementation. |
 | `timezone` | Timestamp interpretation zone | Contract constant | text | no | Always `Asia/Ho_Chi_Minh`. |
 | `status` | Intraday history result state | Endpoint | enum | no | `ready`, `unavailable`, or `failed`; stale is cache metadata. |
 | `reason_code` | Sanitized result qualifier | Endpoint | text | yes | Examples: `no_data`, `partial_rows_rejected`, `stale_cache_recovery`, `provider_unavailable`. |
-| `bars[].time` | Bar instant | SSI IntradayOhlc normalized by backend | Unix seconds | no | Verified raw fields are timezone-free `TradingDate` (`DD/MM/YYYY`) plus `Time` (`HH:MM:SS`); interpret in `Asia/Ho_Chi_Minh`, never as browser/server local time. Bar-open versus last-trade timestamp semantics remain unverified. |
+| `bars[].time` | Normalized minute-bucket start | SSI IntradayOhlc normalized by backend | Unix seconds | no | Interpret timezone-free `TradingDate` + `Time` in `Asia/Ho_Chi_Minh`, floor to minute start, then convert. Four completed sessions produced unique ascending buckets. Raw time is likely the last trade time inside the minute, but that provider meaning is not fully documented. |
 | `bars[].open/high/low/close` | Raw intraday prices | SSI IntradayOhlc | VND/share | no | Must pass OHLC consistency validation. |
-| `bars[].volume` | Intraday row volume | SSI IntradayOhlc `Volume` | numeric, unit pending proof | no | The verified sample was positive, non-cumulative-looking numeric strings; shares/per-bar semantics are not yet sufficiently proven for production exposure. |
+| `bars[].volume` | Intraday row volume | SSI IntradayOhlc `Volume` | numeric; display label `Volume` | no | Four completed sessions were positive/non-cumulative and each daily sum exactly matched DailyOhlc volume (`likely_per_bar_shares`); SSI's inspected materials do not explicitly define the unit, so do not label it shares yet. |
 | `source.provider` | Provider identifier | Endpoint constant | text | no | `ssi_fastconnect`. |
 | `source.dataset` | Provider dataset | Endpoint constant | text | no | `IntradayOhlc`. |
 | `cache.status` | Cache outcome | Intraday-history cache | enum | no | `hit`, `miss`, `refresh`, `stale`, or `bypassed`. |
@@ -259,7 +259,7 @@ These fields are contract design only and are not present in a production endpoi
 | `diagnostics.rejected_rows` | Malformed rows dropped | Normalizer | integer | no | Sanitized count only. |
 | `diagnostics.duplicate_timestamps` | Duplicate timestamps resolved | Normalizer | integer | no | Stable last-provider-row-wins rule. |
 
-`is_final` is deliberately absent until SSI finality or a reliable backend rule is verified. Phase 4.11B-2 keeps the public interval allowlist empty: `resolution=1` is only partially verified, while 5/15/30/60 did not select their numeric cadences. These proposed fields do not replace the existing compact `intraday_candles`/`intraday_pulse` watchlist contract.
+`is_final` is deliberately absent because the Phase 4.11C gate is limited to one date strictly before the current Vietnam date. Phase 4.11B-3 verifies `resolution=1` only for that completed-session `1m` scope; 5/15/30/60 did not select their numeric cadences and remain unexposed. The current runtime allowlist stays empty until Phase 4.11C is implemented. These proposed fields do not replace the existing compact `intraday_candles`/`intraday_pulse` watchlist contract.
 
 ## Current Decision Points
 

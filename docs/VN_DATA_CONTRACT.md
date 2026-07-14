@@ -653,7 +653,7 @@ IndexComponents diagnostics may report `cache_status`, `cache_ttl_seconds`, `cac
 * Phase 2.1 completed: unavailable company `intraday.pulse` is `null`, not `{}`.
 * Phase 4.7B completed: frontend rendering treats unavailable live objects as `null`, missing watchlist/company trade tape as `[]`, and sectioned diagnostics as diagnostics-only UI content.
 
-## Phase 4.11B Future Intraday Chart Contract
+## Phase 4.11B / 4.11B-3 Future Intraday Chart Contract
 
 Phase 4.11B is documentation-only. The current watchlist/company `intraday_candles` pulse remains an optional compact SSI block; it is not the production history contract for Lightweight Charts. No intraday chart endpoint or timeframe UI exists yet.
 
@@ -661,23 +661,27 @@ Phase 4.11B is documentation-only. The current watchlist/company `intraday_candl
 
 The installed `ssi_fc_data` 2.2.2 package defines `IntradayOhlc` and an integer `resolution` field with default `1`, but it provides no interval enum, unit definition, supported-value list, query-range limit, final-bar field, or session semantics. Its official repository sample supplies `DD/MM/YYYY` dates and `resolution=1`; the installed package itself contains no resolution mapping. The repository adapter currently accepts arbitrary request strings and has deterministic cadence fixtures for `1m`, `5m`, and `1h`; those fixtures verify StockClock normalization only, not SSI interval support.
 
-Therefore the production public interval allowlist is currently empty. Candidate values remain:
+Phase 4.11B-3 completed the evidence gate for a deliberately restricted completed-session interval. The future production public interval allowlist is therefore exactly `1m`; this documentation decision does not expose the interval until Phase 4.11C implements the separate endpoint and UI.
 
 | Public candidate | Provider candidate | Status | Rule |
 | --- | --- | --- | --- |
-| `1m` | `resolution=1` | `partially_verified` | Accepted live and returned 226 minute-like rows, but second-bearing timestamps and irregular gaps do not yet prove a production 1-minute bar contract. |
-| `5m` | `resolution=5` | `unsupported` as a 5-minute mapping | Accepted but returned the same 226-row minute-like cadence; 0% of deltas matched 300 seconds. |
-| `15m` | `resolution=15` | `unsupported` as a 15-minute mapping | Accepted but returned the same 226-row minute-like cadence; 0% of deltas matched 900 seconds. |
-| `30m` | `resolution=30` | `unsupported` as a 30-minute mapping | Accepted but returned the same 226-row minute-like cadence; 0% of deltas matched 1,800 seconds. |
-| `1h` | `resolution=60` | `unsupported` as a 60-minute mapping | Accepted but returned the same 226-row minute-like cadence; 0% of deltas matched 3,600 seconds. Existing `timeFrame=1h` hints remain non-authoritative. |
+| `1m` | `resolution=1` | `verified` for one completed HOSE session per request | Four FPT/HPG sessions produced one unique floored minute bucket per row, exact continuous-session minute cadence, exact DailyOhlc OHLC/volume reconciliation, and fewer than 1,000 rows. |
+| `5m` | `resolution=5` | `unsupported_mapping` | Accepted but returned the same 226-row minute-like cadence; 0% of deltas matched 300 seconds. |
+| `15m` | `resolution=15` | `unsupported_mapping` | Accepted but returned the same 226-row minute-like cadence; 0% of deltas matched 900 seconds. |
+| `30m` | `resolution=30` | `unsupported_mapping` | Accepted but returned the same 226-row minute-like cadence; 0% of deltas matched 1,800 seconds. |
+| `1h` | `resolution=60` | `unsupported_mapping` | Accepted but returned the same 226-row minute-like cadence; 0% of deltas matched 3,600 seconds. Existing `timeFrame=1h` hints remain non-authoritative. |
 
-Phase 4.11B-2 used six of the seven allowed provider calls on FPT for the completed `2026-06-24` session. The initial ISO-date call reached SSI but returned HTTP 200 with provider code `Error`. The official `DD/MM/YYYY` shape succeeded with `resolution=1`: 226 rows, `totalRecord=226`, raw fields `TradingDate`, `Time`, `Open`, `High`, `Low`, `Close`, `Volume`, `Value`, and `Symbol`, and no duplicate or out-of-order timestamps. All 226 OHLC rows passed consistency validation. Numeric resolutions 5, 15, 30, and 60 each returned the same row count, fields, first/last timestamps, and minute-like cadence instead of their requested cadence. Page 2 was not requested because the first page size was 1,000 and `totalRecord` was only 226.
+Phase 4.11B-2 used six of seven allowed provider calls to establish the request shape and reject unsupported higher-resolution mappings. Phase 4.11B-3 then used four `IntradayOhlc` and four matching `DailyOhlc` calls: FPT and HPG on completed HOSE sessions `2026-06-23` and `2026-06-24`. Every intraday request used one ticker/date, `resolution=1`, `pageIndex=1`, `pageSize=1000`, and `ascending=true`; every call succeeded with 226 rows and `totalRecord=226`. All four sessions had the identical raw fields `TradingDate`, `Time`, `Open`, `High`, `Low`, `Close`, `Volume`, `Value`, and `Symbol`.
 
-The raw timestamp is a timezone-free `TradingDate=24/06/2026` plus `Time=HH:MM:SS`. The observed range was `09:15:58` through `14:45:00`; the most common positive delta was 60 seconds, the minimum was 33 seconds, and the maximum was 5,462 seconds across the lunch boundary. Only 27.68% of same-session `resolution=1` deltas were exactly 60 seconds, so it remains partially verified rather than a production `1m` interval. The canonical conversion interprets the pair as `Asia/Ho_Chi_Minh` wall time before producing Unix seconds. The current adapter helper treats a naive datetime as UTC, so its existing `timestamp` value is not the future canonical chart timestamp and must be corrected before implementation.
+Raw timestamps remain timezone-free `TradingDate=DD/MM/YYYY` plus `Time=HH:MM:SS`. In each sample, 225 of 226 rows had nonzero seconds, while flooring in `Asia/Ho_Chi_Minh` produced 226 unique, ascending minute buckets with no duplicate bucket, invalid timestamp, or out-of-order row. The continuous buckets were `09:15` through `11:29` and `13:00` through `14:29`; all 223 within-segment transitions were exactly 60 seconds. The apparent 11:30 and 14:30 boundary omissions are half-open session boundaries, not unexplained missing bars. A separate final `14:45:00` row was present in every sample.
 
-`Volume` was a numeric string on every row, with no missing, zero, or negative values and 118 decreases across the ordered series. This disproves a monotonically cumulative-session interpretation for this sample, but the unit and definitive per-bar semantics remain only partially verified. ATO was not observed; the first row was after 09:15, afternoon rows resumed at 13:00, and the last row at 14:45 is ambiguous rather than proof of ATC aggregation. Holidays, half sessions, post-close/negotiated rows, halts, HNX, and UPCOM remain unverified.
+The raw `Time` value is classified `likely_last_trade_time_but_not_fully_verified`: its seconds vary within the minute and consistently land near the minute end, but neither the SDK nor official sample defines it and no trade-level comparison was performed. The canonical chart timestamp is therefore the raw Vietnam wall time floored to minute start, then converted to Unix seconds. Flooring changes only placement, never OHLCV. Invalid timestamps are rejected; the four live samples had no duplicate normalized bucket, while a future duplicate uses stable last-provider-row-wins handling with a diagnostic count. The current adapter's naive-as-UTC helper is not canonical and must be corrected in Phase 4.11C.
 
-The production interval allowlist therefore remains empty and Phase 4.11C remains blocked. It may open only after at least one interval has documented provider mapping, aligned cadence semantics, sufficiently verified volume units, and bounded page/range behavior without source mixing.
+All 904 intraday OHLC rows passed consistency validation. For every ticker/date, first open, maximum high, minimum low, and final close exactly matched the same-date SSI DailyOhlc row (zero absolute and percentage difference). The first 09:15 row also matched DailyOhlc open, and the final 14:45 row matched DailyOhlc close. This is observed reconciliation, but the exact ATO/ATC aggregation mechanism and the locations of session extrema remain ambiguous.
+
+`Volume` was numeric, positive, non-missing, and non-cumulative in all four sessions. Per-session intraday sums exactly equalled DailyOhlc volume: FPT `5,737,500` and `5,968,500`, HPG `29,071,800` and `12,927,300`, each ratio `1.0`. This supports `likely_per_bar_shares`; because SSI's inspected materials do not explicitly define the unit, the first UI must label it neutrally as `Volume`, not assert `shares`. No missing candles are synthesized or forward-filled; Lightweight Charts must display sparse normalized timestamps as gaps. These findings are limited to FPT/HPG on HOSE and do not generalize to HNX, UPCOM, holidays, half sessions, halts, or post-close/negotiated behavior.
+
+The Phase 4.11C gate is open only for a one-date, completed-session `1m` implementation. The current runtime allowlist remains empty until that implementation lands. Current-session bars, multiple days, pagination, higher intervals, realtime updates, aggregation, and fallback remain outside the gate.
 
 Aliases are case-sensitive and rejected unless added to the verified allowlist. `60m`, `1H`, numeric strings, and provider-specific spellings must not be accepted silently.
 
@@ -688,23 +692,20 @@ Phase 4.11C should implement a separate endpoint rather than widening the daily 
 ```text
 GET /api/v1/stocks/vn/intraday-chart
   ?ticker=FPT
-  &interval=<verified-value>
-  &from=<RFC3339-instant>
-  &to=<RFC3339-instant>
-  &limit=500
-  &force_refresh=false
+  &interval=1m
+  &date=2026-06-24
 ```
 
-`/vn/chart` remains D1-only and SSI DailyOhlc-owned. The separate endpoint makes cache, source, timestamp, diagnostics, and any future provisional-bar behavior explicit without breaking the existing daily client.
+`/vn/chart` remains D1-only and SSI DailyOhlc-owned. The separate endpoint makes cache, source, timestamp, and diagnostics explicit without breaking the existing daily client; it has no provisional-bar behavior.
 
-Request rules proposed for the first implementation are provisional until SSI limits are verified:
+Request rules for the first implementation are deliberately narrower than the earlier range proposal:
 
 * Public `ticker` is required, normalized uppercase, and validated with the existing VN ticker rules. The SSI provider request continues to use its own `symbol` field.
-* `interval` is required and must be in the verified allowlist; there is no default.
-* `from` is inclusive and `to` is exclusive. Both are required RFC3339 instants with `Z` or an explicit offset; timezone-free values are invalid.
-* The maximum range is two calendar days in `Asia/Ho_Chi_Minh`.
-* `limit` defaults to 500 and is capped at 1,000 usable bars.
-* Provider page size is provisionally 1,000 with at most two sequential pages. The current process-wide provider timeout is 10 seconds per attempt.
+* `interval` is required and its only accepted value is `1m`; 5m/15m/30m/1h are rejected before any SSI call.
+* `date` is one ISO `YYYY-MM-DD` Vietnam trading date. The backend converts it to SSI `DD/MM/YYYY` and requests only that date.
+* The date must be strictly earlier than the current date in `Asia/Ho_Chi_Minh`. Current-day and future dates are rejected; same-day closed-session support remains deferred because holiday/session finality is not yet authoritative.
+* The response is capped at 1,000 usable bars. One provider page uses `pageSize=1000`; multi-page behavior is not part of the first scope.
+* The current process-wide provider timeout is 10 seconds per attempt.
 * Intraday provider concurrency is one per process initially. Identical requests use single-flight ownership. No parameter-variant fan-out is allowed after the verified request shape is selected.
 * Automatic retry count is zero in the first implementation. SSI/HTTP `429`, auth, permission, and invalid-parameter failures are never retried; the existing 60-second rate-limit cooldown remains applicable. `force_refresh=true` bypasses usable positive/negative cache lookup but not validation, single-flight, pacing, cooldown, or stale-recovery safeguards.
 
@@ -723,39 +724,39 @@ Request rules proposed for the first implementation are provisional until SSI li
   ],
   "source": {"provider": "ssi_fastconnect", "dataset": "IntradayOhlc"},
   "cache": {"status": "miss", "is_stale": false, "captured_at": "...", "expires_at": "..."},
-  "diagnostics": {"requested_from": "...", "requested_to": "...", "returned_bars": 1, "rejected_rows": 0, "duplicate_timestamps": 0}
+  "diagnostics": {"requested_date": "2026-06-24", "returned_bars": 1, "rejected_rows": 0, "duplicate_timestamps": 0}
 }
 ```
 
-`time` is a Unix timestamp in seconds representing an actual instant. Verified SSI fields are separate timezone-free `TradingDate` (`DD/MM/YYYY`) and `Time` (`HH:MM:SS`). They must be interpreted as `Asia/Ho_Chi_Minh` wall time before conversion, not treated as UTC or parsed by the browser. Bars are sorted ascending and unique by `(ticker, interval, time)`. For duplicates, the last provider row in stable provider order wins and the discarded count is diagnostic.
+`time` is a Unix timestamp in seconds representing the floored minute start. Verified SSI fields are separate timezone-free `TradingDate` (`DD/MM/YYYY`) and `Time` (`HH:MM:SS`). They must be interpreted as `Asia/Ho_Chi_Minh` wall time, floored to the minute, and then converted; never treat them as UTC or parse them in the browser. Bars are sorted ascending and unique by `(ticker, interval, time)`. For duplicates, the last provider row in stable provider order wins and the discarded count is diagnostic.
 
-OHLC values remain raw VND/share. Volume must remain the non-negative SSI `Volume` value with explicit unit metadata still pending proof; the backend must not silently label it shares until that evidence exists. A usable row requires finite positive OHLC, `high >= max(open, close, low)`, `low <= min(open, close, high)`, and finite non-negative volume. Malformed rows are rejected individually. A response may remain `ready` when usable rows remain, with `reason_code=partial_rows_rejected`; if no usable row remains after a non-empty provider response, return `failed`, not an empty success. `is_final` is omitted until SSI or StockClock can determine it reliably.
+OHLC values remain raw VND/share. Volume remains the non-negative SSI `Volume` value and is labelled `Volume`; `likely_per_bar_shares` is evidence, not a public unit guarantee. A usable row requires finite positive OHLC, `high >= max(open, close, low)`, `low <= min(open, close, high)`, and finite non-negative volume. Malformed rows are rejected individually. A response may remain `ready` when usable rows remain, with `reason_code=partial_rows_rejected`; if no usable row remains after a non-empty provider response, return `failed`, not an empty success. `is_final` is absent because completed dates are the only accepted scope.
 
 Top-level statuses are `ready`, `unavailable`, and `failed`. Staleness belongs under `cache.is_stale` rather than a fourth top-level status:
 
 * Explicit provider success with no rows: HTTP 200, `ready`, `bars=[]`, `reason_code=no_data`.
 * Provider unavailable/rate-limited/permission failure with no usable cache: HTTP 200, `unavailable`, `bars=[]`, sanitized `reason_code`.
 * Provider failure with a bounded usable stale entry: HTTP 200, `ready`, preserved bars, `cache.status=stale`, `cache.is_stale=true`, `reason_code=stale_cache_recovery`.
-* Unsupported interval, invalid timestamp/range/limit, or invalid symbol syntax: HTTP 422; do not call SSI.
+* Unsupported interval, current/future date, invalid date, or invalid symbol syntax: HTTP 422; do not call SSI.
 * Malformed provider success with no usable bars: HTTP 502, `failed`, `bars=[]`.
 
 ### Cache and freshness design
 
-Cache normalized provider pages or Vietnam trading-date windows under an independent logical identity such as `intraday_chart:{ticker}:{interval}:{vn_trading_date}:{page}`. Normalize public `from`/`to` instants to the bounded provider window and filter the returned bars at the service layer when safe, so second-level range differences do not fragment provider cache entries. Do not reuse DailyOhlc cache entries, the existing compact-pulse key, or Phase 4.8S streaming snapshot persistence.
+Cache the completed provider day under an independent identity such as `intraday_chart:{ticker}:1m:{vn_trading_date}:page:1`. Do not reuse DailyOhlc cache entries, the existing compact-pulse key, or Phase 4.8S streaming snapshot persistence.
 
-Provisional TTLs for Phase 4.11C are 30 seconds during active continuous/auction windows, 60 seconds at lunch, 300 seconds after close for the current trading date, 86,400 seconds for completed prior dates, and 60 seconds for negative/unavailable entries. Stale-if-error windows are 300 seconds during active/lunch periods, 3,600 seconds after close, and 86,400 seconds for completed historical dates. Cache size is capped at 500 LRU keys per process. Partial current-session results may be cached, but the newest bar must be labelled `finality=unknown`; it is replaced only by a later successful fetch for the same key.
+Treat completed history as immutable for the initial contract: positive entries use a 86,400-second TTL, unavailable/no-data entries use 60 seconds, usable expired history may be served stale for up to seven days after an SSI failure, and the process-local cache is capped at 500 LRU keys. There is no active/lunch/current-day cache policy in Phase 4.11C.
 
-The existing Vietnam market-phase helper is HOSE-like and holiday-unaware. Continuous morning/afternoon windows are reasonable refresh contexts, and lunch normally should not create new continuous bars, but SSI ATO/ATC inclusion, post-close/negotiated rows, final-bar timing, suspensions, half sessions, holidays, and HNX/UPCOM differences remain unverified. Phase 4.11C must not encode these as provider facts without live evidence.
+The existing Vietnam market-phase helper is HOSE-like and holiday-unaware. Phase 4.11C avoids that ambiguity by accepting only dates strictly before the current Vietnam date. SSI ATO/ATC mechanics, post-close/negotiated rows, suspensions, half sessions, holidays, HNX, and UPCOM remain unverified and must not be encoded as provider facts.
 
 ### Frontend ownership and source split
 
-The future dashboard owns selected ticker, selected interval, request key, request ID, loading/unavailable state, and stale-response rejection. Interval change invalidates the old request and clears the old interval presentation; only a matching `(ticker, interval, request_id)` response may apply. The chart component receives normalized bars and metadata and performs no request.
+The future dashboard owns selected ticker, selected interval, selected completed date, request key, request ID, loading/unavailable state, and stale-response rejection. Ticker, interval, or date change invalidates the old request and clears the old presentation; only a matching `(ticker, interval, date, request_id)` response may apply. The chart component receives normalized bars and metadata and performs no request.
 
-`1D` continues to call `/vn/chart` and use SSI DailyOhlc. Only verified intraday intervals may call `/vn/intraday-chart` and use SSI IntradayOhlc. DailyStockPrice, X, X-QUOTE, X-TRADE, and persisted streaming snapshots never become candles. Indicators may later use the active timeframe bars; Phase 4.9A zones remain daily and, if displayed over intraday, must be labelled `Daily S/R`.
+`1D` continues to call `/vn/chart` and use SSI DailyOhlc. The future `1m` option calls `/vn/intraday-chart` for an explicit completed date and uses SSI IntradayOhlc; it must not imply realtime data. DailyStockPrice, X, X-QUOTE, X-TRADE, and persisted streaming snapshots never become candles. Indicators may later use the active timeframe bars; Phase 4.9A zones remain daily and, if displayed over intraday, must be labelled `Daily S/R`.
 
 ### Observability requirements
 
-Phase 4.11C should count requests by public interval, provider latency, cache hit/miss/refresh/stale outcomes, returned bars, rejected rows, duplicate timestamps, provider-unavailable responses, unsupported intervals, stale recoveries, maximum-range violations, and frontend ownership discards. Diagnostics may expose sanitized requested range, provider page count, returned/rejected counts, and cache age. Logs and responses must never include credentials, access tokens, authorization headers, full provider payloads, account IDs, consumer IDs, or consumer secrets.
+Phase 4.11C should count requests by public interval, provider latency, cache hit/miss/refresh/stale outcomes, returned bars, rejected rows, duplicate timestamps, provider-unavailable responses, unsupported intervals, stale recoveries, invalid/current-date rejections, and frontend ownership discards. Diagnostics may expose sanitized requested date, provider page count, returned/rejected counts, and cache age. Logs and responses must never include credentials, access tokens, authorization headers, full provider payloads, account IDs, consumer IDs, or consumer secrets.
 
 ## Known Contract TODOs
 
