@@ -167,6 +167,24 @@ No external provider is authorized, configured, called, or allowed as fallback. 
 * IntradayOhlc, realtime snapshot, and trade tape remain optional/unavailable in the local API smoke and must not affect valid DailyOhlc/DailyStockPrice rows.
 * True trade-tape history and final close/session confirmation remain unproven. Do not infer either from DailyOhlc, DailyStockPrice, intraday rows, or realtime snapshots. Fresh `X-TRADE` messages may populate only the bounded latest-event trade-tape buffer.
 
+## Phase 4.11B Intraday Chart Capability Audit
+
+Phase 4.11B inspected the production adapter, deterministic fixtures, installed `ssi_fc_data` 2.2.2 package, existing sanitized live evidence, and current daily chart contract. The endpoint itself is real, but no candidate query interval is verified for a production chart allowlist.
+
+| Candidate | Capability status | Evidence | Provider method/parameter | Live verification | Limits/session/finality | Implementation |
+| --- | --- | --- | --- | --- | --- | --- |
+| `1m` | `partially_verified` | SDK exposes integer `resolution=1`; old returned rows showed minute-like spacing, but not from a verified `1m` request | `IntradayOhlc`; likely `resolution`, units unproven | 2026-07-14 bounded call blocked by `network_error` | Unknown; no final flag or session contract | Do not expose; verify in 4.11C |
+| `5m` | `unverified` | StockClock accepts/detects 5-minute fixtures only | Provider value unresolved | Not run after network blocker | Unknown | Do not expose |
+| `15m` | `unverified` | Cadence detector recognizes 15 minutes; no provider proof | Provider value unresolved | Not run | Unknown | Do not expose |
+| `30m` | `unverified` | Cadence detector recognizes 30 minutes; no provider proof | Provider value unresolved | Not run | Unknown | Do not expose |
+| `1h` | `unverified` | Current adapter sends a `timeFrame=1h` hint, but prior SSI output differed from that hint | `resolution=60`, `60m`, and `1h` mappings all unresolved | Prior request was throttled or returned minute-like cadence | Unknown | Do not expose |
+
+Installed SDK evidence proves `GET /api/v2/Market/IntradayOhlc`, symbol/date/page parameters, ascending order, and an integer `resolution` member with default `1`. It does not define units, an enum, supported values, maximum range, maximum pages, exchange coverage, timestamps, auction behavior, lunch gaps, or final bars. Repository fixtures prove normalization and failure handling only. They are not provider-response certification.
+
+The current compact pulse remains `partial`: it uses a 7-calendar-day request, an internal page size of 1,000 (maximum 20 pages in the generic fetcher), a public default of 8 latest rows, a 60-second service cache, and a 60-second symbol/timeframe rate-limit cooldown. This existing behavior is not the future chart history contract.
+
+Phase 4.11C may implement a separate bounded history endpoint only after at least one interval is live-verified. Phase 4.11D separately owns any realtime last-bar design.
+
 ## Phase 4.0B Intraday Root-Cause Result
 
 Phase 4.0B did not find a company-route wiring failure. The existing backend calls the SSI IntradayOhlc provider through the current SSI auth/cache path and maps provider-returned cadence fields.

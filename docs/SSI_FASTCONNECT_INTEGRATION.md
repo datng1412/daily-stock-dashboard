@@ -188,6 +188,30 @@ Sanitized intraday diagnostics may include:
 
 Diagnostics must not include raw response bodies, tokens, auth headers, account IDs, consumer IDs, consumer secrets, or raw auth responses.
 
+## Phase 4.11B Historical Intraday Contract Audit
+
+Current paths are intentionally distinct:
+
+| Context | Current path | Production use | Cache/error behavior |
+| --- | --- | --- | --- |
+| Daily D1 history/chart | `DailyOhlc -> VietnamMarketService.build_chart -> /vn/chart` | Production daily chart | Daily cache; SSI DailyOhlc owns close/OHLCV |
+| Compact intraday pulse | `IntradayOhlc -> build_watchlist/include_intraday -> company/watchlist fields` | Optional production adjunct | 7-day request, latest 8 public rows, 60-second cache, stale/date mismatch becomes unavailable |
+| Historical intraday chart | None | Not implemented | Phase 4.11C design only |
+| Realtime snapshot | background `X:{symbol}` cache | Optional live context | Never a candle |
+| Order book | background `X-QUOTE:{symbol}` cache | Optional live context | Never a candle |
+| Trade stream | background `X-TRADE:{symbol}` buffer | Optional latest events | No OHLC aggregation |
+| Persisted last-known streaming | Phase 4.8S snapshot store | Optional stale context | Never chart history |
+
+The installed `ssi_fc_data` 2.2.2 model declares `intraday_ohlc(symbol, fromDate, toDate, pageIndex, pageSize, ascending, resolution)` and defaults `resolution` to integer `1`. It does not document units or allowed values. By contrast, the current repository adapter first sends `timeFrame=<request hint>` and can try `interval`, `resolution`, `timeframe`, and case variants. Those variants are compatibility probes, not verified provider interval mappings, and must not be carried into the production chart endpoint once an exact shape is proven.
+
+Existing deterministic tests cover sorted mapping, combined TradingDate/Time input, pagination, latest-row limiting, sanitized provider failures, cooldown, and detected 1m/5m/1h cadence. They use synthetic rows. Historical live notes show minute-like returned spacing even when the request hint was `1h`, plus later provider code `429`; neither proves a supported `1m` or `1h` query parameter.
+
+One Phase 4.11B bounded live call used FPT, completed date `2026-07-13`, one page of at most 1,000 rows, and SDK-shaped `resolution=1`. It returned sanitized `network_error` before usable data, so row count, timestamp form, interval spacing, duplicate/missing intervals, volume availability, and final-bar semantics were not verified. No additional interval calls were made after that blocker.
+
+The mapper currently accepts a timezone-free `TradingTime`/`DateTime` or separate `TradingDate` plus `Time`. The future chart contract must interpret verified SSI wall-clock values in `Asia/Ho_Chi_Minh`, then emit Unix seconds representing actual instants. The current helper's timestamp derived from a timezone-free value must not be treated as canonical until that conversion is corrected in Phase 4.11C.
+
+The repository's session classifier is HOSE-like and holiday-unaware: ATO 09:00-09:15, continuous morning 09:15-11:30, lunch 11:30-13:00, continuous afternoon 13:00-14:30, ATC 14:30-14:45, and post-close until 15:00. This is refresh context, not proof of SSI IntradayOhlc bar inclusion. Auction aggregation, post-close/negotiated rows, final-bar timing, suspended symbols, half sessions, holidays, and HNX/UPCOM differences remain unknown.
+
 ## Official Python Streaming Client Inspection
 
 Phase 4.0C-4 installed and inspected the official Python FC Data package locally:

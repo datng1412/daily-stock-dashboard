@@ -201,6 +201,28 @@ Audit outcome rules:
 - Audit output must remain secret-safe and must not print credentials, tokens, auth headers, account IDs, or full raw provider payloads.
 - Capability evidence should guide later reliability and contract/status tasks before UI rendering work.
 
+## Phase 4.11C Intraday History Contract Tests
+
+These deterministic tests are required before implementing the future endpoint/UI; none should call live SSI:
+
+1. Verified interval accepted; unsupported interval rejected before provider call.
+2. Public interval maps to the exact verified provider resolution.
+3. SSI local timestamp converts to the correct Unix-second instant in `Asia/Ho_Chi_Minh`.
+4. Bars sort ascending and duplicate timestamps use stable last-provider-row-wins handling.
+5. Invalid OHLC/volume rows are rejected and counted without hiding remaining valid bars.
+6. Range, limit, page count, timeout, concurrency, and maximum bar count are enforced.
+7. Cache keys separate symbol, interval, range, and limit; daily, compact-pulse, intraday-history, and streaming persistence caches remain independent.
+8. Active, lunch, post-close, historical, negative, and stale-recovery TTL rules are deterministic.
+9. Force refresh bypasses cache lookup but not validation, single-flight, pacing, or cooldown.
+10. Provider unavailable never becomes empty `ready`; explicit successful no-data remains distinguishable.
+11. DailyStockPrice, X, X-QUOTE, X-TRADE, and persisted streaming rows are never called as candle sources.
+12. D1 uses the daily endpoint; verified intraday uses the intraday endpoint.
+13. Old interval/ticker responses cannot replace the newest owned request, and interval change clears old presentation.
+14. Unsupported intervals do not render as buttons; the chart component makes no request.
+15. Indicators use active timeframe bars, while intraday overlays label Phase 4.9A zones `Daily S/R`.
+
+Phase 4.11D requires separate tests for provisional last bars, late/out-of-order events, reconnect, and reconciliation. Do not fold those cases into Phase 4.11C.
+
 ## Manual Smoke Checklist
 
 With backend running:

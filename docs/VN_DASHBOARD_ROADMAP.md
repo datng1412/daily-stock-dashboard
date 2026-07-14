@@ -1268,6 +1268,18 @@ Crosshair tooltip content remains component-local, pointer-transparent, bounded 
 
 Validation covers 60, 250, and 500 mapped daily sessions; 24 focused chart tests and 193 Vietnam dashboard tests pass, as do TypeScript, ESLint, and the production build. The broader suite reported 829 passes, 2 skips, the same four unrelated Phase 4.10L baseline failures, and one HomePage async failure that passed all 16 tests in isolation. The local backend and frontend were already listening on 127.0.0.1:8000 and :5173, but browser setup again failed with `Cannot redefine property: process`; therefore visual resize/interaction proof and browser network capture remain pending and are not claimed as passed.
 
+### Phase 4.11B - SSI Intraday Chart Contract Audit
+
+Status: documentation-only audit complete on 2026-07-14; no interval is approved for production UI.
+
+The repository has a real SSI `IntradayOhlc` adapter used by the optional watchlist/company pulse, but it is not a full chart-history contract. Current behavior requests seven calendar days, pages internally at 1,000 rows (generic maximum 20 pages), returns the latest eight rows by default, caches for 60 seconds, rejects stale daily-date mismatches, and applies a 60-second ticker/timeframe rate-limit cooldown. Deterministic fixtures prove sorting, mapping, cadence detection, pagination, malformed-row rejection, and unavailable-state behavior; they do not prove SSI interval support.
+
+The installed `ssi_fc_data` 2.2.2 SDK exposes `IntradayOhlc` and integer `resolution=1` but no interval enum, units, supported values, limits, timestamp zone, session rules, or final-bar flag. Existing adapter `timeFrame=1h` requests previously returned minute-like spacing or rate-limit responses. A bounded 2026-07-14 call for FPT on completed date 2026-07-13 with SDK-shaped `resolution=1` was blocked by sanitized `network_error`. Consequently `1m` is only partially verified at the SDK-shape level and `5m`, `15m`, `30m`, and `1h` remain unverified; none is exposed.
+
+The selected future contract is `GET /api/v1/stocks/vn/intraday-chart` with required symbol, verified interval, and offset-bearing RFC3339 `from`/`to` instants. Initial provisional bounds are two Vietnam calendar days, 1,000 usable bars, at most two sequential provider pages, 10-second per-attempt timeout, one provider call at a time, and no automatic retry. Response bars use raw VND/share, non-negative share volume, and Unix-second instants converted from verified SSI local timestamps in `Asia/Ho_Chi_Minh`. Duplicate timestamps resolve deterministically and malformed rows are counted/rejected. `is_final` remains absent until proven.
+
+Phase 4.11C will implement only live-verified mappings, a separate intraday-history cache, stale/unavailable semantics, frontend ticker+interval+request-ID ownership, Lightweight Charts `UTCTimestamp` mapping, active-timeframe indicators, and `Daily S/R` labelling. Phase 4.11D separately owns official realtime last-bar source selection, provisional/final rules, late/out-of-order events, reconnect, and reconciliation with historical SSI bars. X, X-QUOTE, X-TRADE, DailyStockPrice, and Phase 4.8S snapshots remain forbidden candle sources.
+
 ### Phase 4.8F - SSI Remaining Data Capability Audit
 
 Status: completed on 2026-07-08 as a documentation-only audit.

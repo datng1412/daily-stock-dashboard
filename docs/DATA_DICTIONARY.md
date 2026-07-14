@@ -237,6 +237,30 @@ These fields are additive Phase 4.8A metrics. They live under watchlist `indicat
 | `index_components.diagnostics.cache_status` / `cache_ttl_seconds` / `cache_negative` / `cache_key` | Process-cache result and sanitized cache identity for explicit IndexComponents requests | Service cache over SSI IndexComponents | diagnostic object | yes | no | Index diagnostics only | Usable rows cache for 300 seconds; unavailable/rate-limited/no-row responses cache for 60 seconds. Key contains provider, endpoint, normalized index code, and optional market only. |
 | `cache_status.daily_stock_price_cache` | Process-cache result for the combined recent DailyStockPrice enrichment/history request | Service cache over SSI DailyStockPrice | `hit`, `miss`, `refresh`, or `stale` | yes | no | Diagnostics/cache metadata | TTL is 300 seconds; force refresh bypasses freshness. It does not change DailyOhlc canonical price ownership. |
 
+## Proposed Phase 4.11C Intraday Chart Fields
+
+These fields are contract design only and are not present in a production endpoint yet.
+
+| Field | Meaning | Source | Type | Nullable | Notes |
+| --- | --- | --- | --- | --- | --- |
+| `symbol` | Normalized VN ticker | Request/SSI metadata | text | no | Uses existing VN ticker normalization. |
+| `interval` | Verified public intraday interval | Request allowlist | enum | no | Allowlist is currently empty; candidates must not be exposed before verification. |
+| `timezone` | Timestamp interpretation zone | Contract constant | text | no | Always `Asia/Ho_Chi_Minh`. |
+| `status` | Intraday history result state | Endpoint | enum | no | `ready`, `unavailable`, or `failed`; stale is cache metadata. |
+| `reason_code` | Sanitized result qualifier | Endpoint | text | yes | Examples: `no_data`, `partial_rows_rejected`, `stale_cache_recovery`, `provider_unavailable`. |
+| `bars[].time` | Bar-open instant | SSI IntradayOhlc normalized by backend | Unix seconds | no | Actual instant; never `BusinessDay` or a timezone-free browser string. |
+| `bars[].open/high/low/close` | Raw intraday prices | SSI IntradayOhlc | VND/share | no | Must pass OHLC consistency validation. |
+| `bars[].volume` | Intraday bar volume | SSI IntradayOhlc | shares | no | Finite and non-negative; no synthetic zero bar. |
+| `source.provider` | Provider identifier | Endpoint constant | text | no | `ssi_fastconnect`. |
+| `source.dataset` | Provider dataset | Endpoint constant | text | no | `IntradayOhlc`. |
+| `cache.status` | Cache outcome | Intraday-history cache | enum | no | `hit`, `miss`, `refresh`, `stale`, or `bypassed`. |
+| `cache.is_stale` | Last-known recovery marker | Intraday-history cache | boolean | no | Does not change top-level status when usable bars are preserved. |
+| `diagnostics.returned_bars` | Usable bar count | Normalizer | integer | no | Count after validation/deduplication. |
+| `diagnostics.rejected_rows` | Malformed rows dropped | Normalizer | integer | no | Sanitized count only. |
+| `diagnostics.duplicate_timestamps` | Duplicate timestamps resolved | Normalizer | integer | no | Stable last-provider-row-wins rule. |
+
+`is_final` is deliberately absent until SSI finality or a reliable backend rule is verified. These proposed fields do not replace the existing compact `intraday_candles`/`intraday_pulse` watchlist contract.
+
 ## Current Decision Points
 
 - Company shared daily fields: company `latest_price`, `daily_close`, daily OHLCV open/high/low/close/volume, and daily value align with the watchlist SSI DailyOhlc fields. Company reference, limits, foreign flow, matched/put-through, and adjusted-close values remain SSI DailyStockPrice-specific.

@@ -6,7 +6,7 @@ This page is the current entry point for VN dashboard setup. The active runtime 
 
 - Daily OHLCV, daily chart candles, and canonical `latest_price` come from SSI `DailyOhlc` close when DailyOhlc rows exist.
 - SSI `DailyStockPrice` is enrichment only: reference prices, ceiling/floor, adjusted close when present, matched/put-through fields, and foreign-flow fields. It must not overwrite `latest_price`.
-- Intraday candles come from SSI `IntradayOhlc`.
+- The optional compact intraday pulse is sourced only from SSI `IntradayOhlc` when usable. Production intraday chart intervals are not yet verified or exposed; Phase 4.11B defines a bounded future contract without adding UI, endpoint, aggregation, or fallback behavior.
 - Realtime snapshots come from the optional SSI `X:{symbol}` live contract and stay separate from daily prices.
 - Optional local streaming snapshots can retain already-normalized last-known X/X-QUOTE/X-TRADE/R/MI/F rows across a backend restart. They are bounded, stale, explicitly labeled, and never replace SSI DailyOhlc daily price data.
 - Trade tape comes from the optional SSI `X-TRADE:{symbol}` latest-event stream context and stays separate from daily prices.

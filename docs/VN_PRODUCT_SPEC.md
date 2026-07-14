@@ -368,6 +368,14 @@ Confirm whether available SSI FastConnect Data endpoints and entitlements can pr
 
 Detect actual returned intraday cadence, avoid overclaiming a fixed interval unless verified, and label stale or unavailable intraday clearly.
 
+### Phase 4.11B - SSI Intraday Chart Contract Audit
+
+Define, but do not implement, a separate SSI IntradayOhlc history contract for Lightweight Charts. The installed SDK proves an endpoint and integer resolution field but does not prove interval units or supported values; therefore no intraday timeframe button is production-ready. The future contract uses timezone-safe Unix-second instants, bounded queries, independent cache/source diagnostics, strict ticker+interval request ownership, and no trade/realtime aggregation.
+
+### Phase 4.11C - Implement Verified Intraday History API and Lightweight Timeframe UI
+
+Implement only intervals verified against SSI. Keep D1 on DailyOhlc, use a separate bounded `/vn/intraday-chart` contract, calculate indicators from the active timeframe bars, and label Phase 4.9A zones `Daily S/R` when shown over intraday. A later Phase 4.11D must separately design verified realtime last-bar updates and historical reconciliation.
+
 ### Phase 4.2A - DailyStockPrice Enrichment Reliability
 
 Verify reference, ceiling, floor, matched volume/value, and foreign buy/sell/net volume. Verify foreign-flow value fields only when returned, and normalize missing or partial status without changing canonical daily close ownership.

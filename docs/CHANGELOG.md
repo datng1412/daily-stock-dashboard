@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [improvement] Redesign the optional S/R chart overlay as default-off primary S1/R1 midpoint lines with right-edge ranges and secondary S2/R2 dashed rank markers, without changing data ownership or requests.
 - [improvement] Make official Lightweight Charts 5.2 the sole VN daily-chart renderer and remove the temporary engine flag and custom SVG implementation while preserving SSI DailyOhlc ownership.
 - [fix] Harden the VN Lightweight Charts lifecycle, responsive pane sizing, stable price scale, tooltip cleanup, logical-range ownership, expanded mode, and rapid ticker switching without changing SSI data ownership.
+- [documentation] Audit SSI IntradayOhlc interval, timestamp, session, cache, and failure semantics and define a verified-only future intraday chart contract without implementing an endpoint or UI.
 - [fix] Add market-session-aware SSI streaming health diagnostics, after-hours last-known live rows, stale-stream watchdog reconnects during active VN trading windows, and immediate selected live-context refresh when VN dashboard tabs regain focus.
 - [fix] Prevent a late SSI streaming client start from reviving the manager after lifecycle shutdown begins.
 - [documentation] Record Phase 4.8R-Live after-hours streaming proof and defer active-session/reconnect observation to a future market window.
