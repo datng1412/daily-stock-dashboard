@@ -205,13 +205,15 @@ Audit outcome rules:
 
 These deterministic tests are required before implementing the future endpoint/UI; none should call live SSI:
 
+Phase 4.11B-2 fixture guidance is evidence-bound: a future sanitized fixture may use raw fields `TradingDate`, `Time`, `Open`, `High`, `Low`, `Close`, `Volume`, `Value`, and `Symbol`, with `DD/MM/YYYY` plus `HH:MM:SS`. It must not label `resolution=1` as verified `1m`, must preserve irregular second-bearing timestamps and lunch gaps, and must not invent provider pagination or unsupported-interval error shapes. Numeric resolutions 5/15/30/60 returned minute-like rows rather than their requested cadence.
+
 1. Verified interval accepted; unsupported interval rejected before provider call.
-2. Public interval maps to the exact verified provider resolution.
-3. SSI local timestamp converts to the correct Unix-second instant in `Asia/Ho_Chi_Minh`.
-4. Bars sort ascending and duplicate timestamps use stable last-provider-row-wins handling.
-5. Invalid OHLC/volume rows are rejected and counted without hiding remaining valid bars.
-6. Range, limit, page count, timeout, concurrency, and maximum bar count are enforced.
-7. Cache keys separate symbol, interval, range, and limit; daily, compact-pulse, intraday-history, and streaming persistence caches remain independent.
+2. Public interval maps to the exact verified provider resolution; accepted-but-cadence-mismatched values are rejected.
+3. Separate SSI `TradingDate`/`Time` values convert from `Asia/Ho_Chi_Minh` to the correct Unix-second instant without the current naive-as-UTC shift.
+4. Bars sort ascending and duplicate timestamps use stable last-provider-row-wins handling; lunch gaps do not become interval mismatches.
+5. Invalid OHLC/volume rows are rejected and counted without hiding remaining valid bars; numeric-string volume normalization and verified unit semantics are covered separately.
+6. Range, limit, page count, timeout, concurrency, and maximum bar count are enforced, including a sanitized page-boundary fixture only after real page-2 evidence exists.
+7. Cache keys separate ticker, interval, normalized Vietnam trading-date window, and provider page; second-level public ranges filter cached windows without fragmenting provider cache. Daily, compact-pulse, intraday-history, and streaming persistence caches remain independent.
 8. Active, lunch, post-close, historical, negative, and stale-recovery TTL rules are deterministic.
 9. Force refresh bypasses cache lookup but not validation, single-flight, pacing, or cooldown.
 10. Provider unavailable never becomes empty `ready`; explicit successful no-data remains distinguishable.
@@ -220,6 +222,7 @@ These deterministic tests are required before implementing the future endpoint/U
 13. Old interval/ticker responses cannot replace the newest owned request, and interval change clears old presentation.
 14. Unsupported intervals do not render as buttons; the chart component makes no request.
 15. Indicators use active timeframe bars, while intraday overlays label Phase 4.9A zones `Daily S/R`.
+16. Provider `DD/MM/YYYY` request dates remain distinct from public RFC3339 instants, and unsupported provider response shapes remain sanitized.
 
 Phase 4.11D requires separate tests for provisional last bars, late/out-of-order events, reconnect, and reconciliation. Do not fold those cases into Phase 4.11C.
 

@@ -372,9 +372,11 @@ Detect actual returned intraday cadence, avoid overclaiming a fixed interval unl
 
 Define, but do not implement, a separate SSI IntradayOhlc history contract for Lightweight Charts. The installed SDK proves an endpoint and integer resolution field but does not prove interval units or supported values; therefore no intraday timeframe button is production-ready. The future contract uses timezone-safe Unix-second instants, bounded queries, independent cache/source diagnostics, strict ticker+interval request ownership, and no trade/realtime aggregation.
 
+Phase 4.11B-2 obtained one completed-session FPT response with the official `DD/MM/YYYY` request shape. `resolution=1` returned 226 minute-like rows with separate timezone-free `TradingDate`/`Time`, but irregular second-bearing cadence and incomplete volume semantics keep it partially verified. Numeric resolutions 5, 15, 30, and 60 returned the same minute-like result instead of distinct cadences. The production allowlist remains empty and Phase 4.11C is blocked pending a fully verified interval.
+
 ### Phase 4.11C - Implement Verified Intraday History API and Lightweight Timeframe UI
 
-Implement only intervals verified against SSI. Keep D1 on DailyOhlc, use a separate bounded `/vn/intraday-chart` contract, calculate indicators from the active timeframe bars, and label Phase 4.9A zones `Daily S/R` when shown over intraday. A later Phase 4.11D must separately design verified realtime last-bar updates and historical reconciliation.
+Blocked until at least one interval passes the Phase 4.11B gate. When opened, implement only intervals verified against SSI. Keep D1 on DailyOhlc, use public `ticker` on a separate bounded `/vn/intraday-chart` contract, calculate indicators from the active timeframe bars, and label Phase 4.9A zones `Daily S/R` when shown over intraday. A later Phase 4.11D must separately design verified realtime last-bar updates and historical reconciliation.
 
 ### Phase 4.2A - DailyStockPrice Enrichment Reliability
 

@@ -659,17 +659,25 @@ Phase 4.11B is documentation-only. The current watchlist/company `intraday_candl
 
 ### Evidence boundary and interval vocabulary
 
-The installed `ssi_fc_data` 2.2.2 package defines `IntradayOhlc` and an integer `resolution` field with default `1`, but it provides no interval enum, unit definition, supported-value list, query-range limit, final-bar field, or session semantics. The repository adapter currently accepts arbitrary request strings and has deterministic cadence fixtures for `1m`, `5m`, and `1h`; those fixtures verify StockClock normalization only, not SSI interval support. A single bounded FPT probe for `2026-07-13` with `resolution=1` on 2026-07-14 was blocked by `network_error` before usable rows were returned.
+The installed `ssi_fc_data` 2.2.2 package defines `IntradayOhlc` and an integer `resolution` field with default `1`, but it provides no interval enum, unit definition, supported-value list, query-range limit, final-bar field, or session semantics. Its official repository sample supplies `DD/MM/YYYY` dates and `resolution=1`; the installed package itself contains no resolution mapping. The repository adapter currently accepts arbitrary request strings and has deterministic cadence fixtures for `1m`, `5m`, and `1h`; those fixtures verify StockClock normalization only, not SSI interval support.
 
 Therefore the production public interval allowlist is currently empty. Candidate values remain:
 
 | Public candidate | Provider candidate | Status | Rule |
 | --- | --- | --- | --- |
-| `1m` | `resolution=1` | `adapter_supported_but_not_live_verified` | Do not expose until provider units and returned spacing are verified. |
-| `5m` | unresolved (`resolution=5` is only a hypothesis) | `provider_capability_unknown` | Do not expose or aggregate. |
-| `15m` | unresolved | `provider_capability_unknown` | Do not expose or aggregate. |
-| `30m` | unresolved | `provider_capability_unknown` | Do not expose or aggregate. |
-| `1h` | unresolved (`60m`/`resolution=60` not proven) | `provider_capability_unknown` | Current `timeFrame=1h` request hints are not provider support proof. |
+| `1m` | `resolution=1` | `partially_verified` | Accepted live and returned 226 minute-like rows, but second-bearing timestamps and irregular gaps do not yet prove a production 1-minute bar contract. |
+| `5m` | `resolution=5` | `unsupported` as a 5-minute mapping | Accepted but returned the same 226-row minute-like cadence; 0% of deltas matched 300 seconds. |
+| `15m` | `resolution=15` | `unsupported` as a 15-minute mapping | Accepted but returned the same 226-row minute-like cadence; 0% of deltas matched 900 seconds. |
+| `30m` | `resolution=30` | `unsupported` as a 30-minute mapping | Accepted but returned the same 226-row minute-like cadence; 0% of deltas matched 1,800 seconds. |
+| `1h` | `resolution=60` | `unsupported` as a 60-minute mapping | Accepted but returned the same 226-row minute-like cadence; 0% of deltas matched 3,600 seconds. Existing `timeFrame=1h` hints remain non-authoritative. |
+
+Phase 4.11B-2 used six of the seven allowed provider calls on FPT for the completed `2026-06-24` session. The initial ISO-date call reached SSI but returned HTTP 200 with provider code `Error`. The official `DD/MM/YYYY` shape succeeded with `resolution=1`: 226 rows, `totalRecord=226`, raw fields `TradingDate`, `Time`, `Open`, `High`, `Low`, `Close`, `Volume`, `Value`, and `Symbol`, and no duplicate or out-of-order timestamps. All 226 OHLC rows passed consistency validation. Numeric resolutions 5, 15, 30, and 60 each returned the same row count, fields, first/last timestamps, and minute-like cadence instead of their requested cadence. Page 2 was not requested because the first page size was 1,000 and `totalRecord` was only 226.
+
+The raw timestamp is a timezone-free `TradingDate=24/06/2026` plus `Time=HH:MM:SS`. The observed range was `09:15:58` through `14:45:00`; the most common positive delta was 60 seconds, the minimum was 33 seconds, and the maximum was 5,462 seconds across the lunch boundary. Only 27.68% of same-session `resolution=1` deltas were exactly 60 seconds, so it remains partially verified rather than a production `1m` interval. The canonical conversion interprets the pair as `Asia/Ho_Chi_Minh` wall time before producing Unix seconds. The current adapter helper treats a naive datetime as UTC, so its existing `timestamp` value is not the future canonical chart timestamp and must be corrected before implementation.
+
+`Volume` was a numeric string on every row, with no missing, zero, or negative values and 118 decreases across the ordered series. This disproves a monotonically cumulative-session interpretation for this sample, but the unit and definitive per-bar semantics remain only partially verified. ATO was not observed; the first row was after 09:15, afternoon rows resumed at 13:00, and the last row at 14:45 is ambiguous rather than proof of ATC aggregation. Holidays, half sessions, post-close/negotiated rows, halts, HNX, and UPCOM remain unverified.
+
+The production interval allowlist therefore remains empty and Phase 4.11C remains blocked. It may open only after at least one interval has documented provider mapping, aligned cadence semantics, sufficiently verified volume units, and bounded page/range behavior without source mixing.
 
 Aliases are case-sensitive and rejected unless added to the verified allowlist. `60m`, `1H`, numeric strings, and provider-specific spellings must not be accepted silently.
 
@@ -679,7 +687,7 @@ Phase 4.11C should implement a separate endpoint rather than widening the daily 
 
 ```text
 GET /api/v1/stocks/vn/intraday-chart
-  ?symbol=FPT
+  ?ticker=FPT
   &interval=<verified-value>
   &from=<RFC3339-instant>
   &to=<RFC3339-instant>
@@ -691,7 +699,7 @@ GET /api/v1/stocks/vn/intraday-chart
 
 Request rules proposed for the first implementation are provisional until SSI limits are verified:
 
-* `symbol` is required, normalized uppercase, and validated with the existing VN ticker rules.
+* Public `ticker` is required, normalized uppercase, and validated with the existing VN ticker rules. The SSI provider request continues to use its own `symbol` field.
 * `interval` is required and must be in the verified allowlist; there is no default.
 * `from` is inclusive and `to` is exclusive. Both are required RFC3339 instants with `Z` or an explicit offset; timezone-free values are invalid.
 * The maximum range is two calendar days in `Asia/Ho_Chi_Minh`.
@@ -704,7 +712,7 @@ Request rules proposed for the first implementation are provisional until SSI li
 
 ```json
 {
-  "symbol": "FPT",
+  "ticker": "FPT",
   "exchange": "HOSE",
   "interval": "1m",
   "timezone": "Asia/Ho_Chi_Minh",
@@ -719,9 +727,9 @@ Request rules proposed for the first implementation are provisional until SSI li
 }
 ```
 
-`time` is a Unix timestamp in seconds representing an actual instant. SSI timezone-free trading timestamps must be interpreted as `Asia/Ho_Chi_Minh` wall time before conversion; they must not be treated as UTC or parsed by the browser. Bars are sorted ascending and unique by `(symbol, interval, time)`. For duplicates, the last provider row in stable provider order wins and the discarded count is diagnostic.
+`time` is a Unix timestamp in seconds representing an actual instant. Verified SSI fields are separate timezone-free `TradingDate` (`DD/MM/YYYY`) and `Time` (`HH:MM:SS`). They must be interpreted as `Asia/Ho_Chi_Minh` wall time before conversion, not treated as UTC or parsed by the browser. Bars are sorted ascending and unique by `(ticker, interval, time)`. For duplicates, the last provider row in stable provider order wins and the discarded count is diagnostic.
 
-OHLC values remain raw VND/share and volume remains non-negative shares. A usable row requires finite positive OHLC, `high >= max(open, close, low)`, `low <= min(open, close, high)`, and finite non-negative volume. Malformed rows are rejected individually. A response may remain `ready` when usable rows remain, with `reason_code=partial_rows_rejected`; if no usable row remains after a non-empty provider response, return `failed`, not an empty success. `is_final` is omitted until SSI or StockClock can determine it reliably.
+OHLC values remain raw VND/share. Volume must remain the non-negative SSI `Volume` value with explicit unit metadata still pending proof; the backend must not silently label it shares until that evidence exists. A usable row requires finite positive OHLC, `high >= max(open, close, low)`, `low <= min(open, close, high)`, and finite non-negative volume. Malformed rows are rejected individually. A response may remain `ready` when usable rows remain, with `reason_code=partial_rows_rejected`; if no usable row remains after a non-empty provider response, return `failed`, not an empty success. `is_final` is omitted until SSI or StockClock can determine it reliably.
 
 Top-level statuses are `ready`, `unavailable`, and `failed`. Staleness belongs under `cache.is_stale` rather than a fourth top-level status:
 
@@ -733,7 +741,7 @@ Top-level statuses are `ready`, `unavailable`, and `failed`. Staleness belongs u
 
 ### Cache and freshness design
 
-Use an independent key such as `intraday_chart:{symbol}:{interval}:{from_epoch}:{to_epoch}:{limit}`. Do not reuse DailyOhlc cache entries, the existing compact-pulse key, or Phase 4.8S streaming snapshot persistence.
+Cache normalized provider pages or Vietnam trading-date windows under an independent logical identity such as `intraday_chart:{ticker}:{interval}:{vn_trading_date}:{page}`. Normalize public `from`/`to` instants to the bounded provider window and filter the returned bars at the service layer when safe, so second-level range differences do not fragment provider cache entries. Do not reuse DailyOhlc cache entries, the existing compact-pulse key, or Phase 4.8S streaming snapshot persistence.
 
 Provisional TTLs for Phase 4.11C are 30 seconds during active continuous/auction windows, 60 seconds at lunch, 300 seconds after close for the current trading date, 86,400 seconds for completed prior dates, and 60 seconds for negative/unavailable entries. Stale-if-error windows are 300 seconds during active/lunch periods, 3,600 seconds after close, and 86,400 seconds for completed historical dates. Cache size is capped at 500 LRU keys per process. Partial current-session results may be cached, but the newest bar must be labelled `finality=unknown`; it is replaced only by a later successful fetch for the same key.
 
