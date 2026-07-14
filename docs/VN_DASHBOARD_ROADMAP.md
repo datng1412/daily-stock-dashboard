@@ -1244,6 +1244,18 @@ Status: completed on 2026-07-13.
 
 The single `S/R` chart control now defaults off. When enabled, the same Phase 4.9A ranges use a two-level hierarchy: S1/R1 are primary solid midpoint lines with compact right-edge range labels, while S2/R2 are faint dashed lines with rank-only markers and title-only ranges. Faint bands remain clipped behind candles, label offsets are deterministic, and the candle y-domain, selected-ticker ownership guard, requests, polling, providers, and `latest_price` remain unchanged.
 
+### Phase 4.10L - TradingView Lightweight Charts 5.2 Cutover
+
+Status: production cutover complete on 2026-07-14; manual browser parity/network inspection remains pending.
+
+The VN daily inspect chart now uses the separate, no-fetch `VietnamLightweightChart` built against the official open-source `lightweight-charts@5.2.0` npm package as its sole renderer. It maps valid SSI DailyOhlc trading-date strings directly to `BusinessDay` values, keeps raw-VND chart values and existing board-style display formatting, and provides native candlesticks, price/time scales, zoom/pan, crosshair tooltip, volume and RSI panes, MA20/MA50, and Bollinger lines. Phase 4.9A S1/S2/R1/R2 ranges remain backend-owned and default-off; a passive series primitive draws their exact bands/midpoints and exposes rank-prefixed values through native right-price-axis views without autoscale expansion.
+
+Lightweight Charts is only a rendering engine. It does not provide StockClock market data, and the chart includes visible TradingView attribution without implying data supply or endorsement. Chart interaction creates no provider request; no Advanced Charts package, embed widget, external market-data provider, backend contract change, fake bar, or `latest_price` change is part of this phase.
+
+The temporary development-only engine flag and custom SVG renderer were removed during cutover. Card-level range selection continues to request the existing daily chart contract, while native scale interaction, crosshair use, indicator toggles, S/R toggling, and compact/expanded transitions do not request market data. On 2026-07-14, 17 focused chart tests, 192 dashboard tests, TypeScript, ESLint, and the production build passed for the sole-engine implementation. The distinct broader frontend suite reported 822 passes, 2 skips, and 4 unrelated current failures in UI governance, stock-name truncation, and two async dialog tests; those areas were not changed for this chart cutover.
+
+The production cutover was user-directed despite the browser-tooling blocker. Manual browser parity and request-network inspection remain a follow-up because the available in-app browser integration could not initialize before navigation, including after a clean reconnect. This is a validation-environment limitation rather than evidence of runtime failure. When browser tooling is available, verify DailyOhlc OHLC/date/price parity, native interaction, compact/expanded ownership, S/R price-axis readability, responsive layout, attribution visibility, and absence of unexpected external market-data traffic.
+
 ### Phase 4.8F - SSI Remaining Data Capability Audit
 
 Status: completed on 2026-07-08 as a documentation-only audit.

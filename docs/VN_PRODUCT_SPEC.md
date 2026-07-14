@@ -203,6 +203,8 @@ Primary table/watchlist scan fields:
 * Data quality.
 * Live status.
 
+The daily inspect chart uses the official open-source `lightweight-charts` 5.2 npm package as its sole renderer. SSI DailyOhlc remains the owner of daily bars and `latest_price`; daily dates map directly to timezone-safe `BusinessDay` values, and no TradingView market data is used. Native candlesticks, volume and RSI panes, MA20/MA50/Bollinger line series, and a passive series primitive render backend-provided S1/S2/R1/R2 ranges. S/R remains default-off, and native chart interaction makes no market-data request. The former custom SVG renderer and migration flag have been removed.
+
 Source ownership:
 
 * Daily close, OHLCV, and chart: SSI DailyOhlc.
