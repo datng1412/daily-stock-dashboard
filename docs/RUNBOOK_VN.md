@@ -318,6 +318,9 @@ Required non-secret provider defaults:
 
 ```text
 SSI_FASTCONNECT_ENABLED=true
+SSI_STREAMING_REALTIME_ENABLED=true
+SSI_STREAMING_REALTIME_BOOTSTRAP_SYMBOLS=FPT
+SSI_STREAMING_REALTIME_CHANNEL_TEMPLATE=X:{symbol}
 VN_DAILY_DATA_PROVIDER=ssi
 VN_CHART_DATA_PROVIDER=ssi
 VN_DAILY_STOCK_PRICE_PROVIDER=ssi
@@ -332,6 +335,8 @@ KBS_ENABLED=false
 ```
 
 Use `/tmp/dsa-cache` when the deployment service does not have a persistent disk. Cache behavior must not change SSI/Mozyfin/KBS source ownership.
+
+The Docker image must install official SSI `python-fcdata` tag `v2.2.2` through `requirements.txt`. If Render logs or `/api/v1/stocks/vn/realtime` diagnostics show `package_unavailable`, rebuild from a commit that includes that dependency before investigating SSI entitlement or channel behavior.
 
 ## Data Semantics Reminder
 

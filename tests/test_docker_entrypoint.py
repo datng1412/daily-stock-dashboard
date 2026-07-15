@@ -37,6 +37,15 @@ def test_dockerfile_bundles_mozyfin_cli_for_vietnam_dashboard() -> None:
     assert "/usr/local/bin/mozyfin-cli" in dockerfile
 
 
+def test_requirements_include_official_ssi_streaming_client_for_docker_runtime() -> None:
+    requirements = (REPO_ROOT / "requirements.txt").read_text(encoding="utf-8")
+
+    assert re.search(
+        r"(?m)^ssi-fc-data\s+@\s+git\+https://github\.com/SSI-Securities-Corporation/python-fcdata\.git@v2\.2\.2\b",
+        requirements,
+    )
+
+
 def test_docker_entrypoint_repairs_ownership_and_user_permissions() -> None:
     entrypoint = (REPO_ROOT / "docker" / "entrypoint.sh").read_text(encoding="utf-8")
 

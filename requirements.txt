@@ -19,6 +19,7 @@ yfinance>=0.2.0             # Priority 4: Yahoo Finance (Fallback)
 longbridge==0.2.75           # Priority 5: Py3.11 Bookworm 可解析版本；OAuth 路径运行时检测 SDK 能力
 tickflow>=0.1.0            # TickFlow official SDK (Issue #632, market review enhancement)
 vnstock==4.0.4             # Optional Vietnam KBS snapshot/trades runtime provider (lazy import)
+ssi-fc-data @ git+https://github.com/SSI-Securities-Corporation/python-fcdata.git@v2.2.2  # SSI FastConnect FC Data REST/streaming client for VN market data
 
 #飞书
 lark-oapi>=1.0.0             # 飞书API

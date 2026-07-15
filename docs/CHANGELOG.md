@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [documentation] Verify SSI completed-session minute buckets, timestamp normalization, OHLC, and volume across four FPT/HPG samples and open Phase 4.11C only for a bounded one-date `1m` contract.
 - [fix] Add market-session-aware SSI streaming health diagnostics, after-hours last-known live rows, stale-stream watchdog reconnects during active VN trading windows, and immediate selected live-context refresh when VN dashboard tabs regain focus.
 - [fix] Prevent a late SSI streaming client start from reviving the manager after lifecycle shutdown begins.
+- [fix] Include the official SSI `python-fcdata` v2.2.2 runtime package in deployment requirements so Render can start the SSI streaming adapter when realtime is enabled.
 - [documentation] Record Phase 4.8R-Live after-hours streaming proof and defer active-session/reconnect observation to a future market window.
 - [fix] Preserve stale SSI `X-QUOTE:{symbol}` order-book ladders as last-known rows with stale status and add bounded selected-ticker live-context refresh without changing DailyOhlc price ownership.
 - [improvement] Render SSI `X-QUOTE:{symbol}` order-book rows in VN dashboard and company selected-ticker panels with dynamic bid/ask levels, source labels, stale/unavailable states, and SSI board price colors.

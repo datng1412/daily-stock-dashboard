@@ -28,6 +28,7 @@ Phase 4.11C uses a separate process-local LRU capped at 500 entries. Successful 
 * Official `ssi-fc-data` Python client adapter behind the disabled streaming runtime flag.
 * FastAPI startup bootstrap for SSI streaming realtime when explicitly enabled and given a small bootstrap symbol list.
 * Realtime endpoint response-cache bypass and frontend quote polling tuned for the process-local streaming cache.
+* Docker/Render runtime dependencies must install official SSI `python-fcdata` tag `v2.2.2`; otherwise enabled streaming starts as `package_unavailable` and the frontend polling API can only return optional unavailable realtime snapshots.
 * SSI `X-QUOTE:{symbol}` order-book backend/API support as a separate optional watchlist context.
 * SSI `R:{symbol}` foreign-room backend/API support as a separate optional watchlist context.
 * SSI `MI:{index_code}` market-index pulse backend/API support as a separate optional index context.
