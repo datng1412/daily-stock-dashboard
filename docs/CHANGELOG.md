@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [fix] Pin the optional Longbridge Python SDK to the latest release resolvable in the Python 3.11 Bookworm production image.
 - [new feature] Add disabled-by-default bounded atomic persistence for normalized SSI streaming last-known cache rows, restored as stale per context without changing DailyOhlc price ownership or adding provider fallbacks.
 - [new feature] Add compact SSI DailyOhlc-derived short-term D1 support and resistance zones to the VN indicator table without new provider calls, realtime dependencies, fallback data, or a change to `latest_price` ownership.
 - [improvement] Visualize existing short-term D1 support/resistance ranges as optional clipped bands on the selected ticker daily inspect chart without frontend calculation, new requests, live inputs, or a `latest_price` change.
