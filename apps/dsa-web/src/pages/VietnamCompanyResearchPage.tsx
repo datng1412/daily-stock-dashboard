@@ -215,13 +215,30 @@ const safeStatusString = (value: unknown) => {
 };
 
 const statusDiagnosticValue = (
-  statusBlock: VietnamCompanyResearchResponse['tradeTapeStatus'] | null | undefined,
+  statusBlock: VietnamCompanyResearchResponse['tradeTapeStatus'] | VietnamCompanyResearchResponse['realtimeStatus'] | null | undefined,
   diagnostics: Record<string, unknown> | null | undefined,
   key: string,
 ) => (
   safeStatusString((statusBlock as Record<string, unknown> | null | undefined)?.[key])
   ?? safeStatusString(diagnostics?.[key])
 );
+
+const streamLifecycleState = (
+  statusBlock: VietnamCompanyResearchResponse['tradeTapeStatus'] | VietnamCompanyResearchResponse['realtimeStatus'] | null | undefined,
+  diagnostics: Record<string, unknown> | null | undefined,
+) => normalizedStatus(
+  statusDiagnosticValue(statusBlock, diagnostics, 'streamState')
+  ?? statusDiagnosticValue(statusBlock, diagnostics, 'stream_state'),
+);
+
+const streamLifecycleCopy = (state: string, fallback: string) => {
+  if (state === 'recovering' || state === 'awaiting_subscription') {
+    return 'Reconnecting — showing last known data when available.';
+  }
+  if (state === 'stale') return 'Stale — showing last known data.';
+  if (state === 'closed') return 'Market closed — showing last known data.';
+  return fallback;
+};
 
 const tradeTapeReasonCode = (
   statusBlock: VietnamCompanyResearchResponse['tradeTapeStatus'] | null | undefined,
@@ -767,6 +784,22 @@ const VietnamCompanyResearchPage: React.FC = () => {
   const hasRealtimeData = hasCompanyRealtimeData(snapshot);
   const hasTradeTapeRows = hasCompanyTradeTapeData(snapshot);
   const tradeTapeWarmupPending = !hasTradeTapeRows && isCompanyTradeTapeWarmupPending(snapshot);
+  const realtimeStreamState = streamLifecycleState(snapshot.realtimeStatus, snapshot.diagnostics?.realtime);
+  const tradeTapeStreamState = streamLifecycleState(snapshot.tradeTapeStatus, snapshot.diagnostics?.tradeTape);
+  const realtimePanelStatus = realtimeStreamState === 'stale'
+    ? 'stale'
+    : realtimeStreamState === 'recovering' || realtimeStreamState === 'awaiting_subscription'
+      ? 'loading'
+      : realtimeStreamState === 'closed'
+        ? 'closed'
+        : snapshot.realtimeStatus?.status ?? 'unavailable';
+  const tradeTapePanelStatus = tradeTapeStreamState === 'stale'
+    ? 'stale'
+    : tradeTapeStreamState === 'recovering' || tradeTapeStreamState === 'awaiting_subscription'
+      ? 'loading'
+      : tradeTapeStreamState === 'closed'
+        ? 'closed'
+        : hasTradeTapeRows ? 'ok' : tradeTapeWarmupPending ? 'loading' : snapshot.tradeTapeStatus?.status ?? 'unavailable';
   const intradayPulse = snapshot.intraday?.pulse;
   const latestIntradayChange = intradayPulse?.intradayChange ?? intradayPulse?.latest1hChange;
   const intradayRows: MetricRow[] = [
@@ -867,11 +900,11 @@ const VietnamCompanyResearchPage: React.FC = () => {
             <p className="text-sm text-secondary-text">SSI intraday unavailable.</p>
           )}
         </SectionShell>
-        <SectionShell title="SSI realtime" source={snapshot.realtimeStatus?.source ?? 'SSI realtime contract'} status={snapshot.realtimeStatus?.status ?? 'unavailable'}>
+        <SectionShell title="SSI realtime" source={snapshot.realtimeStatus?.source ?? 'SSI realtime contract'} status={realtimePanelStatus}>
           {hasRealtimeData ? (
             <MetricGrid rows={realtimeRows} />
           ) : (
-            <p className="text-sm text-secondary-text">SSI realtime unavailable. Daily SSI data is still available.</p>
+            <p className="text-sm text-secondary-text">{streamLifecycleCopy(realtimeStreamState, 'SSI realtime unavailable. Daily SSI data is still available.')}</p>
           )}
         </SectionShell>
         <OrderBookLadder
@@ -881,7 +914,7 @@ const VietnamCompanyResearchPage: React.FC = () => {
           ceilingPrice={ceilingPrice}
           floorPrice={floorPrice}
         />
-        <SectionShell title="SSI trade tape" source={snapshot.tradeTapeStatus?.source ?? 'SSI trade-tape contract'} status={hasTradeTapeRows ? 'ok' : tradeTapeWarmupPending ? 'loading' : snapshot.tradeTapeStatus?.status ?? 'unavailable'}>
+        <SectionShell title="SSI trade tape" source={snapshot.tradeTapeStatus?.source ?? 'SSI trade-tape contract'} status={tradeTapePanelStatus}>
           {hasTradeTapeRows ? (
             <>
               <MetricGrid rows={tradeTapeRows} />
@@ -895,7 +928,7 @@ const VietnamCompanyResearchPage: React.FC = () => {
           ) : tradeTapeWarmupPending ? (
             <p className="text-sm text-secondary-text">Loading SSI trade tape...</p>
           ) : (
-            <p className="text-sm text-secondary-text">SSI trade tape unavailable.</p>
+            <p className="text-sm text-secondary-text">{streamLifecycleCopy(tradeTapeStreamState, 'SSI trade tape unavailable.')}</p>
           )}
         </SectionShell>
       </section>

@@ -1573,6 +1573,10 @@ const optionalLiveStatusText = (
 ) => {
   const status = normalizedStatus(block?.status);
   const reasonCode = optionalLiveReasonCode(block);
+  const streamState = normalizedStatus(
+    optionalStatusValue(block, 'streamState')
+    || optionalStatusValue(block, 'stream_state'),
+  );
   const copyByReason: Record<string, string> = {
     cadence_mismatch: 'SSI IntradayOhlc cadence differs from the requested timeframe.',
     unavailable_rate_limited: 'SSI IntradayOhlc is rate-limited by the provider.',
@@ -1607,6 +1611,11 @@ const optionalLiveStatusText = (
       ? 'SSI trade tape unavailable.'
       : 'This optional live section is not implemented.',
   };
+  if (streamState === 'recovering' || streamState === 'awaiting_subscription') {
+    return 'Reconnecting — showing last known data when available.';
+  }
+  if (streamState === 'stale') return 'Stale — showing last known data.';
+  if (streamState === 'closed') return 'Market closed — showing last known data.';
   if (reasonCode && copyByReason[reasonCode]) return copyByReason[reasonCode];
   const safeMessage = optionalLiveMessage(block);
   if (safeMessage) return safeMessage;

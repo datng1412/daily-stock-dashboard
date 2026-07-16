@@ -477,4 +477,10 @@ The delayed SSI 1-minute chart is operated as a bounded polling product, not a l
 
 The canonical intraday operational path is `GET /api/v1/stocks/vn/intraday-chart/health`; the older `GET /api/v1/stocks/vn/observability` path remains a separate dashboard-wide diagnostics product. Candle display time is minute start, newest-bar age uses the accepted raw SSI event time, and provider-snapshot age uses the successful fetch time.
 
+## Phase 4.11F - SSI Streaming Lifecycle and Subscription Recovery
+
+The optional SSI stream runtime has one application-owned, process-local lifecycle. Disconnects keep real last-known X, X-QUOTE, X-TRADE, F, R, and MI data visible as stale/recovering where available; approved startup subscriptions are restored through the same manager, and a context is ready only after a fresh event from the new connection generation. User-facing stream sections distinguish reconnecting, stale, market-closed, and unavailable states without changing daily-row validity.
+
+The dashboard-wide observability route exposes sanitized worker-local transport and context status and never starts or subscribes a stream. Multi-worker coordination is not included, continuity across disconnects is not guaranteed, and X-TRADE remains blocked from candle aggregation. DailyOhlc remains the daily/latest-price source and IntradayOhlc remains the only 1m chart source.
+
 The user experience has one market-data schedule, a separate request-free countdown, explicit Force Refresh, stable bars during refresh, semantic Today rollover, and deterministic pre-open/lunch/afternoon/ATC/post-close/visibility behavior. User-facing states distinguish updating, delayed, stale, expected no-data, and SSI unavailability without showing provider exception text. SSI IntradayOhlc remains the sole 1m source, SSI DailyOhlc remains D1/latest-price source, and X-TRADE, external providers, higher intervals, filler candles, and TradingView data ingestion remain excluded.

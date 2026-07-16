@@ -708,7 +708,9 @@ def get_vietnam_index_components(
     summary="Vietnam dashboard fetch observability",
     description="Return process-local Vietnam provider counters without triggering provider requests.",
 )
-def get_vietnam_observability() -> VietnamObservabilityResponse:
+def get_vietnam_observability(response: Response = None) -> VietnamObservabilityResponse:
+    if response is not None:
+        response.headers["Cache-Control"] = "no-store"
     return VietnamObservabilityResponse(**vietnam_observability_snapshot())
 
 

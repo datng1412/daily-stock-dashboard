@@ -11,6 +11,8 @@ from __future__ import annotations
 import contextlib
 import importlib
 import io
+import logging
+import random
 import re
 import threading
 import time
@@ -20,6 +22,9 @@ from types import SimpleNamespace
 from typing import Any, Callable, Dict, Iterable, List, Optional, Protocol, Sequence, Tuple
 
 from data_provider.ssi_streaming_snapshot_store import SNAPSHOT_SCHEMA_VERSION, SsiStreamingSnapshotStore
+
+
+logger = logging.getLogger(__name__)
 
 
 SSI_STREAMING_REALTIME_DISABLED_REASON = "SSI streaming realtime manager disabled."
@@ -71,6 +76,28 @@ RUNTIME_RECONNECTING = "reconnecting"
 RUNTIME_ERRORED = "errored"
 RUNTIME_STOPPED = "stopped"
 RUNTIME_SHUTDOWN = "shutdown"
+
+TRANSPORT_STOPPED = "stopped"
+TRANSPORT_CONNECTING = "connecting"
+TRANSPORT_CONNECTED = "connected"
+TRANSPORT_RECONNECTING = "reconnecting"
+TRANSPORT_CLOSING = "closing"
+TRANSPORT_CLOSED = "closed"
+TRANSPORT_FAILED = "failed"
+
+CONTEXT_DISABLED = "disabled"
+CONTEXT_AWAITING_SUBSCRIPTION = "awaiting_subscription"
+CONTEXT_RECOVERING = "recovering"
+CONTEXT_READY = "ready"
+CONTEXT_STALE = "stale"
+CONTEXT_UNAVAILABLE = "unavailable"
+CONTEXT_CLOSED = "closed"
+CONTEXT_FAILED = "failed"
+
+STREAM_CONTEXTS = ("x", "x_quote", "x_trade", "f", "r", "mi")
+RETRYABLE_STREAM_ERROR_CLASSES = {"network_closed", "timeout", "dns", "tls", "sdk_error", "unknown"}
+NON_RETRYABLE_STREAM_ERROR_CLASSES = {"authentication", "authorization", "configuration", "subscription_failure"}
+DEFAULT_RECONNECT_BACKOFF_SEQUENCE = (2, 5, 10, 20, 30)
 
 
 def vietnam_market_session_from_epoch(epoch_seconds: float) -> Dict[str, Any]:
@@ -142,7 +169,16 @@ def normalize_trade_side(value: Any) -> Optional[str]:
 class SsiRealtimeStreamClient(Protocol):
     """Small stream-client interface used by the background manager."""
 
-    def start(self, on_message: Callable[[Any], None], on_error: Callable[[Any], None], channels: Sequence[str]) -> None:
+    def start(
+        self,
+        on_message: Callable[[Any], None],
+        on_error: Callable[[Any], None],
+        channels: Sequence[str],
+        *,
+        on_open: Optional[Callable[[str], None]] = None,
+        on_close: Optional[Callable[[str], None]] = None,
+        on_subscription_error: Optional[Callable[[str, Any], None]] = None,
+    ) -> None:
         """Start streaming for symbol-scoped channels."""
 
     def stop(self) -> None:
@@ -159,7 +195,16 @@ class DisabledOfficialSsiRealtimeStreamClient:
     client.
     """
 
-    def start(self, on_message: Callable[[Any], None], on_error: Callable[[Any], None], channels: Sequence[str]) -> None:
+    def start(
+        self,
+        on_message: Callable[[Any], None],
+        on_error: Callable[[Any], None],
+        channels: Sequence[str],
+        *,
+        on_open: Optional[Callable[[str], None]] = None,
+        on_close: Optional[Callable[[str], None]] = None,
+        on_subscription_error: Optional[Callable[[str, Any], None]] = None,
+    ) -> None:
         raise RuntimeError(SSI_STREAMING_REALTIME_LIVE_ADAPTER_DISABLED_REASON)
 
     def stop(self) -> None:
@@ -206,7 +251,16 @@ class OfficialSsiRealtimeStreamClient:
         self._streams: List[Any] = []
         self._lock = threading.RLock()
 
-    def start(self, on_message: Callable[[Any], None], on_error: Callable[[Any], None], channels: Sequence[str]) -> None:
+    def start(
+        self,
+        on_message: Callable[[Any], None],
+        on_error: Callable[[Any], None],
+        channels: Sequence[str],
+        *,
+        on_open: Optional[Callable[[str], None]] = None,
+        on_close: Optional[Callable[[str], None]] = None,
+        on_subscription_error: Optional[Callable[[str, Any], None]] = None,
+    ) -> None:
         if not self.consumer_id or not self.consumer_secret or not self.base_url or not self.stream_url:
             raise RuntimeError(SSI_STREAMING_REALTIME_CONFIG_INCOMPLETE_REASON)
         safe_channels = [str(channel or "").strip() for channel in channels or [] if str(channel or "").strip()]
@@ -229,17 +283,35 @@ class OfficialSsiRealtimeStreamClient:
             stream_url=self.stream_url,
         )
         started_streams: List[Any] = []
-        try:
-            for channel in safe_channels:
+        failures: List[Exception] = []
+        for channel in safe_channels:
+            stream: Any = None
+            try:
                 client = client_module.MarketDataClient(config)
-                stream = stream_module.MarketDataStream(config, client)
+                try:
+                    stream = stream_module.MarketDataStream(
+                        config,
+                        client,
+                        on_close=(lambda selected=channel: on_close(selected)) if on_close else None,
+                        on_open=(lambda selected=channel: on_open(selected)) if on_open else None,
+                    )
+                except TypeError:
+                    # Older/fake SDK surfaces may not expose lifecycle constructor callbacks.
+                    stream = stream_module.MarketDataStream(config, client)
                 with contextlib.redirect_stdout(io.StringIO()):
                     stream.start(on_message, on_error, channel)
+                if on_open is not None:
+                    self._attach_open_callback(stream, lambda selected=channel: on_open(selected))
                 started_streams.append(stream)
-        except Exception:
-            for stream in started_streams:
-                self._stop_stream(stream)
-            raise
+            except Exception as exc:
+                if stream is not None:
+                    with contextlib.suppress(Exception):
+                        self._stop_stream(stream)
+                failures.append(exc)
+                if on_subscription_error is not None:
+                    on_subscription_error(channel, exc)
+        if not started_streams and failures:
+            raise failures[0]
         with self._lock:
             self._streams.extend(started_streams)
 
@@ -269,6 +341,28 @@ class OfficialSsiRealtimeStreamClient:
                 connection.close()
             except AttributeError:
                 return
+
+    @staticmethod
+    def _attach_open_callback(stream: Any, callback: Callable[[], None]) -> None:
+        """Chain lifecycle evidence after the SDK-owned SwitchChannels callback.
+
+        SSI's SDK replaces its constructor-time open callback with the channel
+        switch callback during ``start``. Chaining through the connection's
+        callback API preserves that subscription behavior without modifying the
+        installed package.
+        """
+        connection = getattr(stream, "connection", None)
+        transport = getattr(connection, "_Connection__transport", None)
+        existing = getattr(transport, "_on_open", None)
+        registrar = getattr(connection, "on_open_callback", None)
+        if not callable(registrar) or not callable(existing):
+            return
+
+        def combined() -> None:
+            existing()
+            callback()
+
+        registrar(combined)
 
 
 @dataclass(frozen=True)
@@ -489,6 +583,55 @@ def build_streaming_channels(
             channels.append(channel)
             seen.add(channel)
     return channels
+
+
+def stream_context_for_channel(channel: Any) -> Optional[str]:
+    text = str(channel or "").strip().upper()
+    if text.startswith(f"{ORDER_BOOK_CHANNEL_PREFIX}:"):
+        return "x_quote"
+    if text.startswith(f"{TRADE_TAPE_CHANNEL_PREFIX}:"):
+        return "x_trade"
+    if text.startswith(f"{FOREIGN_ROOM_CHANNEL_PREFIX}:"):
+        return "r"
+    if text.startswith(f"{SESSION_STATUS_CHANNEL_PREFIX}:"):
+        return "f"
+    if text.startswith(f"{MARKET_INDEX_CHANNEL_PREFIX}:"):
+        return "mi"
+    if text.startswith("X:"):
+        return "x"
+    return None
+
+
+def classify_streaming_error(error: Any) -> str:
+    """Map transport/provider failures to bounded, credential-safe classes."""
+    if isinstance(error, TimeoutError):
+        return "timeout"
+    text = str(error or "").lower()
+    name = type(error).__name__.lower()
+    combined = f"{name} {text}"
+    if any(marker in combined for marker in ("401", "unauthorized", "authentication", "invalid token")):
+        return "authentication"
+    if any(marker in combined for marker in ("403", "forbidden", "not entitled", "permission denied")):
+        return "authorization"
+    if any(marker in combined for marker in ("configuration incomplete", "config incomplete", "missing credential", "at least one streaming channel")):
+        return "configuration"
+    if any(marker in combined for marker in ("subscription", "switchchannels", "invalid channel")):
+        return "subscription_failure"
+    if any(marker in combined for marker in ("certificate", "ssl", "tls")):
+        return "tls"
+    if any(marker in combined for marker in ("name or service not known", "getaddrinfo", "dns")):
+        return "dns"
+    if any(marker in combined for marker in ("timeout", "timed out")):
+        return "timeout"
+    if any(marker in combined for marker in ("connection closed", "connection lost", "remote host", "websocketconnectionclosed", "broken pipe", "connection reset")):
+        return "network_closed"
+    if isinstance(error, (ConnectionError, OSError)):
+        return "network_closed"
+    if "shutdown" in combined or "stopped" in combined:
+        return "shutdown"
+    if isinstance(error, Exception):
+        return "sdk_error"
+    return "unknown"
 
 
 class RealtimeSnapshotCache:
@@ -1236,6 +1379,7 @@ class SsiStreamingRealtimeManager:
         session_status_enabled: bool = True,
         snapshot_store: Optional[SsiStreamingSnapshotStore] = None,
         time_func: Callable[[], float] = time.time,
+        jitter_func: Optional[Callable[[float], float]] = None,
     ) -> None:
         self.enabled = bool(enabled)
         self.cache = cache or RealtimeSnapshotCache(time_func=time_func)
@@ -1266,6 +1410,7 @@ class SsiStreamingRealtimeManager:
         self.session_status_enabled = bool(session_status_enabled)
         self._snapshot_store = snapshot_store
         self._time_func = time_func
+        self._jitter_func = jitter_func or (lambda delay: random.uniform(-0.2 * delay, 0.2 * delay))
         self._lock = threading.RLock()
         self._client: Optional[SsiRealtimeStreamClient] = None
         self._requested_symbols: List[str] = []
@@ -1301,6 +1446,147 @@ class SsiStreamingRealtimeManager:
         self._last_reconnect_error: Optional[str] = None
         self._reconnect_in_progress = False
         self._shutdown_requested = False
+        self._transport_state = TRANSPORT_STOPPED if self.enabled else TRANSPORT_CLOSED
+        self._connected = False
+        self._generation = 0
+        self._start_count = 0
+        self._connect_count = 0
+        self._disconnect_count = 0
+        self._reconnect_scheduled_count = 0
+        self._reconnect_tasks_created = 0
+        self._reconnect_success_count = 0
+        self._reconnect_failure_count = 0
+        self._current_reconnect_attempt_number = 0
+        self._stale_generation_callbacks_ignored = 0
+        self._subscription_restore_attempt_count = 0
+        self._subscription_restore_success_count = 0
+        self._subscription_restore_failure_count = 0
+        self._readiness_transition_count = 0
+        self._shutdown_count = 0
+        self._last_connected_at: Optional[str] = None
+        self._last_disconnected_at: Optional[str] = None
+        self._last_transition_at: Optional[str] = None
+        self._last_error_class: Optional[str] = None
+        self._retry_blocked = False
+        self._opened_channels: set[str] = set()
+        self._suppressed_close_generations: set[int] = set()
+        self._reconnect_success_generations: set[int] = set()
+        self._session_date = self._vietnam_date_from_epoch(float(self._time_func()))
+        self._backoff_sequence = self._build_backoff_sequence()
+        self._backoff_index = 0
+        self._context_lifecycle = self._initial_context_lifecycle()
+
+    def _initial_context_lifecycle(self) -> Dict[str, Dict[str, Any]]:
+        enabled = {
+            "x": True,
+            "x_quote": self.order_book_enabled,
+            "x_trade": self.trade_tape_enabled,
+            "f": self.session_status_enabled,
+            "r": self.foreign_room_enabled,
+            "mi": self.market_index_enabled,
+        }
+        return {
+            context: {
+                "state": CONTEXT_UNAVAILABLE if is_enabled else CONTEXT_DISABLED,
+                "enabled": is_enabled,
+                "subscribed_generation": None,
+                "last_event_generation": None,
+                "last_event_at": None,
+                "last_event_epoch": None,
+                "last_fresh_event_at": None,
+                "accepted_event_count": 0,
+                "ignored_old_generation_event_count": 0,
+                "subscription_restoration_count": 0,
+                "subscription_failure_count": 0,
+                "stale_reason": None,
+                "last_error_class": None,
+            }
+            for context, is_enabled in enabled.items()
+        }
+
+    def _build_backoff_sequence(self) -> Tuple[float, ...]:
+        candidates = (self.reconnect_initial_delay_seconds, 5, 10, 20, self.reconnect_max_delay_seconds)
+        sequence: List[float] = []
+        for value in candidates:
+            delay = float(min(max(self.reconnect_initial_delay_seconds, value), self.reconnect_max_delay_seconds))
+            if not sequence or delay > sequence[-1]:
+                sequence.append(delay)
+        return tuple(sequence or [float(self.reconnect_initial_delay_seconds)])
+
+    @staticmethod
+    def _vietnam_date_from_epoch(epoch_seconds: float) -> str:
+        return datetime.fromtimestamp(epoch_seconds, timezone.utc).astimezone(VIETNAM_MARKET_TIMEZONE).date().isoformat()
+
+    @staticmethod
+    def _event_trading_date(row: Dict[str, Any]) -> Optional[str]:
+        value = row.get("trading_date") or row.get("TradingDate") or row.get("date")
+        text = str(value or "").strip()
+        if not text:
+            return None
+        for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y"):
+            try:
+                return datetime.strptime(text[:10], fmt).date().isoformat()
+            except ValueError:
+                continue
+        return None
+
+    def _transition_transport_locked(self, state: str) -> None:
+        if self._transport_state == state:
+            return
+        self._transport_state = state
+        self._last_transition_at = _utc_iso_from_epoch(float(self._time_func()))
+
+    def _transition_context_locked(self, context: str, state: str, *, stale_reason: Optional[str] = None) -> None:
+        lifecycle = self._context_lifecycle.get(context)
+        if lifecycle is None or not lifecycle["enabled"]:
+            return
+        if lifecycle["state"] != state:
+            lifecycle["state"] = state
+            self._readiness_transition_count += 1
+        lifecycle["stale_reason"] = stale_reason
+
+    def _reset_contexts_for_generation_locked(self, generation: int, channels: Sequence[str]) -> None:
+        self._opened_channels.clear()
+        contexts_present = {stream_context_for_channel(channel) for channel in channels}
+        for context, lifecycle in self._context_lifecycle.items():
+            if not lifecycle["enabled"]:
+                lifecycle["state"] = CONTEXT_DISABLED
+                continue
+            lifecycle["subscribed_generation"] = None
+            lifecycle["last_error_class"] = None
+            if context in contexts_present:
+                self._transition_context_locked(context, CONTEXT_AWAITING_SUBSCRIPTION)
+            else:
+                self._transition_context_locked(context, CONTEXT_UNAVAILABLE, stale_reason="not_subscribed")
+
+    def _ignore_stale_callback_locked(self, generation: int, *, context: Optional[str] = None) -> None:
+        self._stale_generation_callbacks_ignored += 1
+        if context and context in self._context_lifecycle:
+            self._context_lifecycle[context]["ignored_old_generation_event_count"] += 1
+
+    def _context_channels_locked(self, context: str) -> List[str]:
+        return [channel for channel in self._channels if stream_context_for_channel(channel) == context]
+
+    def _mark_context_subscription_open_locked(self, context: str) -> None:
+        lifecycle = self._context_lifecycle[context]
+        expected = self._context_channels_locked(context)
+        opened = [channel for channel in expected if channel in self._opened_channels]
+        if expected and len(opened) == len(expected):
+            if lifecycle["subscribed_generation"] != self._generation:
+                lifecycle["subscribed_generation"] = self._generation
+                lifecycle["subscription_restoration_count"] += 1
+                self._subscription_restore_success_count += len(expected)
+            self._transition_context_locked(context, CONTEXT_RECOVERING)
+
+    def _mark_legacy_client_started_locked(self) -> None:
+        """Record best available evidence for old test/client interfaces."""
+        self._connected = True
+        self._connect_count += 1
+        self._last_connected_at = _utc_iso_from_epoch(float(self._time_func()))
+        self._transition_transport_locked(TRANSPORT_CONNECTED)
+        self._opened_channels.update(self._channels)
+        for context in STREAM_CONTEXTS:
+            self._mark_context_subscription_open_locked(context)
 
     def set_snapshot_store(self, store: Optional[SsiStreamingSnapshotStore]) -> None:
         """Attach the lifecycle-owned store; request handlers never call it."""
@@ -1390,15 +1676,12 @@ class SsiStreamingRealtimeManager:
         with self._lock:
             if not self.enabled:
                 self._state = MANAGER_DISABLED
+                self._transition_transport_locked(TRANSPORT_CLOSED)
                 return self.status()
             if self._shutdown_requested:
                 return self.status()
-            if self._state == MANAGER_RUNNING:
+            if self._client is not None and self._state in {MANAGER_STARTING, MANAGER_RUNNING}:
                 return self.status()
-            self._state = MANAGER_STARTING
-            self._latest_error = None
-            self._requested_symbols = normalized_symbols
-            self._channels = []
 
         try:
             channels = build_streaming_channels(
@@ -1415,10 +1698,81 @@ class SsiStreamingRealtimeManager:
                 raise ValueError("At least one streaming symbol is required.")
             if self._client_factory is None:
                 raise RuntimeError(SSI_STREAMING_REALTIME_LIVE_ADAPTER_DISABLED_REASON)
+            with self._lock:
+                if self._shutdown_requested:
+                    return self.status()
+                self._generation += 1
+                generation = self._generation
+                self._start_count += 1
+                self._state = MANAGER_STARTING
+                self._latest_error = None
+                self._last_error_class = None
+                self._requested_symbols = normalized_symbols
+                self._channels = list(channels)
+                self._connected = False
+                self._retry_blocked = False
+                self._transition_transport_locked(
+                    TRANSPORT_RECONNECTING if generation > 1 else TRANSPORT_CONNECTING
+                )
+                self._reset_contexts_for_generation_locked(generation, channels)
+                self._subscription_restore_attempt_count += len(channels)
+            logger.info(
+                "vn_stream_start transport=ssi_market_data_channel_cohort generation=%s subscription_count=%s",
+                generation,
+                len(channels),
+            )
             client = self._client_factory()
-            client.start(self.handle_message, self.handle_error, channels)
+            used_lifecycle_callbacks = True
+            try:
+                client.start(
+                    lambda message, owned_generation=generation: self.handle_message(
+                        message,
+                        generation=owned_generation,
+                    ),
+                    lambda error, owned_generation=generation: self.handle_error(
+                        error,
+                        generation=owned_generation,
+                    ),
+                    channels,
+                    on_open=lambda channel, owned_generation=generation: self.handle_transport_open(
+                        channel,
+                        generation=owned_generation,
+                    ),
+                    on_close=lambda channel, owned_generation=generation: self.handle_transport_close(
+                        channel,
+                        generation=owned_generation,
+                    ),
+                    on_subscription_error=lambda channel, error, owned_generation=generation: self.handle_subscription_error(
+                        channel,
+                        error,
+                        generation=owned_generation,
+                    ),
+                )
+            except TypeError as exc:
+                if "unexpected keyword" not in str(exc) and "positional argument" not in str(exc):
+                    raise
+                used_lifecycle_callbacks = False
+                client.start(
+                    lambda message, owned_generation=generation: self.handle_message(
+                        message,
+                        generation=owned_generation,
+                    ),
+                    lambda error, owned_generation=generation: self.handle_error(
+                        error,
+                        generation=owned_generation,
+                    ),
+                    channels,
+                )
         except Exception as exc:
             self._record_error(exc, set_errored=True)
+            error_class = classify_streaming_error(exc)
+            with self._lock:
+                if error_class in NON_RETRYABLE_STREAM_ERROR_CLASSES:
+                    self._retry_blocked = True
+                    for context, lifecycle in self._context_lifecycle.items():
+                        if lifecycle["enabled"]:
+                            lifecycle["last_error_class"] = error_class
+                            self._transition_context_locked(context, CONTEXT_FAILED, stale_reason=error_class)
             return self.status()
 
         with self._lock:
@@ -1436,8 +1790,9 @@ class SsiStreamingRealtimeManager:
                 self._idle_since_epoch = None
                 self._next_reconnect_at = None
                 self._next_reconnect_epoch = None
-                self._reconnect_backoff_seconds = self.reconnect_initial_delay_seconds
                 self._last_reconnect_error = None
+                if not used_lifecycle_callbacks:
+                    self._mark_legacy_client_started_locked()
         if stop_after_start:
             try:
                 client.stop()
@@ -1466,6 +1821,8 @@ class SsiStreamingRealtimeManager:
         with self._lock:
             client = self._client
             self._client = None
+            self._suppressed_close_generations.add(self._generation)
+            self._transition_transport_locked(TRANSPORT_CLOSING)
             self._next_reconnect_at = None
             self._next_reconnect_epoch = None
         if client is not None:
@@ -1480,11 +1837,24 @@ class SsiStreamingRealtimeManager:
             elif self._state != MANAGER_ERRORED:
                 self._state = MANAGER_STOPPED
                 self._channels = []
+            self._connected = False
+            self._transition_transport_locked(TRANSPORT_CLOSED if self._shutdown_requested else TRANSPORT_STOPPED)
+            for context, lifecycle in self._context_lifecycle.items():
+                if lifecycle["enabled"]:
+                    self._transition_context_locked(
+                        context,
+                        CONTEXT_CLOSED if self._shutdown_requested else CONTEXT_STALE,
+                        stale_reason="shutdown" if self._shutdown_requested else "stopped",
+                    )
             return self.status()
 
-    def handle_message(self, message: Any) -> None:
+    def handle_message(self, message: Any, *, generation: Optional[int] = None) -> None:
         with self._lock:
-            if self._state != MANAGER_RUNNING:
+            owned_generation = self._generation if generation is None else int(generation)
+            if owned_generation != self._generation or self._shutdown_requested:
+                self._ignore_stale_callback_locked(owned_generation)
+                return
+            if self._state not in {MANAGER_STARTING, MANAGER_RUNNING}:
                 return
             requested_symbols = list(self._requested_symbols)
             requested_market_indexes = list(self.market_index_codes)
@@ -1509,19 +1879,38 @@ class SsiStreamingRealtimeManager:
                 and not self._is_foreign_room_row(row)
                 and not self._is_market_index_row(row)
             ]
-            written = self.cache.put_rows(snapshot_rows)
-            order_book_written = self.order_book_cache.put_rows(order_book_rows)
-            foreign_room_written = self.foreign_room_cache.put_rows(foreign_room_rows)
-            market_index_written = self.market_index_cache.put_rows(market_index_rows)
-            trade_written = self.trade_tape_cache.put_rows(
-                self._trade_events_from_streaming_rows(snapshot_rows)
-            )
-            session_written = self.session_status_cache.put_rows(session_rows)
-            if any((written, order_book_written, foreign_room_written, market_index_written, trade_written, session_written)):
-                store = self._snapshot_store
-                if store is not None and not self._shutdown_requested:
-                    store.mark_dirty()
+            rows_by_context = {
+                "f": session_rows,
+                "x_quote": order_book_rows,
+                "r": foreign_room_rows,
+                "mi": market_index_rows,
+                "x_trade": [
+                    row
+                    for row in snapshot_rows
+                    if str(row.get("stream_data_type") or row.get("r_type") or "").strip().upper() == TRADE_TAPE_CHANNEL_PREFIX
+                ],
+                "x": [
+                    row
+                    for row in snapshot_rows
+                    if str(row.get("stream_data_type") or row.get("r_type") or "").strip().upper() != TRADE_TAPE_CHANNEL_PREFIX
+                ],
+            }
             with self._lock:
+                if owned_generation != self._generation or self._shutdown_requested:
+                    self._ignore_stale_callback_locked(owned_generation)
+                    return
+                written = self.cache.put_rows(snapshot_rows)
+                order_book_written = self.order_book_cache.put_rows(order_book_rows)
+                foreign_room_written = self.foreign_room_cache.put_rows(foreign_room_rows)
+                market_index_written = self.market_index_cache.put_rows(market_index_rows)
+                trade_written = self.trade_tape_cache.put_rows(
+                    self._trade_events_from_streaming_rows(snapshot_rows)
+                )
+                session_written = self.session_status_cache.put_rows(session_rows)
+                if any((written, order_book_written, foreign_room_written, market_index_written, trade_written, session_written)):
+                    store = self._snapshot_store
+                    if store is not None and not self._shutdown_requested:
+                        store.mark_dirty()
                 self._messages_observed += 1
                 self._parser_rows_observed += written
                 self._order_book_rows_observed += order_book_written
@@ -1535,8 +1924,145 @@ class SsiStreamingRealtimeManager:
                 self._is_idle = False
                 self._idle_since = None
                 self._idle_since_epoch = None
+                self._connected = True
+                self._transition_transport_locked(TRANSPORT_CONNECTED)
+                for context, context_rows in rows_by_context.items():
+                    if not context_rows:
+                        continue
+                    lifecycle = self._context_lifecycle[context]
+                    lifecycle["accepted_event_count"] += len(context_rows)
+                    lifecycle["last_event_generation"] = owned_generation
+                    lifecycle["last_event_at"] = self._last_message_at
+                    lifecycle["last_event_epoch"] = now
+                    event_is_current_session = any(
+                        self._event_trading_date(row) in {None, self._session_date}
+                        for row in context_rows
+                    )
+                    if (
+                        event_is_current_session
+                        and lifecycle["subscribed_generation"] == owned_generation
+                    ):
+                        became_ready = lifecycle["state"] != CONTEXT_READY
+                        lifecycle["last_fresh_event_at"] = self._last_message_at
+                        self._transition_context_locked(context, CONTEXT_READY)
+                        self._confirm_generation_recovery_locked(owned_generation)
+                        if became_ready:
+                            logger.info(
+                                "vn_stream_context_ready transport=ssi_market_data_channel_cohort generation=%s context=%s fresh_event=true",
+                                owned_generation,
+                                context,
+                            )
         except Exception as exc:
             self._record_error(exc, set_errored=False)
+
+    def handle_transport_open(self, channel: str, *, generation: int) -> None:
+        context = stream_context_for_channel(channel)
+        first_open_for_generation = False
+        with self._lock:
+            if generation != self._generation or self._shutdown_requested:
+                self._ignore_stale_callback_locked(generation, context=context)
+                return
+            first_open_for_generation = not self._connected
+            self._connected = True
+            self._opened_channels.add(str(channel))
+            if first_open_for_generation:
+                self._connect_count += 1
+                self._last_connected_at = _utc_iso_from_epoch(float(self._time_func()))
+            self._transition_transport_locked(TRANSPORT_CONNECTED)
+            if context:
+                self._mark_context_subscription_open_locked(context)
+        if first_open_for_generation:
+            logger.info(
+                "vn_stream_connected transport=ssi_market_data_channel_cohort generation=%s",
+                generation,
+            )
+
+    def handle_transport_close(self, channel: str, *, generation: int) -> None:
+        context = stream_context_for_channel(channel)
+        with self._lock:
+            if generation != self._generation or self._shutdown_requested:
+                self._ignore_stale_callback_locked(generation, context=context)
+                return
+            if generation in self._suppressed_close_generations or self._reconnect_in_progress:
+                return
+            should_log = self._connected or self._next_reconnect_epoch is None
+            self._disconnect_count += 1
+            self._connected = False
+            self._last_disconnected_at = _utc_iso_from_epoch(float(self._time_func()))
+            market_session = vietnam_market_session_from_epoch(float(self._time_func()))
+            active = bool(market_session["market_session_active"])
+            self._transition_transport_locked(TRANSPORT_RECONNECTING if active else TRANSPORT_CLOSED)
+            for lifecycle_context, lifecycle in self._context_lifecycle.items():
+                if not lifecycle["enabled"]:
+                    continue
+                state = CONTEXT_RECOVERING if active else CONTEXT_CLOSED
+                if lifecycle["last_event_at"]:
+                    state = CONTEXT_STALE
+                self._transition_context_locked(
+                    lifecycle_context,
+                    state,
+                    stale_reason="transport_disconnected" if active else "market_closed",
+                )
+            if active:
+                self._schedule_reconnect_locked(reason="transport_disconnected", from_now=True)
+        if should_log:
+            logger.warning(
+                "vn_stream_disconnected transport=ssi_market_data_channel_cohort generation=%s context=%s session=%s",
+                generation,
+                context or "unknown",
+                market_session["market_session"],
+            )
+
+    def handle_subscription_error(self, channel: str, error: Any, *, generation: int) -> None:
+        context = stream_context_for_channel(channel)
+        error_class = classify_streaming_error(error)
+        with self._lock:
+            if generation != self._generation or self._shutdown_requested:
+                self._ignore_stale_callback_locked(generation, context=context)
+                return
+            self._subscription_restore_failure_count += 1
+            if context and context in self._context_lifecycle:
+                lifecycle = self._context_lifecycle[context]
+                lifecycle["subscription_failure_count"] += 1
+                lifecycle["last_error_class"] = error_class
+                self._transition_context_locked(
+                    context,
+                    CONTEXT_FAILED,
+                    stale_reason="subscription_failure",
+                )
+        logger.warning(
+            "vn_stream_subscription_restore transport=ssi_market_data_channel_cohort generation=%s context=%s state=failed error_class=%s",
+            generation,
+            context or "unknown",
+            error_class,
+        )
+
+    def _confirm_generation_recovery_locked(self, generation: int) -> None:
+        if generation <= 1 or generation in self._reconnect_success_generations:
+            return
+        self._reconnect_success_generations.add(generation)
+        self._reconnect_success_count += 1
+        self._current_reconnect_attempt_number = 0
+        self._backoff_index = 0
+        self._reconnect_backoff_seconds = self.reconnect_initial_delay_seconds
+        self._next_reconnect_at = None
+        self._next_reconnect_epoch = None
+        self._last_reconnect_error = None
+
+    def _context_status_metadata(self, context: str) -> Dict[str, Any]:
+        with self._lock:
+            lifecycle = self._context_lifecycle[context]
+            last_event_epoch = lifecycle.get("last_event_epoch")
+            return {
+                "stream_state": lifecycle["state"],
+                "last_event_at": lifecycle["last_event_at"],
+                "event_age_seconds": (
+                    max(0, int(float(self._time_func()) - float(last_event_epoch)))
+                    if last_event_epoch is not None
+                    else None
+                ),
+                "generation": self._generation,
+            }
 
     @staticmethod
     def _is_session_status_row(row: Dict[str, Any]) -> bool:
@@ -1597,8 +2123,29 @@ class SsiStreamingRealtimeManager:
             events.append(event)
         return events
 
-    def handle_error(self, error: Any) -> None:
+    def handle_error(self, error: Any, *, generation: Optional[int] = None) -> None:
+        error_class = classify_streaming_error(error)
+        with self._lock:
+            owned_generation = self._generation if generation is None else int(generation)
+            if owned_generation != self._generation or self._shutdown_requested:
+                self._ignore_stale_callback_locked(owned_generation)
+                return
         self._record_error(error, set_errored=True)
+        with self._lock:
+            self._last_error_class = error_class
+            self._connected = False
+            if error_class in NON_RETRYABLE_STREAM_ERROR_CLASSES:
+                self._retry_blocked = True
+                self._transition_transport_locked(TRANSPORT_FAILED)
+                for context, lifecycle in self._context_lifecycle.items():
+                    if lifecycle["enabled"]:
+                        lifecycle["last_error_class"] = error_class
+                        self._transition_context_locked(context, CONTEXT_FAILED, stale_reason=error_class)
+                return
+            market_session = vietnam_market_session_from_epoch(float(self._time_func()))
+            if market_session["market_session_active"]:
+                self._transition_transport_locked(TRANSPORT_RECONNECTING)
+                self._schedule_reconnect_locked(reason="stream_error", from_now=True)
 
     def snapshot(self, symbols: Iterable[str]) -> Dict[str, Any]:
         requested = normalize_streaming_symbols(symbols)
@@ -1610,11 +2157,13 @@ class SsiStreamingRealtimeManager:
             "attempted_endpoints": [],
             "candidate_endpoints": [],
             "rest_status": "unsupported",
+            **self._context_status_metadata("x"),
             "streaming_data_types": ["X"],
         }
         status = self.status()
         manager_state = status["manager_state"]
         diagnostics = dict(status)
+        diagnostics.update(self._context_status_metadata("x"))
         diagnostics["cache_ttl_seconds"] = self.cache.ttl_seconds
 
         if not self.enabled:
@@ -1722,6 +2271,7 @@ class SsiStreamingRealtimeManager:
         requested_symbol = str(symbol or "").strip().upper()
         status = self.status()
         diagnostics = dict(status)
+        diagnostics.update(self._context_status_metadata("x_quote"))
         diagnostics.update(
             {
                 "streaming_status": "order_book_buffer",
@@ -1741,6 +2291,7 @@ class SsiStreamingRealtimeManager:
             "attempted_endpoints": [],
             "candidate_endpoints": [],
             "rest_status": "unsupported",
+            **self._context_status_metadata("x_quote"),
         }
 
         if not requested_symbol:
@@ -1914,6 +2465,7 @@ class SsiStreamingRealtimeManager:
         requested_symbol = str(symbol or "").strip().upper()
         status = self.status()
         diagnostics = dict(status)
+        diagnostics.update(self._context_status_metadata("r"))
         diagnostics.update(
             {
                 "streaming_status": "foreign_room_buffer",
@@ -1932,6 +2484,7 @@ class SsiStreamingRealtimeManager:
             "attempted_endpoints": [],
             "candidate_endpoints": [],
             "rest_status": "unsupported",
+            **self._context_status_metadata("r"),
         }
 
         if not requested_symbol:
@@ -2085,6 +2638,7 @@ class SsiStreamingRealtimeManager:
             requested_indexes = list(self.market_index_codes)
         status = self.status()
         diagnostics = dict(status)
+        diagnostics.update(self._context_status_metadata("mi"))
         diagnostics.update(
             {
                 "streaming_status": "market_index_buffer",
@@ -2105,6 +2659,7 @@ class SsiStreamingRealtimeManager:
             "candidate_endpoints": [],
             "rest_status": "unsupported",
             "channel_format_status": "needs_live_proof",
+            **self._context_status_metadata("mi"),
         }
 
         if not requested_indexes:
@@ -2267,6 +2822,7 @@ class SsiStreamingRealtimeManager:
         safe_limit = max(1, min(int(limit or DEFAULT_TRADE_TAPE_BUFFER_SIZE), self.trade_tape_cache.max_rows_per_symbol))
         status = self.status()
         diagnostics = dict(status)
+        diagnostics.update(self._context_status_metadata("x_trade"))
         diagnostics.update(
             {
                 "streaming_status": "trade_tape_buffer",
@@ -2286,6 +2842,7 @@ class SsiStreamingRealtimeManager:
             "attempted_endpoints": [],
             "candidate_endpoints": [],
             "rest_status": "unsupported",
+            **self._context_status_metadata("x_trade"),
         }
 
         if not requested_symbol:
@@ -2454,6 +3011,7 @@ class SsiStreamingRealtimeManager:
         requested_symbol = str(symbol or "").strip().upper()
         status = self.status()
         diagnostics = dict(status)
+        diagnostics.update(self._context_status_metadata("f"))
         diagnostics.update(
             {
                 "streaming_status": "session_status_buffer",
@@ -2472,6 +3030,7 @@ class SsiStreamingRealtimeManager:
             "attempted_endpoints": [],
             "candidate_endpoints": [],
             "rest_status": "unsupported",
+            **self._context_status_metadata("f"),
         }
 
         if not requested_symbol:
@@ -2619,8 +3178,117 @@ class SsiStreamingRealtimeManager:
             "diagnostics": diagnostics,
         }
 
+    def lifecycle_snapshot(self) -> Dict[str, Any]:
+        """Return a bounded, read-only, process-local lifecycle snapshot."""
+        with self._lock:
+            self._refresh_session_date_locked()
+            now = float(self._time_func())
+            contexts: Dict[str, Dict[str, Any]] = {}
+            for context, lifecycle in self._context_lifecycle.items():
+                last_event_epoch = lifecycle.get("last_event_epoch")
+                contexts[context] = {
+                    "state": lifecycle["state"],
+                    "enabled": lifecycle["enabled"],
+                    "subscribed_generation": lifecycle["subscribed_generation"],
+                    "last_event_generation": lifecycle["last_event_generation"],
+                    "last_event_at": lifecycle["last_event_at"],
+                    "last_fresh_event_at": lifecycle["last_fresh_event_at"],
+                    "event_age_seconds": (
+                        max(0, int(now - float(last_event_epoch)))
+                        if last_event_epoch is not None
+                        else None
+                    ),
+                    "accepted_event_count": lifecycle["accepted_event_count"],
+                    "ignored_old_generation_event_count": lifecycle["ignored_old_generation_event_count"],
+                    "subscription_restoration_count": lifecycle["subscription_restoration_count"],
+                    "subscription_failure_count": lifecycle["subscription_failure_count"],
+                    "stale_reason": lifecycle["stale_reason"],
+                    "last_error_class": lifecycle["last_error_class"],
+                }
+            overall_state = self._overall_lifecycle_state_locked(contexts)
+            return {
+                "scope": "process_local",
+                "overall_state": overall_state,
+                "transports": [
+                    {
+                        "name": "ssi_market_data_channel_cohort",
+                        "state": self._transport_state,
+                        "connected": self._connected,
+                        "generation": self._generation,
+                        "start_count": self._start_count,
+                        "connect_count": self._connect_count,
+                        "disconnect_count": self._disconnect_count,
+                        "reconnect_scheduled_count": self._reconnect_scheduled_count,
+                        "reconnect_task_count": self._reconnect_tasks_created,
+                        "reconnect_attempt_count": self._reconnect_attempt_count,
+                        "reconnect_success_count": self._reconnect_success_count,
+                        "reconnect_failure_count": self._reconnect_failure_count,
+                        "stale_generation_callbacks_ignored": self._stale_generation_callbacks_ignored,
+                        "subscription_restore_attempt_count": self._subscription_restore_attempt_count,
+                        "subscription_restore_success_count": self._subscription_restore_success_count,
+                        "subscription_restore_failure_count": self._subscription_restore_failure_count,
+                        "readiness_transition_count": self._readiness_transition_count,
+                        "shutdown_count": self._shutdown_count,
+                        "physical_transport_count": len(self._opened_channels),
+                        "subscription_count": len(self._channels),
+                        "last_connected_at": self._last_connected_at,
+                        "last_disconnected_at": self._last_disconnected_at,
+                        "last_transition_at": self._last_transition_at,
+                        "last_error_class": self._last_error_class,
+                        "reconnect_attempt_number": self._current_reconnect_attempt_number,
+                        "next_retry_at": self._next_reconnect_at,
+                        "in_flight_reconnect": self._reconnect_in_progress,
+                        "shutdown_requested": self._shutdown_requested,
+                    }
+                ],
+                "contexts": contexts,
+                "session": {
+                    **vietnam_market_session_from_epoch(now),
+                    "trading_date": self._session_date,
+                },
+                "multi_worker_note": "Each worker owns an independent SSI connection cohort and process-local metrics.",
+            }
+
+    def _overall_lifecycle_state_locked(self, contexts: Dict[str, Dict[str, Any]]) -> str:
+        if self._shutdown_requested:
+            return "closed"
+        if not self.enabled:
+            return "closed"
+        if self._retry_blocked or self._transport_state == TRANSPORT_FAILED:
+            return "failed"
+        if self._generation == 0:
+            return "unknown"
+        if self._transport_state == TRANSPORT_CONNECTING:
+            return "connecting"
+        enabled_states = [item["state"] for item in contexts.values() if item["enabled"]]
+        if enabled_states and all(state == CONTEXT_READY for state in enabled_states):
+            return "ready"
+        if self._transport_state in {TRANSPORT_RECONNECTING, TRANSPORT_CONNECTING}:
+            return "recovering"
+        if any(state in {CONTEXT_FAILED, CONTEXT_STALE} for state in enabled_states):
+            return "degraded"
+        if any(state in {CONTEXT_AWAITING_SUBSCRIPTION, CONTEXT_RECOVERING} for state in enabled_states):
+            return "recovering"
+        if self._transport_state in {TRANSPORT_CLOSED, TRANSPORT_CLOSING, TRANSPORT_STOPPED}:
+            return "closed"
+        return "degraded"
+
+    def _refresh_session_date_locked(self) -> None:
+        current_date = self._vietnam_date_from_epoch(float(self._time_func()))
+        if current_date == self._session_date:
+            return
+        self._session_date = current_date
+        for context, lifecycle in self._context_lifecycle.items():
+            if not lifecycle["enabled"]:
+                continue
+            if lifecycle["last_event_at"]:
+                self._transition_context_locked(context, CONTEXT_STALE, stale_reason="date_rollover")
+            else:
+                self._transition_context_locked(context, CONTEXT_RECOVERING, stale_reason="date_rollover")
+
     def status(self) -> Dict[str, Any]:
         with self._lock:
+            self._refresh_session_date_locked()
             self._refresh_idle_state_locked()
             realtime_channels = [
                 channel
@@ -2739,6 +3407,7 @@ class SsiStreamingRealtimeManager:
                 "idle_since": self._idle_since,
                 "reconnect_enabled": self.reconnect_enabled,
                 "reconnect_attempt_count": self._reconnect_attempt_count,
+                "reconnect_attempt_number": self._current_reconnect_attempt_number,
                 "reconnect_count": self._reconnect_attempt_count,
                 "last_reconnect_at": self._last_reconnect_at,
                 "next_reconnect_at": self._next_reconnect_at,
@@ -2746,22 +3415,39 @@ class SsiStreamingRealtimeManager:
                 "last_reconnect_reason": self._last_reconnect_reason,
                 "last_reconnect_error": self._last_reconnect_error,
                 "runtime_status": self._runtime_status_locked(),
+                "transport_state": self._transport_state,
+                "connected": self._connected,
+                "generation": self._generation,
+                "last_error_class": self._last_error_class,
+                "reconnect_scheduled_count": self._reconnect_scheduled_count,
+                "reconnect_success_count": self._reconnect_success_count,
+                "reconnect_failure_count": self._reconnect_failure_count,
+                "stale_generation_callbacks_ignored": self._stale_generation_callbacks_ignored,
                 **snapshot_diagnostics,
             }
 
     def _record_error(self, error: Any, *, set_errored: bool) -> None:
         with self._lock:
             self._latest_error = sanitize_streaming_error(error)
+            self._last_error_class = classify_streaming_error(error)
             self._last_error_at = _utc_iso_from_epoch(float(self._time_func()))
             if set_errored:
                 self._state = MANAGER_ERRORED
+                self._transition_transport_locked(TRANSPORT_FAILED)
 
     def mark_shutdown(self) -> None:
         """Mark the manager as shutting down so monitor ticks cannot revive it."""
         with self._lock:
             self._shutdown_requested = True
+            self._shutdown_count += 1
+            self._connected = False
+            self._transition_transport_locked(TRANSPORT_CLOSING)
             self._next_reconnect_at = None
             self._next_reconnect_epoch = None
+        logger.info(
+            "vn_stream_shutdown transport=ssi_market_data_channel_cohort generation=%s",
+            self._generation,
+        )
 
     def monitor_tick(self, *, wants_streaming: bool) -> Dict[str, Any]:
         """Run one deterministic idle/reconnect monitor iteration."""
@@ -2773,13 +3459,18 @@ class SsiStreamingRealtimeManager:
         symbols, reason = action
         reconnect_error: Optional[str] = None
         try:
+            logger.warning(
+                "vn_stream_reconnect_attempt transport=ssi_market_data_channel_cohort generation=%s attempt=%s reason=%s",
+                self._generation,
+                self._current_reconnect_attempt_number,
+                reason,
+            )
             self._stop_client_for_reconnect()
             status = self.start(symbols)
             if status.get("manager_state") == MANAGER_RUNNING:
                 with self._lock:
                     self._next_reconnect_at = None
                     self._next_reconnect_epoch = None
-                    self._reconnect_backoff_seconds = self.reconnect_initial_delay_seconds
                     self._last_reconnect_error = None
                     self._last_reconnect_reason = reason
                     self._reconnect_in_progress = False
@@ -2793,8 +3484,9 @@ class SsiStreamingRealtimeManager:
                 self._reconnect_in_progress = False
 
         with self._lock:
+            self._reconnect_failure_count += 1
             self._last_reconnect_error = sanitize_streaming_error(reconnect_error)
-            if self.reconnect_max_attempts > 0 and self._reconnect_attempt_count >= self.reconnect_max_attempts:
+            if self.reconnect_max_attempts > 0 and self._current_reconnect_attempt_number >= self.reconnect_max_attempts:
                 self._next_reconnect_at = None
                 self._next_reconnect_epoch = None
             else:
@@ -2811,19 +3503,24 @@ class SsiStreamingRealtimeManager:
                 or self._shutdown_requested
                 or self._reconnect_in_progress
                 or not self.reconnect_enabled
+                or self._retry_blocked
             ):
                 return None
             symbols = list(self._requested_symbols or self._bootstrap_symbols)
             if not symbols:
                 return None
 
-            reason = self._reconnect_reason_locked(market_session)
+            reason = (
+                self._last_reconnect_reason
+                if self._next_reconnect_epoch is not None and self._last_reconnect_reason
+                else self._reconnect_reason_locked(market_session)
+            )
             if reason is None:
                 if self._state == MANAGER_RUNNING and not market_session["market_session_active"]:
                     self._next_reconnect_at = None
                     self._next_reconnect_epoch = None
                 return None
-            if self.reconnect_max_attempts > 0 and self._reconnect_attempt_count >= self.reconnect_max_attempts:
+            if self.reconnect_max_attempts > 0 and self._current_reconnect_attempt_number >= self.reconnect_max_attempts:
                 self._next_reconnect_at = None
                 self._next_reconnect_epoch = None
                 self._last_reconnect_reason = reason
@@ -2838,6 +3535,7 @@ class SsiStreamingRealtimeManager:
 
             self._reconnect_in_progress = True
             self._reconnect_attempt_count += 1
+            self._current_reconnect_attempt_number += 1
             self._last_reconnect_epoch = now
             self._last_reconnect_at = _utc_iso_from_epoch(now)
             self._last_reconnect_reason = reason
@@ -2846,6 +3544,8 @@ class SsiStreamingRealtimeManager:
             return symbols, reason
 
     def _reconnect_reason_locked(self, market_session: Dict[str, Any]) -> Optional[str]:
+        if not market_session["market_session_active"]:
+            return None
         if self._state == MANAGER_ERRORED:
             return "stream_error" if self._messages_observed > 0 else "start_error"
         if self._state == MANAGER_STOPPED and self._bootstrap_started_by_lifecycle:
@@ -2855,18 +3555,40 @@ class SsiStreamingRealtimeManager:
         return None
 
     def _schedule_reconnect_locked(self, *, reason: str, from_now: bool) -> None:
+        if self._shutdown_requested or self._retry_blocked or not self.reconnect_enabled:
+            return
+        if self._next_reconnect_epoch is not None:
+            return
         now = float(self._time_func())
-        delay = max(1, int(self._reconnect_backoff_seconds or self.reconnect_initial_delay_seconds))
+        base_delay = self._backoff_sequence[min(self._backoff_index, len(self._backoff_sequence) - 1)]
+        jitter = float(self._jitter_func(base_delay))
+        jitter_limit = 0.2 * base_delay
+        delay = max(0.1, min(self.reconnect_max_delay_seconds, base_delay + max(-jitter_limit, min(jitter, jitter_limit))))
         self._next_reconnect_epoch = now + delay if from_now else now
         self._next_reconnect_at = _utc_iso_from_epoch(self._next_reconnect_epoch)
         self._last_reconnect_reason = reason
-        self._reconnect_backoff_seconds = min(delay * 2, self.reconnect_max_delay_seconds)
+        self._reconnect_backoff_seconds = delay
+        self._reconnect_scheduled_count += 1
+        self._reconnect_tasks_created += 1
+        self._backoff_index = min(self._backoff_index + 1, len(self._backoff_sequence) - 1)
+        self._transition_transport_locked(TRANSPORT_RECONNECTING)
+        logger.warning(
+            "vn_stream_reconnect_scheduled transport=ssi_market_data_channel_cohort generation=%s attempt=%s delay=%.3f reason=%s",
+            self._generation,
+            self._backoff_index,
+            delay,
+            reason,
+        )
 
     def _stop_client_for_reconnect(self) -> None:
         with self._lock:
             client = self._client
             self._client = None
+            self._suppressed_close_generations.add(self._generation)
             self._channels = []
+            self._connected = False
+            self._opened_channels.clear()
+            self._transition_transport_locked(TRANSPORT_RECONNECTING)
             if self._state != MANAGER_DISABLED:
                 self._state = MANAGER_STOPPED
         if client is not None:

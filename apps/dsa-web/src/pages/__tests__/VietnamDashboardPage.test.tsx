@@ -5004,6 +5004,42 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(chartCard.queryByText(/buy|sell|hold|recommendation/i)).not.toBeInTheDocument();
   });
 
+  it('shows reconnecting lifecycle copy without exposing transport errors', async () => {
+    const response = makeResponse(defaultTickers);
+    response.watchlist[0] = {
+      ...response.watchlist[0],
+      realtimeSnapshot: null,
+      realtimeStatus: {
+        status: 'unavailable',
+        source: 'SSI realtime contract',
+        diagnostics: { stream_state: 'recovering', last_error_class: 'network_closed' },
+      },
+      tradeTape: [],
+      tradeTapeStatus: {
+        status: 'unavailable',
+        source: 'SSI trade-tape contract',
+        diagnostics: { stream_state: 'recovering', last_error_class: 'network_closed' },
+      },
+    };
+    mockedGetVietnamWatchlist.mockResolvedValue(response);
+    mockedGetVietnamRealtimeQuotes.mockResolvedValue({
+      ...makeRealtimeResponse(defaultTickers, { unavailable: true }),
+      streamState: 'recovering',
+      quotes: [],
+    });
+    mockedGetVietnamRealtimeTrades.mockResolvedValue({
+      ...makeTradesResponse('FPT'),
+      status: 'unavailable',
+      streamState: 'recovering',
+      trades: [],
+    });
+
+    render(<VietnamDashboardPage />);
+
+    expect((await screen.findAllByText('Reconnecting — showing last known data when available.')).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/network_closed/i)).not.toBeInTheDocument();
+  });
+
   it('defaults 1m to Today, keeps completed dates selectable, and keeps daily controls separate', async () => {
     const today = vietnamTodayIso();
     render(<VietnamDashboardPage />);

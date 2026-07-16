@@ -667,6 +667,26 @@ describe('VietnamCompanyResearchPage', () => {
     expect(screen.getByText('TradeTape')).toBeInTheDocument();
   });
 
+  it('renders reconnecting and closed stream lifecycle copy without raw errors', async () => {
+    const snapshot = makeCompanySnapshot();
+    snapshot.realtimeSnapshot = null;
+    snapshot.tradeTape = [];
+    snapshot.realtimeStatus = { source: 'SSI realtime contract', status: 'unavailable' };
+    snapshot.tradeTapeStatus = { source: 'SSI trade-tape contract', status: 'unavailable' };
+    snapshot.diagnostics = {
+      ...snapshot.diagnostics,
+      realtime: { stream_state: 'recovering', last_error_class: 'network_closed' },
+      tradeTape: { stream_state: 'closed' },
+    };
+    vi.mocked(stocksApi.getVietnamCompanyResearch).mockResolvedValue(snapshot);
+
+    renderPage();
+
+    expect(await screen.findByText('Reconnecting — showing last known data when available.')).toBeInTheDocument();
+    expect(screen.getByText('Market closed — showing last known data.')).toBeInTheDocument();
+    expect(screen.queryByText(/Connection to remote host was lost/i)).not.toBeInTheDocument();
+  });
+
   it('renders DailyOhlc versus DailyStockPrice mismatch in the data quality summary', async () => {
     const snapshot = makeCompanySnapshot();
     snapshot.dataQualitySummary = {

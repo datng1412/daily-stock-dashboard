@@ -936,9 +936,21 @@ LIVE_DIAGNOSTIC_KEYS = {
     "reconnect_count",
     "reconnect_attempts",
     "reconnect_attempt_count",
+    "reconnect_attempt_number",
+    "reconnect_scheduled_count",
+    "reconnect_success_count",
+    "reconnect_failure_count",
+    "stale_generation_callbacks_ignored",
     "streaming_status",
+    "stream_state",
+    "last_event_at",
+    "event_age_seconds",
     "runtime_status",
     "stream_health",
+    "transport_state",
+    "connected",
+    "generation",
+    "last_error_class",
     "manager_state",
     "market_session",
     "market_session_label",
@@ -7095,7 +7107,17 @@ class VietnamMarketService:
         }
         if diagnostics:
             response["diagnostics"] = diagnostics
-        for key in ("streaming_status", "manager_state", "runtime_status", "cache_status", "parsed_streaming_rows"):
+        for key in (
+            "streaming_status",
+            "manager_state",
+            "runtime_status",
+            "cache_status",
+            "parsed_streaming_rows",
+            "stream_state",
+            "last_event_at",
+            "event_age_seconds",
+            "generation",
+        ):
             if key in payload:
                 response[key] = payload.get(key)
         if status == "ok" and not quotes:
@@ -7228,6 +7250,9 @@ class VietnamMarketService:
             },
             "diagnostics": diagnostics,
         }
+        for key in ("stream_state", "last_event_at", "event_age_seconds", "generation"):
+            if key in payload:
+                response[key] = payload.get(key)
         if status == "ok" and not trades:
             response["status"] = "unavailable"
             response["error"] = VN_TRADE_TAPE_UNAVAILABLE_REASON

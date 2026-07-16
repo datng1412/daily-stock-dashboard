@@ -338,3 +338,5 @@ Frontend fake-time tests cover absolute `:07` polling, lunch/afternoon/post-clos
 - Mozyfin VN paths are disabled for runtime and should not be used as fallback.
 - Tests that require live SSI credentials should be kept out of deterministic CI unless explicitly marked.
 - API snapshots should be reviewed before becoming fixtures because they can contain environment-specific diagnostics.
+
+Phase 4.11F deterministic streaming tests use injected clients, clocks, and zero jitter rather than real sleeps. They cover idempotent startup, generation increments, current-event readiness, stale callback/cache rejection, duplicate-disconnect coalescing, bounded backoff, auth fail-fast, partial subscription isolation, prior-session readiness rejection, shutdown callback suppression, read-only broad observability, and separation from intraday health. Existing X/X-QUOTE/X-TRADE/F/R/MI, persisted snapshot, DailyOhlc, and IntradayOhlc suites remain regression gates. Live network disconnect is supplementary evidence only, not deterministic acceptance.

@@ -125,3 +125,5 @@ Phase 4.11E adds operational hardening without changing that source boundary. Ba
 Older VN dashboard notes and runbooks may mention Mozyfin or KBS because previous phases used Mozyfin for VN daily/intraday experiments and vnstock/KBS for optional snapshot experiments. Those notes are superseded for normal runtime. They are retained only for historical context or explicitly gated development paths and must not be treated as active fallback guidance.
 
 Source: https://github.com/ZhuLinsen/daily_stock_analysis
+
+Phase 4.11F adds generation-owned recovery for the existing optional SSI stream contexts. Disconnects retain last-known data as stale/recovering, approved subscriptions restore through the startup-owned manager, and a context becomes ready only after a fresh event from the new generation. Existing panels show concise Reconnecting, Stale, or Market closed states. The broad observability route reports worker-local lifecycle state; it does not start streams, and continuity across a disconnect is not guaranteed. DailyOhlc remains the sole D1/latest-price source and IntradayOhlc remains the sole 1m source.

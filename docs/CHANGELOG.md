@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [fix] Add generation-owned SSI streaming reconnect, per-context subscription recovery, bounded jittered backoff, stale-cache retention, and clean shutdown ownership.
+- [fix] Report only current-generation opened SSI sockets as physical transports and keep authorization failures fail-fast without reconnect storms.
+- [new feature] Expose sanitized process-local SSI transport and context lifecycle state through the broad Vietnam observability route.
+- [improvement] Show Reconnecting, Stale, and Market closed states in existing SSI stream-backed panels without blanking last-known data or changing chart sources.
+- [test] Add deterministic SSI lifecycle, stale-generation, duplicate-disconnect, partial-subscription, fail-fast, session-date, shutdown, and observability coverage.
 - [new feature] Add bounded worker-local SSI intraday-chart metrics, sanitized provider-fetch logs, a no-fetch health endpoint, and same-key in-flight request coalescing.
 - [improvement] Harden current-session 1-minute scheduling with semantic Today rollover, one market-data timeout, a request-free countdown, overlap prevention, and idempotent post-close reconciliation.
 - [test] Add deterministic intraday health, metrics, coalescing, freshness, lunch, rollover, countdown, unavailable-state, and scheduler-ownership coverage.

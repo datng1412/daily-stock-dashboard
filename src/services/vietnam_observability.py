@@ -242,6 +242,7 @@ def vietnam_observability_snapshot() -> Dict[str, Any]:
             if not bool(getattr(config, "ssi_fastconnect_trade_tape_enabled", True)):
                 ssi_trade_tape["status"] = "disabled"
                 ssi_trade_tape["reason"] = "SSI trade tape is disabled."
+            streaming = _streaming_lifecycle_snapshot()
             return {
                 "market": "VN",
                 "status": "ok",
@@ -252,6 +253,7 @@ def vietnam_observability_snapshot() -> Dict[str, Any]:
                 "ssi_intraday": ssi_intraday,
                 "ssi_realtime": ssi_realtime,
                 "ssi_trade_tape": ssi_trade_tape,
+                "streaming": streaming,
             }
     except Exception as exc:
         logger.warning("Vietnam observability snapshot failed: %s", exc)
@@ -265,7 +267,34 @@ def vietnam_observability_snapshot() -> Dict[str, Any]:
             "ssi_intraday": deepcopy(_SSI_INTRADAY_DEFAULTS),
             "ssi_realtime": deepcopy(_SSI_REALTIME_DEFAULTS),
             "ssi_trade_tape": deepcopy(_SSI_TRADE_TAPE_DEFAULTS),
+            "streaming": _empty_streaming_lifecycle_snapshot(),
         }
+
+
+def _empty_streaming_lifecycle_snapshot() -> Dict[str, Any]:
+    return {
+        "scope": "process_local",
+        "overall_state": "unknown",
+        "transports": [],
+        "contexts": {},
+        "session": {},
+        "multi_worker_note": "Each worker owns an independent SSI connection cohort and process-local metrics.",
+    }
+
+
+def _streaming_lifecycle_snapshot() -> Dict[str, Any]:
+    """Read manager state without constructing clients or mutating lifecycle."""
+    try:
+        from src.services.ssi_streaming_realtime_lifecycle import (
+            get_existing_ssi_streaming_realtime_manager,
+        )
+
+        manager = get_existing_ssi_streaming_realtime_manager()
+        if manager is None:
+            return _empty_streaming_lifecycle_snapshot()
+        return manager.lifecycle_snapshot()
+    except Exception:
+        return _empty_streaming_lifecycle_snapshot()
 
 
 def monotonic_ms() -> int:

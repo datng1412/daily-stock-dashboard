@@ -148,3 +148,13 @@ Provider endpoint details, HTTP status, retryability, and raw provider summaries
 The selected-ticker chart keeps one market-data timeout, one request-free countdown timeout, and one visibility listener. `Next update in Ns` appears only for visible Today views with an active minute-poll target; it derives from the absolute `:07` target and never fetches. D1, fixed completed dates, pre-open, lunch, closed, initial loading, and views without a scheduled minute fetch show no countdown. Existing bars remain mounted during scheduled/manual refresh.
 
 Primary status priority is `Completed`, `Loading`, `Pre-open`, `Lunch break`, `Closed`, `Stale`, `SSI data unavailable`, `No data yet`, `Delayed`, then `Updating`. Today metadata uses Vietnam time and distinguishes `Updated`, `Latest bar`, provider snapshot age, and newest provider bar age. Lunch retains morning bars without minute polling; 13:00:07 uses one authoritative refresh; ATC remains bounded; about 14:45:20 runs at most one automatic reconciliation per ticker/date. Hidden tabs clear owned timers/requests, visibility restoration performs at most one active-session refresh, and semantic Today moves at Vietnam midnight without carrying old bars or automatically calling SSI overnight. No state says `Live`.
+
+## Phase 4.11F stream-backed panel states
+
+- `ready`: use the existing current/updating presentation only after a fresh current-generation event.
+- `recovering` or `awaiting_subscription`: show `Reconnecting — showing last known data when available.` and retain usable cached values.
+- `stale`: show `Stale — showing last known data.` without claiming realtime freshness.
+- `closed`: show `Market closed — showing last known data.` and retain bounded last-known values.
+- `unavailable` or `failed` without usable data: keep the existing concise unavailable state; raw provider exception text is not shown.
+
+These states apply only to existing X/X-QUOTE/X-TRADE/F/R/MI consumers. They do not change D1/1m chart loading, polling, labels, or data ownership, and they do not add a frontend WebSocket or higher polling frequency.

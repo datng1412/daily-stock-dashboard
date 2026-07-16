@@ -591,6 +591,10 @@ export type VietnamRealtimeResponse = {
   runtimeStatus?: string | null;
   cacheStatus?: string | null;
   parsedStreamingRows?: number | null;
+  streamState?: 'ready' | 'recovering' | 'stale' | 'unavailable' | 'closed' | 'failed' | 'awaiting_subscription' | 'disabled' | string | null;
+  lastEventAt?: string | null;
+  eventAgeSeconds?: number | null;
+  generation?: number | null;
 };
 
 export type VietnamRealtimeTrade = {
@@ -634,6 +638,10 @@ export type VietnamRealtimeTradesResponse = {
   note?: string | null;
   cache: Record<string, unknown>;
   diagnostics?: Record<string, unknown>;
+  streamState?: 'ready' | 'recovering' | 'stale' | 'unavailable' | 'closed' | 'failed' | 'awaiting_subscription' | 'disabled' | string | null;
+  lastEventAt?: string | null;
+  eventAgeSeconds?: number | null;
+  generation?: number | null;
 };
 
 export type VietnamChartPoint = {

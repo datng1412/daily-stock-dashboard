@@ -818,3 +818,9 @@ Future current-session metadata may include `session_state`, `freshness`, `last_
 
 * Phase 2 and Phase 6.0: clarify cache errors versus provider unavailable.
 * Phase 2: clarify units metadata versus data availability.
+
+### SSI streaming lifecycle status
+
+Stream-backed responses may add `stream_state`, `last_event_at`, `event_age_seconds`, and `generation`. `stream_state` is one of `disabled`, `awaiting_subscription`, `recovering`, `ready`, `stale`, `unavailable`, `closed`, or `failed`. These fields are freshness/operations metadata only. A connected transport or successful channel switch is not ready; readiness requires an accepted current-generation event for that context. Stale/recovering rows retain their original event timestamp and must not be presented as current.
+
+The broad `/api/v1/stocks/vn/observability` response adds `streaming.scope=process_local`, deterministic `overall_state`, one sanitized logical channel-cohort transport summary, per-context state for X/X-QUOTE/X-TRADE/F/R/MI, schedule-derived Vietnam session context, and a multi-worker limitation note. The endpoint is read-only/no-store and does not expose full subscriptions, payloads, URLs, exception text, headers, or credentials. `/intraday-chart/health` remains unchanged and contains only REST SSI IntradayOhlc worker health.

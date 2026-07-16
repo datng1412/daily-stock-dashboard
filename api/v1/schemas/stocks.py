@@ -951,6 +951,10 @@ class VietnamRealtimeResponse(BaseModel):
     runtime_status: Optional[str] = None
     cache_status: Optional[str] = None
     parsed_streaming_rows: Optional[int] = None
+    stream_state: Optional[Literal["ready", "recovering", "stale", "unavailable", "closed", "failed", "awaiting_subscription", "disabled"]] = None
+    last_event_at: Optional[str] = None
+    event_age_seconds: Optional[int] = Field(default=None, ge=0)
+    generation: Optional[int] = Field(default=None, ge=0)
 
 
 class VietnamRealtimeTrade(BaseModel):
@@ -994,6 +998,10 @@ class VietnamRealtimeTradesResponse(BaseModel):
     note: Optional[str] = None
     cache: Dict[str, Any] = Field(default_factory=dict)
     diagnostics: Dict[str, Any] = Field(default_factory=dict)
+    stream_state: Optional[Literal["ready", "recovering", "stale", "unavailable", "closed", "failed", "awaiting_subscription", "disabled"]] = None
+    last_event_at: Optional[str] = None
+    event_age_seconds: Optional[int] = Field(default=None, ge=0)
+    generation: Optional[int] = Field(default=None, ge=0)
 
 
 class VietnamMozyfinObservability(BaseModel):
@@ -1049,6 +1057,68 @@ class VietnamProviderRuntimeStatus(BaseModel):
     enabled: Optional[bool] = None
 
 
+class VietnamStreamingTransportObservability(BaseModel):
+    """Sanitized process-local SSI channel-cohort lifecycle state."""
+
+    name: str
+    state: Literal["stopped", "connecting", "connected", "reconnecting", "closing", "closed", "failed"]
+    connected: bool = False
+    generation: int = Field(default=0, ge=0)
+    start_count: int = Field(default=0, ge=0)
+    connect_count: int = Field(default=0, ge=0)
+    disconnect_count: int = Field(default=0, ge=0)
+    reconnect_scheduled_count: int = Field(default=0, ge=0)
+    reconnect_task_count: int = Field(default=0, ge=0)
+    reconnect_attempt_count: int = Field(default=0, ge=0)
+    reconnect_success_count: int = Field(default=0, ge=0)
+    reconnect_failure_count: int = Field(default=0, ge=0)
+    stale_generation_callbacks_ignored: int = Field(default=0, ge=0)
+    subscription_restore_attempt_count: int = Field(default=0, ge=0)
+    subscription_restore_success_count: int = Field(default=0, ge=0)
+    subscription_restore_failure_count: int = Field(default=0, ge=0)
+    readiness_transition_count: int = Field(default=0, ge=0)
+    shutdown_count: int = Field(default=0, ge=0)
+    physical_transport_count: int = Field(default=0, ge=0)
+    subscription_count: int = Field(default=0, ge=0)
+    last_connected_at: Optional[str] = None
+    last_disconnected_at: Optional[str] = None
+    last_transition_at: Optional[str] = None
+    last_error_class: Optional[str] = None
+    reconnect_attempt_number: int = Field(default=0, ge=0)
+    next_retry_at: Optional[str] = None
+    in_flight_reconnect: bool = False
+    shutdown_requested: bool = False
+
+
+class VietnamStreamingContextObservability(BaseModel):
+    """Freshness/readiness state for one existing SSI stream context."""
+
+    state: Literal["disabled", "awaiting_subscription", "recovering", "ready", "stale", "unavailable", "closed", "failed"]
+    enabled: bool = False
+    subscribed_generation: Optional[int] = Field(default=None, ge=0)
+    last_event_generation: Optional[int] = Field(default=None, ge=0)
+    last_event_at: Optional[str] = None
+    last_fresh_event_at: Optional[str] = None
+    event_age_seconds: Optional[int] = Field(default=None, ge=0)
+    accepted_event_count: int = Field(default=0, ge=0)
+    ignored_old_generation_event_count: int = Field(default=0, ge=0)
+    subscription_restoration_count: int = Field(default=0, ge=0)
+    subscription_failure_count: int = Field(default=0, ge=0)
+    stale_reason: Optional[str] = None
+    last_error_class: Optional[str] = None
+
+
+class VietnamStreamingObservability(BaseModel):
+    """Read-only worker-local SSI stream lifecycle snapshot."""
+
+    scope: Literal["process_local"] = "process_local"
+    overall_state: Literal["unknown", "connecting", "ready", "recovering", "degraded", "closed", "failed"] = "unknown"
+    transports: List[VietnamStreamingTransportObservability] = Field(default_factory=list)
+    contexts: Dict[str, VietnamStreamingContextObservability] = Field(default_factory=dict)
+    session: Dict[str, Any] = Field(default_factory=dict)
+    multi_worker_note: str = "Each worker owns an independent SSI connection cohort and process-local metrics."
+
+
 class VietnamObservabilityResponse(BaseModel):
     """Vietnam dashboard in-memory observability response."""
 
@@ -1061,3 +1131,4 @@ class VietnamObservabilityResponse(BaseModel):
     ssi_intraday: VietnamProviderRuntimeStatus = Field(default_factory=VietnamProviderRuntimeStatus)
     ssi_realtime: VietnamProviderRuntimeStatus = Field(default_factory=VietnamProviderRuntimeStatus)
     ssi_trade_tape: VietnamProviderRuntimeStatus = Field(default_factory=VietnamProviderRuntimeStatus)
+    streaming: VietnamStreamingObservability = Field(default_factory=VietnamStreamingObservability)

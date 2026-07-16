@@ -447,6 +447,12 @@ The SSI observation covered only FPT during the 2026-07-16 opening/early continu
 
 Phase 4.11D-2 implements that proposal as a scheduled, holiday-unaware HOSE clock policy: positive/empty/negative current-date TTLs are 15/5/10 seconds, stale recovery is capped at five minutes, and completed-date policy is unchanged. The UI uses one absolute one-shot timer, pauses for lunch/hidden tabs, wakes at approximately 13:00:07, and reconciles once at approximately 14:45:20. Runtime proof of lunch, afternoon, ATC, holidays, halts, and half sessions remains outstanding; these limitations are not papered over with another provider.
 
+## Phase 4.11F Streaming Lifecycle Gate
+
+The installed SSI 2.2.2 path creates one `MarketDataStream`/SignalR/WebSocket transport per approved channel and does not receive an SDK `ReconnectionHandler`. StockClock therefore owns one process-local logical cohort lifecycle and bounded whole-cohort restart. Each start/restart has a monotonic generation; callbacks and cache/persistence mutations from older generations are rejected. Context readiness is independent: X, X-QUOTE, X-TRADE, F, R, and MI become ready only after a valid current-generation event, and a failed context does not erase healthy contexts or last-known rows.
+
+Deterministic fake-transport tests prove idempotent startup, one debounced reconnect schedule, bounded jittered backoff, fail-fast auth/config/subscription classification, subscription restoration, stale-generation rejection, prior-session freshness rejection, partial failure isolation, and clean shutdown. The broad observability route reports only sanitized process-local state. Active-session natural-disconnect evidence remains pending, stream continuity is not guaranteed, Phase 4.11D-3 remains blocked, and no streaming context is an approved chart-candle source.
+
 ## Required Guardrails
 
 - This matrix is an audit/planning aid, not a new API contract.
