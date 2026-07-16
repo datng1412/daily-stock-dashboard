@@ -191,6 +191,8 @@ The current compact pulse remains `partial`: it uses a 7-calendar-day request, a
 
 Phase 4.11D-2 implements current-date `1m` through bounded SSI polling and authoritative array replacement. It does not implement a realtime last-bar overlay or stream-built candle.
 
+Phase 4.11E adds production guardrails without widening capability: bounded worker-local operational metrics, a no-fetch/no-store intraday health route, sanitized one-event-per-provider-fetch logging, exact-key process-local coalescing, and separate provider-snapshot/newest-bar ages. The active updating/stale provider-snapshot thresholds are 30/90 seconds; lunch age growth alone is not stale. Frontend ownership remains polling-based with one market-data timeout, one request-free countdown timeout, one visibility listener, semantic Today rollover, and one post-close automatic reconciliation per ticker/date. There is still no distributed coalescing, external provider, X-TRADE candle path, or additional timeframe.
+
 ## Phase 4.0B Intraday Root-Cause Result
 
 Phase 4.0B did not find a company-route wiring failure. The existing backend calls the SSI IntradayOhlc provider through the current SSI auth/cache path and maps provider-returned cadence fields.

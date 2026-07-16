@@ -86,6 +86,7 @@ def test_normalizer_uses_vietnam_time_keeps_gaps_and_deduplicates_latest_raw_tim
     assert result["bars"][0]["close"] == 71_075
     assert result["duplicate_minute_buckets"] == 2
     assert result["rejected_rows"] == 0
+    assert result["newest_provider_timestamp"] == "2026-06-24T09:02:00+07:00"
 
 
 def test_normalizer_rejects_bad_and_mismatched_rows_but_keeps_usable_rows():

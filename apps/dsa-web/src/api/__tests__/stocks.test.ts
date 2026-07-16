@@ -111,6 +111,7 @@ describe('stocksApi Vietnam SSI-derived metric mapping', () => {
         freshness: 'updating',
         last_provider_refresh_at: '2026-06-24T02:16:07+00:00',
         newest_bar_age_seconds: 8,
+        provider_snapshot_age_seconds: 3,
         current_bar_state: 'provisional',
         bars: [{ time: 1782266400, open: 1, high: 2, low: 1, close: 2, volume: 3 }],
         source: { provider: 'ssi_fastconnect', dataset: 'IntradayOhlc' },
@@ -137,6 +138,7 @@ describe('stocksApi Vietnam SSI-derived metric mapping', () => {
     expect(result.freshness).toBe('updating');
     expect(result.lastProviderRefreshAt).toBe('2026-06-24T02:16:07+00:00');
     expect(result.newestBarAgeSeconds).toBe(8);
+    expect(result.providerSnapshotAgeSeconds).toBe(3);
     expect(result.currentBarState).toBe('provisional');
   });
 });

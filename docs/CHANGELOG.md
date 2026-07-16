@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [new feature] Add bounded worker-local SSI intraday-chart metrics, sanitized provider-fetch logs, a no-fetch health endpoint, and same-key in-flight request coalescing.
+- [improvement] Harden current-session 1-minute scheduling with semantic Today rollover, one market-data timeout, a request-free countdown, overlap prevention, and idempotent post-close reconciliation.
+- [test] Add deterministic intraday health, metrics, coalescing, freshness, lunch, rollover, countdown, unavailable-state, and scheduler-ownership coverage.
+- [test] Record bounded intraday runtime health/cache/coalescing proof and the blocked browser-validation limitation without claiming live SSI bars.
+- [test] Verify canonical intraday health versus broader dashboard observability and lock newest-bar age to the accepted raw SSI timestamp rather than minute-start candle time.
 - [new feature] Add SSI-only current-session delayed 1-minute charts with typed session/freshness metadata, short bounded cache recovery, Today selection, and minute-aligned polling that pauses outside eligible sessions.
 - [test] Add deterministic current-date validation, cache, raw-timestamp freshness, session-state, polling-alignment, status-label, and request-ownership coverage for SSI 1-minute charts.
 - [documentation] Audit current-session SSI IntradayOhlc and X-TRADE semantics, open delayed SSI polling design, and block unsafe trade aggregation without runtime changes.

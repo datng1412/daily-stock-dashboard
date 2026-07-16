@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import copy
+from concurrent.futures import Future
 import logging
 import math
 import os
@@ -52,6 +53,18 @@ from src.services.vietnam_observability import (
     observe_mozyfin_fetch,
     observe_mozyfin_watchlist_request,
 )
+from src.services.vietnam_intraday_observability import (
+    observe_intraday_cache,
+    observe_intraday_coalesced_waiter,
+    observe_intraday_inflight_finished,
+    observe_intraday_inflight_started,
+    observe_intraday_provider_fetch,
+    observe_intraday_request,
+    observe_intraday_stale_recovery,
+    observe_intraday_waiter_finished,
+    sanitize_intraday_failure_class,
+    vietnam_intraday_observability_snapshot,
+)
 
 
 LIQUIDITY_TARGET_AVG_VOLUME = 1_000_000
@@ -66,6 +79,7 @@ VN_INTRADAY_CHART_CURRENT_CACHE_TTL_SECONDS = 15
 VN_INTRADAY_CHART_CURRENT_EMPTY_CACHE_TTL_SECONDS = 5
 VN_INTRADAY_CHART_CURRENT_NEGATIVE_CACHE_TTL_SECONDS = 10
 VN_INTRADAY_CHART_CURRENT_STALE_MAX_SECONDS = 5 * 60
+VN_INTRADAY_CHART_CURRENT_SNAPSHOT_FRESH_SECONDS = 30
 VN_INTRADAY_CHART_CURRENT_STALE_THRESHOLD_SECONDS = 90
 VN_INTRADAY_CHART_CACHE_MAX_ENTRIES = 500
 VN_WATCHLIST = ("FPT", "VPB", "MSB", "SCS", "ACV", "ACB")
@@ -278,10 +292,17 @@ class _CacheEntry:
 class _IntradayChartCacheEntry:
     value: Dict[str, Any]
     fetched_at: datetime
+    provider_refreshed_at: Optional[datetime]
     expires_at: datetime
     stale_until: datetime
     usable: bool
     policy: str
+
+
+@dataclass
+class _IntradayChartInFlight:
+    future: Future
+    waiters: int = 0
 
 
 _VN_CACHE: Dict[Tuple[Any, ...], _CacheEntry] = {}
@@ -290,8 +311,8 @@ _VN_INFLIGHT_LOCKS: Dict[Tuple[Any, ...], Lock] = {}
 _VN_INFLIGHT_LOCKS_LOCK = RLock()
 _VN_INTRADAY_CHART_CACHE: "OrderedDict[Tuple[Any, ...], _IntradayChartCacheEntry]" = OrderedDict()
 _VN_INTRADAY_CHART_CACHE_LOCK = RLock()
-_VN_INTRADAY_CHART_INFLIGHT_LOCKS: Dict[Tuple[Any, ...], Lock] = {}
-_VN_INTRADAY_CHART_INFLIGHT_LOCKS_LOCK = RLock()
+_VN_INTRADAY_CHART_INFLIGHT: Dict[Tuple[Any, ...], _IntradayChartInFlight] = {}
+_VN_INTRADAY_CHART_INFLIGHT_LOCK = RLock()
 
 
 def clear_vietnam_cache() -> None:
@@ -302,8 +323,8 @@ def clear_vietnam_cache() -> None:
         _VN_INFLIGHT_LOCKS.clear()
     with _VN_INTRADAY_CHART_CACHE_LOCK:
         _VN_INTRADAY_CHART_CACHE.clear()
-    with _VN_INTRADAY_CHART_INFLIGHT_LOCKS_LOCK:
-        _VN_INTRADAY_CHART_INFLIGHT_LOCKS.clear()
+    with _VN_INTRADAY_CHART_INFLIGHT_LOCK:
+        _VN_INTRADAY_CHART_INFLIGHT.clear()
 
 
 def _utc_now() -> datetime:
@@ -315,16 +336,25 @@ def _iso(value: Optional[datetime]) -> Optional[str]:
 
 
 def _intraday_chart_cache_key(ticker: str, trading_date: str) -> Tuple[Any, ...]:
-    return ("intraday_chart", vn_ticker(ticker), "1m", trading_date, "page", 1)
+    return (
+        "intraday_chart",
+        "ssi_fastconnect",
+        "IntradayOhlc",
+        vn_ticker(ticker),
+        "1m",
+        trading_date,
+        "page",
+        1,
+        "page_size",
+        VN_INTRADAY_CHART_PAGE_SIZE,
+    )
 
 
-def _get_intraday_chart_lock(key: Tuple[Any, ...]) -> Lock:
-    with _VN_INTRADAY_CHART_INFLIGHT_LOCKS_LOCK:
-        lock = _VN_INTRADAY_CHART_INFLIGHT_LOCKS.get(key)
-        if lock is None:
-            lock = Lock()
-            _VN_INTRADAY_CHART_INFLIGHT_LOCKS[key] = lock
-        return lock
+def _intraday_chart_entry_kind(entry: _IntradayChartCacheEntry) -> str:
+    if entry.usable:
+        return "positive"
+    result = str((entry.value.get("diagnostics") or {}).get("result") or "")
+    return "empty" if result == "no_data" else "negative"
 
 
 def _get_intraday_chart_cache_entry(key: Tuple[Any, ...]) -> Optional[_IntradayChartCacheEntry]:
@@ -343,11 +373,13 @@ def _set_intraday_chart_cache_entry(
     usable: bool,
     policy: str,
     stale_max_seconds: int,
+    provider_successful: bool,
 ) -> _IntradayChartCacheEntry:
     now = _utc_now()
     entry = _IntradayChartCacheEntry(
         value=copy.deepcopy(value),
         fetched_at=now,
+        provider_refreshed_at=now if provider_successful else None,
         expires_at=now + timedelta(seconds=ttl_seconds),
         stale_until=now + timedelta(seconds=stale_max_seconds),
         usable=usable,
@@ -374,7 +406,7 @@ def _intraday_chart_cache_payload(
         "fetched_at": _iso(entry.fetched_at),
         "expires_at": _iso(entry.expires_at),
     }
-    payload["last_provider_refresh_at"] = _iso(entry.fetched_at)
+    payload["last_provider_refresh_at"] = _iso(entry.provider_refreshed_at)
     return _with_intraday_chart_runtime_metadata(payload, is_stale=is_stale)
 
 
@@ -400,6 +432,23 @@ def vietnam_intraday_session_state(value: datetime) -> str:
     return "closed"
 
 
+def vietnam_intraday_chart_health_snapshot() -> Dict[str, Any]:
+    """Return a read-only worker-local snapshot without provider/cache mutation."""
+    now = _utc_now()
+    local_now = now.astimezone(VN_TIMEZONE)
+    current_date = local_now.date().isoformat()
+    with _VN_INTRADAY_CHART_CACHE_LOCK:
+        keys = list(_VN_INTRADAY_CHART_CACHE.keys())
+    current_entries = sum(1 for key in keys if len(key) > 5 and key[5] == current_date)
+    return vietnam_intraday_observability_snapshot(
+        now=local_now,
+        scheduled_session_state=vietnam_intraday_session_state(now),
+        cache_entries=len(keys),
+        current_date_entries=current_entries,
+        completed_date_entries=len(keys) - current_entries,
+    )
+
+
 def _with_intraday_chart_runtime_metadata(payload: Dict[str, Any], *, is_stale: bool) -> Dict[str, Any]:
     now = _utc_now()
     local_now = now.astimezone(VN_TIMEZONE)
@@ -411,6 +460,7 @@ def _with_intraday_chart_runtime_metadata(payload: Dict[str, Any], *, is_stale: 
             session_state="completed",
             freshness="completed",
             newest_bar_age_seconds=None,
+            provider_snapshot_age_seconds=None,
             current_bar_state="completed",
         )
         return payload
@@ -425,9 +475,11 @@ def _with_intraday_chart_runtime_metadata(payload: Dict[str, Any], *, is_stale: 
             newest_age = None
     active = session_state in {"continuous_morning", "continuous_afternoon", "atc"}
     current_bar_state = "none"
+    newest_bucket_age_minutes: Optional[int] = None
     if bars:
         newest_bucket = datetime.fromtimestamp(int(bars[-1]["time"]), tz=VN_TIMEZONE).replace(second=0, microsecond=0)
         current_bucket = local_now.replace(second=0, microsecond=0)
+        newest_bucket_age_minutes = max(0, int((current_bucket - newest_bucket).total_seconds() // 60))
         current_bar_state = "provisional" if active and newest_bucket == current_bucket else "inferred_final"
 
     provider_refresh = payload.get("last_provider_refresh_at")
@@ -439,9 +491,19 @@ def _with_intraday_chart_runtime_metadata(payload: Dict[str, Any], *, is_stale: 
             provider_age = None
     if not bars:
         freshness = "unavailable"
-    elif is_stale or (provider_age is not None and provider_age > VN_INTRADAY_CHART_CURRENT_STALE_THRESHOLD_SECONDS):
+    elif is_stale or (
+        active
+        and provider_age is not None
+        and provider_age > VN_INTRADAY_CHART_CURRENT_STALE_THRESHOLD_SECONDS
+    ):
         freshness = "stale"
-    elif active and newest_age is not None and newest_age < 120:
+    elif (
+        active
+        and provider_age is not None
+        and provider_age <= VN_INTRADAY_CHART_CURRENT_SNAPSHOT_FRESH_SECONDS
+        and newest_bucket_age_minutes is not None
+        and newest_bucket_age_minutes <= 1
+    ):
         freshness = "updating"
     else:
         freshness = "delayed"
@@ -449,6 +511,7 @@ def _with_intraday_chart_runtime_metadata(payload: Dict[str, Any], *, is_stale: 
         session_state=session_state,
         freshness=freshness,
         newest_bar_age_seconds=newest_age,
+        provider_snapshot_age_seconds=provider_age,
         current_bar_state=current_bar_state,
     )
     return payload
@@ -5534,151 +5597,312 @@ class VietnamMarketService:
             raise ValueError("Intraday history date must not be after the current Vietnam date")
 
         cache_policy = "current" if requested_date == current_vietnam_date else "completed"
-
-        provider_date = requested_date.strftime("%d/%m/%Y")
+        observe_intraday_request(cache_policy, force_refresh=force_refresh)
         key = _intraday_chart_cache_key(normalized_ticker, trading_date)
         now = _utc_now()
         observed_entry = _get_intraday_chart_cache_entry(key)
         if observed_entry is not None and observed_entry.policy != cache_policy:
             observed_entry = None
-        if observed_entry is not None and not force_refresh and observed_entry.expires_at > now:
-            return _intraday_chart_cache_payload(observed_entry, status="hit", is_stale=False)
-
-        lock = _get_intraday_chart_lock(key)
-        with lock:
-            now = _utc_now()
-            current_entry = _get_intraday_chart_cache_entry(key)
-            if current_entry is not None and current_entry.policy != cache_policy:
-                current_entry = None
-            if current_entry is not None and current_entry.expires_at > now:
-                if not force_refresh or current_entry is not observed_entry:
-                    return _intraday_chart_cache_payload(current_entry, status="hit", is_stale=False)
-
-            fetcher = self._get_ssi_fetcher()
-            provider_result = fetcher.get_completed_intraday_1m(normalized_ticker, trading_date)
-            if provider_result.get("status") == "ok":
-                normalized = normalize_completed_intraday_chart_rows(provider_result.get("rows") or [], trading_date)
-                diagnostics = {
-                    "requested_date": trading_date,
-                    "provider_date": provider_date,
-                    "returned_rows": normalized["returned_rows"],
-                    "usable_bars": len(normalized["bars"]),
-                    "rejected_rows": normalized["rejected_rows"],
-                    "duplicate_minute_buckets": normalized["duplicate_minute_buckets"],
-                    "result": "no_data" if normalized["status"] == "ready" and not normalized["bars"] else normalized["status"],
-                }
-                if normalized["status"] == "failed":
-                    stale_entry = current_entry if current_entry and current_entry.usable else observed_entry
-                    if stale_entry is not None and stale_entry.usable and stale_entry.stale_until > now:
-                        stale_payload = _intraday_chart_cache_payload(stale_entry, status="stale", is_stale=True)
-                        stale_payload["diagnostics"]["recovery"] = "stale_if_error"
-                        stale_payload["diagnostics"]["refresh_result"] = "normalization_failed"
-                        return stale_payload
-                has_usable_bars = normalized["status"] == "ready" and bool(normalized["bars"])
-                current_empty = cache_policy == "current" and normalized["status"] == "ready" and not normalized["bars"]
-                response_status = "unavailable" if current_empty else normalized["status"]
-                value = {
-                    "ticker": normalized_ticker,
-                    "interval": "1m",
-                    "trading_date": trading_date,
-                    "timezone": str(VN_TIMEZONE),
-                    "status": response_status,
-                    "reason": (
-                        "SSI IntradayOhlc returned malformed rows."
-                        if normalized["status"] == "failed"
-                        else "SSI IntradayOhlc has no usable current-session bars yet."
-                        if current_empty
-                        else None
-                    ),
-                    "bars": normalized["bars"],
-                    "source": {"provider": "ssi_fastconnect", "dataset": "IntradayOhlc"},
-                    "diagnostics": diagnostics,
-                    "_newest_provider_timestamp": normalized.get("newest_provider_timestamp"),
-                }
-                if cache_policy == "current":
-                    ttl_seconds = (
-                        VN_INTRADAY_CHART_CURRENT_EMPTY_CACHE_TTL_SECONDS
-                        if not has_usable_bars
-                        else VN_INTRADAY_CHART_CURRENT_CACHE_TTL_SECONDS
-                    )
-                    stale_max_seconds = VN_INTRADAY_CHART_CURRENT_STALE_MAX_SECONDS
+        cache_hit: Optional[_IntradayChartCacheEntry] = None
+        owner = False
+        with _VN_INTRADAY_CHART_INFLIGHT_LOCK:
+            in_flight = _VN_INTRADAY_CHART_INFLIGHT.get(key)
+            if in_flight is not None:
+                in_flight.waiters += 1
+                observe_intraday_coalesced_waiter(in_flight.waiters)
+            else:
+                latest_entry = _get_intraday_chart_cache_entry(key)
+                if latest_entry is not None and latest_entry.policy != cache_policy:
+                    latest_entry = None
+                if latest_entry is not None and not force_refresh and latest_entry.expires_at > now:
+                    cache_hit = latest_entry
+                    observed_entry = latest_entry
                 else:
-                    ttl_seconds = (
-                        VN_INTRADAY_CHART_CACHE_TTL_SECONDS
-                        if normalized["status"] == "ready"
-                        else VN_INTRADAY_CHART_NEGATIVE_CACHE_TTL_SECONDS
+                    observed_entry = latest_entry or observed_entry
+                    in_flight = _IntradayChartInFlight(future=Future())
+                    _VN_INTRADAY_CHART_INFLIGHT[key] = in_flight
+                    owner = True
+
+        if cache_hit is not None:
+            observe_intraday_cache("hit", entry_kind=_intraday_chart_entry_kind(cache_hit))
+            logger.debug("VN intraday chart cache hit", extra={"ticker": normalized_ticker, "trading_date": trading_date})
+            return _intraday_chart_cache_payload(cache_hit, status="hit", is_stale=False)
+
+        assert in_flight is not None
+        if not owner:
+            logger.debug("VN intraday chart request coalesced", extra={"ticker": normalized_ticker, "trading_date": trading_date})
+            try:
+                return copy.deepcopy(in_flight.future.result())
+            finally:
+                observe_intraday_waiter_finished()
+
+        observe_intraday_inflight_started()
+        observe_intraday_cache("refresh" if force_refresh else "miss")
+        try:
+            result = self._fetch_intraday_chart_owner(
+                normalized_ticker,
+                trading_date=trading_date,
+                requested_date=requested_date,
+                cache_policy=cache_policy,
+                key=key,
+                force_refresh=force_refresh,
+                observed_entry=observed_entry,
+            )
+            in_flight.future.set_result(copy.deepcopy(result))
+            return result
+        except Exception as exc:
+            in_flight.future.set_exception(exc)
+            raise
+        finally:
+            with _VN_INTRADAY_CHART_INFLIGHT_LOCK:
+                if _VN_INTRADAY_CHART_INFLIGHT.get(key) is in_flight:
+                    _VN_INTRADAY_CHART_INFLIGHT.pop(key, None)
+            observe_intraday_inflight_finished()
+
+    def _fetch_intraday_chart_owner(
+        self,
+        normalized_ticker: str,
+        *,
+        trading_date: str,
+        requested_date: Any,
+        cache_policy: str,
+        key: Tuple[Any, ...],
+        force_refresh: bool,
+        observed_entry: Optional[_IntradayChartCacheEntry],
+    ) -> Dict[str, Any]:
+        """Execute one owned SSI fetch; no in-flight registry lock is held here."""
+        provider_date = requested_date.strftime("%d/%m/%Y")
+        cache_action = "force_refresh" if force_refresh else "miss"
+        session_state = "completed" if cache_policy == "completed" else vietnam_intraday_session_state(_utc_now())
+        started = time.perf_counter()
+        try:
+            provider_result = self._get_ssi_fetcher().get_completed_intraday_1m(normalized_ticker, trading_date)
+        except Exception as exc:
+            latency_ms = int((time.perf_counter() - started) * 1000)
+            event = observe_intraday_provider_fetch(
+                outcome="failure",
+                date_kind=cache_policy,
+                trading_date=trading_date,
+                session_state=session_state,
+                latency_ms=latency_ms,
+                returned_rows=0,
+                usable_bars=0,
+                rejected_rows=0,
+                duplicate_minutes=0,
+                newest_bar_age_seconds=None,
+                freshness="unavailable",
+                stale_recovery=False,
+                failure_class=type(exc).__name__,
+                at=_iso(_utc_now()) or "",
+            )
+            logger.warning(
+                "vn_intraday_provider_fetch",
+                extra={"vn_intraday": {**event, "ticker": normalized_ticker, "force_refresh": force_refresh, "cache_action": cache_action}},
+            )
+            raise
+        latency_ms = int((time.perf_counter() - started) * 1000)
+
+        def finish(
+            payload: Dict[str, Any],
+            *,
+            outcome: str,
+            returned_rows: int = 0,
+            usable_bars: int = 0,
+            rejected_rows: int = 0,
+            duplicate_minutes: int = 0,
+            stale_recovery: bool = False,
+            failure_class: object = None,
+        ) -> Dict[str, Any]:
+            event = observe_intraday_provider_fetch(
+                outcome=outcome,
+                date_kind=cache_policy,
+                trading_date=trading_date,
+                session_state=session_state,
+                latency_ms=latency_ms,
+                returned_rows=returned_rows,
+                usable_bars=usable_bars,
+                rejected_rows=rejected_rows,
+                duplicate_minutes=duplicate_minutes,
+                newest_bar_age_seconds=payload.get("newest_bar_age_seconds"),
+                freshness=payload.get("freshness"),
+                stale_recovery=stale_recovery,
+                failure_class=failure_class,
+                at=_iso(_utc_now()) or "",
+            )
+            log_payload = {
+                **event,
+                "ticker": normalized_ticker,
+                "force_refresh": force_refresh,
+                "cache_action": cache_action,
+            }
+            log_level = logging.WARNING if stale_recovery or outcome in {"unavailable", "failure"} else logging.INFO
+            logger.log(log_level, "vn_intraday_provider_fetch", extra={"vn_intraday": log_payload})
+            return payload
+
+        now = _utc_now()
+        stale_entry = observed_entry if observed_entry is not None and observed_entry.usable else None
+        if provider_result.get("status") == "ok":
+            normalized = normalize_completed_intraday_chart_rows(provider_result.get("rows") or [], trading_date)
+            returned_rows = int(normalized["returned_rows"])
+            usable_bars = len(normalized["bars"])
+            rejected_rows = int(normalized["rejected_rows"])
+            duplicate_minutes = int(normalized["duplicate_minute_buckets"])
+            diagnostics = {
+                "requested_date": trading_date,
+                "provider_date": provider_date,
+                "returned_rows": returned_rows,
+                "usable_bars": usable_bars,
+                "rejected_rows": rejected_rows,
+                "duplicate_minute_buckets": duplicate_minutes,
+                "result": "no_data" if normalized["status"] == "ready" and not normalized["bars"] else normalized["status"],
+            }
+            if normalized["status"] == "failed" and stale_entry is not None:
+                if stale_entry.stale_until > now:
+                    observe_intraday_stale_recovery(used=True)
+                    stale_payload = _intraday_chart_cache_payload(stale_entry, status="stale", is_stale=True)
+                    stale_payload["diagnostics"]["recovery"] = "stale_if_error"
+                    stale_payload["diagnostics"]["refresh_result"] = "normalization_failed"
+                    return finish(
+                        stale_payload,
+                        outcome="failure",
+                        returned_rows=returned_rows,
+                        usable_bars=len(stale_payload.get("bars") or []),
+                        rejected_rows=rejected_rows,
+                        duplicate_minutes=duplicate_minutes,
+                        stale_recovery=True,
+                        failure_class="normalization_failed",
                     )
-                    stale_max_seconds = VN_INTRADAY_CHART_STALE_MAX_SECONDS
-                entry = _set_intraday_chart_cache_entry(
-                    key,
-                    value,
-                    ttl_seconds=ttl_seconds,
-                    usable=has_usable_bars or (cache_policy == "completed" and normalized["status"] == "ready"),
-                    policy=cache_policy,
-                    stale_max_seconds=stale_max_seconds,
-                )
-                return _intraday_chart_cache_payload(
-                    entry,
-                    status="refresh" if force_refresh else "miss",
-                    is_stale=False,
-                )
+                observe_intraday_stale_recovery(rejected_too_old=True)
 
-            stale_entry = current_entry if current_entry and current_entry.usable else observed_entry
-            if stale_entry is not None and stale_entry.usable and stale_entry.stale_until > now:
-                stale_payload = _intraday_chart_cache_payload(stale_entry, status="stale", is_stale=True)
-                stale_payload["diagnostics"]["recovery"] = "stale_if_error"
-                return stale_payload
-
-            failure_class = provider_result.get("failure_class")
-            provider_code = str(provider_result.get("code") or "").strip().lower()
-            current_no_data = cache_policy == "current" and provider_code == "nodatafound"
+            has_usable_bars = normalized["status"] == "ready" and bool(normalized["bars"])
+            current_empty = cache_policy == "current" and normalized["status"] == "ready" and not normalized["bars"]
+            response_status = "unavailable" if current_empty else normalized["status"]
             value = {
                 "ticker": normalized_ticker,
                 "interval": "1m",
                 "trading_date": trading_date,
                 "timezone": str(VN_TIMEZONE),
-                "status": "unavailable",
+                "status": response_status,
                 "reason": (
-                    "SSI IntradayOhlc has no usable current-session bars yet."
-                    if current_no_data
-                    else "SSI IntradayOhlc is unavailable."
+                    "SSI IntradayOhlc returned malformed rows."
+                    if normalized["status"] == "failed"
+                    else "SSI IntradayOhlc has no usable current-session bars yet."
+                    if current_empty
+                    else None
                 ),
-                "bars": [],
+                "bars": normalized["bars"],
                 "source": {"provider": "ssi_fastconnect", "dataset": "IntradayOhlc"},
-                "diagnostics": {
-                    "requested_date": trading_date,
-                    "provider_date": provider_date,
-                    "returned_rows": 0,
-                    "usable_bars": 0,
-                    "rejected_rows": 0,
-                    "duplicate_minute_buckets": 0,
-                    "result": "no_data" if current_no_data else "provider_unavailable",
-                    "failure_class": str(failure_class)[:80] if failure_class else None,
-                },
+                "diagnostics": diagnostics,
+                "_newest_provider_timestamp": normalized.get("newest_provider_timestamp"),
             }
+            if cache_policy == "current":
+                ttl_seconds = (
+                    VN_INTRADAY_CHART_CURRENT_EMPTY_CACHE_TTL_SECONDS
+                    if not has_usable_bars
+                    else VN_INTRADAY_CHART_CURRENT_CACHE_TTL_SECONDS
+                )
+                stale_max_seconds = VN_INTRADAY_CHART_CURRENT_STALE_MAX_SECONDS
+            else:
+                ttl_seconds = (
+                    VN_INTRADAY_CHART_CACHE_TTL_SECONDS
+                    if normalized["status"] == "ready"
+                    else VN_INTRADAY_CHART_NEGATIVE_CACHE_TTL_SECONDS
+                )
+                stale_max_seconds = VN_INTRADAY_CHART_STALE_MAX_SECONDS
             entry = _set_intraday_chart_cache_entry(
                 key,
                 value,
-                ttl_seconds=(
-                    VN_INTRADAY_CHART_CURRENT_EMPTY_CACHE_TTL_SECONDS
-                    if current_no_data
-                    else VN_INTRADAY_CHART_CURRENT_NEGATIVE_CACHE_TTL_SECONDS
-                    if cache_policy == "current"
-                    else VN_INTRADAY_CHART_NEGATIVE_CACHE_TTL_SECONDS
-                ),
-                usable=False,
+                ttl_seconds=ttl_seconds,
+                usable=has_usable_bars or (cache_policy == "completed" and normalized["status"] == "ready"),
                 policy=cache_policy,
-                stale_max_seconds=(
-                    VN_INTRADAY_CHART_CURRENT_STALE_MAX_SECONDS
-                    if cache_policy == "current"
-                    else VN_INTRADAY_CHART_STALE_MAX_SECONDS
-                ),
+                stale_max_seconds=stale_max_seconds,
+                provider_successful=True,
             )
-            return _intraday_chart_cache_payload(
+            payload = _intraday_chart_cache_payload(
                 entry,
                 status="refresh" if force_refresh else "miss",
                 is_stale=False,
             )
+            return finish(
+                payload,
+                outcome="success" if has_usable_bars else "no_data" if normalized["status"] == "ready" else "failure",
+                returned_rows=returned_rows,
+                usable_bars=usable_bars,
+                rejected_rows=rejected_rows,
+                duplicate_minutes=duplicate_minutes,
+                failure_class="normalization_failed" if normalized["status"] == "failed" else None,
+            )
+
+        failure_class = sanitize_intraday_failure_class(provider_result.get("failure_class"))
+        provider_code = str(provider_result.get("code") or "").strip().lower()
+        current_no_data = cache_policy == "current" and provider_code == "nodatafound"
+        if stale_entry is not None:
+            if stale_entry.stale_until > now:
+                observe_intraday_stale_recovery(used=True)
+                stale_payload = _intraday_chart_cache_payload(stale_entry, status="stale", is_stale=True)
+                stale_payload["diagnostics"]["recovery"] = "stale_if_error"
+                return finish(
+                    stale_payload,
+                    outcome="no_data" if current_no_data else "unavailable",
+                    usable_bars=len(stale_payload.get("bars") or []),
+                    stale_recovery=True,
+                    failure_class=failure_class,
+                )
+            observe_intraday_stale_recovery(rejected_too_old=True)
+
+        value = {
+            "ticker": normalized_ticker,
+            "interval": "1m",
+            "trading_date": trading_date,
+            "timezone": str(VN_TIMEZONE),
+            "status": "unavailable",
+            "reason": (
+                "SSI IntradayOhlc has no usable current-session bars yet."
+                if current_no_data
+                else "SSI IntradayOhlc is unavailable."
+            ),
+            "bars": [],
+            "source": {"provider": "ssi_fastconnect", "dataset": "IntradayOhlc"},
+            "diagnostics": {
+                "requested_date": trading_date,
+                "provider_date": provider_date,
+                "returned_rows": 0,
+                "usable_bars": 0,
+                "rejected_rows": 0,
+                "duplicate_minute_buckets": 0,
+                "result": "no_data" if current_no_data else "provider_unavailable",
+                "failure_class": failure_class,
+            },
+        }
+        entry = _set_intraday_chart_cache_entry(
+            key,
+            value,
+            ttl_seconds=(
+                VN_INTRADAY_CHART_CURRENT_EMPTY_CACHE_TTL_SECONDS
+                if current_no_data
+                else VN_INTRADAY_CHART_CURRENT_NEGATIVE_CACHE_TTL_SECONDS
+                if cache_policy == "current"
+                else VN_INTRADAY_CHART_NEGATIVE_CACHE_TTL_SECONDS
+            ),
+            usable=False,
+            policy=cache_policy,
+            stale_max_seconds=(
+                VN_INTRADAY_CHART_CURRENT_STALE_MAX_SECONDS
+                if cache_policy == "current"
+                else VN_INTRADAY_CHART_STALE_MAX_SECONDS
+            ),
+            provider_successful=False,
+        )
+        payload = _intraday_chart_cache_payload(
+            entry,
+            status="refresh" if force_refresh else "miss",
+            is_stale=False,
+        )
+        return finish(
+            payload,
+            outcome="no_data" if current_no_data else "unavailable",
+            failure_class=failure_class,
+        )
 
     def build_watchlist(
         self,

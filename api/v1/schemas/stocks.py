@@ -384,11 +384,111 @@ class VietnamIntradayChartResponse(BaseModel):
     freshness: Literal["updating", "delayed", "stale", "completed", "unavailable"] = "unavailable"
     last_provider_refresh_at: Optional[str] = None
     newest_bar_age_seconds: Optional[int] = None
+    provider_snapshot_age_seconds: Optional[int] = None
     current_bar_state: Literal["provisional", "inferred_final", "completed", "none"] = "none"
     bars: List[VietnamChartPoint] = Field(default_factory=list)
     source: Dict[str, Any] = Field(default_factory=dict)
     cache: Dict[str, Any] = Field(default_factory=dict)
     diagnostics: Dict[str, Any] = Field(default_factory=dict)
+
+
+class VietnamIntradayHealthProcessScope(BaseModel):
+    metrics_scope: Literal["process_local"] = "process_local"
+    resets_on_restart: bool = True
+
+
+class VietnamIntradayHealthCache(BaseModel):
+    entries: int = Field(0, ge=0)
+    current_date_entries: int = Field(0, ge=0)
+    completed_date_entries: int = Field(0, ge=0)
+    in_flight_fetches: int = Field(0, ge=0)
+
+
+class VietnamIntradayHealthRequests(BaseModel):
+    total: int = Field(0, ge=0)
+    current_date: int = Field(0, ge=0)
+    completed_date: int = Field(0, ge=0)
+    force_refresh: int = Field(0, ge=0)
+    coalesced: int = Field(0, ge=0)
+
+
+class VietnamIntradayHealthLatency(BaseModel):
+    count: int = Field(0, ge=0)
+    min: Optional[int] = Field(None, ge=0)
+    max: Optional[int] = Field(None, ge=0)
+    average: Optional[float] = Field(None, ge=0)
+    last: Optional[int] = Field(None, ge=0)
+
+
+class VietnamIntradayHealthProvider(BaseModel):
+    calls: int = Field(0, ge=0)
+    successes: int = Field(0, ge=0)
+    no_data: int = Field(0, ge=0)
+    unavailable: int = Field(0, ge=0)
+    failures: int = Field(0, ge=0)
+    last_successful_fetch_at: Optional[str] = None
+    latency_ms: VietnamIntradayHealthLatency = Field(default_factory=VietnamIntradayHealthLatency)
+
+
+class VietnamIntradayHealthCacheActivity(BaseModel):
+    hits: int = Field(0, ge=0)
+    misses: int = Field(0, ge=0)
+    refreshes: int = Field(0, ge=0)
+    empty_hits: int = Field(0, ge=0)
+    negative_hits: int = Field(0, ge=0)
+    stale_recoveries: int = Field(0, ge=0)
+    stale_recovery_rejected_too_old: int = Field(0, ge=0)
+
+
+class VietnamIntradayHealthDataQuality(BaseModel):
+    last_returned_row_count: int = Field(0, ge=0)
+    last_usable_bar_count: int = Field(0, ge=0)
+    last_rejected_row_count: int = Field(0, ge=0)
+    last_duplicate_minute_count: int = Field(0, ge=0)
+    last_newest_bar_age_seconds: Optional[int] = Field(None, ge=0)
+    last_freshness: Optional[Literal["updating", "delayed", "stale", "completed", "unavailable"]] = None
+
+
+class VietnamIntradayHealthConcurrency(BaseModel):
+    current_same_key_waiters: int = Field(0, ge=0)
+    coalesced_waiters: int = Field(0, ge=0)
+    maximum_same_key_waiters: int = Field(0, ge=0)
+
+
+class VietnamIntradayHealthLastProviderResult(BaseModel):
+    result: Literal["success", "no_data", "unavailable", "failure"]
+    date_kind: Literal["current", "completed"]
+    trading_date: str
+    session_state: str
+    latency_ms: int = Field(ge=0)
+    returned_row_count: int = Field(ge=0)
+    usable_bar_count: int = Field(ge=0)
+    rejected_row_count: int = Field(ge=0)
+    duplicate_minute_count: int = Field(ge=0)
+    newest_bar_age_seconds: Optional[int] = Field(None, ge=0)
+    freshness: Optional[Literal["updating", "delayed", "stale", "completed", "unavailable"]] = None
+    stale_recovery: bool = False
+    failure_class: Optional[str] = None
+    at: str
+
+
+class VietnamIntradayChartHealthResponse(BaseModel):
+    """Sanitized worker-local health for the SSI intraday chart path."""
+
+    status: Literal["ok", "degraded", "unknown"]
+    timezone: Literal["Asia/Ho_Chi_Minh"] = "Asia/Ho_Chi_Minh"
+    current_vietnam_time: str
+    scheduled_session_state: Literal[
+        "pre_open", "continuous_morning", "lunch", "continuous_afternoon", "atc", "closed"
+    ]
+    process_scope: VietnamIntradayHealthProcessScope
+    cache: VietnamIntradayHealthCache
+    requests: VietnamIntradayHealthRequests
+    provider: VietnamIntradayHealthProvider
+    cache_activity: VietnamIntradayHealthCacheActivity
+    data_quality: VietnamIntradayHealthDataQuality
+    concurrency: VietnamIntradayHealthConcurrency
+    last_provider_result: Optional[VietnamIntradayHealthLastProviderResult] = None
 
 
 class VietnamIndexInfo(BaseModel):

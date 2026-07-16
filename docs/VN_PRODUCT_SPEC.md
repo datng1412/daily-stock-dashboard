@@ -470,3 +470,11 @@ Avoid these until their trigger condition is met, documented, and handled in a s
 * Mozyfin/KBS fallback.
 * Fake realtime or stale snapshots labeled as live.
 * Inferred dividends or corporate actions.
+
+## Phase 4.11E - Current-Session Production Hardening and Observability
+
+The delayed SSI 1-minute chart is operated as a bounded polling product, not a live stream. Backend workers expose a read-only, no-store health snapshot with process-local counters, latency aggregates, cache/coalescing activity, data-quality counts, and a sanitized last provider result. Metrics reset on restart and differ between multiple workers. Same-key requests share one provider fetch inside a worker; there is no Redis or deployment-wide lock.
+
+The canonical intraday operational path is `GET /api/v1/stocks/vn/intraday-chart/health`; the older `GET /api/v1/stocks/vn/observability` path remains a separate dashboard-wide diagnostics product. Candle display time is minute start, newest-bar age uses the accepted raw SSI event time, and provider-snapshot age uses the successful fetch time.
+
+The user experience has one market-data schedule, a separate request-free countdown, explicit Force Refresh, stable bars during refresh, semantic Today rollover, and deterministic pre-open/lunch/afternoon/ATC/post-close/visibility behavior. User-facing states distinguish updating, delayed, stale, expected no-data, and SSI unavailability without showing provider exception text. SSI IntradayOhlc remains the sole 1m source, SSI DailyOhlc remains D1/latest-price source, and X-TRADE, external providers, higher intervals, filler candles, and TradingView data ingestion remain excluded.

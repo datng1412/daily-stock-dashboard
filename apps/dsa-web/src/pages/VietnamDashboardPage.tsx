@@ -43,8 +43,11 @@ import {
   resolveVietnamWatchlistBatchSize,
 } from '../utils/vietnamWatchlistBatching';
 import {
+  getVietnamDateRolloverDelayMs,
+  getVietnamIntradayCountdownSeconds,
   getNextVietnamIntradayAction,
   getVietnamScheduledSessionState,
+  vietnamIntradayFinalRefreshKey,
   vietnamIntradayStatusLabel,
   vietnamTodayIso,
 } from '../utils/vietnamIntradayPolling';
@@ -3380,13 +3383,21 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [intradayRefreshToken, setIntradayRefreshToken] = useState(0);
+  const [intradaySemanticToday, setIntradaySemanticToday] = useState(false);
   const [documentVisible, setDocumentVisible] = useState(() => document.visibilityState === 'visible');
+  const [nextIntradayUpdateAt, setNextIntradayUpdateAt] = useState<number | null>(null);
+  const [intradayCountdownSeconds, setIntradayCountdownSeconds] = useState<number | null>(null);
   const [chartError, setChartError] = useState<{ requestKey: string; message: string } | null>(null);
   const requestIdRef = useRef(0);
   const intradayChartRef = useRef<VietnamIntradayChartResponse | null>(null);
   const intradayControllerRef = useRef<AbortController | null>(null);
   const intradayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const intradayRefreshKindRef = useRef<'initial' | 'scheduled' | 'visible'>('initial');
+  const intradayCountdownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const intradayRequestInFlightRef = useRef(false);
+  const intradayRefreshKindRef = useRef<'initial' | 'scheduled' | 'visible' | 'manual' | 'afternoon_resume' | 'post_close'>('initial');
+  const intradayForceRefreshRef = useRef(false);
+  const intradaySkipNextLoadRef = useRef(false);
+  const intradayFinalRefreshKeysRef = useRef<Set<string>>(new Set());
   const lightweightLogicalRangeRef = useRef<{ from: number; to: number } | null>(null);
   const normalizedTicker = normalizeVietnamTicker(item.ticker);
   const requestKey = timeframe === '1D'
@@ -3422,6 +3433,11 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
     ? intradayBelongsToItem && intradayChart?.status === 'ready'
     : false;
   const activeResponseFailed = timeframe === '1m' && intradayBelongsToItem && intradayChart?.status === 'failed';
+  const intradayProviderUnavailable = Boolean(
+    intradayBelongsToItem
+    && intradayChart?.status === 'unavailable'
+    && intradayChart.diagnostics.result === 'provider_unavailable',
+  );
   const chartIsLoading = loading;
   const chartSectionState: SectionState = chartIsLoading
     ? 'Loading'
@@ -3450,10 +3466,36 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
   }, [currentVietnamDate, dailyChart, preferredCompletedDate]);
 
   const intradayStatus = intradayBelongsToItem
-    ? vietnamIntradayStatusLabel(intradayChart?.sessionState, intradayChart?.freshness, points.length > 0)
+    ? vietnamIntradayStatusLabel(
+      intradayChart?.sessionState,
+      intradayChart?.freshness,
+      points.length > 0,
+      { loading, providerUnavailable: intradayProviderUnavailable },
+    )
     : intradayDate === currentVietnamDate
-      ? vietnamIntradayStatusLabel(getVietnamScheduledSessionState(new Date()), 'unavailable', false)
+      ? vietnamIntradayStatusLabel(
+        getVietnamScheduledSessionState(new Date()),
+        'unavailable',
+        false,
+        { loading },
+      )
       : intradayDate ? 'Completed' : 'No data yet';
+
+  const queueIntradayRefresh = useCallback((
+    kind: 'scheduled' | 'visible' | 'manual' | 'afternoon_resume' | 'post_close',
+    forceRefresh = false,
+  ) => {
+    if (intradayRequestInFlightRef.current) {
+      if (kind !== 'manual') return false;
+      intradayControllerRef.current?.abort();
+      requestIdRef.current += 1;
+      intradayRequestInFlightRef.current = false;
+    }
+    intradayRefreshKindRef.current = kind;
+    intradayForceRefreshRef.current = forceRefresh;
+    setIntradayRefreshToken((value) => value + 1);
+    return true;
+  }, []);
 
   const handleRangeChange = useCallback((nextRange: InspectRangeLabel) => {
     if (nextRange === rangeLabel || timeframe !== '1D') return;
@@ -3471,8 +3513,12 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
     setLoading(true);
     if (nextTimeframe === '1m') {
       intradayRefreshKindRef.current = 'initial';
+      intradayForceRefreshRef.current = false;
+      setIntradaySemanticToday(true);
       setIntradayChart(null);
       setIntradayDate(vietnamTodayIso());
+    } else {
+      setIntradaySemanticToday(false);
     }
     setTimeframe(nextTimeframe);
   }, [timeframe]);
@@ -3480,6 +3526,8 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
   useEffect(() => {
     if (timeframe !== '1m') return;
     intradayRefreshKindRef.current = 'initial';
+    intradayForceRefreshRef.current = false;
+    setIntradaySemanticToday(true);
     setIntradayChart(null);
     setIntradayDate(vietnamTodayIso());
   }, [item.ticker, timeframe]); // reset current-session ownership when the selected ticker changes
@@ -3504,28 +3552,53 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
       if (!visible) {
         if (intradayTimerRef.current) clearTimeout(intradayTimerRef.current);
         intradayTimerRef.current = null;
+        if (intradayCountdownTimerRef.current) clearTimeout(intradayCountdownTimerRef.current);
+        intradayCountdownTimerRef.current = null;
+        setNextIntradayUpdateAt(null);
+        setIntradayCountdownSeconds(null);
         intradayControllerRef.current?.abort();
         requestIdRef.current += 1;
+        intradayRequestInFlightRef.current = false;
         setLoading(false);
         setRefreshing(false);
         return;
       }
-      if (timeframe === '1m' && intradayDate === vietnamTodayIso()) {
-        intradayRefreshKindRef.current = 'visible';
-        setIntradayRefreshToken((value) => value + 1);
+      if (timeframe === '1m' && intradaySemanticToday) {
+        const nextToday = vietnamTodayIso();
+        if (intradayDate !== nextToday) {
+          intradayRefreshKindRef.current = 'initial';
+          intradayForceRefreshRef.current = false;
+          setIntradayChart(null);
+          setIntradayDate(nextToday);
+          return;
+        }
+        const session = getVietnamScheduledSessionState(new Date());
+        if (session === 'continuous_morning' || session === 'continuous_afternoon' || session === 'atc') {
+          queueIntradayRefresh('visible');
+        }
       }
     };
     document.addEventListener('visibilitychange', onVisibilityChange);
     return () => document.removeEventListener('visibilitychange', onVisibilityChange);
-  }, [intradayDate, timeframe]);
+  }, [intradayDate, intradaySemanticToday, queueIntradayRefresh, timeframe]);
 
   useEffect(() => {
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
     const controller = new AbortController();
     intradayControllerRef.current = controller;
-    lightweightLogicalRangeRef.current = null;
+    const requestKind = intradayRefreshKindRef.current;
+    const forceRefresh = intradayForceRefreshRef.current;
+    intradayForceRefreshRef.current = false;
+    if (timeframe === '1D' || requestKind === 'initial') lightweightLogicalRangeRef.current = null;
     setChartError(null);
+    if (timeframe === '1m' && intradaySkipNextLoadRef.current) {
+      intradaySkipNextLoadRef.current = false;
+      setIntradayChart(null);
+      setLoading(false);
+      setRefreshing(false);
+      return () => controller.abort();
+    }
     if (timeframe === '1m' && !intradayDate) {
       setIntradayChart(null);
       setLoading(false);
@@ -3544,16 +3617,20 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
       && existingIntraday.bars.length,
     );
     const preserveBars = timeframe === '1m'
-      && intradayRefreshKindRef.current !== 'initial'
+      && requestKind !== 'initial'
       && ownsExistingBars;
     setLoading(!preserveBars);
     setRefreshing(preserveBars);
     if (timeframe === '1m' && !preserveBars) setIntradayChart(null);
     if (timeframe === '1D') setDailyChart(null);
     const loadChart = async () => {
+      intradayRequestInFlightRef.current = timeframe === '1m';
       try {
         if (timeframe === '1m') {
-          const response = await stocksApi.getVietnamIntradayChart(item.ticker, intradayDate, { signal: controller.signal });
+          const response = await stocksApi.getVietnamIntradayChart(item.ticker, intradayDate, {
+            forceRefresh,
+            signal: controller.signal,
+          });
           if (requestId !== requestIdRef.current) return;
           if (
             normalizeVietnamTicker(response.ticker) !== normalizedTicker
@@ -3561,6 +3638,10 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
             || response.tradingDate !== intradayDate
           ) return;
           setIntradayChart(response);
+          if (response.sessionState === 'closed' && intradaySemanticToday) {
+            intradayFinalRefreshKeysRef.current.clear();
+            intradayFinalRefreshKeysRef.current.add(vietnamIntradayFinalRefreshKey(normalizedTicker, intradayDate));
+          }
         } else {
           const response = await stocksApi.getVietnamChart(item.ticker, rangeLabel);
           if (requestId !== requestIdRef.current) return;
@@ -3574,6 +3655,7 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
           message: err instanceof Error ? err.message : 'Chart data unavailable',
         });
       } finally {
+        if (intradayControllerRef.current === controller) intradayRequestInFlightRef.current = false;
         if (requestId === requestIdRef.current) {
           setLoading(false);
           setRefreshing(false);
@@ -3586,43 +3668,82 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
       if (intradayControllerRef.current === controller) intradayControllerRef.current = null;
       if (requestIdRef.current === requestId) requestIdRef.current += 1;
     };
-  }, [intradayDate, intradayRefreshToken, item.ticker, normalizedTicker, rangeLabel, requestKey, timeframe]);
+  }, [intradayDate, intradayRefreshToken, intradaySemanticToday, item.ticker, normalizedTicker, rangeLabel, requestKey, timeframe]);
 
   useEffect(() => {
     if (intradayTimerRef.current) clearTimeout(intradayTimerRef.current);
     intradayTimerRef.current = null;
+    setNextIntradayUpdateAt(null);
     if (
       timeframe !== '1m'
       || !documentVisible
+      || !intradaySemanticToday
       || intradayDate !== vietnamTodayIso()
       || loading
       || refreshing
     ) return undefined;
 
     const now = new Date();
-    const action = getNextVietnamIntradayAction(now);
-    const delayMs = action?.delayMs ?? (() => {
-      const tomorrow = new Date(`${vietnamTodayIso(now)}T17:00:00Z`).getTime();
-      return Math.max(1_000, tomorrow - now.getTime());
-    })();
+    let action = getNextVietnamIntradayAction(now);
+    const finalRefreshKey = vietnamIntradayFinalRefreshKey(normalizedTicker, intradayDate);
+    if (action?.kind === 'post_close' && intradayFinalRefreshKeysRef.current.has(finalRefreshKey)) {
+      action = null;
+    }
+    const delayMs = action?.delayMs ?? getVietnamDateRolloverDelayMs(now);
+    if (action?.kind === 'poll') setNextIntradayUpdateAt(now.getTime() + delayMs);
     intradayTimerRef.current = setTimeout(() => {
       intradayTimerRef.current = null;
+      setNextIntradayUpdateAt(null);
       const nextToday = vietnamTodayIso();
       if (nextToday !== intradayDate) {
         intradayRefreshKindRef.current = 'initial';
+        intradayForceRefreshRef.current = false;
+        intradaySkipNextLoadRef.current = true;
+        intradayFinalRefreshKeysRef.current.clear();
         setIntradayChart(null);
         setIntradayDate(nextToday);
         return;
       }
       if (!action) return;
-      intradayRefreshKindRef.current = 'scheduled';
-      setIntradayRefreshToken((value) => value + 1);
+      if (action.kind === 'post_close') {
+        if (intradayFinalRefreshKeysRef.current.has(finalRefreshKey)) return;
+        intradayFinalRefreshKeysRef.current.clear();
+        intradayFinalRefreshKeysRef.current.add(finalRefreshKey);
+        queueIntradayRefresh('post_close', true);
+        return;
+      }
+      if (action.kind === 'afternoon_resume') {
+        queueIntradayRefresh('afternoon_resume', true);
+        return;
+      }
+      queueIntradayRefresh('scheduled');
     }, delayMs);
     return () => {
       if (intradayTimerRef.current) clearTimeout(intradayTimerRef.current);
       intradayTimerRef.current = null;
     };
-  }, [documentVisible, intradayChart, intradayDate, loading, refreshing, timeframe]);
+  }, [documentVisible, intradayChart, intradayDate, intradaySemanticToday, loading, normalizedTicker, queueIntradayRefresh, refreshing, timeframe]);
+
+  useEffect(() => {
+    if (intradayCountdownTimerRef.current) clearTimeout(intradayCountdownTimerRef.current);
+    intradayCountdownTimerRef.current = null;
+    if (nextIntradayUpdateAt == null || !documentVisible || loading || timeframe !== '1m') {
+      setIntradayCountdownSeconds(null);
+      return undefined;
+    }
+    const updateCountdown = () => {
+      const remaining = getVietnamIntradayCountdownSeconds(nextIntradayUpdateAt, Date.now());
+      setIntradayCountdownSeconds(remaining);
+      if (remaining != null && remaining > 0) {
+        intradayCountdownTimerRef.current = setTimeout(updateCountdown, Math.min(1_000, remaining * 1_000));
+      }
+    };
+    updateCountdown();
+    return () => {
+      if (intradayCountdownTimerRef.current) clearTimeout(intradayCountdownTimerRef.current);
+      intradayCountdownTimerRef.current = null;
+    };
+  }, [documentVisible, loading, nextIntradayUpdateAt, timeframe]);
 
   const timeframeControls = (
     <div className="flex flex-wrap items-stretch gap-2" aria-label="Chart controls">
@@ -3664,11 +3785,14 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
           <select
             value={intradayDate}
             onChange={(event) => {
+              const nextDate = event.target.value;
               lightweightLogicalRangeRef.current = null;
               intradayRefreshKindRef.current = 'initial';
+              intradayForceRefreshRef.current = false;
+              setIntradaySemanticToday(nextDate === vietnamTodayIso());
               setIntradayChart(null);
               setChartError(null);
-              setIntradayDate(event.target.value);
+              setIntradayDate(nextDate);
             }}
             className="h-8 rounded-md border border-border/70 bg-card/60 px-2 text-foreground"
             aria-label="Intraday trading date"
@@ -3676,10 +3800,19 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
             <option value={currentVietnamDate}>Today — {currentVietnamDate.split('-').reverse().join('/')}</option>
             {intradayCompletedDates.map((date) => <option key={date} value={date}>{date.split('-').reverse().join('/')}</option>)}
           </select>
-          <Badge variant={intradayStatus === 'Stale' ? 'warning' : 'default'}>
+          <Badge variant={intradayStatus === 'Stale' || intradayStatus === 'SSI data unavailable' ? 'warning' : 'default'}>
             {intradayStatus}
           </Badge>
           {refreshing ? <span className="inline-flex items-center gap-1 text-muted"><Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />Refreshing</span> : null}
+          <button
+            type="button"
+            onClick={() => queueIntradayRefresh('manual', true)}
+            className="inline-flex h-8 items-center gap-1 rounded-md border border-border/70 bg-card/60 px-2 text-xs font-medium text-secondary-text transition-colors hover:bg-hover hover:text-foreground"
+            aria-label="Force refresh 1-minute chart"
+          >
+            <RefreshCw className={cn('h-3 w-3', refreshing && 'animate-spin')} aria-hidden="true" />
+            Force Refresh
+          </button>
         </div>
       )}
     </div>
@@ -3762,7 +3895,7 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
             : timeframe === '1m' && activeResponseReady
               ? 'No 1-minute bars for the selected date.'
               : timeframe === '1m' && intradayDate === currentVietnamDate
-                ? 'No data yet'
+                ? intradayStatus === 'SSI data unavailable' ? 'SSI data unavailable' : 'No data yet'
               : 'Chart data unavailable'}
         </p>
       )}
@@ -3775,10 +3908,19 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
         <p>{timeframe === '1m' ? '1-minute history' : 'Daily OHLCV'} source: {chartSourceLabel}</p>
         <p>SSI realtime is separate and not used as {timeframe === '1m' ? 'chart history' : 'daily close'}.</p>
         {timeframe === '1m' && intradayBelongsToItem && intradayChart?.lastProviderRefreshAt ? (
-          <p>Last SSI provider refresh: {formatVietnamTime(intradayChart.lastProviderRefreshAt)}</p>
+          <p>{intradayStatus === 'Stale' ? 'Last successful update' : 'Updated'}: {formatVietnamTime(intradayChart.lastProviderRefreshAt)}</p>
+        ) : null}
+        {timeframe === '1m' && intradayBelongsToItem && points.length ? (
+          <p>Latest bar: {formatVietnamTime(Number(points[points.length - 1].time) * 1_000).replace(/:\d{2} VN$/, ' VN')}</p>
+        ) : null}
+        {timeframe === '1m' && intradayCountdownSeconds != null ? (
+          <p aria-live="off">Next update in {intradayCountdownSeconds}s</p>
         ) : null}
         {timeframe === '1m' && intradayBelongsToItem && intradayChart?.newestBarAgeSeconds != null ? (
           <p>Newest provider bar age: {intradayChart.newestBarAgeSeconds}s</p>
+        ) : null}
+        {timeframe === '1m' && intradayBelongsToItem && intradayChart?.providerSnapshotAgeSeconds != null ? (
+          <p>Provider snapshot age: {intradayChart.providerSnapshotAgeSeconds}s</p>
         ) : null}
         {timeframe === '1m' && intradayBelongsToItem && intradayChart?.cache.isStale ? <p>Showing stale cached history after a provider refresh error.</p> : null}
         {timeframe === '1D' && dailyBelongsToItem && dailyChart?.latestDate ? <p>Latest chart date: {dailyChart.latestDate}</p> : null}

@@ -1323,6 +1323,18 @@ Eight bounded current-date FPT IntradayOhlc requests covered 09:12-09:20 Vietnam
 
 Phase 4.11D-2 gate: `open_as_delayed_only`. Future work may add bounded minute-boundary SSI polling about 5-10 seconds after each continuous-trading boundary, pause during lunch/pre-open, retain usable cache on failure, reconcile authoritatively after close, and label the experience `Updating`/`Delayed`, never `Live` from this evidence.
 
+### Phase 4.11E - Current-Session Production Hardening and Observability
+
+Status: implementation, deterministic validation, and bounded backend runtime health/cache/coalescing proof complete on 2026-07-16; SSI data remained unavailable as a sanitized local `network_error`, and browser evidence remains blocked.
+
+The phase adds bounded concurrency-safe worker-local metrics, sanitized `vn_intraday_provider_fetch` events, a read-only no-store health route, exact-key process-local coalescing, separate provider-snapshot/newest-bar ages, and current-session cache/date-rollover guards. The dashboard centralizes active refresh triggers behind one owned request path, retains one market-data timeout plus one request-free countdown timeout, prevents scheduled/manual/visibility overlap, preserves bars during refresh, wakes once after lunch, reconciles once after close, and rolls semantic Today in Vietnam time. Metrics reset on restart and are per worker; there is no distributed lock or deployment-global health aggregation.
+
+The contract stays SSI-only: DailyOhlc owns D1/latest price; IntradayOhlc owns 1m; X-TRADE candle aggregation and Phase 4.11D-3 remain blocked; TradingView is rendering-only; no external provider, WebSocket, realtime overlay, higher timeframe, filler, or forward fill was added.
+
+Runtime proof started with HTTP 200/no-store `unknown` health and zero provider calls. A completed-date miss/repeat/force sequence ended with four endpoint requests, three actual provider calls, one cache hit, two misses, one refresh, zero in-flight work, and `degraded` health because SSI was locally unavailable as `network_error`; no current or completed bars were observed. Five concurrent same-key forced requests then yielded one actual provider call, four coalesced waiters, maximum same-key waiter count four, and clean in-flight removal. Automated browser navigation terminated twice before the page could be inspected, so no D1, completed 1m, Today, transition, visual, or network proof is claimed.
+
+Phase 4.11E-R verified that `/intraday-chart/health` and the broader `/observability` endpoint are intentionally distinct typed routes. It also verified the existing implementation already calculates newest-bar age from the accepted raw SSI timestamp, including the latest-raw-time duplicate winner, while keeping the candle bucket at minute start and snapshot age at successful fetch time. Production code, cache policy, and provider behavior therefore required no repair; focused route and frozen-time tests were strengthened.
+
 One bounded `X-TRADE:FPT` observation captured 206 events across two 30-second windows and one controlled reconnect. All observed events had trade price, `LastVol`, cumulative `TotalVol`, side, date/time, and session/status, but no ID or sequence; 109 visible tuples collided. The current manager stores receive order and performs no event deduplication, so replay/loss/correction detection and authoritative close/volume aggregation are unsafe. Phase 4.11D-3 gate: `blocked`. A future reconnect must suspend provisional trust and refresh/reconcile from SSI IntradayOhlc before resuming. No X/X-QUOTE/F/R/MI/persisted-snapshot candle path is allowed.
 
 ### Phase 4.8F - SSI Remaining Data Capability Audit

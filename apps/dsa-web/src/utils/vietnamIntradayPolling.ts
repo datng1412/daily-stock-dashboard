@@ -38,6 +38,11 @@ const vietnamParts = (now: Date) => {
 
 export const vietnamTodayIso = (now = new Date()) => vietnamParts(now).date;
 
+export const getVietnamDateRolloverDelayMs = (now: Date) => {
+  const nextVietnamMidnight = new Date(`${vietnamTodayIso(now)}T17:00:00Z`).getTime();
+  return Math.max(1_000, nextVietnamMidnight - now.getTime());
+};
+
 export const getVietnamScheduledSessionState = (now: Date): VietnamIntradaySessionState => {
   const { weekday, hour, minute } = vietnamParts(now);
   if (weekday === 'Sat' || weekday === 'Sun') return 'closed';
@@ -83,17 +88,28 @@ export const getNextVietnamIntradayAction = (now: Date): VietnamIntradaySchedule
   };
 };
 
+export const getVietnamIntradayCountdownSeconds = (targetAtMs: number | null, nowMs: number) => (
+  targetAtMs == null ? null : Math.max(0, Math.ceil((targetAtMs - nowMs) / 1_000))
+);
+
+export const vietnamIntradayFinalRefreshKey = (ticker: string, tradingDate: string) => (
+  `${ticker.trim().toUpperCase()}:${tradingDate}`
+);
+
 export const vietnamIntradayStatusLabel = (
   sessionState: string | null | undefined,
   freshness: string | null | undefined,
   hasBars: boolean,
+  options?: { loading?: boolean; providerUnavailable?: boolean },
 ) => {
   if (sessionState === 'completed') return 'Completed';
+  if (options?.loading && !hasBars) return 'Loading';
   if (sessionState === 'pre_open') return 'Pre-open';
   if (sessionState === 'lunch') return 'Lunch break';
   if (sessionState === 'closed') return 'Closed';
-  if (!hasBars || freshness === 'unavailable') return 'No data yet';
   if (freshness === 'stale') return 'Stale';
+  if (options?.providerUnavailable && !hasBars) return 'SSI data unavailable';
+  if (!hasBars || freshness === 'unavailable') return 'No data yet';
   if (freshness === 'updating') return 'Updating';
   return 'Delayed';
 };

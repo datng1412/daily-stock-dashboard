@@ -27,6 +27,7 @@ from api.v1.schemas.stocks import (
     StockHistoryResponse,
     StockQuote,
     VietnamChartResponse,
+    VietnamIntradayChartHealthResponse,
     VietnamIntradayChartResponse,
     VietnamCompanyNewsResponse,
     VietnamCompanyResearchResponse,
@@ -56,7 +57,7 @@ from src.services.import_parser import (
 from src.services.stock_service import StockService
 from src.services.system_config_service import SystemConfigService
 from src.services.vietnam_company_research_service import VietnamCompanyResearchService
-from src.services.vietnam_market_service import VietnamMarketService
+from src.services.vietnam_market_service import VietnamMarketService, vietnam_intraday_chart_health_snapshot
 from src.services.vietnam_observability import vietnam_observability_snapshot
 from data_provider.base import normalize_stock_code
 from data_provider.vnstock_realtime_fetcher import VnstockRealtimeFetcher
@@ -532,6 +533,17 @@ def get_vietnam_index_list(
             status_code=500,
             detail={"error": "vn_index_list_failed", "message": str(e)},
         )
+
+
+@router.get(
+    "/vn/intraday-chart/health",
+    response_model=VietnamIntradayChartHealthResponse,
+    summary="Vietnam intraday chart operational health",
+    description="Return sanitized process-local SSI IntradayOhlc chart metrics without fetching market data.",
+)
+def get_vietnam_intraday_chart_health(response: Response) -> VietnamIntradayChartHealthResponse:
+    response.headers["Cache-Control"] = "no-store"
+    return VietnamIntradayChartHealthResponse(**vietnam_intraday_chart_health_snapshot())
 
 
 @router.get(

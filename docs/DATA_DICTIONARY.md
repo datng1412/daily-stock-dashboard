@@ -271,10 +271,17 @@ These additive fields are active in the current intraday-chart response.
 | `freshness` | `updating`, `delayed`, `stale`, `completed`, or `unavailable` | SSI refresh/bar age and session state | no | `live` is not approved by the bounded opening-session evidence. |
 | `last_provider_refresh_at` | Last successful SSI IntradayOhlc refresh | Backend observation time | yes | Must not be browser receive time presented as exchange time. |
 | `newest_bar_age_seconds` | Observation time minus newest accepted raw SSI timestamp | Backend | yes | Non-negative; completed dates return null. Normalized candle timestamps remain minute starts. |
+| `provider_snapshot_age_seconds` | Observation time minus the successful provider fetch that produced the current snapshot | Backend/cache | yes | Non-negative for current snapshots; increases on cache hits and keeps the original value basis during stale recovery. It is not newest-bar age. |
 | `current_bar_state` | Provisional/completed interpretation | SSI bucket progression plus reconciliation | yes | Latest bucket is provisional; prior-bucket finality is inferred, not provider-verified. |
 | `bars[].is_provisional` | Per-bar provisional flag | Not implemented | yes | Deliberately absent; only response-level `current_bar_state` is exposed. |
 
 SSI `IntradayOhlc` remains the only candidate authoritative current-session candle source. X-TRADE `LastVol` is `likely_incremental`, but provider identity/sequence is absent in observed events, duplicate visible tuples occur, and deduplication is unsafe. X-TRADE fields remain trade-tape context and must not populate candles in the current contract.
+
+## Phase 4.11E Intraday Operational Health Fields
+
+`GET /api/v1/stocks/vn/intraday-chart/health` exposes sanitized worker-local aggregates only. `status` is `unknown`, `ok`, or `degraded`; `process_scope.metrics_scope=process_local` and `resets_on_restart=true` are explicit. `cache`, `requests`, `provider`, `cache_activity`, `data_quality`, and `concurrency` contain non-negative scalar counters/latency values. `last_provider_result` is nullable and contains only outcome, date kind/date, scheduled session, latency, row-quality counts, age/freshness, stale-recovery flag, a normalized failure class, and timestamp. It contains no bars, full cache key, raw row, exception text, header, token, account, or credential. Multiple workers report independent values.
+
+The intraday health path is distinct from the broader `GET /api/v1/stocks/vn/observability` dashboard contract. Candle `time` remains the accepted row's Vietnam minute-start Unix timestamp; `newest_bar_age_seconds` uses that accepted winner's unfloored raw SSI `TradingDate + Time`; `provider_snapshot_age_seconds` uses the successful fetch timestamp retained by the cache entry.
 
 ## Current Decision Points
 

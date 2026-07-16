@@ -681,6 +681,7 @@ export type VietnamIntradayChartResponse = {
   freshness: 'completed' | 'updating' | 'delayed' | 'stale' | 'unavailable';
   lastProviderRefreshAt?: string | null;
   newestBarAgeSeconds?: number | null;
+  providerSnapshotAgeSeconds?: number | null;
   currentBarState: 'completed' | 'provisional' | 'inferred_final' | 'none';
   bars: VietnamChartPoint[];
   source: { provider?: string | null; dataset?: string | null };

@@ -258,7 +258,8 @@ With backend running:
 ```text
 GET /api/v1/stocks/vn/watchlist?tickers=FPT&force_refresh=true
 GET /api/v1/stocks/vn/company/FPT?force_refresh=true
-GET /api/v1/stocks/vn/observability
+GET /api/v1/stocks/vn/intraday-chart/health       # canonical intraday worker health
+GET /api/v1/stocks/vn/observability               # separate dashboard-wide diagnostics
 GET /api/v1/stocks/vn/index-components?index_code=VN30
 GET /vietnam
 GET /vietnam/company/FPT
@@ -322,6 +323,14 @@ Expected protection:
 - Public status messages stay short while diagnostics may retain endpoint, HTTP status, provider message, and sanitized error context.
 
 This harness is local/manual regression coverage. It requires a running backend and does not replace deterministic backend/frontend unit tests.
+
+## Phase 4.11E Intraday Hardening Coverage
+
+Backend deterministic tests reset worker-local state and cover initial/ok/degraded health, no-provider-call health reads, no-store headers, typed non-negative counters, sanitized last results/log events, latency aggregates, positive/empty/negative cache accounting, 2-way and 5-way same-key coalescing, normal/force overlap, independent ticker keys, shared success/failure, in-flight cleanup, lunch freshness, distinct snapshot/bar age, completed-policy preservation, and Vietnam-midnight cache isolation. No pytest calls live SSI.
+
+Phase 4.11E-R additionally checks OpenAPI route/schema separation between canonical intraday health and broader dashboard observability, proves health reads do not change metrics or cache entries, and freezes Vietnam time at 09:17:05 with a 09:16:55 raw SSI winner. Tests assert age 10 rather than minute-bucket age 65, duplicate-minute winner consistency, zero/future-skew clamping, cache-hit age progression, and equality between response and health last-result age.
+
+Frontend fake-time tests cover absolute `:07` polling, lunch/afternoon/post-close transitions, request-free countdown, explicit force refresh, provider-unavailable copy, single final reconciliation, semantic Today rollover without overnight fetch, stale response ownership, hidden/visible cleanup, and D1/completed no-poll behavior. Existing Lightweight Charts regressions continue to prove one chart lifecycle, RSI 0-100, Vietnam 1m formatting, D1 BusinessDay, sparse gaps, and no chart-owned fetch. The bounded runtime smoke confirmed health/cache/coalescing behavior but SSI returned sanitized `network_error`; browser navigation terminated before inspection, so visual and network evidence remains explicitly unverified.
 
 ## Legacy/Quarantine Notes
 

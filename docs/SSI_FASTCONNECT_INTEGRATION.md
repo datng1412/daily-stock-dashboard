@@ -812,6 +812,16 @@ The full VN product phase plan is in `docs/VN_DASHBOARD_ROADMAP.md`. SSI-depende
 | Phase 6.0 - Backend Performance and Caching | DailyOhlc, DailyStockPrice, metadata, diagnostics if performance evidence justifies storage | Persist source/date/fetched_at only if durable storage is introduced; keep stale-data semantics explicit. |
 | Phase 7.0 - Product Packaging | SSI source/freshness status as validation inputs | Clean runbooks, startup scripts, smoke/test/release checklist, and deprecated docs without changing provider semantics. |
 
+## Phase 4.11E Intraday Production Operations
+
+The SSI `IntradayOhlc` chart path records bounded scalar metrics and one sanitized last-result snapshot per backend worker. `GET /api/v1/stocks/vn/intraday-chart/health` reads that state only, sets `Cache-Control: no-store`, and performs no SSI request or cache refresh. Metrics reset on restart and are not deployment-global when Render runs multiple workers. Each actual provider request emits one `vn_intraday_provider_fetch` event with ticker/date/session, force/cache action, latency, row-quality counts, freshness/age, stale-recovery use, and a normalized failure class; raw rows, exception messages, headers, tokens, accounts, cookies, and credentials are excluded.
+
+Route inspection confirms this intraday-specific health path and the established dashboard-wide `GET /api/v1/stocks/vn/observability` path are separate operations with separate typed schemas, not aliases. Raw-time regression coverage also confirms the duplicate-minute winner retains its latest accepted SSI timestamp for age while its public candle timestamp stays floored to minute start.
+
+The 2026-07-16 bounded runtime smoke confirmed HTTP 200/no-store health reads, separate endpoint/provider-call accounting, positive negative-cache hits, forced-refresh accounting, and five-way same-key coalescing (five requests, one provider call, four waiters, zero retained in-flight entries). The local SSI call returned only sanitized `network_error`, so the health snapshot correctly became `degraded`; this run does not prove live current-session or completed-session bars.
+
+Exact SSI chart keys include provider/dataset, ticker, `1m`, date, page 1, and page size 1,000. Same-key normal/force overlaps share one worker-local provider call; other ticker/date keys stay independent. This uses no Redis or distributed lock. Current snapshots publish both newest raw-bar age and successful-provider-snapshot age. Active-session freshness uses 30 seconds for `updating` eligibility and 90 seconds for stale provider snapshots; expected lunch inactivity does not by itself become stale. SSI IntradayOhlc remains authoritative and X-TRADE aggregation remains blocked.
+
 ## Next phase
 
 Use the roadmap phase order. Phase 0 freezes the current SSI milestone; Phase 1 and Phase 2 make data quality and public contracts clearer; Phase 3.2-3.6 make `/vietnam` a progressive workspace before Phase 4.0 realtime/trade-tape investigation and later external provider work. Do not introduce FC Trading or Mozyfin/KBS fallback for SSI-owned market data in any phase.

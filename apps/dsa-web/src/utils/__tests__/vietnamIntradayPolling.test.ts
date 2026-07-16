@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  getVietnamDateRolloverDelayMs,
+  getVietnamIntradayCountdownSeconds,
   getNextVietnamIntradayAction,
   getVietnamScheduledSessionState,
   shouldPollCurrentIntraday,
   vietnamIntradayStatusLabel,
+  vietnamIntradayFinalRefreshKey,
   vietnamTodayIso,
 } from '../vietnamIntradayPolling';
 
@@ -54,6 +57,13 @@ describe('Vietnam intraday polling helpers', () => {
     expect(shouldPollCurrentIntraday('lunch')).toBe(false);
   });
 
+  it('derives countdown and rollover from absolute Vietnam targets', () => {
+    expect(getVietnamIntradayCountdownSeconds(Date.parse('2026-07-16T02:17:07Z'), Date.parse('2026-07-16T02:16:32Z'))).toBe(35);
+    expect(getVietnamIntradayCountdownSeconds(null, Date.now())).toBeNull();
+    expect(getVietnamDateRolloverDelayMs(new Date('2026-07-16T16:59:58Z'))).toBe(2_000);
+    expect(vietnamIntradayFinalRefreshKey(' fpt ', '2026-07-16')).toBe('FPT:2026-07-16');
+  });
+
   it('maps honest user-facing states without a live label', () => {
     expect(vietnamIntradayStatusLabel('completed', 'completed', true)).toBe('Completed');
     expect(vietnamIntradayStatusLabel('pre_open', 'unavailable', false)).toBe('Pre-open');
@@ -63,5 +73,7 @@ describe('Vietnam intraday polling helpers', () => {
     expect(vietnamIntradayStatusLabel('continuous_afternoon', 'delayed', true)).toBe('Delayed');
     expect(vietnamIntradayStatusLabel('atc', 'stale', true)).toBe('Stale');
     expect(vietnamIntradayStatusLabel('continuous_morning', 'unavailable', false)).toBe('No data yet');
+    expect(vietnamIntradayStatusLabel('continuous_morning', 'unavailable', false, { providerUnavailable: true })).toBe('SSI data unavailable');
+    expect(vietnamIntradayStatusLabel('continuous_morning', 'unavailable', false, { loading: true })).toBe('Loading');
   });
 });
