@@ -746,6 +746,32 @@ It requests IndexList sequentially without a market, with `HOSE`, and with `HNX`
 * Realtime and trade-tape unavailable messages should be short and user-safe. Streaming manager/cache state and sanitized provider error summaries should move to diagnostics. When `trade_tape` rows exist, the UI should render those timestamped rows even if diagnostics say stream/cache freshness is stale; when the stream is not enabled, not started, not bootstrapped, or empty, classify trade tape with stream-specific unavailable reasons instead of implying a working historical time-and-sales feed.
 * REST realtime candidate probing is disabled; do not reintroduce repeated speculative realtime endpoint probes.
 
+## Phase 4.11D-1 Current-Session Source Inventory
+
+| Source | Existing code path and acquisition | Relevant fields | Cache/reconnect behavior | Candle decision |
+| --- | --- | --- | --- | --- |
+| SSI IntradayOhlc | `SsiFastConnectFetcher.get_completed_intraday_1m` -> fixed `IntradayOhlc` request; `VietnamMarketService.build_intraday_chart` accepts completed or current Vietnam date | `TradingDate`, `Time`, OHLC, `Volume`, `Value`, `Symbol`; no finality flag | Separate completed and short current-date LRU/stale policy | Sole authoritative 1m history source |
+| X snapshot | startup-owned `SsiStreamingRealtimeManager`, `X:{symbol}` | last price/snapshot fields, provider time, optional last volume | latest process-local cache, debounced reconnect in active sessions | never a candle |
+| X-QUOTE | `X-QUOTE:{symbol}` -> dedicated order-book cache | bid/ask levels and provider time | latest-row cache; preserved stale/after-hours | never a candle |
+| X-TRADE | `X-TRADE:{symbol}` -> parser -> bounded `TradeTapeEventCache` | `LastPrice`, `LastVol`, `TotalVol`, `Side`, provider date/time; observed stream has no ID/sequence | receive-order insert, no event dedup; preserved bounded snapshots; manager reconnect cannot detect trade gaps | provisional current bucket candidate only; currently blocked |
+| F | `F:{symbol}` -> session-status cache | trading session/status/date/time | latest-row cache and manager reconnect | never a candle |
+| Compact intraday pulse | `get_intraday_ohlcv` -> watchlist/company pulse | provider-returned OHLCV subset and derived summary | ordinary fetcher/service cache | not chart history |
+| Phase 4.8S | lifecycle-owned `SsiStreamingSnapshotStore` | allowlisted normalized X/X-QUOTE/X-TRADE/R/MI/F rows | persisted rows always restore stale and are replaced by live rows | never chart history |
+
+Live proof on 2026-07-16 used eight current-date FPT IntradayOhlc calls from 09:12-09:20 Vietnam time. `NoDataFound` persisted through 09:15:05; at 09:16:05 the response contained a 09:15:59 row and a changing 09:16 provisional row. Same-minute OHLCV and raw `Time` revised, and a newer bucket appeared by the 09:17:10 observation. Provider-response latency was 0.423-1.116 seconds (median 0.615, eight calls). Previous-bucket finality is inferred only when a newer bucket appears and must be reconciled with SSI.
+
+The bounded X-TRADE observation used only `X-TRADE:FPT`, two 30-second windows, and one controlled reconnect. It observed 206 events without error but no provider sequence/trade/message ID. Duplicate visible tuples were common, so receive order cannot support authoritative close selection or safe volume summation. After reconnect, missed/replayed events and sequence gaps were unknowable. Future reconnect handling must discard trust in provisional aggregation and refresh SSI IntradayOhlc before resuming. No raw payload or credential was stored.
+
+### Phase 4.11D-2 runtime contract
+
+Current-date requests use the same one-call fixed SSI mapping as completed dates. Valid rows keep minute-start Unix timestamps; the newest accepted raw `TradingDate + Time` is retained only for non-negative age metadata. A current-minute bucket is `provisional` only during a scheduled active session; older current-day buckets are `inferred_final`. Freshness is `updating` for the current/immediately previous bucket under a fresh provider snapshot, `delayed` when further behind, `stale` after bounded recovery or provider-refresh age above 90 seconds, and `unavailable` without usable rows.
+
+Current-date cache policy is positive 15 seconds, provider-confirmed empty 5 seconds, negative 10 seconds, and stale-if-error no longer than five minutes. Completed dates retain 86,400-second positive/empty, 60-second negative, and seven-day stale recovery. Policy identity is checked against the current Vietnam date so a current-session entry is not reused as a completed entry after rollover. The backend does not poll or retry in the background.
+
+The dashboard owns one request and one one-shot timer. Pre-open may schedule one 09:15:07 opening baseline, active morning/afternoon/ATC polling targets the minute boundary plus seven seconds, lunch schedules one 13:00:07 baseline, and the ATC transition schedules one 14:45:20 reconciliation. Hidden tabs, D1, completed dates, pre-open, and closed periods have no recurring chart request. SSI arrays replace authoritatively; no X-TRADE/X/X-QUOTE/DailyStockPrice/TradingView data becomes a candle.
+
+The official-client observation emitted an SDK/urllib3 certificate-verification warning. This audit did not disable TLS, change proxy behavior, or modify transport configuration; transport trust verification remains a separate operational follow-up.
+
 ## Current limitations
 
 * SSI FastConnect credentials are not bundled; with default placeholder config, SSI-owned sections are unavailable.

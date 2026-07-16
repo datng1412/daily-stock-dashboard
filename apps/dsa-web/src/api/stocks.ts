@@ -677,6 +677,11 @@ export type VietnamIntradayChartResponse = {
   timezone: 'Asia/Ho_Chi_Minh' | string;
   status: 'ready' | 'unavailable' | 'failed' | string;
   reason?: string | null;
+  sessionState: 'completed' | 'pre_open' | 'continuous_morning' | 'lunch' | 'continuous_afternoon' | 'atc' | 'closed' | 'unknown';
+  freshness: 'completed' | 'updating' | 'delayed' | 'stale' | 'unavailable';
+  lastProviderRefreshAt?: string | null;
+  newestBarAgeSeconds?: number | null;
+  currentBarState: 'completed' | 'provisional' | 'inferred_final' | 'none';
   bars: VietnamChartPoint[];
   source: { provider?: string | null; dataset?: string | null };
   cache: {

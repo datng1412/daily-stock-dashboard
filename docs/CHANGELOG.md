@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [new feature] Add SSI-only current-session delayed 1-minute charts with typed session/freshness metadata, short bounded cache recovery, Today selection, and minute-aligned polling that pauses outside eligible sessions.
+- [test] Add deterministic current-date validation, cache, raw-timestamp freshness, session-state, polling-alignment, status-label, and request-ownership coverage for SSI 1-minute charts.
+- [documentation] Audit current-session SSI IntradayOhlc and X-TRADE semantics, open delayed SSI polling design, and block unsafe trade aggregation without runtime changes.
 - [fix] Pin the optional Longbridge Python SDK to the latest release resolvable in the Python 3.11 Bookworm production image.
 - [new feature] Add disabled-by-default bounded atomic persistence for normalized SSI streaming last-known cache rows, restored as stale per context without changing DailyOhlc price ownership or adding provider fallbacks.
 - [new feature] Add compact SSI DailyOhlc-derived short-term D1 support and resistance zones to the VN indicator table without new provider calls, realtime dependencies, fallback data, or a change to `latest_price` ownership.

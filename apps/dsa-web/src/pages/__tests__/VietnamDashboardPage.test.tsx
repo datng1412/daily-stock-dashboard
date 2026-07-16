@@ -22,6 +22,7 @@ import {
   chunkVietnamWatchlistTickers,
   resolveVietnamWatchlistBatchSize,
 } from '../../utils/vietnamWatchlistBatching';
+import { vietnamTodayIso } from '../../utils/vietnamIntradayPolling';
 import VietnamDashboardPage from '../VietnamDashboardPage';
 
 const mockedGetVietnamMarketPhase = vi.fn();
@@ -479,6 +480,11 @@ const makeIntradayChartResponse = (
   tradingDate,
   timezone: 'Asia/Ho_Chi_Minh',
   status: 'ready',
+  sessionState: 'completed',
+  freshness: 'completed',
+  lastProviderRefreshAt: '2026-06-09T08:00:00Z',
+  newestBarAgeSeconds: null,
+  currentBarState: 'completed',
   bars: [
     { time: 1_780_980_600, open: 100, high: 102, low: 99, close: 101, volume: 1_000 },
     { time: 1_780_980_720, open: 101, high: 103, low: 100, close: 102, volume: 2_000 },
@@ -4998,23 +5004,31 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(chartCard.queryByText(/buy|sell|hold|recommendation/i)).not.toBeInTheDocument();
   });
 
-  it('loads one explicit completed date for 1m history and keeps daily controls separate', async () => {
+  it('defaults 1m to Today, keeps completed dates selectable, and keeps daily controls separate', async () => {
+    const today = vietnamTodayIso();
     render(<VietnamDashboardPage />);
     await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('FPT', '6M'));
     const chartCard = inspectChartCard();
 
-    await clickChartControl(chartCard.getByRole('button', { name: '1m history' }));
+    await clickChartControl(chartCard.getByRole('button', { name: '1m' }));
+    await waitFor(() => expect(mockedGetVietnamIntradayChart).toHaveBeenCalledWith(
+      'FPT',
+      today,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    ));
+
+    expect(chartCard.getByRole('button', { name: '1m' })).toHaveAttribute('aria-pressed', 'true');
+    expect(chartCard.getByRole('group', { name: 'Timeframe' })).toBeInTheDocument();
+    expect(chartCard.queryByRole('group', { name: 'Daily range' })).not.toBeInTheDocument();
+    expect(chartCard.queryByRole('button', { name: '6M' })).not.toBeInTheDocument();
+    expect(chartCard.getByLabelText('Intraday trading date')).toHaveValue(today);
+    expect(chartCard.getByRole('option', { name: `Today — ${today.split('-').reverse().join('/')}` })).toBeInTheDocument();
+    fireEvent.change(chartCard.getByLabelText('Intraday trading date'), { target: { value: '2026-06-09' } });
     await waitFor(() => expect(mockedGetVietnamIntradayChart).toHaveBeenCalledWith(
       'FPT',
       '2026-06-09',
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     ));
-
-    expect(chartCard.getByRole('button', { name: '1m history' })).toHaveAttribute('aria-pressed', 'true');
-    expect(chartCard.getByRole('group', { name: 'Timeframe' })).toBeInTheDocument();
-    expect(chartCard.queryByRole('group', { name: 'Daily range' })).not.toBeInTheDocument();
-    expect(chartCard.queryByRole('button', { name: '6M' })).not.toBeInTheDocument();
-    expect(chartCard.getByLabelText('Completed trading date')).toHaveValue('2026-06-09');
     expect(chartCard.getByText('Daily S/R')).toBeInTheDocument();
     await waitFor(() => expect(chartCard.getByTestId('vietnam-lightweight-chart')).toHaveAttribute('data-timeframe', '1m'));
     expect(chartCard.getByTestId('vietnam-lightweight-chart')).toHaveAttribute(
@@ -5023,8 +5037,8 @@ describe('VietnamDashboardPage watchlist loading', () => {
     );
     expect(mockedGetVietnamChart).toHaveBeenCalledTimes(1);
 
-    await clickChartControl(chartCard.getByRole('button', { name: '1m history' }));
-    expect(mockedGetVietnamIntradayChart).toHaveBeenCalledTimes(1);
+    await clickChartControl(chartCard.getByRole('button', { name: '1m' }));
+    expect(mockedGetVietnamIntradayChart).toHaveBeenCalledTimes(2);
 
     const intradayRequestsBeforeLocalActions = mockedGetVietnamIntradayChart.mock.calls.length;
     await clickChartControl(chartCard.getByLabelText('MA20'));
@@ -5034,7 +5048,8 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(mockedGetVietnamIntradayChart).toHaveBeenCalledTimes(intradayRequestsBeforeLocalActions);
   });
 
-  it('does not request 1m history when no completed DailyOhlc date is available', async () => {
+  it('still requests explicit Today when no completed DailyOhlc date is available', async () => {
+    const today = vietnamTodayIso();
     const response = makeResponse(defaultTickers);
     response.watchlist[0] = {
       ...response.watchlist[0],
@@ -5048,17 +5063,21 @@ describe('VietnamDashboardPage watchlist loading', () => {
     render(<VietnamDashboardPage />);
     await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('FPT', '6M'));
     const chartCard = inspectChartCard();
-    await clickChartControl(chartCard.getByRole('button', { name: '1m history' }));
+    await clickChartControl(chartCard.getByRole('button', { name: '1m' }));
 
-    expect(mockedGetVietnamIntradayChart).not.toHaveBeenCalled();
-    expect(chartCard.getByText('Choose a completed trading date after daily history is available.')).toBeInTheDocument();
-    expect(chartCard.getByLabelText('Completed trading date')).toHaveValue('');
+    await waitFor(() => expect(mockedGetVietnamIntradayChart).toHaveBeenCalledWith(
+      'FPT',
+      today,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    ));
+    expect(chartCard.getByLabelText('Intraday trading date')).toHaveValue(today);
   });
 
   it('rejects a late 1m response after the selected completed date changes', async () => {
+    const today = vietnamTodayIso();
     let resolveFirst: ((value: VietnamIntradayChartResponse) => void) | undefined;
     mockedGetVietnamIntradayChart.mockImplementation((ticker, tradingDate) => {
-      if (tradingDate === '2026-06-09') {
+      if (tradingDate === today) {
         return new Promise((resolve) => { resolveFirst = resolve; });
       }
       return Promise.resolve(makeIntradayChartResponse(ticker, tradingDate, {
@@ -5069,23 +5088,73 @@ describe('VietnamDashboardPage watchlist loading', () => {
     render(<VietnamDashboardPage />);
     await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('FPT', '6M'));
     const chartCard = inspectChartCard();
-    await clickChartControl(chartCard.getByRole('button', { name: '1m history' }));
+    await clickChartControl(chartCard.getByRole('button', { name: '1m' }));
     await waitFor(() => expect(mockedGetVietnamIntradayChart).toHaveBeenCalledTimes(1));
-    fireEvent.change(chartCard.getByLabelText('Completed trading date'), { target: { value: '2026-06-08' } });
+    fireEvent.change(chartCard.getByLabelText('Intraday trading date'), { target: { value: '2026-06-09' } });
 
     await waitFor(() => expect(mockedGetVietnamIntradayChart).toHaveBeenCalledWith(
       'FPT',
-      '2026-06-08',
+      '2026-06-09',
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     ));
     await waitFor(() => expect(chartCard.getByTestId('vietnam-lightweight-chart')).toHaveAttribute('data-first-close', '201'));
     await act(async () => {
-      resolveFirst?.(makeIntradayChartResponse('FPT', '2026-06-09', {
+      resolveFirst?.(makeIntradayChartResponse('FPT', today, {
         bars: [{ time: 1_780_980_600, open: 900, high: 902, low: 899, close: 901, volume: 4_000 }],
       }));
       await Promise.resolve();
     });
     expect(chartCard.getByTestId('vietnam-lightweight-chart')).toHaveAttribute('data-first-close', '201');
+  });
+
+  it('shows Updating and performs one minute-aligned Today refresh', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date('2026-07-16T02:16:05Z'));
+    mockedGetVietnamIntradayChart.mockImplementation(async (ticker, tradingDate) => makeIntradayChartResponse(
+      ticker,
+      tradingDate,
+      {
+        sessionState: 'continuous_morning',
+        freshness: 'updating',
+        currentBarState: 'provisional',
+        newestBarAgeSeconds: 5,
+      },
+    ));
+
+    render(<VietnamDashboardPage />);
+    await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('FPT', '6M'));
+    const chartCard = inspectChartCard();
+    await clickChartControl(chartCard.getByRole('button', { name: '1m' }));
+    await waitFor(() => expect(mockedGetVietnamIntradayChart).toHaveBeenCalledTimes(1));
+    expect(chartCard.getByText('Updating')).toBeInTheDocument();
+
+    mockedGetVietnamIntradayChart.mockClear();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+    await waitFor(() => expect(mockedGetVietnamIntradayChart).toHaveBeenCalledTimes(1));
+  });
+
+  it('shows Lunch break for Today without a recurring minute request', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date('2026-07-16T05:00:00Z'));
+    mockedGetVietnamIntradayChart.mockImplementation(async (ticker, tradingDate) => makeIntradayChartResponse(
+      ticker,
+      tradingDate,
+      { sessionState: 'lunch', freshness: 'delayed', currentBarState: 'inferred_final' },
+    ));
+
+    render(<VietnamDashboardPage />);
+    await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('FPT', '6M'));
+    const chartCard = inspectChartCard();
+    await clickChartControl(chartCard.getByRole('button', { name: '1m' }));
+    await waitFor(() => expect(mockedGetVietnamIntradayChart).toHaveBeenCalledTimes(1));
+    expect(chartCard.getByText('Lunch break')).toBeInTheDocument();
+    mockedGetVietnamIntradayChart.mockClear();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(59_000);
+    });
+    expect(mockedGetVietnamIntradayChart).not.toHaveBeenCalled();
   });
 
   it('replaces the chart bars when switching the selected range', async () => {

@@ -210,7 +210,7 @@ Audit outcome rules:
 
 ## Phase 4.11C Intraday History Contract Tests
 
-These deterministic tests are required before implementing the future endpoint/UI; none should call live SSI:
+These deterministic tests protect the implemented completed-session endpoint/UI; none should call live SSI:
 
 Phase 4.11B-3 fixtures remain sanitized and deterministic. They may use `TradingDate`, `Time`, `Open`, `High`, `Low`, `Close`, and `Volume` with transformed values that preserve only the evidence-backed shape. Cover nonzero seconds, unique minute buckets, an intentional missing minute, lunch gap, final 14:45 row, malformed timestamp, duplicate normalized bucket, malformed OHLC, non-numeric volume, and one completed-session DailyOhlc reconciliation example. Never copy or commit a raw provider response. Numeric resolutions 5/15/30/60 returned minute-like rows rather than their requested cadence.
 
@@ -246,6 +246,10 @@ Phase 4.11B-3 fixtures remain sanitized and deterministic. They may use `Trading
 30. Phase 4.9A overlays read `Daily S/R` on 1m.
 
 Phase 4.11D requires separate tests for provisional last bars, late/out-of-order events, reconnect, and reconciliation. Do not fold those cases into Phase 4.11C.
+
+Phase 4.11D-2 deterministic tests cover current-date acceptance, future-date rejection, unchanged completed-date behavior, identical SSI normalization, raw-provider-time age/freshness, current/previous bucket state, short current cache TTLs, bounded stale recovery, minute-boundary-plus-seven-second scheduling, lunch/afternoon/post-close actions, status labels, Today/completed selection, stale-response ownership, and visibility/request cleanup. Tests use sanitized fixtures and never call live SSI. Runtime/browser proof is reported separately and must not be inferred from pytest/Vitest.
+
+Phase 4.11D-3 tests remain design-only while the gate is blocked. If identity/order semantics are later proven, cover verified incremental volume, first/later trade OHLCV updates, duplicate rejection by a provider-backed key, documented out-of-order handling, lunch boundaries, bounded current/previous-bucket revision, reconnect trust suspension, SSI replacement/mismatch metrics, ticker/session cleanup, and explicit absence of X/X-QUOTE/full-session-rebuild paths. Do not create tests that bless ticker+timestamp+price+volume+side as a unique key.
 
 ## Manual Smoke Checklist
 

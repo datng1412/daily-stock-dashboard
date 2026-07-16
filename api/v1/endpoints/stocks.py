@@ -537,13 +537,13 @@ def get_vietnam_index_list(
 @router.get(
     "/vn/intraday-chart",
     response_model=VietnamIntradayChartResponse,
-    summary="Vietnam completed-session one-minute chart history",
-    description="Return sparse SSI IntradayOhlc one-minute bars for one completed Vietnam date.",
+    summary="Vietnam one-minute chart history",
+    description="Return sparse SSI IntradayOhlc one-minute bars for one completed or current Vietnam date.",
 )
 def get_vietnam_intraday_chart(
     ticker: str = Query(..., description="VN ticker, for example FPT"),
-    interval: str = Query("1m", description="Only completed-session 1m history is supported; supported value: 1m"),
-    trading_date: str = Query(..., alias="date", description="Completed Vietnam date in YYYY-MM-DD format"),
+    interval: str = Query("1m", description="Only SSI IntradayOhlc 1m history is supported; supported value: 1m"),
+    trading_date: str = Query(..., alias="date", description="Vietnam date through today in YYYY-MM-DD format"),
     force_refresh: bool = Query(False, description="Bypass the dedicated process-local intraday chart cache"),
 ) -> VietnamIntradayChartResponse:
     try:

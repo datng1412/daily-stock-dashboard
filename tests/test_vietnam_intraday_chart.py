@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
 from fastapi.testclient import TestClient
 
 from api.app import create_app
@@ -11,6 +12,7 @@ from src.services.vietnam_market_service import (
     VietnamMarketService,
     clear_vietnam_cache,
     normalize_completed_intraday_chart_rows,
+    vietnam_intraday_session_state,
 )
 
 
@@ -170,7 +172,7 @@ def test_service_negative_cache_and_validation_do_not_repeat_or_make_invalid_cal
         {"ticker": "FPT", "interval": "5m", "trading_date": "2026-06-24"},
         {"ticker": "FPT", "interval": "1m", "trading_date": "2026/06/24"},
         {"ticker": "FPT", "interval": "1m", "trading_date": "2026-6-24"},
-        {"ticker": "FPT", "interval": "1m", "trading_date": "2026-06-25"},
+        {"ticker": "FPT", "interval": "1m", "trading_date": "2026-06-26"},
     ):
         try:
             service.build_intraday_chart(**kwargs)
@@ -216,15 +218,160 @@ def test_intraday_chart_api_contract_and_validation(monkeypatch, tmp_path):
 
     class CurrentDateRejectingService:
         def build_intraday_chart(self, ticker, *, interval, trading_date, force_refresh=False):
-            raise ValueError("Intraday history date must be before the current Vietnam date")
+            raise ValueError("Intraday history date must not be after the current Vietnam date")
 
     monkeypatch.setattr("api.v1.endpoints.stocks.VietnamMarketService", CurrentDateRejectingService)
     current_date = client.get("/api/v1/stocks/vn/intraday-chart?ticker=FPT&interval=1m&date=2026-06-25")
     assert current_date.status_code == 422
     assert current_date.json() == {
         "error": "vn_intraday_chart_invalid_request",
-        "message": "Intraday history date must be before the current Vietnam date",
+        "message": "Intraday history date must not be after the current Vietnam date",
     }
+
+
+@pytest.mark.parametrize(
+    ("utc_value", "expected"),
+    [
+        (datetime(2026, 6, 25, 1, 0, tzinfo=timezone.utc), "pre_open"),
+        (datetime(2026, 6, 25, 2, 16, tzinfo=timezone.utc), "continuous_morning"),
+        (datetime(2026, 6, 25, 5, 0, tzinfo=timezone.utc), "lunch"),
+        (datetime(2026, 6, 25, 6, 1, tzinfo=timezone.utc), "continuous_afternoon"),
+        (datetime(2026, 6, 25, 7, 31, tzinfo=timezone.utc), "atc"),
+        (datetime(2026, 6, 25, 7, 46, tzinfo=timezone.utc), "closed"),
+        (datetime(2026, 6, 27, 2, 16, tzinfo=timezone.utc), "closed"),
+    ],
+)
+def test_vietnam_intraday_session_state_is_clock_derived(utc_value, expected):
+    assert vietnam_intraday_session_state(utc_value) == expected
+
+
+def test_current_date_metadata_uses_raw_provider_time_and_short_positive_cache(monkeypatch):
+    clear_vietnam_cache()
+    clock = [datetime(2026, 6, 25, 2, 16, 40, tzinfo=timezone.utc)]
+    monkeypatch.setattr(service_module, "_utc_now", lambda: clock[0])
+    fetcher = FakeCompletedIntradayFetcher(
+        {"status": "ok", "rows": [_raw_row("09:16:29", date_value="25/06/2026")]}
+    )
+    service = VietnamMarketService(ssi_fetcher=fetcher)
+
+    first = service.build_intraday_chart("FPT", interval="1m", trading_date="2026-06-25")
+    assert first["status"] == "ready"
+    assert first["session_state"] == "continuous_morning"
+    assert first["freshness"] == "updating"
+    assert first["current_bar_state"] == "provisional"
+    assert first["newest_bar_age_seconds"] == 11
+    assert first["bars"][0]["time"] == int(
+        datetime(2026, 6, 25, 9, 16, tzinfo=service_module.VN_TIMEZONE).timestamp()
+    )
+    fetched_at = datetime.fromisoformat(first["cache"]["fetched_at"])
+    expires_at = datetime.fromisoformat(first["cache"]["expires_at"])
+    assert (expires_at - fetched_at).total_seconds() == 15
+
+    clock[0] += timedelta(seconds=14)
+    cached = service.build_intraday_chart("FPT", interval="1m", trading_date="2026-06-25")
+    assert cached["cache"]["status"] == "hit"
+    assert cached["last_provider_refresh_at"] == first["last_provider_refresh_at"]
+    assert len(fetcher.calls) == 1
+
+
+def test_current_date_previous_bucket_is_inferred_final_and_delayed(monkeypatch):
+    clear_vietnam_cache()
+    monkeypatch.setattr(
+        service_module,
+        "_utc_now",
+        lambda: datetime(2026, 6, 25, 2, 20, 0, tzinfo=timezone.utc),
+    )
+    fetcher = FakeCompletedIntradayFetcher(
+        {"status": "ok", "rows": [_raw_row("09:16:58", date_value="25/06/2026")]}
+    )
+    result = VietnamMarketService(ssi_fetcher=fetcher).build_intraday_chart(
+        "FPT", interval="1m", trading_date="2026-06-25"
+    )
+    assert result["current_bar_state"] == "inferred_final"
+    assert result["freshness"] == "delayed"
+
+
+def test_current_empty_and_negative_cache_are_short_and_unavailable(monkeypatch):
+    clear_vietnam_cache()
+    clock = [datetime(2026, 6, 25, 2, 16, tzinfo=timezone.utc)]
+    monkeypatch.setattr(service_module, "_utc_now", lambda: clock[0])
+    fetcher = FakeCompletedIntradayFetcher({"status": "ok", "rows": []})
+    service = VietnamMarketService(ssi_fetcher=fetcher)
+
+    empty = service.build_intraday_chart("FPT", interval="1m", trading_date="2026-06-25")
+    assert empty["status"] == "unavailable"
+    assert empty["freshness"] == "unavailable"
+    assert empty["current_bar_state"] == "none"
+    assert (
+        datetime.fromisoformat(empty["cache"]["expires_at"])
+        - datetime.fromisoformat(empty["cache"]["fetched_at"])
+    ).total_seconds() == 5
+
+    clock[0] += timedelta(seconds=6)
+    fetcher.payload = {"status": "unavailable", "failure_class": "network_error", "rows": []}
+    negative = service.build_intraday_chart("FPT", interval="1m", trading_date="2026-06-25")
+    assert negative["freshness"] == "unavailable"
+    assert (
+        datetime.fromisoformat(negative["cache"]["expires_at"])
+        - datetime.fromisoformat(negative["cache"]["fetched_at"])
+    ).total_seconds() == 10
+
+    fetcher.payload = {"status": "unavailable", "code": "NoDataFound", "rows": []}
+    no_data = service.build_intraday_chart("HPG", interval="1m", trading_date="2026-06-25")
+    assert no_data["diagnostics"]["result"] == "no_data"
+    assert (
+        datetime.fromisoformat(no_data["cache"]["expires_at"])
+        - datetime.fromisoformat(no_data["cache"]["fetched_at"])
+    ).total_seconds() == 5
+
+
+def test_current_force_refresh_recovers_only_bounded_stale_snapshot(monkeypatch):
+    clear_vietnam_cache()
+    clock = [datetime(2026, 6, 25, 2, 16, tzinfo=timezone.utc)]
+    monkeypatch.setattr(service_module, "_utc_now", lambda: clock[0])
+    fetcher = FakeCompletedIntradayFetcher(
+        {"status": "ok", "rows": [_raw_row("09:16:00", date_value="25/06/2026")]}
+    )
+    service = VietnamMarketService(ssi_fetcher=fetcher)
+    ready = service.build_intraday_chart("FPT", interval="1m", trading_date="2026-06-25")
+
+    fetcher.payload = {"status": "unavailable", "failure_class": "timeout", "rows": []}
+    clock[0] += timedelta(seconds=30)
+    stale = service.build_intraday_chart(
+        "FPT", interval="1m", trading_date="2026-06-25", force_refresh=True
+    )
+    assert stale["status"] == "ready"
+    assert stale["freshness"] == "stale"
+    assert stale["cache"]["is_stale"] is True
+    assert stale["last_provider_refresh_at"] == ready["last_provider_refresh_at"]
+
+    clock[0] += timedelta(seconds=271)
+    unavailable = service.build_intraday_chart(
+        "FPT", interval="1m", trading_date="2026-06-25", force_refresh=True
+    )
+    assert unavailable["status"] == "unavailable"
+    assert unavailable["bars"] == []
+
+
+def test_completed_metadata_and_cache_policy_remain_unchanged(monkeypatch):
+    clear_vietnam_cache()
+    monkeypatch.setattr(
+        service_module,
+        "_utc_now",
+        lambda: datetime(2026, 6, 25, 2, tzinfo=timezone.utc),
+    )
+    fetcher = FakeCompletedIntradayFetcher({"status": "ok", "rows": [_raw_row("09:00:00")]})
+    result = VietnamMarketService(ssi_fetcher=fetcher).build_intraday_chart(
+        "FPT", interval="1m", trading_date="2026-06-24"
+    )
+    assert result["session_state"] == "completed"
+    assert result["freshness"] == "completed"
+    assert result["current_bar_state"] == "completed"
+    assert result["newest_bar_age_seconds"] is None
+    assert (
+        datetime.fromisoformat(result["cache"]["expires_at"])
+        - datetime.fromisoformat(result["cache"]["fetched_at"])
+    ).total_seconds() == 86_400
 
 
 def test_intraday_cache_is_bounded_lru(monkeypatch):

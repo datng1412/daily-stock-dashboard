@@ -12,7 +12,7 @@ Last local audit baseline: 2026-06-24, using `FPT,VPB,ACB,SSI,GMD,GAS,POW,VNM` a
 
 Latest bounded live gate: 2026-06-29, using sanitized SSI smoke output plus local API smoke. SSI DailyStockPrice history populated 20 recent foreign-flow rows for FPT/HPG/SSI; VN30 DailyIndex remained partial because the public row lacked a usable positive `index_value` and `exchange`; exact `VNINDEX` remained unresolved; VN30 IndexComponents returned 30 rows.
 
-Phase 4.11C implements the verified completed-session slice of `IntradayOhlc`: one explicit prior HOSE date, `resolution=1`, page 1, size 1,000, ascending, and no retry or alternate parameters. This is historical 1-minute chart data, not realtime. Current-session support, 5m/15m/30m/1h, aggregation, additional pages, HNX/UPCOM proof, and official volume-unit documentation remain unverified/deferred.
+Phase 4.11C implements the verified completed-session slice of `IntradayOhlc`, and Phase 4.11D-2 extends the same fixed `resolution=1`, page 1, size 1,000 request to Today with delayed polling and typed freshness metadata. This is SSI-authoritative 1-minute chart data, not realtime. 5m/15m/30m/1h, aggregation, additional pages, HNX/UPCOM proof, and official volume-unit documentation remain unverified/deferred.
 
 ## Status Vocabulary
 
@@ -185,11 +185,11 @@ Installed SDK evidence proves `GET /api/v2/Market/IntradayOhlc`, symbol/date/pag
 
 Each session returned continuous buckets from 09:15 through 11:29 and 13:00 through 14:29, plus a final 14:45 row, with no unexplained in-session gap, duplicate bucket, invalid timestamp, or ordering error. First open, maximum high, minimum low, and final close exactly matched DailyOhlc for every sample. Intraday volume sums also exactly matched daily volume (ratio `1.0` in all four) and were non-negative/non-cumulative, supporting `likely_per_bar_shares`; the public label remains neutral `Volume` until SSI documents the unit. Each `totalRecord=226` fits one 1,000-row page, but pagination itself remains unverified.
 
-Values 5, 15, 30, and 60 were accepted by the endpoint but did not select corresponding output cadence in tested SSI behavior. The current runtime allowlist remains empty until Phase 4.11C implements the restricted contract. The gate is open only for `GET /api/v1/stocks/vn/intraday-chart?ticker=FPT&interval=1m&date=2026-06-24`: one date strictly before the current Vietnam date, one page/max 1,000 rows, no current session, multi-day range, pagination, realtime update, aggregation, or fallback.
+Values 5, 15, 30, and 60 were accepted by SSI but did not select corresponding output cadence in tested behavior. Phase 4.11C now exposes only `GET /api/v1/stocks/vn/intraday-chart?ticker=FPT&interval=1m&date=2026-06-24`: one date strictly before the current Vietnam date, one page/max 1,000 rows, no current session, multi-day range, pagination, realtime update, aggregation, or fallback.
 
 The current compact pulse remains `partial`: it uses a 7-calendar-day request, an internal page size of 1,000 (maximum 20 pages in the generic fetcher), a public default of 8 latest rows, a 60-second service cache, and a 60-second symbol/timeframe rate-limit cooldown. This existing behavior is not the future chart history contract.
 
-Phase 4.11C may implement only the verified bounded completed-session `1m` history endpoint. Phase 4.11D separately owns any current-session or realtime last-bar design.
+Phase 4.11D-2 implements current-date `1m` through bounded SSI polling and authoritative array replacement. It does not implement a realtime last-bar overlay or stream-built candle.
 
 ## Phase 4.0B Intraday Root-Cause Result
 
@@ -430,6 +430,20 @@ This phase does not prove live reliability. Under the Phase 4.5A vocabulary, rea
 Live diagnostics proved the official SSI stream requires no-space channel strings. Working verifier channels include `X:FPT`, `X-QUOTE:FPT`, and `X-TRADE:FPT`; Phase 4.8I uses the same no-space shape for `R:FPT`. Old spaced forms such as `X: FPT`, `X-QUOTE: FPT`, and `X-TRADE: FPT` can start transport but did not receive callbacks in live verification.
 
 The project default is now `SSI_STREAMING_REALTIME_CHANNEL_TEMPLATE=X:{symbol}`. Explicit custom overrides remain respected for diagnostics, and the verifier still supports channel-format variants with both spaced and no-space forms. This change does not add backend auto-start, does not mark realtime production reliable, does not alter `latest_price`, and does not implement trade tape.
+
+## Phase 4.11D-1 Current-Session Gate
+
+| Source | Current-session evidence | Candle eligibility | Gate |
+| --- | --- | --- | --- |
+| SSI `IntradayOhlc` | Current-date FPT rows appeared after continuous trading began; latest row changed within the minute; six valid unique buckets were returned by 09:20 | Authoritative baseline/history candidate | Phase 4.11D-2 `open_as_delayed_only` |
+| SSI `X-TRADE:FPT` | 206 events across two 30-second windows and one reconnect; no ID/sequence; 109 visible-tuple collisions; `TotalVol` cumulative, `LastVol` likely incremental | Provisional current bucket only, after stronger proof | Phase 4.11D-3 `blocked` |
+| X / X-QUOTE / F / R / MI | Snapshot, order-book, session, foreign-room, and index contexts | Not candle sources | closed |
+| Compact IntradayOhlc pulse | Bounded dashboard summary, not chart history | Not a separate candle source | closed |
+| Phase 4.8S persisted snapshots | Stale restart continuity for normalized live contexts | Not chart history | closed |
+
+The SSI observation covered only FPT during the 2026-07-16 opening/early continuous session. It does not prove a full-day latency SLA, lunch/afternoon/ATC/holiday behavior, final post-close reconciliation, or provider finality. The conservative future polling proposal is one request per minute about 5-10 seconds after the boundary, no lunch polling, and a final post-close refresh, labelled `Updating`/`Delayed` rather than `Live`.
+
+Phase 4.11D-2 implements that proposal as a scheduled, holiday-unaware HOSE clock policy: positive/empty/negative current-date TTLs are 15/5/10 seconds, stale recovery is capped at five minutes, and completed-date policy is unchanged. The UI uses one absolute one-shot timer, pauses for lunch/hidden tabs, wakes at approximately 13:00:07, and reconciles once at approximately 14:45:20. Runtime proof of lunch, afternoon, ATC, holidays, halts, and half sessions remains outstanding; these limitations are not papered over with another provider.
 
 ## Required Guardrails
 

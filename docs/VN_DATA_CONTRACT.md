@@ -6,7 +6,7 @@ This document defines the public data contract for the VN dashboard and company 
 
 ## Completed-session 1-minute chart history (Phase 4.11C)
 
-`GET /api/v1/stocks/vn/intraday-chart?ticker=FPT&interval=1m&date=YYYY-MM-DD` returns one completed Vietnam date from SSI `IntradayOhlc`. Only `1m` is accepted, and the date must be strictly before the current `Asia/Ho_Chi_Minh` date. `ready` may contain sparse bars or `bars=[]` for a provider-confirmed no-data date; `unavailable` means SSI could not be reached and no usable cache exists; `failed` means a nonempty response had no usable bars. Stale-if-error data remains `ready` and is disclosed by `cache.is_stale=true`.
+`GET /api/v1/stocks/vn/intraday-chart?ticker=FPT&interval=1m&date=YYYY-MM-DD` returns one completed or current Vietnam date from SSI `IntradayOhlc`. Only `1m` is accepted; dates after the current `Asia/Ho_Chi_Minh` date return the endpoint-specific 422 contract. `ready` contains usable sparse bars; a current date without usable bars is `unavailable`; `failed` means a nonempty response had no usable bars. Stale-if-error data remains `ready` and is disclosed by `cache.is_stale=true` plus `freshness=stale`.
 
 Unsupported intervals are validated by this endpoint before SSI is called and return HTTP 422 with `error=vn_intraday_chart_invalid_request` and `message=Only interval=1m is supported`. Invalid current/future dates use the same error code with the completed-date message. The broader global request-validation copy does not own these intraday allowlist errors.
 
@@ -669,7 +669,7 @@ Phase 4.11B is documentation-only. The current watchlist/company `intraday_candl
 
 The installed `ssi_fc_data` 2.2.2 package defines `IntradayOhlc` and an integer `resolution` field with default `1`, but it provides no interval enum, unit definition, supported-value list, query-range limit, final-bar field, or session semantics. Its official repository sample supplies `DD/MM/YYYY` dates and `resolution=1`; the installed package itself contains no resolution mapping. The repository adapter currently accepts arbitrary request strings and has deterministic cadence fixtures for `1m`, `5m`, and `1h`; those fixtures verify StockClock normalization only, not SSI interval support.
 
-Phase 4.11B-3 completed the evidence gate for a deliberately restricted completed-session interval. The future production public interval allowlist is therefore exactly `1m`; this documentation decision does not expose the interval until Phase 4.11C implements the separate endpoint and UI.
+Phase 4.11B-3 completed the evidence gate for a deliberately restricted completed-session interval. Phase 4.11C has since implemented the production public interval allowlist as exactly `1m` for one completed Vietnam date through the separate endpoint and UI.
 
 | Public candidate | Provider candidate | Status | Rule |
 | --- | --- | --- | --- |
@@ -689,13 +689,13 @@ All 904 intraday OHLC rows passed consistency validation. For every ticker/date,
 
 `Volume` was numeric, positive, non-missing, and non-cumulative in all four sessions. Per-session intraday sums exactly equalled DailyOhlc volume: FPT `5,737,500` and `5,968,500`, HPG `29,071,800` and `12,927,300`, each ratio `1.0`. This supports `likely_per_bar_shares`; because SSI's inspected materials do not explicitly define the unit, the first UI must label it neutrally as `Volume`, not assert `shares`. No missing candles are synthesized or forward-filled; Lightweight Charts must display sparse normalized timestamps as gaps. These findings are limited to FPT/HPG on HOSE and do not generalize to HNX, UPCOM, holidays, half sessions, halts, or post-close/negotiated behavior.
 
-The Phase 4.11C gate is open only for a one-date, completed-session `1m` implementation. The current runtime allowlist remains empty until that implementation lands. Current-session bars, multiple days, pagination, higher intervals, realtime updates, aggregation, and fallback remain outside the gate.
+Phase 4.11C implements only one-date, completed-session `1m` history. Current-session bars, multiple days, pagination, higher intervals, realtime updates, aggregation, and fallback remain outside the runtime allowlist.
 
 Aliases are case-sensitive and rejected unless added to the verified allowlist. `60m`, `1H`, numeric strings, and provider-specific spellings must not be accepted silently.
 
 ### Endpoint selection and request bounds
 
-Phase 4.11C should implement a separate endpoint rather than widening the daily endpoint:
+Phase 4.11C implements a separate endpoint rather than widening the daily endpoint:
 
 ```text
 GET /api/v1/stocks/vn/intraday-chart
@@ -760,11 +760,33 @@ The existing Vietnam market-phase helper is HOSE-like and holiday-unaware. Phase
 
 The future dashboard owns selected ticker, selected interval, selected completed date, request key, request ID, loading/unavailable state, and stale-response rejection. Ticker, interval, or date change invalidates the old request and clears the old presentation; only a matching `(ticker, interval, date, request_id)` response may apply. The chart component receives normalized bars and metadata and performs no request.
 
-`1D` continues to call `/vn/chart` and use SSI DailyOhlc. The future `1m` option calls `/vn/intraday-chart` for an explicit completed date and uses SSI IntradayOhlc; it must not imply realtime data. DailyStockPrice, X, X-QUOTE, X-TRADE, and persisted streaming snapshots never become candles. Indicators may later use the active timeframe bars; Phase 4.9A zones remain daily and, if displayed over intraday, must be labelled `Daily S/R`.
+`1D` continues to call `/vn/chart` and use SSI DailyOhlc. The implemented `1m` option calls `/vn/intraday-chart` for Today or an available completed date and uses only SSI IntradayOhlc; current-day data is delayed bounded polling, not realtime data. DailyStockPrice, X, X-QUOTE, X-TRADE, and persisted streaming snapshots never become candles. Indicators use the active timeframe bars; Phase 4.9A zones remain daily and read `Daily S/R` over intraday history.
 
 ### Observability requirements
 
 Phase 4.11C should count requests by public interval, provider latency, cache hit/miss/refresh/stale outcomes, returned bars, rejected rows, duplicate timestamps, provider-unavailable responses, unsupported intervals, stale recoveries, invalid/current-date rejections, and frontend ownership discards. Diagnostics may expose sanitized requested date, provider page count, returned/rejected counts, and cache age. Logs and responses must never include credentials, access tokens, authorization headers, full provider payloads, account IDs, consumer IDs, or consumer secrets.
+
+## Phase 4.11D-1 Current-Session Source Audit
+
+Phase 4.11D-1 is evidence and contract work only. It does not enable the current date, add polling, add a provisional schema field, aggregate X-TRADE, or change the completed-session endpoint.
+
+On 2026-07-16, eight bounded FPT `IntradayOhlc` calls used the current Vietnam date, `resolution=1`, page 1, page size 1,000, and ascending order. Calls at 09:12:34 and 09:15:05 returned HTTP 200 with provider code `NoDataFound`. At 09:16:05, SSI returned the 09:15:59 opening row plus a 09:16:05 row for the still-open minute. Repeated calls at 09:16:30 and 09:16:55 changed that row's raw `Time`, OHLC, and volume. At 09:17:10 a newer normalized bucket existed and the prior row had advanced through 09:16:58; it remained unchanged at 09:17:30 and 09:20:05. The final sample returned six valid unique buckets, zero rejected rows, and zero duplicate normalized buckets.
+
+SSI current-session behavior is therefore classified `provisional_current_bar`. The raw `Time` is the newest provider event time within the bucket, not its canonical bucket start. Previous-bucket finality is `inferred_finality_with_reconciliation`: a prior bucket may be treated as provisionally closed when a newer normalized bucket appears, but SSI exposes no provider finality flag and SSI remains authoritative on every refresh. `provider_finality_verified` is not claimed.
+
+Provider-response latency was 0.423-1.116 seconds (median 0.615, sample count 8, including two valid `NoDataFound` responses). For the five repeated current-bucket observations, observation time minus normalized bucket start was approximately 5, 30, 55, 10.8, and 30 seconds (minimum 5, median 30, maximum 55, sample count 5). The first new 09:17 bucket was observed at 09:17:10 with raw time 09:17:04. This is a bounded opening-session sample, not a full-day latency SLA.
+
+Phase 4.11D-2 implements the delayed-only gate. Current responses add `session_state`, `freshness`, `last_provider_refresh_at`, `newest_bar_age_seconds`, and `current_bar_state`. The backend uses 15-second positive, 5-second empty, 10-second negative, and five-minute stale-if-error current-date bounds; completed dates retain 24-hour/60-second/seven-day policy. The dashboard schedules one 09:15:07 opening wake-up when Today remains selected from pre-open, one absolute-time request near each eligible minute boundary plus seven seconds, one 13:00:07 afternoon baseline after lunch, and one 14:45:20 post-close reconciliation. It uses `Updating`, `Delayed`, `Stale`, `Pre-open`, `Lunch break`, `Closed`, `Completed`, or `No data yet`, never `Live`; hidden tabs and completed/D1 views do not poll.
+
+A live `X-TRADE:FPT` audit observed 124 events in 30 seconds, performed one controlled disconnect/reconnect, then observed 82 events in the next 30 seconds without transport errors. Every event exposed `Symbol`, `TradingDate`, `Time`, `LastPrice`, `LastVol`, `TotalVol`, `Side`, `TradingSession`, and `TradingStatus`; none exposed a trade ID, sequence, message ID, channel sequence, correction flag, or cancel flag. Visible `(ticker,date,time,price,last-volume,side)` tuples collided 109 times across the two windows. `TotalVol` behaved as a cumulative session total and `LastVol` matched the increment when the total advanced, but repeated deliveries with unchanged `TotalVol` make raw summation unsafe. Volume is classified `likely_incremental`; ordering is `receive_order_only`; deduplication is `unsafe`; replay/gap/correction behavior is `unavailable`.
+
+Phase 4.11D-3 is `blocked`. X-TRADE must not create or update chart candles until stable identity or ordering, replay/gap detection, correction semantics, and safe deduplication are verified. A reconnect cannot currently prove missed or replayed events, so the conservative future rule remains: suspend provisional trust, fetch a fresh SSI IntradayOhlc baseline, replace/reconcile the latest bars, then resume only after the stream is healthy. SSI wins every mismatch. X snapshot, X-QUOTE, F, R, MI, the compact pulse, DailyStockPrice, and persisted streaming snapshots are not candle sources.
+
+Scheduled HOSE classification is clock-derived in `Asia/Ho_Chi_Minh`: pre-open before 09:15, morning 09:15-11:30, lunch 11:30-13:00, afternoon 13:00-14:30, ATC 14:30-14:45, and closed afterward or on weekends. This does not prove an exchange holiday, halt, half session, HNX, or UPCOM schedule. No bar exists without an SSI row, morning bars are never extended through lunch, successful refreshes authoritatively replace the array, and date/ticker/timeframe/request-ID ownership prevents stale responses from winning.
+
+Late-event policy remains closed while X-TRADE is blocked. A future stream overlay may revise only the current bucket and, if later evidence supports it, the immediately previous bucket for a short measured grace period. It must bucket by provider exchange date/time in `Asia/Ho_Chi_Minh`, never receive time; never span lunch; never reopen unlimited history; and discard provisional state whenever SSI differs, omits the provisional bucket, reconnects, or changes session/date. Until a provider-backed identity/order key exists, no composite visible-field key is safe enough to accept or reject a late event.
+
+Future current-session metadata may include `session_state`, `freshness`, `last_provider_refresh_at`, `newest_bar_age_seconds`, and `current_bar_state`, but no field is added by this audit. Recommended UI states are `Completed`, `Updating`, `Delayed`, `Reconnecting`, `Stale`, and `Closed`; `Live` remains unapproved. Future observability must count SSI requests/latency/revisions/newest-bar age, X-TRADE events/duplicates/out-of-order/sequence gaps/reconnects, reconciliation mismatches, provisional replacements, stale transitions, and current-session unavailability without logging raw payloads or credentials.
 
 ## Known Contract TODOs
 

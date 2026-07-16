@@ -9,7 +9,7 @@
 2. 定义历史 K 线数据模型
 """
 
-from typing import Any, Dict, Optional, List
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -370,7 +370,7 @@ class VietnamChartResponse(BaseModel):
 
 
 class VietnamIntradayChartResponse(BaseModel):
-    """One completed Vietnam trading date of SSI one-minute chart history."""
+    """One completed or current Vietnam date of SSI one-minute chart history."""
 
     ticker: str
     interval: str = "1m"
@@ -378,6 +378,13 @@ class VietnamIntradayChartResponse(BaseModel):
     timezone: str = "Asia/Ho_Chi_Minh"
     status: str = "ready"
     reason: Optional[str] = None
+    session_state: Literal[
+        "completed", "pre_open", "continuous_morning", "lunch", "continuous_afternoon", "atc", "closed", "unknown"
+    ] = "closed"
+    freshness: Literal["updating", "delayed", "stale", "completed", "unavailable"] = "unavailable"
+    last_provider_refresh_at: Optional[str] = None
+    newest_bar_age_seconds: Optional[int] = None
+    current_bar_state: Literal["provisional", "inferred_final", "completed", "none"] = "none"
     bars: List[VietnamChartPoint] = Field(default_factory=list)
     source: Dict[str, Any] = Field(default_factory=dict)
     cache: Dict[str, Any] = Field(default_factory=dict)

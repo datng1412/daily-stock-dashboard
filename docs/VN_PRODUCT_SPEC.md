@@ -18,7 +18,7 @@ The product should answer:
 
 ### Historical chart timeframes
 
-The selected-ticker chart defaults to `1D` from SSI `DailyOhlc`. `Timeframe` contains only `1D` and `1m history`; the separate `Range` group contains the D1-only `1M`, `3M`, `6M`, and `1Y` presets. Users may select `1m history` for one explicit completed Vietnam date sourced only from SSI `IntradayOhlc`; the date control replaces the daily range group and current-day history is not offered. Indicators use the active chart bars, RSI retains its canonical 0–100 numeric scale, and support/resistance remains the existing backend-owned daily context labelled `Daily S/R` in 1-minute mode. This is historical inspection, not a realtime chart.
+The selected-ticker chart defaults to `1D` from SSI `DailyOhlc`. `Timeframe` contains only `1D` and `1m`; the separate `Range` group contains the D1-only `1M`, `3M`, `6M`, and `1Y` presets. Users may select Today or a loaded completed Vietnam date sourced only from SSI `IntradayOhlc`; the date control replaces the daily range group. Today uses bounded delayed polling with `Updating`/`Delayed`/session-aware labels and is never described as Live. Indicators use the active chart bars, RSI retains its canonical 0–100 numeric scale, and support/resistance remains the existing backend-owned daily context labelled `Daily S/R` in 1-minute mode.
 
 ## Non-Goals
 
@@ -382,7 +382,13 @@ Phase 4.11B-3 verified the bounded `resolution=1` shape across FPT and HPG on tw
 
 ### Phase 4.11C - Implement Verified Intraday History API and Lightweight Timeframe UI
 
-Gate open for implementation only as `GET /vn/intraday-chart?ticker=FPT&interval=1m&date=2026-06-24`: one completed Vietnam date strictly before today, one SSI page, maximum 1,000 bars, and no current session, multi-day query, pagination, realtime update, aggregation, or fallback. The runtime allowlist remains empty until this phase is implemented. Keep D1 on DailyOhlc, calculate indicators from the active timeframe bars, and label Phase 4.9A zones `Daily S/R` on 1m. Phase 4.11D separately owns current-session and realtime last-bar semantics.
+Implemented as `GET /vn/intraday-chart?ticker=FPT&interval=1m&date=YYYY-MM-DD`: one completed or current Vietnam date, one SSI page, maximum 1,000 bars, and no multi-day query, pagination, stream update, aggregation, or fallback. D1 stays on DailyOhlc, indicators use active timeframe bars, and Phase 4.9A zones read `Daily S/R` on 1m. Current-day refresh is bounded SSI polling rather than a realtime last-bar overlay.
+
+### Phase 4.11D-1 - Audit Current-Session Intraday and X-TRADE Sources
+
+The audit confirmed that current-date SSI IntradayOhlc can expose an updating provisional minute after continuous trading begins, but SSI supplies no explicit finality flag. Phase 4.11D-2 implements only the approved SSI polling-based delayed/updating experience with authoritative refresh replacement, lunch suppression, stale labelling, and post-close reconciliation. It is not labelled `Live`.
+
+X-TRADE is not approved for chart aggregation. Observed events had price, last volume, cumulative volume, side, and provider time, but no stable trade ID or sequence and many indistinguishable duplicate tuples. Phase 4.11D-3 remains blocked until ordering, identity, replay/gap, correction, and dedup semantics are verified. TradingView remains the local rendering library only and is not a market-data provider. No production current-session endpoint, polling, schema, UI, or aggregator is part of Phase 4.11D-1.
 
 ### Phase 4.2A - DailyStockPrice Enrichment Reliability
 

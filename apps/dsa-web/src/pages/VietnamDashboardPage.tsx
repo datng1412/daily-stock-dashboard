@@ -43,6 +43,12 @@ import {
   resolveVietnamWatchlistBatchSize,
 } from '../utils/vietnamWatchlistBatching';
 import {
+  getNextVietnamIntradayAction,
+  getVietnamScheduledSessionState,
+  vietnamIntradayStatusLabel,
+  vietnamTodayIso,
+} from '../utils/vietnamIntradayPolling';
+import {
   CEILING_PRICE_CLASS,
   FLOOR_PRICE_CLASS,
   formatCompactShareVolume,
@@ -73,21 +79,6 @@ const INSPECT_RANGES = [
 ] as const;
 type InspectRangeLabel = typeof INSPECT_RANGES[number]['label'];
 type InspectTimeframe = '1D' | '1m';
-
-const vietnamTodayIso = () => {
-  const parts = Object.fromEntries(
-    new Intl.DateTimeFormat('en-GB', {
-      timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: '2-digit', day: '2-digit',
-    }).formatToParts(new Date()).map((part) => [part.type, part.value]),
-  );
-  return `${parts.year}-${parts.month}-${parts.day}`;
-};
-
-const previousIsoDate = (isoDate: string) => {
-  const date = new Date(`${isoDate}T00:00:00Z`);
-  date.setUTCDate(date.getUTCDate() - 1);
-  return date.toISOString().slice(0, 10);
-};
 
 const completedVietnamChartDate = (...values: Array<string | null | undefined>) => {
   const today = vietnamTodayIso();
@@ -3387,8 +3378,15 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
   const [intradayChart, setIntradayChart] = useState<VietnamIntradayChartResponse | null>(null);
   const [isExpanded, setIsExpanded] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [intradayRefreshToken, setIntradayRefreshToken] = useState(0);
+  const [documentVisible, setDocumentVisible] = useState(() => document.visibilityState === 'visible');
   const [chartError, setChartError] = useState<{ requestKey: string; message: string } | null>(null);
   const requestIdRef = useRef(0);
+  const intradayChartRef = useRef<VietnamIntradayChartResponse | null>(null);
+  const intradayControllerRef = useRef<AbortController | null>(null);
+  const intradayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const intradayRefreshKindRef = useRef<'initial' | 'scheduled' | 'visible'>('initial');
   const lightweightLogicalRangeRef = useRef<{ from: number; to: number } | null>(null);
   const normalizedTicker = normalizeVietnamTicker(item.ticker);
   const requestKey = timeframe === '1D'
@@ -3432,7 +3430,7 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
       : currentError || activeResponseFailed
         ? 'Failed'
         : 'Unavailable';
-  const maxIntradayDate = previousIsoDate(vietnamTodayIso());
+  const currentVietnamDate = vietnamTodayIso();
 
   const preferredCompletedDate = useCallback(() => completedVietnamChartDate(
     dailyChart?.latestDate,
@@ -3440,6 +3438,22 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
     item.ohlcvDate,
     item.date,
   ), [dailyChart?.latestDate, item.date, item.latestPriceDate, item.ohlcvDate]);
+
+  const intradayCompletedDates = useMemo(() => {
+    const candidates = dailyChart?.points?.length ? dailyChart.points : dailyChart?.candles ?? [];
+    const dates = candidates
+      .map((point) => point.date)
+      .filter((value): value is string => Boolean(value && /^\d{4}-\d{2}-\d{2}$/.test(value) && value < currentVietnamDate));
+    const preferred = preferredCompletedDate();
+    if (preferred && preferred < currentVietnamDate) dates.push(preferred);
+    return [...new Set(dates)].sort((left, right) => right.localeCompare(left));
+  }, [currentVietnamDate, dailyChart, preferredCompletedDate]);
+
+  const intradayStatus = intradayBelongsToItem
+    ? vietnamIntradayStatusLabel(intradayChart?.sessionState, intradayChart?.freshness, points.length > 0)
+    : intradayDate === currentVietnamDate
+      ? vietnamIntradayStatusLabel(getVietnamScheduledSessionState(new Date()), 'unavailable', false)
+      : intradayDate ? 'Completed' : 'No data yet';
 
   const handleRangeChange = useCallback((nextRange: InspectRangeLabel) => {
     if (nextRange === rangeLabel || timeframe !== '1D') return;
@@ -3454,19 +3468,25 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
     if (nextTimeframe === timeframe) return;
     lightweightLogicalRangeRef.current = null;
     setChartError(null);
-    setLoading(nextTimeframe === '1D' || Boolean(preferredCompletedDate()));
+    setLoading(true);
     if (nextTimeframe === '1m') {
+      intradayRefreshKindRef.current = 'initial';
       setIntradayChart(null);
-      setIntradayDate(preferredCompletedDate());
+      setIntradayDate(vietnamTodayIso());
     }
     setTimeframe(nextTimeframe);
-  }, [preferredCompletedDate, timeframe]);
+  }, [timeframe]);
 
   useEffect(() => {
     if (timeframe !== '1m') return;
+    intradayRefreshKindRef.current = 'initial';
     setIntradayChart(null);
-    setIntradayDate(preferredCompletedDate());
-  }, [item.ticker, preferredCompletedDate, timeframe]); // reset date ownership when the selected ticker changes
+    setIntradayDate(vietnamTodayIso());
+  }, [item.ticker, timeframe]); // reset current-session ownership when the selected ticker changes
+
+  useEffect(() => {
+    intradayChartRef.current = intradayChart;
+  }, [intradayChart]);
 
   useEffect(() => {
     if (!isExpanded) return undefined;
@@ -3478,9 +3498,32 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
   }, [isExpanded]);
 
   useEffect(() => {
+    const onVisibilityChange = () => {
+      const visible = document.visibilityState === 'visible';
+      setDocumentVisible(visible);
+      if (!visible) {
+        if (intradayTimerRef.current) clearTimeout(intradayTimerRef.current);
+        intradayTimerRef.current = null;
+        intradayControllerRef.current?.abort();
+        requestIdRef.current += 1;
+        setLoading(false);
+        setRefreshing(false);
+        return;
+      }
+      if (timeframe === '1m' && intradayDate === vietnamTodayIso()) {
+        intradayRefreshKindRef.current = 'visible';
+        setIntradayRefreshToken((value) => value + 1);
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+  }, [intradayDate, timeframe]);
+
+  useEffect(() => {
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
     const controller = new AbortController();
+    intradayControllerRef.current = controller;
     lightweightLogicalRangeRef.current = null;
     setChartError(null);
     if (timeframe === '1m' && !intradayDate) {
@@ -3488,9 +3531,25 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
       setLoading(false);
       return () => controller.abort();
     }
-    setLoading(true);
-    if (timeframe === '1m') setIntradayChart(null);
-    else setDailyChart(null);
+    if (timeframe === '1m' && document.visibilityState !== 'visible') {
+      setLoading(false);
+      setRefreshing(false);
+      return () => controller.abort();
+    }
+    const existingIntraday = intradayChartRef.current;
+    const ownsExistingBars = Boolean(
+      existingIntraday
+      && normalizeVietnamTicker(existingIntraday.ticker) === normalizedTicker
+      && existingIntraday.tradingDate === intradayDate
+      && existingIntraday.bars.length,
+    );
+    const preserveBars = timeframe === '1m'
+      && intradayRefreshKindRef.current !== 'initial'
+      && ownsExistingBars;
+    setLoading(!preserveBars);
+    setRefreshing(preserveBars);
+    if (timeframe === '1m' && !preserveBars) setIntradayChart(null);
+    if (timeframe === '1D') setDailyChart(null);
     const loadChart = async () => {
       try {
         if (timeframe === '1m') {
@@ -3515,15 +3574,55 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
           message: err instanceof Error ? err.message : 'Chart data unavailable',
         });
       } finally {
-        if (requestId === requestIdRef.current) setLoading(false);
+        if (requestId === requestIdRef.current) {
+          setLoading(false);
+          setRefreshing(false);
+        }
       }
     };
     void loadChart();
     return () => {
       controller.abort();
+      if (intradayControllerRef.current === controller) intradayControllerRef.current = null;
       if (requestIdRef.current === requestId) requestIdRef.current += 1;
     };
-  }, [intradayDate, item.ticker, normalizedTicker, rangeLabel, requestKey, timeframe]);
+  }, [intradayDate, intradayRefreshToken, item.ticker, normalizedTicker, rangeLabel, requestKey, timeframe]);
+
+  useEffect(() => {
+    if (intradayTimerRef.current) clearTimeout(intradayTimerRef.current);
+    intradayTimerRef.current = null;
+    if (
+      timeframe !== '1m'
+      || !documentVisible
+      || intradayDate !== vietnamTodayIso()
+      || loading
+      || refreshing
+    ) return undefined;
+
+    const now = new Date();
+    const action = getNextVietnamIntradayAction(now);
+    const delayMs = action?.delayMs ?? (() => {
+      const tomorrow = new Date(`${vietnamTodayIso(now)}T17:00:00Z`).getTime();
+      return Math.max(1_000, tomorrow - now.getTime());
+    })();
+    intradayTimerRef.current = setTimeout(() => {
+      intradayTimerRef.current = null;
+      const nextToday = vietnamTodayIso();
+      if (nextToday !== intradayDate) {
+        intradayRefreshKindRef.current = 'initial';
+        setIntradayChart(null);
+        setIntradayDate(nextToday);
+        return;
+      }
+      if (!action) return;
+      intradayRefreshKindRef.current = 'scheduled';
+      setIntradayRefreshToken((value) => value + 1);
+    }, delayMs);
+    return () => {
+      if (intradayTimerRef.current) clearTimeout(intradayTimerRef.current);
+      intradayTimerRef.current = null;
+    };
+  }, [documentVisible, intradayChart, intradayDate, loading, refreshing, timeframe]);
 
   const timeframeControls = (
     <div className="flex flex-wrap items-stretch gap-2" aria-label="Chart controls">
@@ -3545,7 +3644,7 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
                 timeframe === value ? 'border-cyan bg-cyan/10 text-cyan' : 'border-border/70 bg-card/60 text-secondary-text hover:bg-hover hover:text-foreground',
               )}
             >
-              {value === '1m' ? '1m history' : value}
+              {value}
             </button>
           ))}
         </div>
@@ -3560,22 +3659,28 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
           <ChartRangeControls rangeLabel={rangeLabel} onRangeChange={handleRangeChange} />
         </div>
       ) : (
-        <label className="flex items-center gap-2 rounded-md border border-border/60 bg-elevated/40 px-2 py-1 text-xs text-secondary-text">
+        <div className="flex items-center gap-2 rounded-md border border-border/60 bg-elevated/40 px-2 py-1 text-xs text-secondary-text">
           <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">Trading date</span>
-          <input
-            type="date"
+          <select
             value={intradayDate}
-            max={maxIntradayDate}
             onChange={(event) => {
               lightweightLogicalRangeRef.current = null;
+              intradayRefreshKindRef.current = 'initial';
               setIntradayChart(null);
               setChartError(null);
               setIntradayDate(event.target.value);
             }}
             className="h-8 rounded-md border border-border/70 bg-card/60 px-2 text-foreground"
-            aria-label="Completed trading date"
-          />
-        </label>
+            aria-label="Intraday trading date"
+          >
+            <option value={currentVietnamDate}>Today — {currentVietnamDate.split('-').reverse().join('/')}</option>
+            {intradayCompletedDates.map((date) => <option key={date} value={date}>{date.split('-').reverse().join('/')}</option>)}
+          </select>
+          <Badge variant={intradayStatus === 'Stale' ? 'warning' : 'default'}>
+            {intradayStatus}
+          </Badge>
+          {refreshing ? <span className="inline-flex items-center gap-1 text-muted"><Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />Refreshing</span> : null}
+        </div>
       )}
     </div>
   );
@@ -3588,7 +3693,7 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
             <h3 className="text-sm font-semibold text-foreground">Inspect chart</h3>
             <Badge variant={sectionStateVariant(chartSectionState)}>{chartSectionState}</Badge>
           </div>
-          <p className="mt-1 text-xs text-secondary-text">{timeframe === '1m' ? 'Completed-session 1-minute history' : 'Daily OHLCV'} from {chartSourceLabel}. SSI realtime remains separate.</p>
+          <p className="mt-1 text-xs text-secondary-text">{timeframe === '1m' ? 'SSI delayed 1-minute history' : 'Daily OHLCV'} from {chartSourceLabel}. SSI realtime remains separate.</p>
         </div>
         {timeframeControls}
       </div>
@@ -3653,9 +3758,11 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
       ) : (
         <p className="mt-4 text-sm text-secondary-text">
           {timeframe === '1m' && !intradayDate
-            ? 'Choose a completed trading date after daily history is available.'
+            ? 'Choose a Vietnam trading date.'
             : timeframe === '1m' && activeResponseReady
-              ? 'No 1-minute bars for the selected completed date.'
+              ? 'No 1-minute bars for the selected date.'
+              : timeframe === '1m' && intradayDate === currentVietnamDate
+                ? 'No data yet'
               : 'Chart data unavailable'}
         </p>
       )}
@@ -3667,6 +3774,12 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
       <div className="mt-3 space-y-1 text-xs text-secondary-text">
         <p>{timeframe === '1m' ? '1-minute history' : 'Daily OHLCV'} source: {chartSourceLabel}</p>
         <p>SSI realtime is separate and not used as {timeframe === '1m' ? 'chart history' : 'daily close'}.</p>
+        {timeframe === '1m' && intradayBelongsToItem && intradayChart?.lastProviderRefreshAt ? (
+          <p>Last SSI provider refresh: {formatVietnamTime(intradayChart.lastProviderRefreshAt)}</p>
+        ) : null}
+        {timeframe === '1m' && intradayBelongsToItem && intradayChart?.newestBarAgeSeconds != null ? (
+          <p>Newest provider bar age: {intradayChart.newestBarAgeSeconds}s</p>
+        ) : null}
         {timeframe === '1m' && intradayBelongsToItem && intradayChart?.cache.isStale ? <p>Showing stale cached history after a provider refresh error.</p> : null}
         {timeframe === '1D' && dailyBelongsToItem && dailyChart?.latestDate ? <p>Latest chart date: {dailyChart.latestDate}</p> : null}
       </div>
@@ -3681,7 +3794,7 @@ const InspectChartCard: React.FC<{ item: VietnamWatchItem }> = ({ item }) => {
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <h3 id="inspect-chart-expanded-title" className="text-base font-semibold text-foreground">Expanded inspect chart</h3>
-                <p className="mt-1 text-xs text-secondary-text">{timeframe === '1m' ? 'Completed-session 1-minute history' : 'Daily OHLCV'} from {chartSourceLabel}. SSI realtime remains separate.</p>
+                <p className="mt-1 text-xs text-secondary-text">{timeframe === '1m' ? 'SSI delayed 1-minute history' : 'Daily OHLCV'} from {chartSourceLabel}. SSI realtime remains separate.</p>
               </div>
               <button
                 type="button"

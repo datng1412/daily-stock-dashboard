@@ -99,7 +99,7 @@ describe('stocksApi Vietnam SSI-derived metric mapping', () => {
     expect(result.technical.dailyRangePct).toBe(1.77);
   });
 
-  it('requests completed-session 1m history with explicit ticker and date identity', async () => {
+  it('parses typed 1m session metadata with explicit ticker and date identity', async () => {
     get.mockResolvedValueOnce({
       data: {
         ticker: 'FPT',
@@ -107,6 +107,11 @@ describe('stocksApi Vietnam SSI-derived metric mapping', () => {
         trading_date: '2026-06-24',
         timezone: 'Asia/Ho_Chi_Minh',
         status: 'ready',
+        session_state: 'continuous_morning',
+        freshness: 'updating',
+        last_provider_refresh_at: '2026-06-24T02:16:07+00:00',
+        newest_bar_age_seconds: 8,
+        current_bar_state: 'provisional',
         bars: [{ time: 1782266400, open: 1, high: 2, low: 1, close: 2, volume: 3 }],
         source: { provider: 'ssi_fastconnect', dataset: 'IntradayOhlc' },
         cache: { status: 'miss', is_stale: false },
@@ -128,5 +133,10 @@ describe('stocksApi Vietnam SSI-derived metric mapping', () => {
     expect(result.tradingDate).toBe('2026-06-24');
     expect(result.bars[0].time).toBe(1782266400);
     expect(result.cache.isStale).toBe(false);
+    expect(result.sessionState).toBe('continuous_morning');
+    expect(result.freshness).toBe('updating');
+    expect(result.lastProviderRefreshAt).toBe('2026-06-24T02:16:07+00:00');
+    expect(result.newestBarAgeSeconds).toBe(8);
+    expect(result.currentBarState).toBe('provisional');
   });
 });

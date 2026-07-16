@@ -62,6 +62,11 @@ VN_INTRADAY_CHART_PAGE_SIZE = 1000
 VN_INTRADAY_CHART_CACHE_TTL_SECONDS = 86_400
 VN_INTRADAY_CHART_NEGATIVE_CACHE_TTL_SECONDS = 60
 VN_INTRADAY_CHART_STALE_MAX_SECONDS = 7 * 86_400
+VN_INTRADAY_CHART_CURRENT_CACHE_TTL_SECONDS = 15
+VN_INTRADAY_CHART_CURRENT_EMPTY_CACHE_TTL_SECONDS = 5
+VN_INTRADAY_CHART_CURRENT_NEGATIVE_CACHE_TTL_SECONDS = 10
+VN_INTRADAY_CHART_CURRENT_STALE_MAX_SECONDS = 5 * 60
+VN_INTRADAY_CHART_CURRENT_STALE_THRESHOLD_SECONDS = 90
 VN_INTRADAY_CHART_CACHE_MAX_ENTRIES = 500
 VN_WATCHLIST = ("FPT", "VPB", "MSB", "SCS", "ACV", "ACB")
 VN_EXCHANGE_MAP = {
@@ -276,6 +281,7 @@ class _IntradayChartCacheEntry:
     expires_at: datetime
     stale_until: datetime
     usable: bool
+    policy: str
 
 
 _VN_CACHE: Dict[Tuple[Any, ...], _CacheEntry] = {}
@@ -335,14 +341,17 @@ def _set_intraday_chart_cache_entry(
     *,
     ttl_seconds: int,
     usable: bool,
+    policy: str,
+    stale_max_seconds: int,
 ) -> _IntradayChartCacheEntry:
     now = _utc_now()
     entry = _IntradayChartCacheEntry(
         value=copy.deepcopy(value),
         fetched_at=now,
         expires_at=now + timedelta(seconds=ttl_seconds),
-        stale_until=now + timedelta(seconds=VN_INTRADAY_CHART_STALE_MAX_SECONDS),
+        stale_until=now + timedelta(seconds=stale_max_seconds),
         usable=usable,
+        policy=policy,
     )
     with _VN_INTRADAY_CHART_CACHE_LOCK:
         _VN_INTRADAY_CHART_CACHE[key] = entry
@@ -365,6 +374,83 @@ def _intraday_chart_cache_payload(
         "fetched_at": _iso(entry.fetched_at),
         "expires_at": _iso(entry.expires_at),
     }
+    payload["last_provider_refresh_at"] = _iso(entry.fetched_at)
+    return _with_intraday_chart_runtime_metadata(payload, is_stale=is_stale)
+
+
+def vietnam_intraday_session_state(value: datetime) -> str:
+    """Classify the scheduled SSI cash-market session using Vietnam local time.
+
+    This clock-only helper is intentionally holiday-unaware. Weekends are closed.
+    """
+    local = value.astimezone(VN_TIMEZONE)
+    if local.weekday() >= 5:
+        return "closed"
+    minute = (local.hour * 60) + local.minute
+    if minute < (9 * 60 + 15):
+        return "pre_open"
+    if minute < (11 * 60 + 30):
+        return "continuous_morning"
+    if minute < (13 * 60):
+        return "lunch"
+    if minute < (14 * 60 + 30):
+        return "continuous_afternoon"
+    if minute < (14 * 60 + 45):
+        return "atc"
+    return "closed"
+
+
+def _with_intraday_chart_runtime_metadata(payload: Dict[str, Any], *, is_stale: bool) -> Dict[str, Any]:
+    now = _utc_now()
+    local_now = now.astimezone(VN_TIMEZONE)
+    requested_date = datetime.strptime(payload["trading_date"], "%Y-%m-%d").date()
+    newest_provider_timestamp = payload.pop("_newest_provider_timestamp", None)
+    bars = payload.get("bars") or []
+    if requested_date < local_now.date():
+        payload.update(
+            session_state="completed",
+            freshness="completed",
+            newest_bar_age_seconds=None,
+            current_bar_state="completed",
+        )
+        return payload
+
+    session_state = vietnam_intraday_session_state(now)
+    newest_age: Optional[int] = None
+    if newest_provider_timestamp:
+        try:
+            newest = datetime.fromisoformat(str(newest_provider_timestamp))
+            newest_age = max(0, int((now - newest.astimezone(timezone.utc)).total_seconds()))
+        except (TypeError, ValueError):
+            newest_age = None
+    active = session_state in {"continuous_morning", "continuous_afternoon", "atc"}
+    current_bar_state = "none"
+    if bars:
+        newest_bucket = datetime.fromtimestamp(int(bars[-1]["time"]), tz=VN_TIMEZONE).replace(second=0, microsecond=0)
+        current_bucket = local_now.replace(second=0, microsecond=0)
+        current_bar_state = "provisional" if active and newest_bucket == current_bucket else "inferred_final"
+
+    provider_refresh = payload.get("last_provider_refresh_at")
+    provider_age: Optional[int] = None
+    if provider_refresh:
+        try:
+            provider_age = max(0, int((now - datetime.fromisoformat(str(provider_refresh)).astimezone(timezone.utc)).total_seconds()))
+        except (TypeError, ValueError):
+            provider_age = None
+    if not bars:
+        freshness = "unavailable"
+    elif is_stale or (provider_age is not None and provider_age > VN_INTRADAY_CHART_CURRENT_STALE_THRESHOLD_SECONDS):
+        freshness = "stale"
+    elif active and newest_age is not None and newest_age < 120:
+        freshness = "updating"
+    else:
+        freshness = "delayed"
+    payload.update(
+        session_state=session_state,
+        freshness=freshness,
+        newest_bar_age_seconds=newest_age,
+        current_bar_state=current_bar_state,
+    )
     return payload
 
 
@@ -3302,6 +3388,7 @@ def normalize_completed_intraday_chart_rows(
         "returned_rows": len(raw_rows),
         "rejected_rows": rejected_rows,
         "duplicate_minute_buckets": duplicate_minute_buckets,
+        "newest_provider_timestamp": _iso(normalized[-1]["original_datetime"]) if normalized else None,
     }
 
 
@@ -5430,7 +5517,7 @@ class VietnamMarketService:
         trading_date: str,
         force_refresh: bool = False,
     ) -> Dict[str, Any]:
-        """Build one completed-session SSI 1-minute history response."""
+        """Build SSI 1-minute history for one completed or current VN date."""
         normalized_ticker = vn_ticker(ticker)
         if not re.fullmatch(r"[A-Z0-9]{1,10}", normalized_ticker):
             raise ValueError("Invalid Vietnam ticker")
@@ -5443,13 +5530,17 @@ class VietnamMarketService:
         except (TypeError, ValueError) as exc:
             raise ValueError("Date must use YYYY-MM-DD") from exc
         current_vietnam_date = _utc_now().astimezone(VN_TIMEZONE).date()
-        if requested_date >= current_vietnam_date:
-            raise ValueError("Intraday history date must be before the current Vietnam date")
+        if requested_date > current_vietnam_date:
+            raise ValueError("Intraday history date must not be after the current Vietnam date")
+
+        cache_policy = "current" if requested_date == current_vietnam_date else "completed"
 
         provider_date = requested_date.strftime("%d/%m/%Y")
         key = _intraday_chart_cache_key(normalized_ticker, trading_date)
         now = _utc_now()
         observed_entry = _get_intraday_chart_cache_entry(key)
+        if observed_entry is not None and observed_entry.policy != cache_policy:
+            observed_entry = None
         if observed_entry is not None and not force_refresh and observed_entry.expires_at > now:
             return _intraday_chart_cache_payload(observed_entry, status="hit", is_stale=False)
 
@@ -5457,6 +5548,8 @@ class VietnamMarketService:
         with lock:
             now = _utc_now()
             current_entry = _get_intraday_chart_cache_entry(key)
+            if current_entry is not None and current_entry.policy != cache_policy:
+                current_entry = None
             if current_entry is not None and current_entry.expires_at > now:
                 if not force_refresh or current_entry is not observed_entry:
                     return _intraday_chart_cache_payload(current_entry, status="hit", is_stale=False)
@@ -5481,26 +5574,48 @@ class VietnamMarketService:
                         stale_payload["diagnostics"]["recovery"] = "stale_if_error"
                         stale_payload["diagnostics"]["refresh_result"] = "normalization_failed"
                         return stale_payload
+                has_usable_bars = normalized["status"] == "ready" and bool(normalized["bars"])
+                current_empty = cache_policy == "current" and normalized["status"] == "ready" and not normalized["bars"]
+                response_status = "unavailable" if current_empty else normalized["status"]
                 value = {
                     "ticker": normalized_ticker,
                     "interval": "1m",
                     "trading_date": trading_date,
                     "timezone": str(VN_TIMEZONE),
-                    "status": normalized["status"],
-                    "reason": "SSI IntradayOhlc returned malformed rows." if normalized["status"] == "failed" else None,
+                    "status": response_status,
+                    "reason": (
+                        "SSI IntradayOhlc returned malformed rows."
+                        if normalized["status"] == "failed"
+                        else "SSI IntradayOhlc has no usable current-session bars yet."
+                        if current_empty
+                        else None
+                    ),
                     "bars": normalized["bars"],
                     "source": {"provider": "ssi_fastconnect", "dataset": "IntradayOhlc"},
                     "diagnostics": diagnostics,
+                    "_newest_provider_timestamp": normalized.get("newest_provider_timestamp"),
                 }
-                entry = _set_intraday_chart_cache_entry(
-                    key,
-                    value,
-                    ttl_seconds=(
+                if cache_policy == "current":
+                    ttl_seconds = (
+                        VN_INTRADAY_CHART_CURRENT_EMPTY_CACHE_TTL_SECONDS
+                        if not has_usable_bars
+                        else VN_INTRADAY_CHART_CURRENT_CACHE_TTL_SECONDS
+                    )
+                    stale_max_seconds = VN_INTRADAY_CHART_CURRENT_STALE_MAX_SECONDS
+                else:
+                    ttl_seconds = (
                         VN_INTRADAY_CHART_CACHE_TTL_SECONDS
                         if normalized["status"] == "ready"
                         else VN_INTRADAY_CHART_NEGATIVE_CACHE_TTL_SECONDS
-                    ),
-                    usable=normalized["status"] == "ready",
+                    )
+                    stale_max_seconds = VN_INTRADAY_CHART_STALE_MAX_SECONDS
+                entry = _set_intraday_chart_cache_entry(
+                    key,
+                    value,
+                    ttl_seconds=ttl_seconds,
+                    usable=has_usable_bars or (cache_policy == "completed" and normalized["status"] == "ready"),
+                    policy=cache_policy,
+                    stale_max_seconds=stale_max_seconds,
                 )
                 return _intraday_chart_cache_payload(
                     entry,
@@ -5515,13 +5630,19 @@ class VietnamMarketService:
                 return stale_payload
 
             failure_class = provider_result.get("failure_class")
+            provider_code = str(provider_result.get("code") or "").strip().lower()
+            current_no_data = cache_policy == "current" and provider_code == "nodatafound"
             value = {
                 "ticker": normalized_ticker,
                 "interval": "1m",
                 "trading_date": trading_date,
                 "timezone": str(VN_TIMEZONE),
                 "status": "unavailable",
-                "reason": "SSI IntradayOhlc is unavailable.",
+                "reason": (
+                    "SSI IntradayOhlc has no usable current-session bars yet."
+                    if current_no_data
+                    else "SSI IntradayOhlc is unavailable."
+                ),
                 "bars": [],
                 "source": {"provider": "ssi_fastconnect", "dataset": "IntradayOhlc"},
                 "diagnostics": {
@@ -5531,15 +5652,27 @@ class VietnamMarketService:
                     "usable_bars": 0,
                     "rejected_rows": 0,
                     "duplicate_minute_buckets": 0,
-                    "result": "provider_unavailable",
+                    "result": "no_data" if current_no_data else "provider_unavailable",
                     "failure_class": str(failure_class)[:80] if failure_class else None,
                 },
             }
             entry = _set_intraday_chart_cache_entry(
                 key,
                 value,
-                ttl_seconds=VN_INTRADAY_CHART_NEGATIVE_CACHE_TTL_SECONDS,
+                ttl_seconds=(
+                    VN_INTRADAY_CHART_CURRENT_EMPTY_CACHE_TTL_SECONDS
+                    if current_no_data
+                    else VN_INTRADAY_CHART_CURRENT_NEGATIVE_CACHE_TTL_SECONDS
+                    if cache_policy == "current"
+                    else VN_INTRADAY_CHART_NEGATIVE_CACHE_TTL_SECONDS
+                ),
                 usable=False,
+                policy=cache_policy,
+                stale_max_seconds=(
+                    VN_INTRADAY_CHART_CURRENT_STALE_MAX_SECONDS
+                    if cache_policy == "current"
+                    else VN_INTRADAY_CHART_STALE_MAX_SECONDS
+                ),
             )
             return _intraday_chart_cache_payload(
                 entry,

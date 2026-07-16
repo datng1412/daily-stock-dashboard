@@ -237,14 +237,14 @@ These fields are additive Phase 4.8A metrics. They live under watchlist `indicat
 | `index_components.diagnostics.cache_status` / `cache_ttl_seconds` / `cache_negative` / `cache_key` | Process-cache result and sanitized cache identity for explicit IndexComponents requests | Service cache over SSI IndexComponents | diagnostic object | yes | no | Index diagnostics only | Usable rows cache for 300 seconds; unavailable/rate-limited/no-row responses cache for 60 seconds. Key contains provider, endpoint, normalized index code, and optional market only. |
 | `cache_status.daily_stock_price_cache` | Process-cache result for the combined recent DailyStockPrice enrichment/history request | Service cache over SSI DailyStockPrice | `hit`, `miss`, `refresh`, or `stale` | yes | no | Diagnostics/cache metadata | TTL is 300 seconds; force refresh bypasses freshness. It does not change DailyOhlc canonical price ownership. |
 
-## Proposed Phase 4.11C Intraday Chart Fields
+## Phase 4.11C Intraday Chart Fields
 
-These fields are contract design only and are not present in a production endpoint yet.
+These fields are implemented by the production intraday-chart endpoint for completed and current Vietnam dates.
 
 | Field | Meaning | Source | Type | Nullable | Notes |
 | --- | --- | --- | --- | --- | --- |
 | `ticker` | Normalized public VN ticker | Request/SSI metadata | text | no | StockClock public APIs use `ticker`; the SSI request model continues to call this field `symbol`. |
-| `interval` | Verified public intraday interval | Request allowlist | enum | no | Phase 4.11C gate allows only `1m` for one completed date; the current runtime allowlist remains empty until implementation. |
+| `interval` | Verified public intraday interval | Request allowlist | enum | no | Runtime allows only `1m` for one completed or current Vietnam date. |
 | `timezone` | Timestamp interpretation zone | Contract constant | text | no | Always `Asia/Ho_Chi_Minh`. |
 | `status` | Intraday history result state | Endpoint | enum | no | `ready`, `unavailable`, or `failed`; stale is cache metadata. |
 | `reason_code` | Sanitized result qualifier | Endpoint | text | yes | Examples: `no_data`, `partial_rows_rejected`, `stale_cache_recovery`, `provider_unavailable`. |
@@ -259,7 +259,22 @@ These fields are contract design only and are not present in a production endpoi
 | `diagnostics.rejected_rows` | Malformed rows dropped | Normalizer | integer | no | Sanitized count only. |
 | `diagnostics.duplicate_timestamps` | Duplicate timestamps resolved | Normalizer | integer | no | Stable last-provider-row-wins rule. |
 
-`is_final` is deliberately absent because the Phase 4.11C gate is limited to one date strictly before the current Vietnam date. Phase 4.11B-3 verifies `resolution=1` only for that completed-session `1m` scope; 5/15/30/60 did not select their numeric cadences and remain unexposed. The current runtime allowlist stays empty until Phase 4.11C is implemented. These proposed fields do not replace the existing compact `intraday_candles`/`intraday_pulse` watchlist contract.
+Per-bar `is_final` is deliberately absent. For the current date, response-level `current_bar_state=provisional` only when the newest normalized bucket equals the current active Vietnam minute; an older bucket is `inferred_final`, never provider-verified final. Phase 4.11B-3 verifies `resolution=1`; 5/15/30/60 remain unexposed. These fields do not replace the existing compact `intraday_candles`/`intraday_pulse` watchlist contract.
+
+## Phase 4.11D-2 Current-Session Fields
+
+These additive fields are active in the current intraday-chart response.
+
+| Field | Meaning | Source | Nullable | Current decision |
+| --- | --- | --- | --- | --- |
+| `session_state` | Current Vietnam scheduled-session classification or `completed` | Backend Vietnam-time clock policy | no | Holiday/half-session, halt, HNX, and UPCOM semantics remain unresolved. |
+| `freshness` | `updating`, `delayed`, `stale`, `completed`, or `unavailable` | SSI refresh/bar age and session state | no | `live` is not approved by the bounded opening-session evidence. |
+| `last_provider_refresh_at` | Last successful SSI IntradayOhlc refresh | Backend observation time | yes | Must not be browser receive time presented as exchange time. |
+| `newest_bar_age_seconds` | Observation time minus newest accepted raw SSI timestamp | Backend | yes | Non-negative; completed dates return null. Normalized candle timestamps remain minute starts. |
+| `current_bar_state` | Provisional/completed interpretation | SSI bucket progression plus reconciliation | yes | Latest bucket is provisional; prior-bucket finality is inferred, not provider-verified. |
+| `bars[].is_provisional` | Per-bar provisional flag | Not implemented | yes | Deliberately absent; only response-level `current_bar_state` is exposed. |
+
+SSI `IntradayOhlc` remains the only candidate authoritative current-session candle source. X-TRADE `LastVol` is `likely_incremental`, but provider identity/sequence is absent in observed events, duplicate visible tuples occur, and deduplication is unsafe. X-TRADE fields remain trade-tape context and must not populate candles in the current contract.
 
 ## Current Decision Points
 

@@ -20,6 +20,14 @@ The dashboard must remain:
 - Deferred current-session history, 5m/15m/30m/1h, aggregation, further pagination, HNX/UPCOM verification, realtime candles, and external/fallback providers.
 - Automated browser smoke remains pending because the local browser integration failed before navigation with `Cannot redefine property: process`; do not treat deterministic tests as visual/network proof.
 
+## Phase 4.11D-2 - Current-session delayed SSI 1m history (implemented)
+
+- The existing endpoint now accepts Today in Vietnam time and rejects only future dates. SSI `IntradayOhlc` remains the sole candle source; D1/latest-price ownership remains SSI DailyOhlc.
+- Current responses expose scheduled session, freshness, provider-refresh time, newest raw-bar age, and response-level provisional/inferred-final state. The schedule is clock-derived and holiday/halt/half-session/HNX/UPCOM semantics remain unresolved.
+- Current-date cache bounds are 15 seconds positive, 5 seconds empty, 10 seconds negative, and five minutes stale-if-error. Completed-date 24-hour/60-second/seven-day behavior remains unchanged.
+- The dashboard now presents `1D | 1m`, defaults 1m to Today, retains completed selection, polls at minute boundary plus seven seconds only during eligible sessions, wakes once after lunch, reconciles once after close, pauses while hidden, and never labels this delayed path `Live`.
+- Phase 4.11D-3 remains blocked: X-TRADE lacks proven identity/sequence/replay semantics and cannot construct candles.
+
 ### Phase 4.11C-1 - Runtime validation fixes
 
 - Fixed the RSI pane display defect without changing Wilder/RMA calculations: canonical 0–100 RSI values now use an explicit numeric series formatter and the existing supported 0–100 autoscale instead of inheriting the board-price formatter.
@@ -1295,7 +1303,7 @@ Validation covers 60, 250, and 500 mapped daily sessions; 24 focused chart tests
 
 ### Phase 4.11B - SSI Intraday Chart Contract Audit
 
-Status: Phase 4.11B-3 bounded live verification complete on 2026-07-14; the Phase 4.11C gate is open only for a one-completed-date `1m` implementation. No production endpoint/UI exists and the current runtime allowlist remains empty.
+Status: Phase 4.11B-3 bounded live verification completed on 2026-07-14; Phase 4.11C has since implemented only one-completed-date `1m` history through the production endpoint/UI.
 
 The repository has a real SSI `IntradayOhlc` adapter used by the optional watchlist/company pulse, but it is not a full chart-history contract. Current behavior requests seven calendar days, pages internally at 1,000 rows (generic maximum 20 pages), returns the latest eight rows by default, caches for 60 seconds, rejects stale daily-date mismatches, and applies a 60-second ticker/timeframe rate-limit cooldown. Deterministic fixtures prove sorting, mapping, cadence detection, pagination, malformed-row rejection, and unavailable-state behavior; they do not prove SSI interval support.
 
@@ -1305,7 +1313,17 @@ All 904 OHLC rows were valid. First open, maximum high, minimum low, final close
 
 Values 5, 15, 30, and 60 were accepted by the endpoint but did not select corresponding output cadence in tested SSI behavior. They remain unsupported mappings to 5m/15m/30m/1h and must not be exposed or synthesized by backend aggregation.
 
-Phase 4.11C may now implement only `GET /api/v1/stocks/vn/intraday-chart?ticker=FPT&interval=1m&date=2026-06-24`. The date must be strictly before the current Vietnam date, the provider query is one translated `DD/MM/YYYY` day with `pageSize=1000`, and output is capped at 1,000 bars. Pagination itself remains unverified because every tested `totalRecord` was 226. Cache identity is `intraday_chart:{ticker}:1m:{vn_trading_date}:page:1`, with 86,400-second positive TTL, 60-second negative TTL, bounded stale-if-error, and 500 LRU entries. Current-session support, multi-day ranges, pagination, higher intervals, realtime updates, aggregation, and fallback remain deferred. Phase 4.11D separately owns realtime/current-session finality. X, X-QUOTE, X-TRADE, DailyStockPrice, and Phase 4.8S snapshots remain forbidden candle sources.
+Phase 4.11C implements only `GET /api/v1/stocks/vn/intraday-chart?ticker=FPT&interval=1m&date=2026-06-24`. The date must be strictly before the current Vietnam date, the provider query is one translated `DD/MM/YYYY` day with `pageSize=1000`, and output is capped at 1,000 bars. Pagination itself remains unverified because every tested `totalRecord` was 226. Cache identity is `intraday_chart:{ticker}:1m:{vn_trading_date}:page:1`, with 86,400-second positive TTL, 60-second negative TTL, bounded stale-if-error, and 500 LRU entries. Current-session support, multi-day ranges, pagination, higher intervals, realtime updates, aggregation, and fallback remain deferred. Phase 4.11D separately owns realtime/current-session finality. X, X-QUOTE, X-TRADE, DailyStockPrice, and Phase 4.8S snapshots remain forbidden candle sources.
+
+### Phase 4.11D-1 - Current-Session SSI and X-TRADE Audit
+
+Status: documentation/evidence audit complete on 2026-07-16; no production current-session behavior implemented.
+
+Eight bounded current-date FPT IntradayOhlc requests covered 09:12-09:20 Vietnam time. SSI returned `NoDataFound` through 09:15:05, then exposed a 09:15:59 opening row and a changing current-minute row at 09:16:05. Repeated requests proved raw time/OHLC/volume revision inside the minute; after a newer minute appeared, the previous row remained stable in later samples. The final request returned six valid unique normalized buckets with zero rejected/duplicate rows. Provider-response latency was 0.423-1.116 seconds (median 0.615, eight calls). Provider finality remains absent, so finality is `inferred_finality_with_reconciliation`.
+
+Phase 4.11D-2 gate: `open_as_delayed_only`. Future work may add bounded minute-boundary SSI polling about 5-10 seconds after each continuous-trading boundary, pause during lunch/pre-open, retain usable cache on failure, reconcile authoritatively after close, and label the experience `Updating`/`Delayed`, never `Live` from this evidence.
+
+One bounded `X-TRADE:FPT` observation captured 206 events across two 30-second windows and one controlled reconnect. All observed events had trade price, `LastVol`, cumulative `TotalVol`, side, date/time, and session/status, but no ID or sequence; 109 visible tuples collided. The current manager stores receive order and performs no event deduplication, so replay/loss/correction detection and authoritative close/volume aggregation are unsafe. Phase 4.11D-3 gate: `blocked`. A future reconnect must suspend provisional trust and refresh/reconcile from SSI IntradayOhlc before resuming. No X/X-QUOTE/F/R/MI/persisted-snapshot candle path is allowed.
 
 ### Phase 4.8F - SSI Remaining Data Capability Audit
 
