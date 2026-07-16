@@ -94,6 +94,7 @@ class FakeOfficialClient:
 class FakeOfficialTransport:
     def __init__(self):
         self.stop_calls = 0
+        self._on_open = lambda: None
 
     def stop(self):
         self.stop_calls += 1
@@ -102,11 +103,15 @@ class FakeOfficialTransport:
 class FakeOfficialStream:
     instances = []
 
-    def __init__(self, config, client):
+    def __init__(self, config, client, on_close=None, on_open=None):
         self.config = config
         self.client = client
+        self.on_close = on_close
+        self.on_open = on_open
         self.transport = FakeOfficialTransport()
-        self.connection = SimpleNamespace()
+        self.connection = SimpleNamespace(
+            on_open_callback=lambda callback: setattr(self.transport, "_on_open", callback)
+        )
         setattr(self.connection, "_Connection__transport", self.transport)
         self.started_channels = []
         FakeOfficialStream.instances.append(self)
@@ -220,6 +225,7 @@ def _manager(
         "enabled": enabled,
         "parser": parser_fetcher.normalize_streaming_realtime_messages,
         "client_factory": (lambda: client) if client is not None else None,
+        "jitter_func": lambda _delay: 0.0,
     }
     if time_func is not None:
         kwargs["cache"] = RealtimeSnapshotCache(15, time_func=time_func)
@@ -1280,6 +1286,7 @@ def test_stale_running_stream_reconnects_and_preserves_existing_buffers():
         order_book_cache=OrderBookCache(15, time_func=lambda: now[0]),
         idle_timeout_seconds=10,
         reconnect_initial_delay_seconds=2,
+        jitter_func=lambda _delay: 0.0,
         time_func=lambda: now[0],
     )
     manager.start(["FPT"])
@@ -1325,6 +1332,7 @@ def test_stale_running_stream_reconnect_failure_is_reported_without_crashing():
         idle_timeout_seconds=10,
         reconnect_initial_delay_seconds=2,
         reconnect_max_delay_seconds=5,
+        jitter_func=lambda _delay: 0.0,
         time_func=lambda: now[0],
     )
     manager.start(["FPT"])
@@ -1373,7 +1381,7 @@ def test_running_idle_realtime_does_not_make_daily_data_invalid():
 
 
 def test_reconnect_enabled_schedules_reconnect_after_start_failure():
-    now = [100.0]
+    now = [_vn_epoch(2026, 6, 8, 9, 20)]
     manager = _manager(
         client=FakeStreamClient(fail_start=True),
         now=now,
@@ -1392,7 +1400,7 @@ def test_reconnect_enabled_schedules_reconnect_after_start_failure():
 
 
 def test_reconnect_backoff_increases_and_caps_after_failed_attempts():
-    now = [100.0]
+    now = [_vn_epoch(2026, 6, 8, 9, 20)]
     clients = []
 
     def factory():
@@ -1408,18 +1416,19 @@ def test_reconnect_backoff_increases_and_caps_after_failed_attempts():
         idle_timeout_seconds=10,
         reconnect_initial_delay_seconds=2,
         reconnect_max_delay_seconds=5,
+        jitter_func=lambda _delay: 0.0,
         time_func=lambda: now[0],
     )
     manager.start(["FPT"])
     first = manager.monitor_tick(wants_streaming=True)
-    assert first["reconnect_backoff_seconds"] == 4
+    assert first["reconnect_backoff_seconds"] == 2
 
-    now[0] = 102.0
+    now[0] += 2.0
     second = manager.monitor_tick(wants_streaming=True)
     assert second["reconnect_attempt_count"] == 1
     assert second["reconnect_backoff_seconds"] == 5
 
-    now[0] = 106.0
+    now[0] += 5.0
     third = manager.monitor_tick(wants_streaming=True)
     assert third["reconnect_attempt_count"] == 2
     assert third["reconnect_backoff_seconds"] == 5
@@ -1427,7 +1436,7 @@ def test_reconnect_backoff_increases_and_caps_after_failed_attempts():
 
 
 def test_reconnect_max_attempts_positive_stops_after_attempt_limit():
-    now = [100.0]
+    now = [_vn_epoch(2026, 6, 8, 9, 20)]
     manager = _manager(
         client=FakeStreamClient(fail_start=True),
         now=now,
@@ -1436,7 +1445,7 @@ def test_reconnect_max_attempts_positive_stops_after_attempt_limit():
     )
     manager.start(["FPT"])
     manager.monitor_tick(wants_streaming=True)
-    now[0] = 102.0
+    now[0] += 2.0
 
     status = manager.monitor_tick(wants_streaming=True)
 
@@ -1446,7 +1455,7 @@ def test_reconnect_max_attempts_positive_stops_after_attempt_limit():
 
 
 def test_reconnect_max_attempts_zero_allows_unlimited_attempts():
-    now = [100.0]
+    now = [_vn_epoch(2026, 6, 8, 9, 20)]
     manager = _manager(
         client=FakeStreamClient(fail_start=True),
         now=now,
@@ -1462,7 +1471,7 @@ def test_reconnect_max_attempts_zero_allows_unlimited_attempts():
 
 
 def test_reconnect_stops_previous_stream_before_starting_new_one():
-    now = [100.0]
+    now = [_vn_epoch(2026, 6, 8, 9, 20)]
     clients = [FakeStreamClient(), FakeStreamClient()]
 
     def factory():
@@ -1474,13 +1483,14 @@ def test_reconnect_stops_previous_stream_before_starting_new_one():
         parser=parser_fetcher.normalize_streaming_realtime_messages,
         client_factory=factory,
         reconnect_initial_delay_seconds=2,
+        jitter_func=lambda _delay: 0.0,
         time_func=lambda: now[0],
     )
     manager.start(["FPT"])
     first_client = manager._client
     manager.handle_error("stream transport error")
     manager.monitor_tick(wants_streaming=True)
-    now[0] = 102.0
+    now[0] += 2.0
 
     status = manager.monitor_tick(wants_streaming=True)
 
@@ -1633,6 +1643,35 @@ def test_official_adapter_starts_symbol_channel_without_leaking_headers(capsys):
     assert FakeOfficialStream.instances[0].started_channels == ["X:FPT"]
     adapter.stop()
     assert FakeOfficialStream.instances[0].transport.stop_calls == 1
+
+
+def test_official_adapter_exposes_per_channel_open_and_close_evidence():
+    FakeOfficialClient.instances.clear()
+    FakeOfficialStream.instances.clear()
+    opened = []
+    closed = []
+    adapter = OfficialSsiRealtimeStreamClient(
+        consumer_id="test-consumer",
+        consumer_secret="test-secret",
+        base_url="https://fc-data.ssi.com.vn/api/v2/Market",
+        import_module=_fake_official_import,
+    )
+
+    adapter.start(
+        lambda message: None,
+        lambda error: None,
+        ["X:FPT", "X-QUOTE:FPT"],
+        on_open=opened.append,
+        on_close=closed.append,
+    )
+    assert len(FakeOfficialStream.instances) == 2
+
+    for stream in FakeOfficialStream.instances:
+        stream.transport._on_open()
+        stream.on_close()
+
+    assert opened == ["X:FPT", "X-QUOTE:FPT"]
+    assert closed == ["X:FPT", "X-QUOTE:FPT"]
 
 
 def test_official_adapter_missing_package_fails_closed():

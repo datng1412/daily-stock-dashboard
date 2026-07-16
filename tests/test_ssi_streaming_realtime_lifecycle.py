@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from fastapi import FastAPI
@@ -29,6 +30,11 @@ from src.services.vietnam_market_service import (
 
 
 SECRET_TOKEN = "SECRET_BOOTSTRAP_TOKEN"
+VIETNAM_TZ = timezone(timedelta(hours=7))
+
+
+def _active_vn_epoch() -> float:
+    return datetime(2026, 6, 8, 9, 20, tzinfo=VIETNAM_TZ).timestamp()
 
 
 class FakeStreamClient:
@@ -301,6 +307,9 @@ def test_lifecycle_monitor_tick_schedules_reconnect_after_start_error():
         start_monitor=False,
     )
 
+    manager = get_existing_ssi_streaming_realtime_manager()
+    assert manager is not None
+    manager._time_func = _active_vn_epoch
     tick = run_ssi_streaming_realtime_monitor_tick()
 
     assert status["manager_state"] == "errored"
@@ -382,8 +391,9 @@ def test_shutdown_before_bootstrap_requests_streaming_prevents_client_start(monk
         original_set_context = manager.set_bootstrap_context
 
         def gated_set_context(*args, **context_kwargs):
-            bootstrap_context_entered.set()
-            assert allow_bootstrap_to_continue.wait(timeout=2)
+            if not bootstrap_context_entered.is_set():
+                bootstrap_context_entered.set()
+                assert allow_bootstrap_to_continue.wait(timeout=2)
             return original_set_context(*args, **context_kwargs)
 
         manager.set_bootstrap_context = gated_set_context
