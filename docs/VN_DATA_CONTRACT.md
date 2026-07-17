@@ -599,7 +599,7 @@ Sanitized `daily_stock_price.diagnostics` may include endpoint name, requested s
 
 ### Foreign Flow Contract (Phase 4.12)
 
-Phase 4.12A-Lite verifies the SSI DailyStockPrice **symbol daily** slice; the dedicated API, frontend, current-session, ranking, and aggregate designs remain planned and not implemented. The full design and evidence matrix are in `docs/VN_FOREIGN_FLOW_PLAN.md`.
+Phase 4.12A-Lite verifies the SSI DailyStockPrice **symbol daily** slice. Phase 4.12B implements the dedicated historical symbol API; frontend, current-session, ranking, and aggregate designs remain planned and not implemented. The full design and evidence matrix are in `docs/VN_FOREIGN_FLOW_PLAN.md`.
 
 The verified canonical fields are `foreign_buy_volume`, `foreign_sell_volume`, `foreign_net_volume`, `foreign_buy_value`, `foreign_sell_value`, and `foreign_net_value`. Raw SSI fields are `ForeignBuyVolTotal`, `ForeignSellVolTotal`, `NetBuySellVol`, `ForeignBuyValTotal`, `ForeignSellValTotal`, and `NetBuySellVal`. Volume is shares and value is VND; StockClock parses the raw numeric strings without scaling. Direct SSI net is preferred. Net may be calculated as official buy minus official sell only when direct net is absent and both inputs have the same symbol, trading date, source, unit, and finality; otherwise it remains null. Missing value must not be estimated from volume and price.
 
@@ -615,7 +615,9 @@ Foreign-flow results separate these dimensions:
 
 Zero means the provider explicitly reported zero or two compatible official inputs produced a zero net. Null means absent, unverified, incompatible, or unavailable. A missing row is not a zero-flow session. Partial aggregates retain their covered subset but must expose `aggregation_basis`, expected/covered/missing component counts, missing symbols, and `coverage_ratio`; they are never extrapolated.
 
-Planned APIs are one bounded symbol detail/history endpoint, one overview/rankings endpoint, and additive watchlist summary fields or a single bounded batch alternative. They are not implemented. Phase 4.12B may implement only the verified historical symbol slice. The frontend must not make one foreign-flow HTTP request per symbol. SSI `R` remains a separate foreign-room contract and cannot populate foreign flow. Current provisional data cannot silently replace an accepted daily row.
+`GET /api/v1/stocks/vn/foreign-flow/symbol/{ticker}` implements only the verified historical symbol slice. It accepts either recent sessions (`limit`, default 20, maximum 120) or a paired inclusive `from_date`/`to_date` range (maximum 168 calendar days); mixing the modes is HTTP 422. Responses identify `ssi_fastconnect`, `daily_stock_price`, shares, VND, and `daily_available`; return ascending unique provider trading dates, `latest_row`, request/coverage metadata, and null-aware 5/20/60-session windows. Direct net wins over any side-derived mismatch. Fallback net is calculated only when both buy and sell are non-null. Missing trading dates are not synthesized, and date-range completeness is not inferred from calendar days.
+
+The endpoint uses a dedicated bounded process-local cache and same-key coalescing. Positive current/completed, empty, and unavailable entries have distinct TTL classes; failed refresh may preserve a usable bounded stale positive result without changing its original fetch timestamp. The broad observability route exposes sanitized counters and no rows. Overview/rankings, watchlist/batch integration, frontend calls, current-session flow, reconciliation, VN30/HOSE aggregation, and persistence remain unimplemented. SSI `R` remains a separate foreign-room contract and cannot populate foreign flow. Current provisional data cannot silently replace an accepted daily row.
 
 ## External Provider Boundary
 

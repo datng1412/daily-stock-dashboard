@@ -355,7 +355,8 @@ Phase 4.12A-Lite completed the DailyStockPrice-only evidence gate without produc
 
 - Verified live evidence: FPT/VCB/HPG/SSI each returned 22 distinct ascending `TradingDate` rows over 2026-06-18 through 2026-07-17, all six foreign fields were present, 88/88 volume and value direct nets matched buy minus sell, and two after-close reads were stable.
 - Existing deterministic coverage preserves explicit zero, null/missing fields, unavailable provider state, date sorting/deduplication, cache behavior, 5/20 incomplete-window nulls, and unchanged SSI DailyOhlc `latest_price`.
-- Phase 4.12B must add focused endpoint coverage for bounded date/session counts, `daily_available` finality, raw-to-normalized units, ordered history, complete 5/20/60 windows, and provider unavailable behavior. Pytest must remain offline.
+- Phase 4.12B adds offline focused coverage for bounded date/session counts, `daily_available` finality, raw-to-normalized units, direct-net preference and fallback, ordered/deduplicated history, null-aware 5/20/60 windows, positive/empty/negative/stale cache behavior, normal/force same-key coalescing, provider unavailable behavior, typed API/OpenAPI output, and no-fetch broad observability.
+- Live checks remain separate and bounded: one FPT recent request, one wider recent request, one identical cache repeat, and one observability read, with no full payload logging and no more than six provider requests.
 
 - Capability verifier: the A-Lite manual proof used bounded ticker/date inputs, exact whitelisted fields, sanitized summaries, and no persisted raw provider payload or secret. Future current/bulk gates need separate bounded evidence.
 - Historical contract: sign convention, official buy/sell-derived net only with both inputs, zero versus null, missing rows, 60-session bounds, 5/20/60 complete windows, value/volume separation, corrections, and unchanged DailyOhlc `latest_price`.

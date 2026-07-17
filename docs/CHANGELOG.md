@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [new feature] Add a bounded typed SSI DailyStockPrice historical foreign-flow API for one Vietnam symbol with 5/20/60-session summaries.
+- [improvement] Add dedicated positive, empty, negative, stale-recovery, and same-key coalescing behavior for historical foreign-flow requests.
+- [test] Cover foreign-flow normalization, direct-net precedence, null-aware windows, cache/coalescing, API validation, and no-fetch observability.
 - [documentation] Confirm the SSI DailyStockPrice full symbol daily foreign-flow contract, units, dates, net basis, and existing 5D/20D window semantics for Phase 4.12A-Lite.
 - [documentation] Add the Phase 4.12 foreign-flow product, data, API, state, coverage, reconciliation, delivery, and risk plan with SSI capability verification as the first gate.
 - [fix] Reuse one SSI token-caching market-data client across generation-owned channel streams and repair generation-aware standalone streaming diagnostics.

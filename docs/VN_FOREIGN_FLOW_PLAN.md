@@ -1,6 +1,6 @@
 # Vietnam Foreign Flow Product, Data, and Delivery Plan
 
-Status: Phase 4.12A-Lite verified the full SSI DailyStockPrice symbol-level daily contract; product APIs and UI are not yet implemented
+Status: Phase 4.12B implements the bounded SSI DailyStockPrice historical symbol API; UI, current-session, rankings, and aggregates remain deferred
 
 Phase: 4.12-PLAN
 
@@ -8,13 +8,13 @@ Repository evidence reviewed: 2026-07-17
 
 ## Purpose
 
-This document is the implementation plan for a Vietnam foreign-investor flow product in StockClock. It defines the user journey, product surfaces, normalized data contract, source gates, delivery phases, and operational safeguards. It does not authorize an SSI field that has not been verified and does not describe a production API that exists today.
+This document is the implementation plan and phase record for a Vietnam foreign-investor flow product in StockClock. It defines the user journey, product surfaces, normalized data contract, source gates, delivery phases, and operational safeguards. It does not authorize an SSI field that has not been verified; only the Phase 4.12B historical symbol endpoint described below exists today.
 
 The product journey is:
 
 `scan -> compare -> inspect -> monitor`
 
-Phase 4.12A-Lite completed the DailyStockPrice-only gate on 2026-07-17. The symbol-level daily fields, units, provider trading date, date-range history, and existing 5/20-row construction are verified. Current-session semantics, aggregates, bulk behavior, and the API/UI shapes below remain **planned, pending their separate gates, and not yet implemented**.
+Phase 4.12A-Lite completed the DailyStockPrice-only gate on 2026-07-17. Phase 4.12B now implements the verified one-symbol historical API. Current-session semantics, aggregates, bulk behavior, rankings, and all foreign-flow UI shapes remain **planned, pending their separate gates, and not yet implemented**.
 
 ## Fixed source and interpretation boundaries
 
@@ -91,7 +91,7 @@ The unit decision is supported by the official field names/descriptions and samp
 - The service currently requests a 28-calendar-day lookback, retains at most 20 foreign-history rows, and computes 5/20 sums from the latest rows with usable net volume. These are StockClock rolling aggregates, not SSI-supplied 5D/20D fields.
 - The latest provider trading date is included whenever it has usable net volume. For FPT, the verified 5-row window was 2026-07-13 through 2026-07-17; the 20-row window was 2026-06-22 through 2026-07-17. Both included 2026-07-17.
 - Daily history contains buy, sell, and net separately for both volume and value. The current public indicators aggregate only net volume; historical buy/sell/value rows are normalized internally but are not yet exposed through a dedicated history API.
-- Sixty-session retrieval is **supported through the documented date range and paging shape**, but is not implemented in the current 28-day/20-row service path. Phase 4.12B must choose a bounded calendar lookback/page budget and require complete-session counts rather than assuming 60 calendar days equals 60 sessions.
+- Sixty-session retrieval is **supported through the documented date range and paging shape**. Phase 4.12B implements a bounded expanding calendar lookback for recent-session mode and reports covered/complete counts rather than assuming 60 calendar days equals 60 sessions. The older watchlist path remains limited to its existing 28-day/20-row enrichment request.
 - Production naming should be `daily_available`. The proof observed stable post-close rows, but neither the package nor response supplies an explicit finality flag. Do not publish `historical_final` or call the latest row realtime from this evidence alone.
 
 ### Zero, null, missing, and unavailable
@@ -105,7 +105,7 @@ The unit decision is supported by the official field names/descriptions and samp
 
 Primary outcome: **A - GO: FULL SYMBOL DAILY CONTRACT**.
 
-The verified daily contract contains buy/sell/net volume and value, provider trading date, shares/VND units, usable multi-date rows, deterministic ordering/deduplication, and neutral `daily_available` finality semantics. Proceed to **Phase 4.12B - Historical Symbol Foreign-Flow API**. Keep current-session fields unavailable until a separate active-session proof establishes cumulative semantics, timestamps, reset behavior, and reconciliation.
+The verified daily contract contains buy/sell/net volume and value, provider trading date, shares/VND units, usable multi-date rows, deterministic ordering/deduplication, and neutral `daily_available` finality semantics. **Phase 4.12B - Historical Symbol Foreign-Flow API** now implements that slice. Keep current-session fields unavailable until a separate active-session proof establishes cumulative semantics, timestamps, reset behavior, and reconciliation.
 
 ## User questions
 
@@ -553,17 +553,17 @@ Explicit exclusions: advanced alert engine, sector heatmap, historical membershi
 - Outcome: full symbol daily contract verified for DailyStockPrice; no production backend or frontend changed.
 - Verified: exact six foreign fields, shares/VND units, provider trading dates, multi-date buy/sell/net volume/value rows, direct-net agreement, 5/20 construction, latest-date inclusion, zero/null/missing/unavailable separation, and date-range/paging feasibility for a future 60-session request.
 - Neutral boundary: use `daily_available`; active-session cumulative behavior, explicit provider finality/corrections, bulk behavior, and aggregates remain unresolved.
-- Next: Phase 4.12B may implement only the verified historical symbol contract.
+- Result: Phase 4.12B implements only the verified historical symbol contract.
 
-### Phase 4.12B - Historical symbol foreign-flow API (M)
+### Phase 4.12B - Historical symbol foreign-flow API (implemented)
 
 - Goal/value: deliver source-aware `daily_available` rows and 5/20/60 trend for one symbol.
-- Backend: normalized models/service/schema, one bounded symbol endpoint, cache and compatibility mapping.
+- Backend: implemented normalized service/schema, one bounded symbol endpoint, dedicated cache, stale recovery, and same-key coalescing.
 - Frontend: none beyond API typing if needed for contract proof.
 - Source: Phase 4.12A-Lite-approved SSI DailyStockPrice daily source.
-- Likely files: `src/services/vietnam_foreign_flow_service.py`, `api/v1/schemas/stocks.py` or a scoped schema module, `api/v1/endpoints/stocks.py`, tests.
-- Tests: mapping, units, zero/null, 60-session bounds, sign, missing rows, value absence, cache/stale-if-error, unchanged DailyOhlc price.
-- Observability: historical calls/cache/duration/rows/failure.
+- Production files: `src/services/vietnam_foreign_flow_service.py`, `api/v1/schemas/stocks.py`, `api/v1/endpoints/stocks.py`, SSI mapper provenance, and broad observability integration.
+- Tests: mapping, units, zero/null, date/query bounds, sign, missing rows, value absence, cache/stale-if-error, coalescing, API/OpenAPI, observability, and unchanged existing DailyStockPrice behavior.
+- Observability: implemented sanitized process-local historical request/cache/provider/row-quality/concurrency counters.
 - Risks: history limits and corrections.
 - Exclusions: current session, aggregates, UI, alerts, database unless the gate requires it.
 - Dependencies: historical-source and volume/value gates.
@@ -683,13 +683,15 @@ Explicit exclusions: advanced alert engine, sector heatmap, historical membershi
 
 - Current-session SSI foreign flow is not yet proven; this phase ran after close.
 - DailyStockPrice has no explicit provider finality flag. Use `daily_available` even though the bounded post-close repeat was stable.
-- Sixty-session access is feasible through official date ranges/paging but is not implemented or performance-profiled in the current 28-day/20-row service path.
+- Sixty-session access is implemented only in the dedicated bounded Phase 4.12B endpoint; the existing 28-day/20-row watchlist enrichment path remains unchanged. Live performance profiling for a 60-session API request remains to be recorded.
 - The four verified symbols had complete value fields, but production null handling remains mandatory because provider coverage can vary.
 - VN30 official aggregate capability and HOSE aggregate/bulk capability are unknown.
 - Sector classification coverage is insufficiently proven.
 - Exact TTLs, mismatch thresholds, liquidity guards, and partial-coverage publish thresholds require capability and performance evidence.
 - Natural SSI stream reconnect continuity is a separate existing acceptance item and is not redefined by this plan.
 
-## Recommended next phase
+## Implemented Phase 4.12B and next gate
 
-Proceed with **Phase 4.12B - Historical Symbol Foreign-Flow API** using only the verified `daily_available` DailyStockPrice fields. Do not start the current-session adapter, aggregates, rankings, or UI until their independent current, bulk, membership, and scale gates have recorded evidence-backed outcomes.
+Phase 4.12B is implemented at `GET /api/v1/stocks/vn/foreign-flow/symbol/{ticker}` using only verified `daily_available` DailyStockPrice fields. Recent mode defaults to 20 and is capped at 120 accepted sessions; date-range mode requires both inclusive dates, rejects an explicit `limit`, and is bounded to 168 calendar days. Rows are ascending and unique by provider trading date, with the last valid occurrence winning. Direct net fields take precedence; buy-minus-sell is used only when both sides exist. Five-/twenty-/sixty-session summaries use the latest accepted rows and return null sums when no values contribute.
+
+The endpoint owns a dedicated process-local cache keyed by provider, endpoint, ticker, query mode, bounds, row cap, and cache version. Positive current/completed TTLs are 300/3,600 seconds, empty/negative TTLs are 60/30 seconds, and usable positive rows may recover stale for 86,400 seconds after a provider failure. Identical active keys coalesce, including normal/force overlap. Broad observability reports sanitized counters only and makes no provider request. No frontend, current-session adapter, aggregate, ranking, database, fallback, or price-source change was added. Proceed next only through the separately gated Phase 4.12C authority/reconciliation work.

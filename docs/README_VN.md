@@ -114,7 +114,7 @@ The VN dashboard is data-quality-first. The API and UI distinguish:
 
 Diagnostics belong in diagnostic panels/logs, not primary metric cards.
 
-Phase 4.12A-Lite verified the SSI DailyStockPrice symbol daily foreign-flow contract: buy/sell/net volume is shares, buy/sell/net value is VND, rows use provider trading dates, and the current 5D/20D summaries are StockClock rolling net-volume sums that include the latest usable provider date. The safe label is latest `daily_available`, not realtime or explicit provider-final. A bounded historical symbol API is next; current-session authority, 60-session production retrieval, rankings, and coverage-aware VN30/HOSE aggregates are not yet implemented. Foreign room remains a separate SSI `R` context, and SSI DailyOhlc remains canonical for daily/latest price.
+Phase 4.12B exposes bounded one-symbol SSI DailyStockPrice foreign-flow history through `/api/v1/stocks/vn/foreign-flow/symbol/{ticker}`. It preserves provider trading dates, shares/VND units, null values, and `daily_available` wording, and adds latest-row plus honest 5/20/60-session summaries. It is not realtime or an explicit provider-final claim. Current-session authority, rankings, frontend productization, and coverage-aware VN30/HOSE aggregates are not implemented. Foreign room remains a separate SSI `R` context, and SSI DailyOhlc remains canonical for daily/latest price.
 
 ## Phase 4.11D-1 Current-Session Audit
 

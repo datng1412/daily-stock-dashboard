@@ -302,6 +302,22 @@ SSI `IntradayOhlc` remains the only candidate authoritative current-session cand
 
 The intraday health path is distinct from the broader `GET /api/v1/stocks/vn/observability` dashboard contract. Candle `time` remains the accepted row's Vietnam minute-start Unix timestamp; `newest_bar_age_seconds` uses that accepted winner's unfloored raw SSI `TradingDate + Time`; `provider_snapshot_age_seconds` uses the successful fetch timestamp retained by the cache entry.
 
+## Phase 4.12B Historical Foreign-Flow Fields
+
+`GET /api/v1/stocks/vn/foreign-flow/symbol/{ticker}` is the only Phase 4.12B route. It uses SSI DailyStockPrice and does not join price or live contexts.
+
+| Field | Meaning | Unit/source | Null/coverage rule |
+| --- | --- | --- | --- |
+| `rows[].trading_date` | SSI provider trading date | ISO date from `TradingDate` | Required for an accepted row; missing dates are rejected and never synthesized. |
+| `foreign_buy_volume` / `foreign_sell_volume` | Foreign investor buy/sell volume for the session | shares; `ForeignBuyVolTotal` / `ForeignSellVolTotal` | Nullable integer; explicit zero is preserved. |
+| `foreign_net_volume` | Foreign net volume | shares; direct `NetBuySellVol` preferred | If direct is missing, derive only when both buy and sell exist. Direct mismatch is preserved and counted. |
+| `foreign_buy_value` / `foreign_sell_value` | Foreign investor buy/sell value for the session | VND; `ForeignBuyValTotal` / `ForeignSellValTotal` | Nullable integer; no price-based reconstruction. |
+| `foreign_net_value` | Foreign net value | VND; direct `NetBuySellVal` preferred | If direct is missing, derive only when both buy and sell exist. Direct mismatch is preserved and counted. |
+| `windows[5|20|60]` | Latest accepted trading-session summaries | StockClock calculation from returned SSI rows | Exposes covered/complete and contributing/positive/negative/zero/null counts; cumulative value is null when no row contributes. |
+| `latest_row` | Last accepted provider-date row | Same response history | Null for an empty or unavailable response; no additional provider call. |
+| `finality` | Availability semantics | constant `daily_available` | Does not mean realtime or provider-final. |
+| `data_state` / `freshness` | Response/cache state | `ready`, `empty`, `stale`, `unavailable` and matching freshness | Stale preserves the original positive fetch timestamp and gives a sanitized reason. |
+
 ## Current Decision Points
 
 - Company shared daily fields: company `latest_price`, `daily_close`, daily OHLCV open/high/low/close/volume, and daily value align with the watchlist SSI DailyOhlc fields. Company reference, limits, foreign flow, matched/put-through, and adjusted-close values remain SSI DailyStockPrice-specific.

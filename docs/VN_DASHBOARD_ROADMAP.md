@@ -2554,7 +2554,7 @@ Status: Phase 4.12A-Lite completed the DailyStockPrice-only contract gate with o
 Delivery order and gates:
 
 1. **Phase 4.12A-Lite - DailyStockPrice contract confirmation (completed):** verified the full symbol daily contract only. SSI `R` remains foreign-room context; no stream was inspected as flow.
-2. **Phase 4.12B - Historical symbol API (next):** implement bounded `daily_available` rows and complete-window 5/20/60 trends without changing DailyOhlc price ownership. Current-session fields remain out of scope.
+2. **Phase 4.12B - Historical symbol API (implemented):** exposes one bounded SSI DailyStockPrice symbol endpoint with recent-session/date-range modes, typed `daily_available` rows, latest row, honest coverage, null-aware 5/20/60-session summaries, dedicated cache/coalescing, stale-if-error, and process-local observability. It adds no frontend, current-session source, ranking, aggregate, fallback provider, or DailyOhlc ownership change.
 3. **Phase 4.12C - Current-session snapshot and reconciliation:** proceed only if an official cumulative current source is proven; detect resets and reconcile provisional with final.
 4. **Phase 4.12D - Watchlist and rankings:** one additive watchlist/batch request, explicit per-symbol states, and no frontend N+1.
 5. **Phase 4.12E - VN30 aggregate:** use an official aggregate when proven or current SSI IndexComponents plus covered symbol sums; always expose coverage and aggregation basis.

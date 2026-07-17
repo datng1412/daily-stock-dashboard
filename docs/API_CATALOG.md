@@ -349,6 +349,29 @@ Response rules:
 - Do not infer dividends, rights, splits, or adjustment events from price/reference gaps.
 - Disabled or failed provider states do not affect SSI daily data or `latest_price`.
 
+## `GET /api/v1/stocks/vn/foreign-flow/symbol/{ticker}`
+
+Purpose:
+
+- Return bounded historical foreign buy/sell/net volume and value for exactly one VN symbol from SSI DailyStockPrice.
+- Provide latest-row and 5/20/60-session summaries without joining price, realtime, foreign-room, ranking, or aggregate data.
+
+Query modes:
+
+| Mode | Parameters | Bounds |
+| --- | --- | --- |
+| Recent sessions | Optional `limit` | Defaults to 20; 1 to 120. |
+| Date range | `from_date` and `to_date` | Both required, inclusive ISO dates, maximum 168 calendar days; cannot include `limit`. |
+
+Response rules:
+
+- Source/finality constants are `ssi_fastconnect`, `daily_stock_price`, shares, VND, and `daily_available`.
+- Rows are ascending and unique by provider trading date; the last valid duplicate wins and missing dates are not synthesized.
+- Direct net fields are preferred. Buy-minus-sell fallback requires both non-null sides; direct mismatches are preserved and counted, not overwritten.
+- Window sums are null when no row contributes and expose contributing, positive, negative, zero, null, covered, and completeness counts.
+- Empty periods return HTTP 200 with `rows=[]`; invalid ticker/query shape returns HTTP 422; unavailable provider state is sanitized and may use bounded stale positive cache recovery.
+- Cache and same-key coalescing are process-local. `force_refresh` bypasses fresh reuse but may join an identical in-flight fetch.
+
 ## Planned `GET /api/v1/stocks/vn/news`
 
 Status: planned only. No route, provider adapter, credentials, config flag, scraping path, or fallback provider is implemented in Phase 5.1A.
