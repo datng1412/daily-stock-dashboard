@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [fix] Reuse one SSI token-caching market-data client across generation-owned channel streams and repair generation-aware standalone streaming diagnostics.
+- [test] Reconcile prior SSI forbidden startup evidence with active-session official, StockClock minimal, scale, context, and full-registry live proof.
+- [documentation] Correct the provisional Phase 4.11F-A2 entitlement inference and record current live SSI streaming support with reconnect continuity still unverified.
 - [fix] Add generation-owned SSI streaming reconnect, per-context subscription recovery, bounded jittered backoff, stale-cache retention, and clean shutdown ownership.
 - [fix] Report only current-generation opened SSI sockets as physical transports and keep authorization failures fail-fast without reconnect storms.
 - [new feature] Expose sanitized process-local SSI transport and context lifecycle state through the broad Vietnam observability route.

@@ -453,6 +453,8 @@ The installed SSI 2.2.2 path creates one `MarketDataStream`/SignalR/WebSocket tr
 
 Deterministic fake-transport tests prove idempotent startup, one debounced reconnect schedule, bounded jittered backoff, fail-fast auth/config/subscription classification, subscription restoration, stale-generation rejection, prior-session freshness rejection, partial failure isolation, and clean shutdown. The broad observability route reports only sanitized process-local state. Active-session natural-disconnect evidence remains pending, stream continuity is not guaranteed, Phase 4.11D-3 remains blocked, and no streaming context is an approved chart-candle source.
 
+Phase 4.11G active-session proof confirms current live access for X, X-QUOTE, X-TRADE, F, R, and MI with SSI 2.2.2 and the existing configuration. Minimal official and StockClock X paths received current events, X-only scale worked through 30 symbols, and the full 154-channel backend accepted current-generation events without subscription failure. The prior 154/154 forbidden result is not entitlement proof. Runtime now reuses one token-caching `MarketDataClient` per generation across channel-specific transports instead of requesting a token per channel. Natural disconnect/recovery continuity remains unverified, and streaming ownership remains unchanged: no stream is a D1 or 1m candle source.
+
 ## Required Guardrails
 
 - This matrix is an audit/planning aid, not a new API contract.
