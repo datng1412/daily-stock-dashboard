@@ -15,6 +15,7 @@ from time import perf_counter
 from typing import Any, Dict, Optional
 
 from src.config import get_config
+from src.services.vietnam_foreign_flow_service import vietnam_foreign_flow_observability_snapshot
 
 
 logger = logging.getLogger(__name__)
@@ -253,6 +254,7 @@ def vietnam_observability_snapshot() -> Dict[str, Any]:
                 "ssi_intraday": ssi_intraday,
                 "ssi_realtime": ssi_realtime,
                 "ssi_trade_tape": ssi_trade_tape,
+                "foreign_flow": vietnam_foreign_flow_observability_snapshot(),
                 "streaming": streaming,
             }
     except Exception as exc:
@@ -267,6 +269,7 @@ def vietnam_observability_snapshot() -> Dict[str, Any]:
             "ssi_intraday": deepcopy(_SSI_INTRADAY_DEFAULTS),
             "ssi_realtime": deepcopy(_SSI_REALTIME_DEFAULTS),
             "ssi_trade_tape": deepcopy(_SSI_TRADE_TAPE_DEFAULTS),
+            "foreign_flow": vietnam_foreign_flow_observability_snapshot(),
             "streaming": _empty_streaming_lifecycle_snapshot(),
         }
 

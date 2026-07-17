@@ -2953,6 +2953,12 @@ class SsiFastConnectFetcher:
         if unavailable_result:
             return unavailable_result
 
+        valid_keys = [
+            tuple(row.get(field) for field in dedupe_fields)
+            for row in result_rows
+            if all(row.get(field) not in (None, "") for field in dedupe_fields)
+        ]
+        duplicate_date_count = max(0, len(valid_keys) - len(set(valid_keys)))
         rows = self._dedupe_and_sort_rows(result_rows, dedupe_fields)
         if limit and len(rows) > limit:
             rows = rows[-limit:]
@@ -2965,6 +2971,7 @@ class SsiFastConnectFetcher:
             "count": len(rows),
             "chunks_used": chunks_used,
             "pages_used": pages_used,
+            "duplicate_date_count": duplicate_date_count,
             "date_range": {
                 "from": windows[0][0] if windows else None,
                 "to": windows[-1][1] if windows else None,
@@ -3196,6 +3203,26 @@ class SsiFastConnectFetcher:
         )
         foreign_buy_value = _first_value(row, "ForeignBuyValue", "ForeignBuyValTotal", "foreignBuyValue", "foreign_buy_value", "BuyForeignValue")
         foreign_sell_value = _first_value(row, "ForeignSellValue", "ForeignSellValTotal", "foreignSellValue", "foreign_sell_value", "SellForeignValue")
+        direct_net_volume = _to_int(
+            _first_value(row, "NetBuySellVol", "ForeignNetVolume", "ForeignNetVol", "foreignNetVolume", "foreign_net_volume")
+        )
+        direct_net_value = _to_float(
+            _first_value(row, "NetBuySellVal", "ForeignNetValue", "foreignNetValue", "foreign_net_value")
+        )
+        normalized_buy_volume = _to_int(foreign_buy_volume)
+        normalized_sell_volume = _to_int(foreign_sell_volume)
+        normalized_buy_value = _to_float(foreign_buy_value)
+        normalized_sell_value = _to_float(foreign_sell_value)
+        derived_net_volume = (
+            normalized_buy_volume - normalized_sell_volume
+            if normalized_buy_volume is not None and normalized_sell_volume is not None
+            else None
+        )
+        derived_net_value = (
+            normalized_buy_value - normalized_sell_value
+            if normalized_buy_value is not None and normalized_sell_value is not None
+            else None
+        )
         return {
             "date": _parse_date(_first_value(row, "TradingDate", "Tradingdate", "Date", "date", "trading_date", "time")),
             "reference_price": _to_float(_first_value(row, "RefPrice", "ReferencePrice", "BasicPrice", "referencePrice", "reference_price")),
@@ -3212,12 +3239,26 @@ class SsiFastConnectFetcher:
             "put_through_value": _to_float(_first_value(row, "TotalDealVal", "PutThroughValue", "putThroughValue", "put_through_value", "dealValue")),
             "total_volume": _to_int(_first_value(row, "TotalTradedVol", "TotalVol", "TotalVolume", "Volume", "totalTradedVol", "totalVol", "totalVolume", "volume")),
             "total_value": _to_float(_first_value(row, "TotalTradedValue", "TotalVal", "TotalValue", "Value", "totalTradedValue", "totalVal", "totalValue", "value")),
-            "foreign_buy_volume": _to_int(foreign_buy_volume),
-            "foreign_sell_volume": _to_int(foreign_sell_volume),
-            "foreign_net_volume": _to_int(_net_value(row, ("NetBuySellVol", "ForeignNetVolume", "ForeignNetVol", "foreignNetVolume", "foreign_net_volume"), foreign_buy_volume, foreign_sell_volume)),
-            "foreign_buy_value": _to_float(foreign_buy_value),
-            "foreign_sell_value": _to_float(foreign_sell_value),
-            "foreign_net_value": _net_value(row, ("NetBuySellVal", "ForeignNetValue", "foreignNetValue", "foreign_net_value"), foreign_buy_value, foreign_sell_value),
+            "foreign_buy_volume": normalized_buy_volume,
+            "foreign_sell_volume": normalized_sell_volume,
+            "foreign_net_volume": direct_net_volume if direct_net_volume is not None else derived_net_volume,
+            "foreign_buy_value": normalized_buy_value,
+            "foreign_sell_value": normalized_sell_value,
+            "foreign_net_value": direct_net_value if direct_net_value is not None else derived_net_value,
+            # Internal provenance supports downstream mismatch/fallback diagnostics.
+            # Public API schemas intentionally do not expose these fields.
+            "_foreign_net_volume_source": "direct" if direct_net_volume is not None else "derived" if derived_net_volume is not None else None,
+            "_foreign_net_value_source": "direct" if direct_net_value is not None else "derived" if derived_net_value is not None else None,
+            "_foreign_net_volume_mismatch": bool(
+                direct_net_volume is not None
+                and derived_net_volume is not None
+                and direct_net_volume != derived_net_volume
+            ),
+            "_foreign_net_value_mismatch": bool(
+                direct_net_value is not None
+                and derived_net_value is not None
+                and direct_net_value != derived_net_value
+            ),
             "source": SSI_SOURCE,
         }
 

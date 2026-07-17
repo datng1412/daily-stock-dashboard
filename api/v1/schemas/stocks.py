@@ -1004,6 +1004,110 @@ class VietnamRealtimeTradesResponse(BaseModel):
     generation: Optional[int] = Field(default=None, ge=0)
 
 
+class VietnamForeignFlowRow(BaseModel):
+    """One accepted SSI DailyStockPrice trading session."""
+
+    trading_date: str
+    foreign_buy_volume: Optional[int] = None
+    foreign_sell_volume: Optional[int] = None
+    foreign_net_volume: Optional[int] = None
+    foreign_buy_value: Optional[int] = None
+    foreign_sell_value: Optional[int] = None
+    foreign_net_value: Optional[int] = None
+
+
+class VietnamForeignFlowWindow(BaseModel):
+    requested_sessions: int = Field(ge=1, le=120)
+    covered_sessions: int = Field(ge=0, le=120)
+    complete: bool
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    cumulative_foreign_net_volume: Optional[int] = None
+    cumulative_foreign_net_value: Optional[int] = None
+    net_volume_contributing_sessions: int = Field(ge=0, le=120)
+    net_value_contributing_sessions: int = Field(ge=0, le=120)
+    positive_net_volume_sessions: int = Field(ge=0, le=120)
+    negative_net_volume_sessions: int = Field(ge=0, le=120)
+    zero_net_volume_sessions: int = Field(ge=0, le=120)
+    null_net_volume_sessions: int = Field(ge=0, le=120)
+    positive_net_value_sessions: int = Field(ge=0, le=120)
+    negative_net_value_sessions: int = Field(ge=0, le=120)
+    zero_net_value_sessions: int = Field(ge=0, le=120)
+    null_net_value_sessions: int = Field(ge=0, le=120)
+
+
+class VietnamForeignFlowRequested(BaseModel):
+    mode: Literal["recent_sessions", "date_range"]
+    requested_limit: Optional[int] = Field(default=None, ge=1, le=120)
+    requested_from_date: Optional[str] = None
+    requested_to_date: Optional[str] = None
+    returned_session_count: int = Field(ge=0, le=120)
+
+
+class VietnamForeignFlowCoverage(BaseModel):
+    requested_sessions: Optional[int] = Field(default=None, ge=1, le=120)
+    covered_sessions: int = Field(ge=0, le=120)
+    complete: Optional[bool] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+
+
+class VietnamForeignFlowSymbolHistoryResponse(BaseModel):
+    """Bounded one-symbol historical foreign-flow response."""
+
+    ticker: str
+    source: Literal["ssi_fastconnect"] = "ssi_fastconnect"
+    source_endpoint: Literal["daily_stock_price"] = "daily_stock_price"
+    volume_unit: Literal["shares"] = "shares"
+    value_unit: Literal["VND"] = "VND"
+    finality: Literal["daily_available"] = "daily_available"
+    data_state: Literal["ready", "empty", "stale", "unavailable"]
+    freshness: Literal["fresh", "stale", "empty", "unavailable"]
+    rows: List[VietnamForeignFlowRow] = Field(default_factory=list, max_length=120)
+    windows: Dict[Literal["5", "20", "60"], VietnamForeignFlowWindow]
+    latest_row: Optional[VietnamForeignFlowRow] = None
+    requested: VietnamForeignFlowRequested
+    coverage: VietnamForeignFlowCoverage
+    fetched_at: str
+    stale_reason: Optional[str] = None
+    failure_class: Optional[str] = None
+
+
+class VietnamForeignFlowObservability(BaseModel):
+    """Sanitized process-local historical foreign-flow counters."""
+
+    scope: Literal["process_local"] = "process_local"
+    endpoint_requests: int = Field(0, ge=0)
+    recent_session_requests: int = Field(0, ge=0)
+    date_range_requests: int = Field(0, ge=0)
+    force_refresh_requests: int = Field(0, ge=0)
+    cache_hits: int = Field(0, ge=0)
+    cache_misses: int = Field(0, ge=0)
+    empty_cache_hits: int = Field(0, ge=0)
+    negative_cache_hits: int = Field(0, ge=0)
+    stale_recoveries: int = Field(0, ge=0)
+    provider_calls: int = Field(0, ge=0)
+    provider_successes: int = Field(0, ge=0)
+    provider_empty_results: int = Field(0, ge=0)
+    provider_failures: int = Field(0, ge=0)
+    provider_latency_count: int = Field(0, ge=0)
+    provider_latency_total_ms: int = Field(0, ge=0)
+    provider_latency_max_ms: int = Field(0, ge=0)
+    normalized_rows: int = Field(0, ge=0)
+    rejected_rows: int = Field(0, ge=0)
+    duplicate_date_count: int = Field(0, ge=0)
+    net_volume_fallback_count: int = Field(0, ge=0)
+    net_value_fallback_count: int = Field(0, ge=0)
+    net_volume_mismatch_count: int = Field(0, ge=0)
+    net_value_mismatch_count: int = Field(0, ge=0)
+    active_in_flight: int = Field(0, ge=0)
+    coalesced_waiters: int = Field(0, ge=0)
+    max_coalesced_waiters: int = Field(0, ge=0)
+    unavailable_results: int = Field(0, ge=0)
+    last_success_at: Optional[str] = None
+    last_failure_class: Optional[str] = None
+
+
 class VietnamMozyfinObservability(BaseModel):
     """Legacy Mozyfin counter block retained for API compatibility."""
 
@@ -1131,4 +1235,5 @@ class VietnamObservabilityResponse(BaseModel):
     ssi_intraday: VietnamProviderRuntimeStatus = Field(default_factory=VietnamProviderRuntimeStatus)
     ssi_realtime: VietnamProviderRuntimeStatus = Field(default_factory=VietnamProviderRuntimeStatus)
     ssi_trade_tape: VietnamProviderRuntimeStatus = Field(default_factory=VietnamProviderRuntimeStatus)
+    foreign_flow: VietnamForeignFlowObservability = Field(default_factory=VietnamForeignFlowObservability)
     streaming: VietnamStreamingObservability = Field(default_factory=VietnamStreamingObservability)

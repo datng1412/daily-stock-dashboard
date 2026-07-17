@@ -33,6 +33,7 @@ from api.v1.schemas.stocks import (
     VietnamCompanyResearchResponse,
     VietnamCorporateActionsResponse,
     VietnamDailyIndexResponse,
+    VietnamForeignFlowSymbolHistoryResponse,
     VietnamIndexComponentsResponse,
     VietnamIndexListResponse,
     VietnamMarketIndexPulseResponse,
@@ -57,6 +58,7 @@ from src.services.import_parser import (
 from src.services.stock_service import StockService
 from src.services.system_config_service import SystemConfigService
 from src.services.vietnam_company_research_service import VietnamCompanyResearchService
+from src.services.vietnam_foreign_flow_service import VietnamForeignFlowService
 from src.services.vietnam_market_service import VietnamMarketService, vietnam_intraday_chart_health_snapshot
 from src.services.vietnam_observability import vietnam_observability_snapshot
 from data_provider.base import normalize_stock_code
@@ -700,6 +702,41 @@ def get_vietnam_index_components(
             status_code=500,
             detail={"error": "vn_index_components_failed", "message": str(e)},
         )
+
+
+@router.get(
+    "/vn/foreign-flow/symbol/{ticker}",
+    response_model=VietnamForeignFlowSymbolHistoryResponse,
+    summary="Vietnam one-symbol historical foreign flow",
+    description="Return bounded SSI DailyStockPrice foreign buy/sell/net history and latest-session summaries for one VN symbol.",
+)
+def get_vietnam_foreign_flow_symbol_history(
+    ticker: str,
+    limit: Optional[int] = Query(None, ge=1, le=120, description="Latest accepted trading sessions; defaults to 20."),
+    from_date: Optional[str] = Query(None, description="Inclusive start date in YYYY-MM-DD format; requires to_date."),
+    to_date: Optional[str] = Query(None, description="Inclusive end date in YYYY-MM-DD format; requires from_date."),
+    force_refresh: bool = Query(False, description="Bypass a fresh dedicated history cache entry."),
+) -> VietnamForeignFlowSymbolHistoryResponse:
+    try:
+        payload = VietnamForeignFlowService().get_symbol_history(
+            ticker,
+            limit=limit,
+            from_date=from_date,
+            to_date=to_date,
+            force_refresh=force_refresh,
+        )
+        return VietnamForeignFlowSymbolHistoryResponse(**payload)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"error": "vn_foreign_flow_invalid_request", "message": str(exc)},
+        ) from exc
+    except Exception as exc:
+        logger.error("Vietnam foreign-flow history failed")
+        raise HTTPException(
+            status_code=500,
+            detail={"error": "vn_foreign_flow_failed", "message": "Vietnam foreign-flow request failed"},
+        ) from exc
 
 
 @router.get(

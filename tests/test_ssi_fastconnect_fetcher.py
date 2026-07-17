@@ -1906,6 +1906,42 @@ def test_daily_stock_price_maps_reference_limits_matched_and_foreign_fields():
     assert row["source"] == "SSI"
 
 
+def test_daily_stock_price_preserves_direct_foreign_net_provenance_and_mismatch():
+    fetcher = _fetcher()
+
+    direct = fetcher._map_daily_stock_price(
+        {
+            "TradingDate": "2026-06-17",
+            "ForeignBuyVolTotal": "100",
+            "ForeignSellVolTotal": "40",
+            "NetBuySellVol": "999",
+            "ForeignBuyValTotal": "1000",
+            "ForeignSellValTotal": "400",
+            "NetBuySellVal": "9999",
+        }
+    )
+    derived = fetcher._map_daily_stock_price(
+        {
+            "TradingDate": "2026-06-18",
+            "ForeignBuyVolTotal": "100",
+            "ForeignSellVolTotal": "40",
+            "ForeignBuyValTotal": "1000",
+            "ForeignSellValTotal": "400",
+        }
+    )
+
+    assert direct["foreign_net_volume"] == 999
+    assert direct["foreign_net_value"] == 9999
+    assert direct["_foreign_net_volume_source"] == "direct"
+    assert direct["_foreign_net_value_source"] == "direct"
+    assert direct["_foreign_net_volume_mismatch"] is True
+    assert direct["_foreign_net_value_mismatch"] is True
+    assert derived["foreign_net_volume"] == 60
+    assert derived["foreign_net_value"] == 600
+    assert derived["_foreign_net_volume_source"] == "derived"
+    assert derived["_foreign_net_value_source"] == "derived"
+
+
 def test_daily_stock_price_accepts_documented_sample_like_row():
     session = _FakeSession(
         post_items=[_token_response()],
