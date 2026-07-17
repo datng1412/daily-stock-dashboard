@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [improvement] Show Reconnecting, Stale, and Market closed states in existing SSI stream-backed panels without blanking last-known data or changing chart sources.
 - [test] Add deterministic SSI lifecycle, stale-generation, duplicate-disconnect, partial-subscription, fail-fast, session-date, shutdown, and observability coverage.
 - [documentation] Record the Phase 4.11F-A active-session acceptance attempt, deterministic pass, pre-listener backend blocker, and still-pending live readiness/reconnect proof.
+- [documentation] Record Phase 4.11F-A2 HTTP readiness, active-session SSI authorization blocking, non-mutating unavailable endpoints, and deferred natural-reconnect proof.
 - [fix] Make the normal backend launcher wait for Uvicorn HTTP readiness and surface background startup failure without coupling readiness to SSI streaming.
 - [new feature] Add bounded worker-local SSI intraday-chart metrics, sanitized provider-fetch logs, a no-fetch health endpoint, and same-key in-flight request coalescing.
 - [improvement] Harden current-session 1-minute scheduling with semantic Today rollover, one market-data timeout, a request-free countdown, overlap prevention, and idempotent post-close reconciliation.
