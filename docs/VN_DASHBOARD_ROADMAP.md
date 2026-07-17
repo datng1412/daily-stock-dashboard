@@ -2549,12 +2549,12 @@ Phase 4.11G reconciled that result with historical success. Unchanged SSI 2.2.2 
 
 ### Phase 4.12 - Foreign Flow Product and Delivery Sequence
 
-Status: Phase 4.12-PLAN completed as documentation only. The implementation-ready product, data, API, cache, reconciliation, observability, and risk plan is `docs/VN_FOREIGN_FLOW_PLAN.md`. Existing DailyStockPrice latest fields and bounded 5D/20D net-volume summaries remain the only implemented flow capability; proposed current-session authority, 60-session history, value trends, rankings, VN30/HOSE aggregates, and dedicated APIs remain pending capability verification and not yet implemented.
+Status: Phase 4.12A-Lite completed the DailyStockPrice-only contract gate with outcome A, full symbol daily contract. Exact buy/sell/net volume and value fields, shares/VND units, provider trading dates, multi-date history, direct-net agreement, and latest-date-inclusive 5D/20D rolling semantics are verified. Rows are `daily_available`; active-session cumulative behavior and an explicit provider-final marker remain unproven. No runtime API or frontend was added.
 
 Delivery order and gates:
 
-1. **Phase 4.12A - SSI foreign-flow capability verification:** prove exact fields, units, history, current-session behavior, timestamps, finality, corrections, bulk capability, and rate limits. SSI `R` remains foreign-room context only.
-2. **Phase 4.12B - Historical symbol API:** implement verified final daily rows and 5/20/60 trends without changing DailyOhlc price ownership.
+1. **Phase 4.12A-Lite - DailyStockPrice contract confirmation (completed):** verified the full symbol daily contract only. SSI `R` remains foreign-room context; no stream was inspected as flow.
+2. **Phase 4.12B - Historical symbol API (next):** implement bounded `daily_available` rows and complete-window 5/20/60 trends without changing DailyOhlc price ownership. Current-session fields remain out of scope.
 3. **Phase 4.12C - Current-session snapshot and reconciliation:** proceed only if an official cumulative current source is proven; detect resets and reconcile provisional with final.
 4. **Phase 4.12D - Watchlist and rankings:** one additive watchlist/batch request, explicit per-symbol states, and no frontend N+1.
 5. **Phase 4.12E - VN30 aggregate:** use an official aggregate when proven or current SSI IndexComponents plus covered symbol sums; always expose coverage and aggregation basis.

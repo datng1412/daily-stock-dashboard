@@ -349,11 +349,15 @@ Phase 4.11F-A2 first reran the focused deterministic acceptance gate: 156 tests 
 
 Phase 4.11G uses the existing secret-safe verifier plus a temporary, deleted X-only manager harness. Official minimal contexts run sequentially and never use `ALL`: X, F, MI, X-QUOTE, X-TRADE, and R each produced matching callbacks. X-only StockClock scale runs at 1/5/10/30 symbols produced events with zero subscription failures. The normal full registry was observed twice; current-generation events arrived before and after the shared-client fix. Regression tests assert one SDK client for multiple channel streams, per-channel failure accounting when shared token construction fails, diagnostic isolation to the requested X context, and forwarding of generation callback metadata. The combined lifecycle/observability/verifier gate passes 190 tests. Live network evidence supplements rather than replaces deterministic reconnect tests; natural disconnect was not manufactured and remains unproven.
 
-## Planned Phase 4.12 Foreign Flow Validation
+## Phase 4.12 Foreign Flow Validation
 
-This is a future validation strategy; no Phase 4.12 production or test code exists yet.
+Phase 4.12A-Lite completed the DailyStockPrice-only evidence gate without production or test-code changes. Existing deterministic parser/service tests plus the official package/docs and bounded live proof established the symbol daily contract; broader product tests remain future work.
 
-- Capability verifier: bounded ticker/date inputs, exact whitelisted fields, units/finality evidence, stop-on-rate-limit, sanitized output, and no raw provider payload or secret.
+- Verified live evidence: FPT/VCB/HPG/SSI each returned 22 distinct ascending `TradingDate` rows over 2026-06-18 through 2026-07-17, all six foreign fields were present, 88/88 volume and value direct nets matched buy minus sell, and two after-close reads were stable.
+- Existing deterministic coverage preserves explicit zero, null/missing fields, unavailable provider state, date sorting/deduplication, cache behavior, 5/20 incomplete-window nulls, and unchanged SSI DailyOhlc `latest_price`.
+- Phase 4.12B must add focused endpoint coverage for bounded date/session counts, `daily_available` finality, raw-to-normalized units, ordered history, complete 5/20/60 windows, and provider unavailable behavior. Pytest must remain offline.
+
+- Capability verifier: the A-Lite manual proof used bounded ticker/date inputs, exact whitelisted fields, sanitized summaries, and no persisted raw provider payload or secret. Future current/bulk gates need separate bounded evidence.
 - Historical contract: sign convention, official buy/sell-derived net only with both inputs, zero versus null, missing rows, 60-session bounds, 5/20/60 complete windows, value/volume separation, corrections, and unchanged DailyOhlc `latest_price`.
 - Current contract: verified cumulative source only, provisional/final separation, stale/market-closed states, counter decrease detection, no negative interval emission, delayed final reconciliation, and source-unavailable behavior.
 - Batch/watchlist: maximum 30 normalized unique tickers, stable order, invalid/missing ticker reporting, per-row partial failures, request-local reuse/coalescing, and one frontend HTTP request.

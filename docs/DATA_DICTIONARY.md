@@ -91,14 +91,14 @@ These fields are additive Phase 4.8A metrics. They live under watchlist `indicat
 
 | Field | Meaning | Source | Unit | Nullable | Canonical | UI placement | Known caveat |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `foreign_buy_volume` | Latest foreign buy volume | SSI DailyStockPrice | shares | yes | source-specific | Foreign flow | Available only if DailyStockPrice returns it. |
-| `foreign_sell_volume` | Latest foreign sell volume | SSI DailyStockPrice | shares | yes | source-specific | Foreign flow | Same date alignment should be checked. |
-| `foreign_net_volume` | Latest foreign net volume | SSI DailyStockPrice | shares | yes | source-specific | Foreign flow | Null is not zero. |
-| `foreign_buy_value` | Latest foreign buy value | SSI DailyStockPrice | VND | yes | source-specific | Foreign flow | Render only when present. |
-| `foreign_sell_value` | Latest foreign sell value | SSI DailyStockPrice | VND | yes | source-specific | Foreign flow | Render only when present. |
-| `foreign_net_value` | Latest foreign net value | SSI DailyStockPrice | VND | yes | source-specific | Foreign flow | Null is not zero. |
-| `foreign_net_5d_latest_available` | Five returned-row net foreign volume summary | SSI DailyStockPrice recent rows | shares | yes | no | Selected ticker foreign flow | Computed only from returned `foreign_net_volume` rows; null when fewer than 5 usable rows exist. |
-| `foreign_net_20d_latest_available` | Twenty returned-row net foreign volume summary | SSI DailyStockPrice recent rows | shares | yes | no | Selected ticker foreign flow | Computed only from returned `foreign_net_volume` rows; null when fewer than 20 usable rows exist. |
+| `foreign_buy_volume` | Latest available daily foreign buy volume | SSI DailyStockPrice `ForeignBuyVolTotal` | shares | yes | source-specific | Foreign flow | Direct provider field, normalized without scaling; provider `TradingDate` owns the date. |
+| `foreign_sell_volume` | Latest available daily foreign sell volume | SSI DailyStockPrice `ForeignSellVolTotal` | shares | yes | source-specific | Foreign flow | Direct provider field, normalized without scaling; provider `TradingDate` owns the date. |
+| `foreign_net_volume` | Latest available daily foreign net volume | SSI DailyStockPrice `NetBuySellVol` | shares | yes | source-specific | Foreign flow | Direct provider net is preferred; buy minus sell is used only if direct net is absent and both compatible inputs exist. Null is not zero. |
+| `foreign_buy_value` | Latest available daily foreign buy value | SSI DailyStockPrice `ForeignBuyValTotal` | VND | yes | source-specific | Foreign flow | Direct provider field, normalized without scaling; never reconstructed from volume and price. |
+| `foreign_sell_value` | Latest available daily foreign sell value | SSI DailyStockPrice `ForeignSellValTotal` | VND | yes | source-specific | Foreign flow | Direct provider field, normalized without scaling; never reconstructed from volume and price. |
+| `foreign_net_value` | Latest available daily foreign net value | SSI DailyStockPrice `NetBuySellVal` | VND | yes | source-specific | Foreign flow | Direct provider net is preferred; compatible buy minus sell is the only fallback arithmetic. Null is not zero. |
+| `foreign_net_5d_latest_available` | Five trading-row net foreign volume summary | SSI DailyStockPrice recent rows | shares | yes | no | Selected ticker foreign flow | StockClock rolling sum over the latest 5 distinct dated rows with usable `foreign_net_volume`; includes the latest provider date when usable; null below 5 rows. |
+| `foreign_net_20d_latest_available` | Twenty trading-row net foreign volume summary | SSI DailyStockPrice recent rows | shares | yes | no | Selected ticker foreign flow | StockClock rolling sum over the latest 20 distinct dated rows with usable `foreign_net_volume`; includes the latest provider date when usable; null below 20 rows. |
 | `foreign_net_history_count` | Count of recent DailyStockPrice rows with usable foreign net volume | SSI DailyStockPrice recent rows | rows | no | no | Selected ticker foreign flow/diagnostics | Counts provider-returned rows, not an exchange trading calendar. |
 
 ### Planned Phase 4.12 Foreign Flow Fields

@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [documentation] Confirm the SSI DailyStockPrice full symbol daily foreign-flow contract, units, dates, net basis, and existing 5D/20D window semantics for Phase 4.12A-Lite.
 - [documentation] Add the Phase 4.12 foreign-flow product, data, API, state, coverage, reconciliation, delivery, and risk plan with SSI capability verification as the first gate.
 - [fix] Reuse one SSI token-caching market-data client across generation-owned channel streams and repair generation-aware standalone streaming diagnostics.
 - [test] Reconcile prior SSI forbidden startup evidence with active-session official, StockClock minimal, scale, context, and full-registry live proof.
