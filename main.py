@@ -59,6 +59,9 @@ from src.logging_config import setup_logging
 
 logger = logging.getLogger(__name__)
 _RUNTIME_ENV_FILE_KEYS = set()
+_API_SERVER_STARTUP_TIMEOUT_SECONDS = 30.0
+_API_SERVER_STARTUP_POLL_SECONDS = 0.05
+_API_SERVER_SHUTDOWN_GRACE_SECONDS = 2.0
 
 
 def _get_active_env_path() -> Path:
@@ -665,7 +668,7 @@ def run_full_analysis(
         logger.exception(f"Analysis flow execution failed: {e}")
 
 
-def start_api_server(host: str, port: int, config: Config) -> None:
+def start_api_server(host: str, port: int, config: Config) -> Any:
     """
     在后台线程启动 FastAPI 服务
 
@@ -677,19 +680,51 @@ def start_api_server(host: str, port: int, config: Config) -> None:
     import threading
     import uvicorn
 
-    def run_server():
-        level_name = (config.log_level or "INFO").lower()
-        uvicorn.run(
+    level_name = (config.log_level or "INFO").lower()
+    server = uvicorn.Server(
+        uvicorn.Config(
             "api.app:app",
             host=host,
             port=port,
             log_level=level_name,
             log_config=None,
+            reload=False,
+            workers=1,
+        )
+    )
+    startup_result: Dict[str, BaseException] = {}
+
+    def run_server() -> None:
+        try:
+            server.run()
+        except BaseException as exc:  # Uvicorn may raise SystemExit on bind/config failure.
+            startup_result["error"] = exc
+
+    thread = threading.Thread(
+        target=run_server,
+        name="stockclock-fastapi-server",
+        daemon=True,
+    )
+    thread.start()
+
+    deadline = time.monotonic() + _API_SERVER_STARTUP_TIMEOUT_SECONDS
+    while thread.is_alive() and not server.started and time.monotonic() < deadline:
+        remaining = max(0.0, deadline - time.monotonic())
+        thread.join(timeout=min(_API_SERVER_STARTUP_POLL_SECONDS, remaining))
+
+    startup_error = startup_result.get("error")
+    if startup_error is not None:
+        raise RuntimeError("FastAPI service failed before HTTP readiness.") from startup_error
+    if not server.started:
+        server.should_exit = True
+        thread.join(timeout=_API_SERVER_SHUTDOWN_GRACE_SECONDS)
+        raise RuntimeError(
+            f"FastAPI service did not become HTTP-ready within "
+            f"{_API_SERVER_STARTUP_TIMEOUT_SECONDS:g} seconds."
         )
 
-    thread = threading.Thread(target=run_server, daemon=True)
-    thread.start()
     logger.info(f"FastAPI service started: http://{host}:{port}")
+    return thread
 
 
 def _is_truthy_env(var_name: str, default: str = "true") -> bool:
@@ -867,6 +902,8 @@ def main() -> int:
             bot_clients_started = True
         except Exception as e:
             logger.error(f"Failed to start FastAPI service: {e}")
+            if args.serve_only:
+                return 1
 
     if bot_clients_started:
         start_bot_stream_clients(config)
