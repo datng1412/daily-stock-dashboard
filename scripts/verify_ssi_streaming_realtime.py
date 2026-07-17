@@ -599,6 +599,11 @@ def make_manager(
             auth_type=config.get("auth_type") or "Bearer",
         ),
         channel_template=config["channel_template"],
+        order_book_enabled=False,
+        foreign_room_enabled=False,
+        market_index_enabled=False,
+        trade_tape_enabled=False,
+        session_status_enabled=False,
     )
 
 
@@ -789,13 +794,13 @@ def run_verification(
     original_handle_message = manager.handle_message
     original_handle_error = manager.handle_error
 
-    def instrumented_message(message: Any) -> None:
+    def instrumented_message(message: Any, *args: Any, **kwargs: Any) -> None:
         diagnostics.record_message(message)
-        original_handle_message(message)
+        original_handle_message(message, *args, **kwargs)
 
-    def instrumented_error(error: Any) -> None:
+    def instrumented_error(error: Any, *args: Any, **kwargs: Any) -> None:
         diagnostics.record_error(error)
-        original_handle_error(error)
+        original_handle_error(error, *args, **kwargs)
 
     manager.handle_message = instrumented_message  # type: ignore[method-assign]
     manager.handle_error = instrumented_error  # type: ignore[method-assign]

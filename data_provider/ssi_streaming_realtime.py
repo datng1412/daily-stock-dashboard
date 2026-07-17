@@ -284,10 +284,20 @@ class OfficialSsiRealtimeStreamClient:
         )
         started_streams: List[Any] = []
         failures: List[Exception] = []
+        try:
+            # MarketDataClient acquires and caches the access token during
+            # construction. Share it across the channel-specific stream
+            # transports so one generation does not request a token once per
+            # subscription.
+            client = client_module.MarketDataClient(config)
+        except Exception as exc:
+            if on_subscription_error is not None:
+                for channel in safe_channels:
+                    on_subscription_error(channel, exc)
+            raise
         for channel in safe_channels:
             stream: Any = None
             try:
-                client = client_module.MarketDataClient(config)
                 try:
                     stream = stream_module.MarketDataStream(
                         config,

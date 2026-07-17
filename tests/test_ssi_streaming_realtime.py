@@ -1664,6 +1664,7 @@ def test_official_adapter_exposes_per_channel_open_and_close_evidence():
         on_open=opened.append,
         on_close=closed.append,
     )
+    assert len(FakeOfficialClient.instances) == 1
     assert len(FakeOfficialStream.instances) == 2
 
     for stream in FakeOfficialStream.instances:
@@ -1672,6 +1673,38 @@ def test_official_adapter_exposes_per_channel_open_and_close_evidence():
 
     assert opened == ["X:FPT", "X-QUOTE:FPT"]
     assert closed == ["X:FPT", "X-QUOTE:FPT"]
+
+
+def test_official_adapter_reports_shared_token_failure_for_each_planned_channel():
+    failures = []
+
+    class FailingClient:
+        def __init__(self, config):
+            raise OSError("403")
+
+    def import_module(name):
+        if name == "ssi_fc_data.fc_md_client":
+            return SimpleNamespace(MarketDataClient=FailingClient)
+        if name == "ssi_fc_data.fc_md_stream":
+            return SimpleNamespace(MarketDataStream=FakeOfficialStream)
+        raise ImportError(name)
+
+    adapter = OfficialSsiRealtimeStreamClient(
+        consumer_id="test-consumer",
+        consumer_secret="test-secret",
+        base_url="https://fc-data.ssi.com.vn/api/v2/Market",
+        import_module=import_module,
+    )
+
+    with pytest.raises(OSError, match="403"):
+        adapter.start(
+            lambda message: None,
+            lambda error: None,
+            ["X:FPT", "X-QUOTE:FPT"],
+            on_subscription_error=lambda channel, error: failures.append((channel, type(error).__name__)),
+        )
+
+    assert failures == [("X:FPT", "OSError"), ("X-QUOTE:FPT", "OSError")]
 
 
 def test_official_adapter_missing_package_fails_closed():

@@ -308,6 +308,57 @@ def test_mock_manager_starts_with_symbol_scoped_channels_and_parser(monkeypatch,
     assert SECRET_VALUE not in output
 
 
+def test_real_manager_factory_keeps_diagnostic_to_requested_x_context(monkeypatch):
+    module = _load_script(monkeypatch)
+    _set_valid_env(monkeypatch)
+    config = module.load_config(module.build_arg_parser().parse_args([]))
+
+    manager = module.make_manager(config=config, parser=lambda messages, symbols: [])
+
+    assert manager.order_book_enabled is False
+    assert manager.foreign_room_enabled is False
+    assert manager.market_index_enabled is False
+    assert manager.trade_tape_enabled is False
+    assert manager.session_status_enabled is False
+
+
+def test_verifier_instrumentation_forwards_generation_keyword(monkeypatch):
+    module = _load_script(monkeypatch)
+    _set_valid_env(monkeypatch)
+    observed_generations = []
+
+    class GenerationManager(FakeManager):
+        def snapshot(self, symbols):
+            if self.messages:
+                self.handle_message(self.messages.pop(0), generation=7)
+            return super().snapshot(symbols)
+
+        def handle_message(self, message, *, generation=None):
+            observed_generations.append(generation)
+            return super().handle_message(message)
+
+    def manager_factory(**kwargs):
+        return GenerationManager(
+            config=kwargs["config"],
+            parser=kwargs["parser"],
+            messages=[{"DataType": "X", "Content": {"Symbol": "FPT", "LastPrice": 100.0}}],
+        )
+
+    code, payload = module.run_verification(
+        symbols=["FPT"],
+        config=module.load_config(module.build_arg_parser().parse_args([])),
+        wait_seconds=0,
+        poll_interval_seconds=0,
+        manager_factory=manager_factory,
+        sleep_func=lambda _: None,
+        monotonic_func=lambda: 0.0,
+    )
+
+    assert code == 0
+    assert payload["callback_invoked_count"] == 1
+    assert observed_generations == [7]
+
+
 def test_no_message_case_classifies_no_message_after_start(monkeypatch):
     module = _load_script(monkeypatch)
     _set_valid_env(monkeypatch)
