@@ -484,3 +484,9 @@ The optional SSI stream runtime has one application-owned, process-local lifecyc
 The dashboard-wide observability route exposes sanitized worker-local transport and context status and never starts or subscribes a stream. Multi-worker coordination is not included, continuity across disconnects is not guaranteed, and X-TRADE remains blocked from candle aggregation. DailyOhlc remains the daily/latest-price source and IntradayOhlc remains the only 1m chart source.
 
 The user experience has one market-data schedule, a separate request-free countdown, explicit Force Refresh, stable bars during refresh, semantic Today rollover, and deterministic pre-open/lunch/afternoon/ATC/post-close/visibility behavior. User-facing states distinguish updating, delayed, stale, expected no-data, and SSI unavailability without showing provider exception text. SSI IntradayOhlc remains the sole 1m source, SSI DailyOhlc remains D1/latest-price source, and X-TRADE, external providers, higher intervals, filler candles, and TradingView data ingestion remain excluded.
+
+## Phase 4.12 - Foreign Flow Product
+
+Phase 4.12 is planned in `docs/VN_FOREIGN_FLOW_PLAN.md`. The product will let users scan covered-market flow, compare a watchlist, inspect one symbol's current-versus-final history, and later monitor meaningful changes. Its first implementation gate is a bounded SSI capability verification; current-session fields, value fields, broader history, and aggregates remain pending verification and are not yet implemented.
+
+Foreign flow, foreign room, and foreign ownership remain separate. SSI DailyStockPrice is the existing bounded historical-flow candidate; SSI `R` remains foreign-room context only. Missing value fields stay null, current provisional data cannot silently overwrite historical final data, VN30/HOSE aggregates require visible coverage, and product copy remains descriptive rather than predictive.

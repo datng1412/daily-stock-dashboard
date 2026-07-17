@@ -114,6 +114,8 @@ The VN dashboard is data-quality-first. The API and UI distinguish:
 
 Diagnostics belong in diagnostic panels/logs, not primary metric cards.
 
+Phase 4.12 foreign flow is planned in `docs/VN_FOREIGN_FLOW_PLAN.md`. Current runtime remains limited to SSI DailyStockPrice latest foreign-flow fields and bounded 5D/20D net-volume summaries. Current-session authority, broader history, value trends, rankings, and coverage-aware VN30/HOSE aggregates are pending capability verification and are not yet implemented. Foreign room remains a separate SSI `R` context, and SSI DailyOhlc remains the canonical daily/latest-price source.
+
 ## Phase 4.11D-1 Current-Session Audit
 
 Phase 4.11D-1 audited current-session chart sources. Phase 4.11D-2 now implements the approved delayed-only path: SSI IntradayOhlc remains authoritative, the current bucket is `provisional` only while its normalized minute matches the active Vietnam minute, older current-day buckets are `inferred_final`, and bounded replacement polling runs without stream aggregation. X-TRADE aggregation remains blocked because observed events lack stable identity/sequence and include indistinguishable duplicates. TradingView supplies rendering only, never market data. Holidays, halts, half sessions, HNX, and UPCOM session differences remain unresolved.

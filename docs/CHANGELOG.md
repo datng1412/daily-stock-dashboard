@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [documentation] Add the Phase 4.12 foreign-flow product, data, API, state, coverage, reconciliation, delivery, and risk plan with SSI capability verification as the first gate.
 - [fix] Reuse one SSI token-caching market-data client across generation-owned channel streams and repair generation-aware standalone streaming diagnostics.
 - [test] Reconcile prior SSI forbidden startup evidence with active-session official, StockClock minimal, scale, context, and full-registry live proof.
 - [documentation] Correct the provisional Phase 4.11F-A2 entitlement inference and record current live SSI streaming support with reconnect continuity still unverified.

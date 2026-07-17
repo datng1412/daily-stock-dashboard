@@ -597,6 +597,24 @@ The watchlist indicators expose bounded recent foreign-flow summaries as `foreig
 
 Sanitized `daily_stock_price.diagnostics` may include endpoint name, requested symbol/date range, normalized row count, selected row date, DailyOhlc date, date match, DailyStockPrice foreign-history row counts/date span/status, missing fields, field coverage, and failure class. It must not include raw provider payloads, credentials, tokens, auth headers, account identifiers, or raw auth responses.
 
+### Planned Foreign Flow Contract (Phase 4.12)
+
+This contract is **planned, pending capability verification, and not yet implemented**. The full design is in `docs/VN_FOREIGN_FLOW_PLAN.md`.
+
+The proposed canonical field names follow existing repository conventions: `foreign_buy_volume`, `foreign_sell_volume`, `foreign_net_volume`, `foreign_buy_value`, `foreign_sell_value`, and `foreign_net_value`. Volume uses shares and value uses VND only when an official source supplies the field. A net field may be calculated as official buy minus official sell only when both inputs have the same symbol, session, source, unit, and finality; otherwise it remains null. Missing value must not be estimated from volume and price.
+
+Foreign-flow results separate these dimensions:
+
+- `availability_status`: `loading`, `ready`, `partial`, `stale`, or `unavailable`.
+- `finality`: `current_provisional`, `historical_final`, or null when no authoritative row exists.
+- `market_state`: `active`, `market_closed`, or `unknown`.
+- `freshness_status`: `fresh`, `stale`, or `unknown`.
+- `aggregation_status`: `complete`, `partial`, `unavailable`, or null for non-aggregates.
+
+Zero means the provider explicitly reported zero or two compatible official inputs produced a zero net. Null means absent, unverified, incompatible, or unavailable. A missing row is not a zero-flow session. Partial aggregates retain their covered subset but must expose `aggregation_basis`, expected/covered/missing component counts, missing symbols, and `coverage_ratio`; they are never extrapolated.
+
+Planned APIs are one bounded symbol detail/history endpoint, one overview/rankings endpoint, and additive watchlist summary fields or a single bounded batch alternative. They are not implemented. The frontend must not make one foreign-flow HTTP request per symbol. SSI `R` remains a separate foreign-room contract and cannot populate foreign flow. Current provisional data cannot silently replace historical final data.
+
 ## External Provider Boundary
 
 Phase 4.5A/5.0A do not add a live external provider. Phase 5.0B adds only a disabled-by-default `CorporateActionsProvider` contract proof. Corporate actions are the first selected domain for provider qualification, but they remain `disabled`, `not_configured`, or unavailable until the access and legal gates in `docs/VN_EXTERNAL_PROVIDER_STRATEGY.md` pass. VNStocks and FiinGroup are candidate external providers only, both `needs_verification`; they are not runtime sources, fallback providers, or implementation sources in the current contract.

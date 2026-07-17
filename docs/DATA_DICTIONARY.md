@@ -101,6 +101,22 @@ These fields are additive Phase 4.8A metrics. They live under watchlist `indicat
 | `foreign_net_20d_latest_available` | Twenty returned-row net foreign volume summary | SSI DailyStockPrice recent rows | shares | yes | no | Selected ticker foreign flow | Computed only from returned `foreign_net_volume` rows; null when fewer than 20 usable rows exist. |
 | `foreign_net_history_count` | Count of recent DailyStockPrice rows with usable foreign net volume | SSI DailyStockPrice recent rows | rows | no | no | Selected ticker foreign flow/diagnostics | Counts provider-returned rows, not an exchange trading calendar. |
 
+### Planned Phase 4.12 Foreign Flow Fields
+
+The following are proposed, pending capability verification, and not yet implemented. Existing fields above remain the current contract.
+
+| Field | Meaning | Source | Unit | Nullable | Canonical | UI placement | Known caveat |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `availability_status` | Foreign-flow availability independent of finality | Service contract | enum | no | planned | All foreign-flow surfaces | Planned values: loading, ready, partial, stale, unavailable. |
+| `finality` | Current cumulative provisional versus historical final | Verified official SSI source | enum | yes | planned | Trust label | Current-session source and final timing require Phase 4.12A proof. |
+| `foreign_net_value_ratio` | Net foreign value divided by compatible official traded value | SSI-derived from verified same-row inputs | ratio | yes | planned | Watchlist/detail | Null when value or compatible positive denominator is absent; no price-derived value. |
+| `foreign_net_5_session` / `foreign_net_20_session` / `foreign_net_60_session` | Complete-window cumulative net for an explicit value or volume metric kind | Verified official daily rows | VND or shares | yes | planned | Watchlist/detail | Value and volume series remain separate; incomplete windows are null with coverage. |
+| `aggregation_basis` | Official aggregate, component sum, or current-membership backfill basis | Service contract | text | yes | planned | Overview trust metadata | Current-membership backfill is not historically constituent-correct. |
+| `expected_components` / `covered_components` / `missing_components` | Aggregate coverage counts | Service-derived | count | yes | planned | VN30/HOSE summary | Required for every aggregate. |
+| `coverage_ratio` | Covered divided by expected components | Service-derived | ratio | yes | planned | VN30/HOSE summary | Partial coverage is never extrapolated. |
+| `provider_updated_at` / `fetched_at` / `snapshot_age_seconds` | Provider/app freshness metadata | Verified source and service | timestamp/seconds | yes | planned | Trust metadata | Provider time remains null when absent. |
+| `reconciliation_status` / `counter_reset_detected` | Current-to-final comparison and cumulative-reset state | Service-derived | enum/bool | yes | planned | Diagnostics/trust state | Current authority must pass Phase 4.12A first. |
+
 ## Data Quality Summary Field
 
 | Field | Meaning | Source | Unit | Nullable | Canonical | UI placement | Known caveat |

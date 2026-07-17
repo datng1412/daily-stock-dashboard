@@ -158,3 +158,19 @@ Primary status priority is `Completed`, `Loading`, `Pre-open`, `Lunch break`, `C
 - `unavailable` or `failed` without usable data: keep the existing concise unavailable state; raw provider exception text is not shown.
 
 These states apply only to existing X/X-QUOTE/X-TRADE/F/R/MI consumers. They do not change D1/1m chart loading, polling, labels, or data ownership, and they do not add a frontend WebSocket or higher polling frequency.
+
+## Planned Phase 4.12 Foreign Flow States
+
+These states are planned, pending capability verification, and not yet implemented.
+
+| State | Display behavior | Preserve | Never show |
+| --- | --- | --- | --- |
+| Loading | Keep the prior successful foreign-flow view and show a local updating state | Unrelated daily/watchlist data | Full-page blanking or zero placeholders |
+| Current provisional | Show verified cumulative current fields with `Provisional` and update time | Latest historical final for comparison | `Final`, room-derived flow, or estimated value |
+| Historical final | Show the official daily row and complete-window trends | Source/date/finality metadata | A provisional row silently promoted to final |
+| Partial | Show valid fields or covered aggregate subset plus missing fields/components and coverage | Correct zeros and independent volume/value paths | Complete-market wording or extrapolation |
+| Stale | Keep last-known values with age and reason | Last verified source/finality | Current/ready wording |
+| Unavailable | Show concise reason and no metric-shaped placeholder | DailyOhlc price/chart and other independent sections | Null formatted as zero or fallback data |
+| Market closed | Prefer latest historical final; optionally show stale last-known provisional data with after-hours label | Final history and explicit age | Missing current data classified as provider failure |
+
+Foreign flow and foreign room render as separate sections. Price reaction copy is descriptive (`Flow and price moved in the same direction`, `Foreign buying occurred while price declined`, or `Foreign selling occurred while price increased`) and does not present an instruction or forecast.
