@@ -9,7 +9,6 @@ import {
   type VietnamCorporateActionEvent,
   type VietnamCorporateActionsResponse,
   type VietnamDailyIndexResponse,
-  type VietnamForeignFlowBatchResponse,
   type VietnamForeignFlowBatchSymbol,
   type VietnamIndexComponentsResponse,
   type VietnamIndexListResponse,
@@ -24,6 +23,7 @@ import { AppPage, Badge, Button, Loading, Tooltip } from '../components/common';
 import { VietnamLightweightChart } from '../components/charts/VietnamLightweightChart';
 import { normalizeShortTermChartZones } from '../components/charts/lightweightChartData';
 import { DataQualitySummary, ForeignFlowWatchlistRankings, OrderBookLadder } from '../components/dashboard';
+import { useForeignFlowWatchlistBatch } from '../hooks/useForeignFlowWatchlistBatch';
 import { cn } from '../utils/cn';
 import { buildVietnamConditionSummary, VIETNAM_CONDITION_SUMMARY_SUBTITLE } from '../utils/vietnamConditionSummary';
 import { getRealtimeSnapshotDisplayState, type RealtimeSnapshotDisplayResult } from '../utils/realtimeSnapshotState';
@@ -5055,9 +5055,6 @@ const VietnamDashboardPage: React.FC = () => {
   const [watchlistError, setWatchlistError] = useState<string | null>(null);
   const [customNotice, setCustomNotice] = useState<string | null>(initialCustomWatchlist.length ? 'Saved locally in this browser.' : null);
   const [data, setData] = useState<VietnamWatchlistResponse | null>(null);
-  const [foreignFlowData, setForeignFlowData] = useState<VietnamForeignFlowBatchResponse | null>(null);
-  const [foreignFlowLoading, setForeignFlowLoading] = useState(false);
-  const [foreignFlowError, setForeignFlowError] = useState<string | null>(null);
   const [realtimeQuotes, setRealtimeQuotes] = useState<Record<string, VietnamRealtimeQuote | undefined>>({});
   const [realtimeLoading, setRealtimeLoading] = useState(false);
   const [realtimeError, setRealtimeError] = useState<string | null>(null);
@@ -5121,8 +5118,6 @@ const VietnamDashboardPage: React.FC = () => {
   selectedTickerRef.current = selectedTicker;
   const dataRef = useRef(data);
   dataRef.current = data;
-  const foreignFlowDataRef = useRef(foreignFlowData);
-  foreignFlowDataRef.current = foreignFlowData;
   const vn30HydrationRef = useRef(vn30Hydration);
   vn30HydrationRef.current = vn30Hydration;
   const requestIdRef = useRef(0);
@@ -5146,8 +5141,6 @@ const VietnamDashboardPage: React.FC = () => {
   const pendingRealtimeSnapshotTickersRef = useRef<string[] | null>(null);
   const pendingTradeTapeSymbolRef = useRef<string | null>(null);
   const pendingSelectedLiveContextSymbolRef = useRef<string | null>(null);
-  const foreignFlowRequestIdRef = useRef(0);
-  const foreignFlowAbortRef = useRef<AbortController | null>(null);
   const unmountedRef = useRef(false);
 
   useEffect(() => {
@@ -5161,8 +5154,6 @@ const VietnamDashboardPage: React.FC = () => {
       filterIntentIdRef.current += 1;
       vn30HydrationRunIdRef.current += 1;
       vn30ComponentsRequestIdRef.current += 1;
-      foreignFlowRequestIdRef.current += 1;
-      foreignFlowAbortRef.current?.abort();
     };
   }, []);
 
@@ -5175,59 +5166,14 @@ const VietnamDashboardPage: React.FC = () => {
     }
   }, []);
 
-  const loadForeignFlow = useCallback(async (tickers: string[], forceRefresh = false) => {
-    const seen = new Set<string>();
-    const requestedTickers = tickers
-      .map((ticker) => normalizeVietnamTicker(ticker))
-      .filter((ticker) => {
-        if (!/^[A-Z0-9]{1,10}$/.test(ticker) || ticker === 'ALL' || seen.has(ticker)) return false;
-        seen.add(ticker);
-        return true;
-      })
-      .slice(0, VIETNAM_WATCHLIST_MAX_SIZE);
-    foreignFlowRequestIdRef.current += 1;
-    const requestId = foreignFlowRequestIdRef.current;
-    foreignFlowAbortRef.current?.abort();
-    if (!requestedTickers.length) {
-      foreignFlowAbortRef.current = null;
-      setForeignFlowData(null);
-      setForeignFlowLoading(false);
-      setForeignFlowError(null);
-      return;
-    }
-    const scopeKey = requestedTickers.join(',');
-    const controller = new AbortController();
-    foreignFlowAbortRef.current = controller;
-    setForeignFlowLoading(true);
-    setForeignFlowError(null);
-    try {
-      const response = await stocksApi.getVietnamForeignFlowBatch(requestedTickers, {
-        topN: 5,
-        forceRefresh,
-        signal: controller.signal,
-      });
-      if (requestId !== foreignFlowRequestIdRef.current || unmountedRef.current) return;
-      const previous = foreignFlowDataRef.current;
-      const sameScope = previous?.normalizedTickers.join(',') === scopeKey;
-      if (sameScope && previous.usableCount > 0 && response.usableCount === 0) {
-        setForeignFlowError('Latest foreign-flow refresh returned no usable rows.');
-      } else {
-        setForeignFlowData(response);
-      }
-    } catch (err) {
-      if (controller.signal.aborted || requestId !== foreignFlowRequestIdRef.current || unmountedRef.current) return;
-      setForeignFlowError(err instanceof Error ? err.message : 'Foreign-flow batch unavailable.');
-    } finally {
-      if (requestId === foreignFlowRequestIdRef.current && !unmountedRef.current) {
-        setForeignFlowLoading(false);
-        if (foreignFlowAbortRef.current === controller) foreignFlowAbortRef.current = null;
-      }
-    }
-  }, []);
-
-  useEffect(() => {
-    void loadForeignFlow(logicalWatchlistRef.current, false);
-  }, [loadForeignFlow, logicalWatchlistKey]);
+  const {
+    data: currentForeignFlowData,
+    loading: foreignFlowLoading,
+    updating: foreignFlowUpdating,
+    error: foreignFlowError,
+    refresh: refreshForeignFlow,
+    forceRefresh: forceRefreshForeignFlow,
+  } = useForeignFlowWatchlistBatch(logicalWatchlist);
 
   const loadRealtimeQuotes = useCallback(async (tickers: string[]) => {
     const seen = new Set<string>();
@@ -5678,8 +5624,8 @@ const VietnamDashboardPage: React.FC = () => {
 
   const refreshWatchlistData = useCallback((forceRefresh = false, refreshKind: 'manual' | 'auto' | 'force live' = forceRefresh ? 'force live' : 'manual') => {
     void load(forceRefresh, refreshKind);
-    void loadForeignFlow(logicalWatchlistRef.current, forceRefresh);
-  }, [load, loadForeignFlow]);
+    void (forceRefresh ? forceRefreshForeignFlow() : refreshForeignFlow());
+  }, [forceRefreshForeignFlow, load, refreshForeignFlow]);
 
   const hydrateVn30Watchlist = useCallback(async (
     tickers: string[],
@@ -6312,10 +6258,6 @@ const VietnamDashboardPage: React.FC = () => {
   const indicatorRows: Vn30WatchItem[] = vn30Hydration.status === 'idle'
     ? data?.watchlist ?? []
     : vn30Hydration.rows;
-  const foreignFlowScopeKey = logicalWatchlist.slice(0, VIETNAM_WATCHLIST_MAX_SIZE).join(',');
-  const currentForeignFlowData = foreignFlowData?.normalizedTickers.join(',') === foreignFlowScopeKey
-    ? foreignFlowData
-    : null;
   const foreignFlowRows = useMemo(
     () => Object.fromEntries((currentForeignFlowData?.rows ?? []).map((row) => [row.ticker, row])),
     [currentForeignFlowData],
@@ -6892,10 +6834,10 @@ const VietnamDashboardPage: React.FC = () => {
           <ForeignFlowWatchlistRankings
             data={currentForeignFlowData}
             loading={foreignFlowLoading}
-            updating={foreignFlowLoading && Boolean(currentForeignFlowData)}
+            updating={foreignFlowUpdating}
             error={foreignFlowError}
             totalTickerCount={logicalWatchlist.length}
-            onRetry={() => void loadForeignFlow(logicalWatchlistRef.current, false)}
+            onRetry={refreshForeignFlow}
           />
           <IndicatorTable
             items={indicatorRows}

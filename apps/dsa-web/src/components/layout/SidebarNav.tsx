@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
-import { BarChart3, Bell, BriefcaseBusiness, Home, LineChart, LogOut, MessageSquareQuote, Search, Settings2 } from 'lucide-react';
+import { ArrowLeftRight, BarChart3, Bell, BriefcaseBusiness, Home, LineChart, LogOut, MessageSquareQuote, Search, Settings2 } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 import { ALPHASIFT_CONFIG_CHANGED_EVENT, SYSTEM_CONFIG_CHANGED_EVENT, alphasiftApi } from '../../api/alphasift';
 import { useAuth } from '../../contexts/AuthContext';
@@ -30,6 +30,7 @@ const NAV_ITEMS: NavItem[] = [
   { key: 'screening', label: 'Screening', to: '/screening', icon: Search },
   { key: 'portfolio', label: 'Portfolio', to: '/portfolio', icon: BriefcaseBusiness },
   { key: 'vietnam', label: 'Vietnam', to: '/vietnam', icon: LineChart },
+  { key: 'foreign-flow', label: 'Dòng tiền ngoại', to: '/foreign-flow', icon: ArrowLeftRight },
   { key: 'backtest', label: 'Backtest', to: '/backtest', icon: BarChart3 },
   { key: 'alerts', label: 'Alerts', to: '/alerts', icon: Bell },
   { key: 'settings', label: 'Settings', to: '/settings', icon: Settings2 },

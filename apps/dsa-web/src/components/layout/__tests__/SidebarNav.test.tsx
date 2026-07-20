@@ -139,6 +139,18 @@ describe('SidebarNav', () => {
     expect(alertsLink).toHaveClass('font-medium');
   });
 
+  it('renders foreign flow as a top-level item and keeps it active with query parameters', () => {
+    render(
+      <MemoryRouter initialEntries={['/foreign-flow?window=20&metric=volume']}>
+        <SidebarNav />
+      </MemoryRouter>,
+    );
+
+    const link = screen.getByRole('link', { name: 'Dòng tiền ngoại' });
+    expect(link).toHaveAttribute('href', '/foreign-flow');
+    expect(link).toHaveClass('font-medium');
+  });
+
   it('opens the logout confirmation and confirms logout', async () => {
     render(
       <MemoryRouter initialEntries={['/chat']}>

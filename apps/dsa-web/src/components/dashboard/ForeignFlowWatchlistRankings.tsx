@@ -3,6 +3,7 @@ import type {
   VietnamForeignFlowBatchResponse,
   VietnamForeignFlowRankingPair,
 } from '../../api/stocks';
+import { buildForeignFlowRankings, type ForeignFlowWindow } from '../foreign-flow/foreignFlowViewModel';
 import { cn } from '../../utils/cn';
 import { formatCompactVndValue, formatFullVndTitle } from '../../utils/vietnamNumberFormat';
 import { Badge, Button } from '../common';
@@ -16,9 +17,8 @@ const metricOptions: Array<{ id: RankingMetric; label: string }> = [
 ];
 
 const rankingFor = (data: VietnamForeignFlowBatchResponse, metric: RankingMetric): VietnamForeignFlowRankingPair => {
-  if (metric === '5d') return data.rankings.netValue5d;
-  if (metric === '20d') return data.rankings.netValue20d;
-  return data.rankings.latestNetValue;
+  const window: ForeignFlowWindow = metric === '5d' ? '5' : metric === '20d' ? '20' : 'today';
+  return buildForeignFlowRankings(data.rows, window, 'value', 5);
 };
 
 const RankingList = ({

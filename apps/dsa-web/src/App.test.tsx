@@ -43,6 +43,10 @@ vi.mock('./pages/PortfolioPage', () => ({
   default: () => <div data-testid="portfolio-page">Portfolio</div>,
 }));
 
+vi.mock('./pages/ForeignFlowPage', () => ({
+  default: () => <div data-testid="foreign-flow-page">Foreign Flow</div>,
+}));
+
 vi.mock('./pages/BacktestPage', () => ({
   default: () => <div data-testid="backtest-page">Backtest</div>,
 }));
@@ -120,6 +124,17 @@ describe('App routing behavior', () => {
     expect(setCurrentRoute).toHaveBeenCalledWith('/chat');
     expect(screen.queryByTestId('login-page')).not.toBeInTheDocument();
     expect(screen.queryByTestId('home-page')).not.toBeInTheDocument();
+  });
+
+  it('renders the dedicated foreign-flow route with query parameters intact', async () => {
+    window.history.pushState({}, '', '/foreign-flow?window=5&metric=volume');
+
+    render(<App />);
+
+    expect(await screen.findByTestId('foreign-flow-page')).toBeInTheDocument();
+    expect(window.location.pathname).toBe('/foreign-flow');
+    expect(window.location.search).toBe('?window=5&metric=volume');
+    expect(setCurrentRoute).toHaveBeenCalledWith('/foreign-flow');
   });
 
   it('redirects authenticated login visits back to the home page', async () => {
