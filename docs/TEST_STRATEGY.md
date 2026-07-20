@@ -6,6 +6,8 @@ This strategy defines the expected validation for VN dashboard documentation, AP
 
 ## Required Backend Tests
 
+Phase 4.12E-3 deterministic coverage includes symbol row normalization, 5/20/60 completeness, null/zero sign counts, accepted-row streak breaks, adjacent nonzero reversal, inclusive percentiles, population z-scores, unusual thresholds, deterministic extrema, rolling gaps, empty analytics, Pydantic/OpenAPI exposure, and cache/single-flight regressions. Frontend coverage includes digit-suffix API normalization, zero requests while closed, one request on open, cancellation and stale-response ownership on ticker switch, retained same-ticker refresh, local-control no-refetch, finite/null-safe canonical metric modeling, URL restoration, charts, and sortable table behavior. Runtime smoke is optional and must not replace deterministic evidence.
+
 Run these before a Phase 0/1/2/3 runtime milestone commit:
 
 ```powershell

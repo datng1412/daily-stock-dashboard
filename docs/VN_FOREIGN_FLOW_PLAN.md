@@ -1,6 +1,6 @@
 # Vietnam Foreign Flow Product, Data, and Delivery Plan
 
-Status: Phase 4.12E-2 implements the current-membership VN30 daily aggregate and workspace scope; runtime acceptance remains inconclusive because both bounded launcher attempts exited before HTTP readiness
+Status: Phase 4.12E-3 implements deterministic, on-demand single-symbol analytics over at most 60 accepted SSI DailyStockPrice sessions; runtime smoke was intentionally skipped and the Phase 4.12E-2 runtime follow-up remains deferred
 
 Phase: 4.12-PLAN
 
@@ -654,18 +654,20 @@ Explicit exclusions: advanced alert engine, sector heatmap, historical membershi
 - Dependencies: HOSE universe, bulk/scale, persistence decisions.
 - Acceptance: measured safe provider budget and coverage-aware result; otherwise HOSE remains unavailable.
 
-### Phase 4.13A - Symbol and watchlist visualization (L)
+### Phase 4.12E-3 - On-demand symbol analytics (implemented)
 
-- Goal/value: implement the four-block product with an aligned neutral chart.
-- Backend: no new authority; consume 4.12 APIs.
-- Frontend: summary, rankings, table, symbol chart/history, mobile layout and accessibility.
-- Tests: loading/partial/stale/unavailable/closed, null not zero, source/finality, navigation/state preservation, chart alignment.
-- Risks: density and overinterpretation.
-- Exclusions: predictions, new data source, alert engine.
-- Dependencies: 4.12D/E and stable schemas.
-- Acceptance: users can scan, compare, inspect, and return without losing state; no more than four primary blocks.
+- The existing symbol-history response now adds separate value and volume analytics for 5/20/60 sessions, accepted-row streaks, adjacent nonzero reversals, extrema, rolling 5/20 sums, and 20/60 comparison statistics.
+- Signed and absolute percentiles use `100 * count(sample <= latest) / sample_count`; z-score uses `(latest - mean) / population_standard_deviation`. Comparison needs at least five finite observations. `elevated` means 60-session absolute percentile is at least 90 or absolute 60-session z-score is at least 2.
+- The frontend makes zero symbol-history requests until `Mở phân tích chi tiết` is selected. The open panel owns one cancellable 60-session request; metric, summary window, chart mode/range, and table sorting are local and do not refetch.
+- Chart modes are net, buy/sell, cumulative, and rolling. The shared table shows date, buy, sell, net, rolling 5/20, and row state. Positive signed values are green, negative red, zero neutral, and null unavailable.
+- This is completed-session inspection only. It adds no current-session claim, price/flow inference, alert, provider, fallback, polling, or stream. Deterministic tests are the acceptance evidence; optional runtime smoke was skipped.
 
-### Phase 4.13B - Alerts and advanced analytics (XL)
+### Phase 4.13A - Price, liquidity, and foreign-flow context (future)
+
+- Goal/value: evaluate price, liquidity, and foreign-flow context after explicit data-ownership and denominator gates.
+- Status: not implemented. No DailyOhlc join, liquidity ratio, traded-value materiality, correlation, prediction, or recommendation exists in Phase 4.12E-3.
+
+### Phase 4.13B - Foreign-flow alerts after finality and dedup gates (future)
 
 - Goal/value: monitor meaningful changes with bounded noise.
 - Backend/frontend: approved foreign-flow alert types, configuration UI, history/links, optional P1 analytics.

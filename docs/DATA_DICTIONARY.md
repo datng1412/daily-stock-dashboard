@@ -10,6 +10,16 @@ Conventions:
 - Nullable means the field may be `null` or absent when source data is unavailable.
 - Missing lists should be `[]`.
 - Missing objects should be `null`.
+
+## Symbol foreign-flow analytics
+
+- `analytics.max_sessions`: fixed bound `60`; `observed_sessions` counts accepted provider rows used.
+- `analytics.value` / `analytics.volume`: independent net-value (VND) and net-volume (shares) families.
+- `windows.{5,20,60}`: requested/observed/covered counts, completeness, dates, net sum, average, average absolute net, sign counts, and deterministic most-recent extrema.
+- `current_streak`: consecutive accepted provider rows from the latest row; null breaks the streak, zero yields `none`, and dates are explicit.
+- `latest_reversal`: most recent adjacent accepted rows whose finite nonzero signs differ; otherwise `null`.
+- `comparison`: 20/60 sample counts, averages, inclusive signed/absolute percentiles, population z-scores, and `unusual_flow_state` with machine-readable basis.
+- `rolling_series`: date-aligned 5/20-session net sums for value and volume. A window with any missing net remains `null`.
 - Diagnostics fields are for debugging and should not become primary metric rows.
 - Frontend display formatting is UI-only. Raw API price fields remain VND/share numeric values; VN price-like fields are displayed in board-style thousand-VND units with two decimals and no suffix, for example `72,100` renders as `72.10`. Share-volume fields may render with `K`/`M` suffixes, and VND trading-value fields may render with `K`/`M`/`B`/`T` suffixes. Tooltips/titles may expose the raw VND or share count.
 - Frontend directional coloring is UI-only. Daily/latest price and `price_vs_reference_pct` are colored by comparing SSI DailyOhlc close/latest price with SSI DailyStockPrice `reference_price`, `ceiling_price`, and `floor_price`: ceiling is purple/magenta, floor is blue/cyan, reference/equal is dedicated yellow, above reference is green, below reference is red, and missing/non-positive inputs are neutral. Trade-tape zero change uses the same reference yellow. Raw API values and field ownership do not change.

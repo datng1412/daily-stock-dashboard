@@ -8,6 +8,10 @@ The Vietnam dashboard is a data-quality-first market inspection workspace for VN
 
 This is not an AI stock advisor. It does not provide buy, sell, hold, target-price, portfolio, or order-placement recommendations. The product is a market-data quality dashboard.
 
+## Phase 4.12E-3 — On-demand symbol foreign-flow inspection
+
+Users can explicitly open a selected ticker's completed-session foreign-flow history. The workspace makes no history request before that action. The panel separates value and volume, exposes latest and 5/20/60-session coverage, neutral streak/reversal/distribution/extrema context, and provides net, buy/sell, cumulative, and rolling views plus a sortable session table. Positive/negative colors describe signed historical values only. Missing data stays visible and does not become zero. The feature does not relate flow to price, claim current-session activity, trigger alerts, predict outcomes, or recommend an action.
+
 The product should answer:
 
 * What is the current official daily market-data state for this ticker?

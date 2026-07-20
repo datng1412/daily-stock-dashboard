@@ -10,6 +10,10 @@ Global rules:
 - Mozyfin is disabled for VN runtime.
 - KBS is legacy optional only and disabled by default.
 - News is disabled until a separate provider exists.
+
+## Symbol foreign-flow history and analytics
+
+`GET /api/v1/stocks/vn/foreign-flow/symbol/{ticker}` accepts the existing recent-session or paired date-range request. The frontend inspection path uses `limit=60`. The response additively includes optional `analytics` with separate value/volume 5/20/60 statistics and date-aligned rolling 5/20 series. Existing clients may ignore the field. Cache, single-flight, force-refresh, stale-if-error, sanitization, and provider ownership remain unchanged; there is no new endpoint and no current-session or polling behavior.
 - Missing object data returns `null`.
 - Missing list data returns `[]`.
 - Live-provider statuses use `ok`, `unavailable`, or `disabled`.

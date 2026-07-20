@@ -10,6 +10,17 @@ Rules that apply to every state:
 - Optional live sections render only when real data exists.
 - Missing object data renders as `null`.
 - Missing list data renders as `[]`.
+
+## Symbol foreign-flow inspection
+
+- **Closed:** ticker selection only highlights the workspace; zero history requests and no hidden loading state.
+- **Loading:** after `Mở phân tích chi tiết`, show the ticker-specific loading copy without numeric placeholders.
+- **Updating:** retain the same-ticker successful result while an explicit retry/force refresh runs.
+- **Ready/partial/stale:** show usable rows, exact coverage, incomplete-window labels, source/finality, and stale disclosure. Null remains unavailable.
+- **Empty:** distinguish a valid empty result from failure and do not render fake summaries or chart points.
+- **Unavailable:** show a retry action and no numeric analytics.
+
+Panel URL state uses `ticker`, `inspect`, `symbolMetric`, `symbolWindow`, `symbolRange`, and `symbolChart`. Metric, window, 20/40/60 range, chart mode, and table sorting are local presentation controls and make zero additional requests. Signed positive/negative/zero/null states use green/red/neutral/unavailable styling plus numeric/text labels; color is not the only cue.
 - Endpoint attempts, HTTP status, raw provider error summaries, stale-date details, and retryability belong in diagnostics, not primary metric rows.
 - User-facing copy must stay neutral and must not become investment advice.
 

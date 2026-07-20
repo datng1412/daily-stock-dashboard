@@ -4,6 +4,12 @@
 
 This document defines the public data contract for the VN dashboard and company research page. It is intentionally data-quality-first: valid daily SSI data should remain visible even when optional live or enrichment sections are unavailable.
 
+## On-demand symbol foreign-flow analytics (Phase 4.12E-3)
+
+`GET /api/v1/stocks/vn/foreign-flow/symbol/{ticker}?limit=60` keeps its existing rows, windows, latest, request, coverage, source, finality, freshness, and failure fields and additively exposes optional `analytics`. Analytics use only the last 60 normalized accepted SSI DailyStockPrice rows and keep value and volume families separate. Each family contains latest, 5/20/60 windows, accepted-row current streak, latest adjacent nonzero reversal, 20/60 comparison statistics, and extrema; `rolling_series` contains null-aware 5/20 sums.
+
+Missing net values remain `null`: they do not become zero, complete a window, extend a streak, form a reversal, or fill a rolling window. Percentile is inclusive rank, `100 * count(sample <= latest) / N`, separately for signed and absolute values. Z-score is `(latest - mean) / population_standard_deviation`; both require at least five finite observations and zero deviation returns `null`. `unusual_flow_state=elevated` requires absolute 60-session percentile `>=90` or absolute 60-session z-score `>=2`. The contract is completed-session `daily_available` inspection only; it makes no current-session, price/flow, liquidity, alert, or predictive claim.
+
 ## Completed-session 1-minute chart history (Phase 4.11C)
 
 `GET /api/v1/stocks/vn/intraday-chart?ticker=FPT&interval=1m&date=YYYY-MM-DD` returns one completed or current Vietnam date from SSI `IntradayOhlc`. Only `1m` is accepted; dates after the current `Asia/Ho_Chi_Minh` date return the endpoint-specific 422 contract. `ready` contains usable sparse bars; a current date without usable bars is `unavailable`; `failed` means a nonempty response had no usable bars. Stale-if-error data remains `ready` and is disclosed by `cache.is_stale=true` plus `freshness=stale`.
