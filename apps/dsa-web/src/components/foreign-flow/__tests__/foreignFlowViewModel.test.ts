@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { VietnamForeignFlowBatchSymbol } from '../../../api/stocks';
 import {
+  buildForeignFlowWorkspaceViewModel,
   buildForeignFlowRankings,
   filterForeignFlowRows,
   foreignFlowWindowDisplay,
@@ -143,5 +144,77 @@ describe('foreign-flow view model', () => {
     expect(filterForeignFlowRows(rows, 'sell', '20', 'value').map((item) => item.ticker)).toEqual(['CCC']);
     expect(sortForeignFlowRows(rows, '20', 'desc', 'value').map((item) => item.ticker)).toEqual(['AAA', 'CCC', 'BBB']);
     expect(sortForeignFlowRows(rows, '20', 'asc', 'value').map((item) => item.ticker)).toEqual(['CCC', 'AAA', 'BBB']);
+  });
+
+  it('builds selected-window breadth with zero, stale, incomplete, and unavailable rows', () => {
+    const workspace = buildForeignFlowWorkspaceViewModel([
+      row('BUY', { foreignNetValue5d: 100 }),
+      row('SELL', { foreignNetValue5d: -50, coveredSessions5d: 3, complete5d: false }),
+      row('ZERO', { foreignNetValue5d: 0 }),
+      row('STALE', { foreignNetValue5d: 25, dataState: 'stale', freshness: 'stale' }),
+      row('NONE', { foreignNetValue5d: null }),
+    ], '5', 'value');
+
+    expect(workspace.breadth).toEqual({
+      buyCount: 2,
+      sellCount: 1,
+      zeroCount: 1,
+      unavailableCount: 1,
+      usableCount: 4,
+      normalizedCount: 5,
+      coverageRatio: 0.8,
+      completeCount: 3,
+      incompleteCount: 1,
+      staleCount: 1,
+    });
+  });
+
+  it('calculates concentration over absolute selected flow with deterministic ticker ties', () => {
+    const workspace = buildForeignFlowWorkspaceViewModel([
+      row('BBB', { foreignNetValue20d: 40 }),
+      row('AAA', { foreignNetValue20d: -40 }),
+      row('CCC', { foreignNetValue20d: 20 }),
+      row('ZERO', { foreignNetValue20d: 0 }),
+      row('NONE', { foreignNetValue20d: null }),
+    ], '20', 'value');
+
+    expect(workspace.concentration).toMatchObject({
+      eligibleCount: 3,
+      totalAbsoluteFlow: 100,
+      top1AbsoluteShare: 0.4,
+      top3AbsoluteShare: 1,
+      top5AbsoluteShare: 1,
+    });
+    expect(workspace.treemapItems.map((item) => item.ticker)).toEqual(['AAA', 'BBB', 'CCC']);
+    expect(workspace.buyers.map((item) => item.ticker)).toEqual(['BBB', 'CCC']);
+    expect(workspace.sellers.map((item) => item.ticker)).toEqual(['AAA']);
+    expect(workspace.selectedRows.find((item) => item.ticker === 'BBB')?.shareOfAbsoluteFlow).toBe(0.4);
+  });
+
+  it('keeps explicit zero usable but excludes it from treemap and bars', () => {
+    const workspace = buildForeignFlowWorkspaceViewModel([
+      row('ZERO', { foreignNetVolume: 0 }),
+      row('NONE', { foreignNetVolume: null }),
+    ], 'today', 'volume');
+
+    expect(workspace.usableRows.map((item) => item.ticker)).toEqual(['ZERO']);
+    expect(workspace.breadth.zeroCount).toBe(1);
+    expect(workspace.treemapItems).toEqual([]);
+    expect(workspace.buyers).toEqual([]);
+    expect(workspace.sellers).toEqual([]);
+    expect(workspace.concentration.totalAbsoluteFlow).toBeNull();
+  });
+
+  it('rejects every non-finite selected value from derived visualization models', () => {
+    const workspace = buildForeignFlowWorkspaceViewModel([
+      row('NAN', { foreignNetValue: Number.NaN }),
+      row('POS', { foreignNetValue: Number.POSITIVE_INFINITY }),
+      row('NEG', { foreignNetValue: Number.NEGATIVE_INFINITY }),
+    ], 'today', 'value');
+
+    expect(workspace.breadth.unavailableCount).toBe(3);
+    expect(workspace.treemapItems).toEqual([]);
+    expect(workspace.concentration.totalAbsoluteFlow).toBeNull();
+    expect(JSON.stringify(workspace)).not.toMatch(/NaN|Infinity/);
   });
 });

@@ -6,10 +6,12 @@ import type {
 
 export type ForeignFlowWindow = 'today' | '5' | '20';
 export type ForeignFlowMetric = 'value' | 'volume';
-export type ForeignFlowSort = 'ticker' | 'latest' | '5' | '20' | 'date' | 'state';
+export type ForeignFlowSort = 'ticker' | 'selected' | 'absolute' | 'share' | 'latest' | '5' | '20' | 'date' | 'state';
 export type ForeignFlowDirection = 'asc' | 'desc';
 export type ForeignFlowFilter = 'all' | 'buy' | 'sell' | 'no-data';
+export type ForeignFlowView = 'overview' | 'detailed';
 export type ForeignFlowWindowState = 'ready' | 'incomplete' | 'unavailable' | 'empty' | 'stale';
+export type ForeignFlowSign = 'buy' | 'sell' | 'zero' | 'unavailable';
 
 export type ForeignFlowWindowDisplay = {
   value: number | null;
@@ -20,6 +22,49 @@ export type ForeignFlowWindowDisplay = {
   stale: boolean;
   state: ForeignFlowWindowState;
   endDate: string | null;
+};
+
+export type ForeignFlowWorkspaceRow = {
+  ticker: string;
+  sourceRow: VietnamForeignFlowBatchSymbol;
+  display: ForeignFlowWindowDisplay;
+  value: number | null;
+  magnitude: number;
+  sign: ForeignFlowSign;
+  shareOfAbsoluteFlow: number | null;
+};
+
+export type ForeignFlowBreadthModel = {
+  buyCount: number;
+  sellCount: number;
+  zeroCount: number;
+  unavailableCount: number;
+  usableCount: number;
+  normalizedCount: number;
+  coverageRatio: number | null;
+  completeCount: number;
+  incompleteCount: number;
+  staleCount: number;
+};
+
+export type ForeignFlowConcentrationModel = {
+  eligibleCount: number;
+  totalAbsoluteFlow: number | null;
+  top1AbsoluteShare: number | null;
+  top3AbsoluteShare: number | null;
+  top5AbsoluteShare: number | null;
+};
+
+export type ForeignFlowWorkspaceViewModel = {
+  selectedRows: ForeignFlowWorkspaceRow[];
+  usableRows: ForeignFlowWorkspaceRow[];
+  unavailableRows: ForeignFlowWorkspaceRow[];
+  breadth: ForeignFlowBreadthModel;
+  concentration: ForeignFlowConcentrationModel;
+  treemapItems: ForeignFlowWorkspaceRow[];
+  buyers: ForeignFlowWorkspaceRow[];
+  sellers: ForeignFlowWorkspaceRow[];
+  selectedSummary: ReturnType<typeof summarizeForeignFlow>;
 };
 
 const finite = (value?: number | null): value is number => typeof value === 'number' && Number.isFinite(value);
@@ -114,6 +159,13 @@ export const foreignFlowWindowStateLabel = (
     : `Thiếu dữ liệu ${display.requestedSessions} phiên`;
 };
 
+const signForDisplay = (display: ForeignFlowWindowDisplay): ForeignFlowSign => {
+  if (!display.usable || display.value === null) return 'unavailable';
+  if (display.value > 0) return 'buy';
+  if (display.value < 0) return 'sell';
+  return 'zero';
+};
+
 export const buildForeignFlowRankings = (
   rows: VietnamForeignFlowBatchSymbol[],
   window: ForeignFlowWindow,
@@ -182,6 +234,93 @@ export const summarizeForeignFlow = (
   };
 };
 
+const absoluteShare = (
+  sortedRows: ForeignFlowWorkspaceRow[],
+  count: number,
+  denominator: number,
+): number | null => {
+  if (!(denominator > 0)) return null;
+  const numerator = sortedRows.slice(0, count).reduce((total, row) => total + row.magnitude, 0);
+  const share = numerator / denominator;
+  return Number.isFinite(share) ? share : null;
+};
+
+export const buildForeignFlowWorkspaceViewModel = (
+  rows: VietnamForeignFlowBatchSymbol[],
+  window: ForeignFlowWindow,
+  metric: ForeignFlowMetric,
+  topN = 5,
+): ForeignFlowWorkspaceViewModel => {
+  const selectedRowsWithoutShare: ForeignFlowWorkspaceRow[] = rows.map((sourceRow) => {
+    const display = foreignFlowWindowDisplay(sourceRow, window, metric);
+    const value = display.usable ? display.value : null;
+    const magnitude = value === null ? 0 : Math.abs(value);
+    return {
+      ticker: sourceRow.ticker,
+      sourceRow,
+      display,
+      value,
+      magnitude: Number.isFinite(magnitude) ? magnitude : 0,
+      sign: signForDisplay(display),
+      shareOfAbsoluteFlow: null,
+    };
+  });
+  const nonZeroRows = selectedRowsWithoutShare.filter((row) => row.value !== null && row.value !== 0);
+  const totalAbsoluteFlow = nonZeroRows.reduce((total, row) => total + row.magnitude, 0);
+  const safeTotalAbsoluteFlow = Number.isFinite(totalAbsoluteFlow) && totalAbsoluteFlow > 0
+    ? totalAbsoluteFlow
+    : null;
+  const selectedRows = selectedRowsWithoutShare.map((row) => ({
+    ...row,
+    shareOfAbsoluteFlow: safeTotalAbsoluteFlow !== null && row.value !== null
+      ? row.magnitude / safeTotalAbsoluteFlow
+      : null,
+  }));
+  const usableRows = selectedRows.filter((row) => row.display.usable);
+  const unavailableRows = selectedRows.filter((row) => !row.display.usable);
+  const eligibleRows = selectedRows
+    .filter((row) => row.value !== null && row.value !== 0)
+    .sort((left, right) => right.magnitude - left.magnitude || left.ticker.localeCompare(right.ticker));
+  const buyers = selectedRows
+    .filter((row) => row.value !== null && row.value > 0)
+    .sort((left, right) => (right.value as number) - (left.value as number) || left.ticker.localeCompare(right.ticker))
+    .slice(0, Math.max(0, topN));
+  const sellers = selectedRows
+    .filter((row) => row.value !== null && row.value < 0)
+    .sort((left, right) => (left.value as number) - (right.value as number) || left.ticker.localeCompare(right.ticker))
+    .slice(0, Math.max(0, topN));
+  const normalizedCount = selectedRows.length;
+
+  return {
+    selectedRows,
+    usableRows,
+    unavailableRows,
+    breadth: {
+      buyCount: selectedRows.filter((row) => row.sign === 'buy').length,
+      sellCount: selectedRows.filter((row) => row.sign === 'sell').length,
+      zeroCount: selectedRows.filter((row) => row.sign === 'zero').length,
+      unavailableCount: unavailableRows.length,
+      usableCount: usableRows.length,
+      normalizedCount,
+      coverageRatio: normalizedCount ? usableRows.length / normalizedCount : null,
+      completeCount: usableRows.filter((row) => row.display.complete === true).length,
+      incompleteCount: usableRows.filter((row) => row.display.state === 'incomplete').length,
+      staleCount: usableRows.filter((row) => row.display.stale).length,
+    },
+    concentration: {
+      eligibleCount: eligibleRows.length,
+      totalAbsoluteFlow: safeTotalAbsoluteFlow,
+      top1AbsoluteShare: safeTotalAbsoluteFlow === null ? null : absoluteShare(eligibleRows, 1, safeTotalAbsoluteFlow),
+      top3AbsoluteShare: safeTotalAbsoluteFlow === null ? null : absoluteShare(eligibleRows, 3, safeTotalAbsoluteFlow),
+      top5AbsoluteShare: safeTotalAbsoluteFlow === null ? null : absoluteShare(eligibleRows, 5, safeTotalAbsoluteFlow),
+    },
+    treemapItems: eligibleRows,
+    buyers,
+    sellers,
+    selectedSummary: summarizeForeignFlow(rows, window, metric),
+  };
+};
+
 export const filterForeignFlowRows = (
   rows: VietnamForeignFlowBatchSymbol[],
   filter: ForeignFlowFilter,
@@ -201,6 +340,11 @@ const sortValue = (
   metric: ForeignFlowMetric,
   selectedWindow: ForeignFlowWindow,
 ) => {
+  if (sort === 'selected') return foreignFlowWindowDisplay(row, selectedWindow, metric).value;
+  if (sort === 'absolute' || sort === 'share') {
+    const value = foreignFlowWindowDisplay(row, selectedWindow, metric).value;
+    return value === null ? null : Math.abs(value);
+  }
   if (sort === 'latest') return foreignFlowWindowDisplay(row, 'today', metric).value;
   if (sort === '5') return foreignFlowWindowDisplay(row, '5', metric).value;
   if (sort === '20') return foreignFlowWindowDisplay(row, '20', metric).value;

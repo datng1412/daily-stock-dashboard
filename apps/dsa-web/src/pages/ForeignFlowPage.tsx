@@ -2,16 +2,21 @@ import { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, RefreshCw, Users } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { AppPage, Badge, Button, EmptyState, PageHeader } from '../components/common';
-import { ForeignFlowRankings } from '../components/foreign-flow/ForeignFlowRankings';
+import { ForeignFlowBreadth } from '../components/foreign-flow/ForeignFlowBreadth';
+import { ForeignFlowConcentration } from '../components/foreign-flow/ForeignFlowConcentration';
+import { ForeignFlowDivergingBars } from '../components/foreign-flow/ForeignFlowDivergingBars';
 import { ForeignFlowScannerTable } from '../components/foreign-flow/ForeignFlowScannerTable';
 import { ForeignFlowSummaryCards } from '../components/foreign-flow/ForeignFlowSummaryCards';
+import { ForeignFlowTreemap } from '../components/foreign-flow/ForeignFlowTreemap';
 import {
+  buildForeignFlowWorkspaceViewModel,
   summarizeForeignFlow,
   type ForeignFlowDirection,
   type ForeignFlowFilter,
   type ForeignFlowMetric,
   type ForeignFlowSort,
   type ForeignFlowWindow,
+  type ForeignFlowView,
 } from '../components/foreign-flow/foreignFlowViewModel';
 import { useForeignFlowWatchlistBatch } from '../hooks/useForeignFlowWatchlistBatch';
 import { readVietnamCustomWatchlistValues } from '../utils/vietnamCustomWatchlist';
@@ -29,9 +34,10 @@ const validWindow = (value: string | null): ForeignFlowWindow => (
 );
 const validMetric = (value: string | null): ForeignFlowMetric => value === 'volume' ? 'volume' : 'value';
 const validSort = (value: string | null): ForeignFlowSort => (
-  value === 'ticker' || value === '5' || value === '20' || value === 'date' || value === 'state' ? value : 'latest'
+  value === 'ticker' || value === 'selected' || value === 'absolute' || value === 'share' || value === '5' || value === '20' || value === 'date' || value === 'state' ? value : 'selected'
 );
 const validDirection = (value: string | null): ForeignFlowDirection => value === 'asc' ? 'asc' : 'desc';
+const validView = (value: string | null): ForeignFlowView => value === 'detailed' ? 'detailed' : 'overview';
 
 const ForeignFlowPage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -43,10 +49,15 @@ const ForeignFlowPage = () => {
   const metric = validMetric(searchParams.get('metric'));
   const sort = validSort(searchParams.get('sort'));
   const direction = validDirection(searchParams.get('direction'));
+  const view = validView(searchParams.get('view'));
   const requestedTicker = normalizeVietnamTicker(searchParams.get('ticker') ?? '');
   const selectedTicker = batch.scope.tickers.includes(requestedTicker) ? requestedTicker : null;
   const selectedSummary = useMemo(
     () => batch.data ? summarizeForeignFlow(batch.data.rows, window, metric) : null,
+    [batch.data, metric, window],
+  );
+  const workspace = useMemo(
+    () => batch.data ? buildForeignFlowWorkspaceViewModel(batch.data.rows, window, metric) : null,
     [batch.data, metric, window],
   );
 
@@ -134,6 +145,17 @@ const ForeignFlowPage = () => {
                 >{option === 'value' ? 'Giá trị' : 'Khối lượng'}</button>
               ))}
             </div>
+            <div className="inline-flex rounded-lg border border-border/70 p-1" role="group" aria-label="Mức độ chi tiết">
+              {(['overview', 'detailed'] as const).map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  className={`rounded-md px-3 py-1.5 text-sm font-medium ${view === option ? 'bg-cyan/15 text-cyan' : 'text-secondary-text hover:text-foreground'}`}
+                  aria-pressed={view === option}
+                  onClick={() => updateQuery({ view: option })}
+                >{option === 'overview' ? 'Tổng quan' : 'Chi tiết'}</button>
+              ))}
+            </div>
           </div>
         </div>
       </section>
@@ -149,11 +171,24 @@ const ForeignFlowPage = () => {
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" aria-busy="true" aria-label="Đang tải dòng tiền ngoại">
           {Array.from({ length: 6 }, (_, index) => <div key={index} className="h-28 animate-pulse rounded-lg bg-elevated/60" />)}
         </div>
-      ) : batch.data ? (
+      ) : batch.data && workspace ? (
         <>
           {stateCopy ? <div className="rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-warning" role="status">{stateCopy}</div> : null}
           <ForeignFlowSummaryCards data={batch.data} window={window} metric={metric} />
-          <ForeignFlowRankings rows={batch.data.rows} window={window} metric={metric} />
+          <div className="grid items-start gap-4 lg:grid-cols-2">
+            <ForeignFlowBreadth breadth={workspace.breadth} window={window} metric={metric} />
+            <ForeignFlowConcentration concentration={workspace.concentration} window={window} metric={metric} />
+          </div>
+          <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
+            <ForeignFlowTreemap
+              items={workspace.treemapItems}
+              window={window}
+              metric={metric}
+              selectedTicker={selectedTicker}
+              onSelectTicker={(ticker) => updateQuery({ ticker })}
+            />
+            <ForeignFlowDivergingBars buyers={workspace.buyers} sellers={workspace.sellers} window={window} metric={metric} />
+          </div>
           <ForeignFlowScannerTable
             rows={batch.data.rows}
             window={window}
@@ -161,6 +196,7 @@ const ForeignFlowPage = () => {
             sort={sort}
             direction={direction}
             filter={filter}
+            view={view}
             selectedTicker={selectedTicker}
             onSort={handleSort}
             onFilter={setFilter}

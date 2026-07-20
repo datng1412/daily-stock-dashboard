@@ -100,8 +100,10 @@ describe('ForeignFlowPage', () => {
     expect(mockedBatch).toHaveBeenCalledWith(['FPT', 'HPG', 'SSI'], expect.objectContaining({ topN: 10, forceRefresh: false, signal: expect.any(AbortSignal) }));
     expect(screen.getByText('Tổng quan watchlist')).toBeInTheDocument();
     expect(screen.getByText(/Phiên thị trường:/)).toBeInTheDocument();
-    expect(screen.getByText('Top mua ròng trong watchlist')).toBeInTheDocument();
-    expect(screen.getByText('Top bán ròng trong watchlist')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Độ rộng watchlist' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Mức độ tập trung' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Bản đồ dòng tiền · Watchlist' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Dòng tiền nổi bật' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Bộ quét watchlist' })).toBeInTheDocument();
     expect(screen.getAllByRole('row')).toHaveLength(4);
     expect(mockedBatch).toHaveBeenCalledTimes(1);
@@ -116,10 +118,12 @@ describe('ForeignFlowPage', () => {
     expect(screen.getByRole('button', { name: 'Giá trị' })).toHaveAttribute('aria-pressed', 'true');
     fireEvent.click(screen.getByRole('button', { name: '5 phiên' }));
     fireEvent.click(screen.getByRole('button', { name: 'Khối lượng' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Chi tiết' }));
     fireEvent.click(screen.getByRole('button', { name: 'HPG' }));
 
     expect(window.location.search).toContain('window=5');
     expect(window.location.search).toContain('metric=volume');
+    expect(window.location.search).toContain('view=detailed');
     expect(window.location.search).toContain('ticker=HPG');
     expect(screen.getByRole('link', { name: 'Mở chi tiết mã' })).toHaveAttribute('href', '/vietnam/company/HPG');
     expect(mockedBatch).toHaveBeenCalledTimes(1);
@@ -145,7 +149,7 @@ describe('ForeignFlowPage', () => {
   it('shows a visible 30/N notice and sends one capped request', async () => {
     const tickers = Array.from({ length: 32 }, (_, index) => `T${String(index).padStart(2, '0')}`);
     window.localStorage.setItem(VIETNAM_CUSTOM_WATCHLIST_STORAGE_KEY, JSON.stringify(tickers));
-    renderPage();
+    renderPage('/foreign-flow?view=detailed');
 
     await waitFor(() => expect(mockedBatch).toHaveBeenCalledTimes(1));
     expect(mockedBatch.mock.calls[0][0]).toHaveLength(30);
@@ -165,15 +169,15 @@ describe('ForeignFlowPage', () => {
       complete: false,
       dataState: 'partial',
     }));
-    renderPage();
-    await screen.findByText('Nhiều ngày dữ liệu trong watchlist');
+    renderPage('/foreign-flow?view=detailed');
+    await screen.findByText(/Nhiều ngày kết thúc dữ liệu trong watchlist/);
 
-    expect(screen.getByText('1/2 mã')).toBeInTheDocument();
+    expect(screen.getAllByText(/1\/2 mã có dữ liệu/).length).toBeGreaterThan(0);
     expect(screen.getAllByText('0').length).toBeGreaterThan(0);
     expect(screen.getAllByLabelText('Không khả dụng').length).toBeGreaterThan(0);
     expect(screen.getByText('3/5 phiên')).toBeInTheDocument();
     expect(screen.queryByText('2/5 phiên')).not.toBeInTheDocument();
-    expect(document.body).not.toHaveTextContent(/undefined|NaN|null\/5|null\/20/);
+    expect(document.body).not.toHaveTextContent(/undefined|NaN|Infinity|null\/5|null\/20/);
     expect(screen.getByText(/Một số mã chưa có đủ dữ liệu/)).toBeInTheDocument();
   });
 
@@ -185,7 +189,7 @@ describe('ForeignFlowPage', () => {
         makeRow('HPG', 1, { foreignNetValue5d: null, coveredSessions5d: 2, complete5d: false }),
       ],
     }));
-    renderPage('/foreign-flow?window=5');
+    renderPage('/foreign-flow?window=5&view=detailed');
 
     await screen.findByRole('heading', { name: 'Bộ quét watchlist' });
     expect(screen.getByLabelText(/Nguồn: SSI DailyStockPrice.*daily_available/)).toHaveTextContent('Dữ liệu theo phiên');
@@ -195,15 +199,16 @@ describe('ForeignFlowPage', () => {
     expect(screen.getByText('Chưa đủ 5 phiên')).toBeInTheDocument();
     expect(screen.getByText('Thiếu dữ liệu 5 phiên')).toBeInTheDocument();
     const scanner = screen.getByRole('heading', { name: 'Bộ quét watchlist' }).closest('section') as HTMLElement;
-    expect(within(scanner).getByRole('columnheader', { name: /NN ròng/ })).toHaveAttribute('aria-sort', 'descending');
+    expect(within(scanner).getByRole('columnheader', { name: /NN 5P/ })).toHaveAttribute('aria-sort', 'descending');
+    expect(within(scanner).getByRole('columnheader', { name: /^NN ròng/ })).toHaveAttribute('aria-sort', 'none');
     expect(within(scanner).getByRole('columnheader', { name: 'NN mua' })).not.toHaveAttribute('aria-sort');
     expect(within(scanner).getByRole('columnheader', { name: 'NN bán' })).not.toHaveAttribute('aria-sort');
-    expect(document.body).not.toHaveTextContent(/undefined|NaN|null\/5|null\/20/);
+    expect(document.body).not.toHaveTextContent(/undefined|NaN|Infinity|null\/5|null\/20/);
   });
 
   it('sorts and filters locally without additional requests', async () => {
     window.localStorage.setItem(VIETNAM_CUSTOM_WATCHLIST_STORAGE_KEY, JSON.stringify(['FPT', 'HPG', 'SSI']));
-    renderPage();
+    renderPage('/foreign-flow?view=detailed');
     await waitFor(() => expect(mockedBatch).toHaveBeenCalledTimes(1));
 
     fireEvent.change(screen.getByLabelText('Lọc trạng thái dòng tiền'), { target: { value: 'sell' } });
