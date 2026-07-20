@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [new feature] Add watchlist-only foreign-flow breadth, concentration, deterministic treemap, shared-scale buy/sell bars, and overview/detail scanner views.
+- [improvement] Show paired value/volume daily summaries and selected-window coverage without inventing cumulative 5/20-session buy or sell totals.
+- [test] Cover foreign-flow visualization derivation, finite-number guards, deterministic treemap geometry, shared bar scaling, accessibility, and request-free presentation changes.
 - [fix] Correct foreign-flow 5/20-session frontend field mapping, selected-window states, unavailable rendering, latest-window wording, and scanner sorting accessibility.
 - [test] Cover foreign-flow digit-suffixed API normalization, invalid coverage and number guards, selected-window completeness, units, and active sort semantics.
 - [new feature] Add a dedicated `/foreign-flow` watchlist workspace with null-aware summaries, value/volume rankings, URL-owned controls, and a sortable scanner.
