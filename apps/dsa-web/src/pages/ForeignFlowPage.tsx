@@ -8,6 +8,9 @@ import { ForeignFlowDivergingBars } from '../components/foreign-flow/ForeignFlow
 import { ForeignFlowScannerTable } from '../components/foreign-flow/ForeignFlowScannerTable';
 import { ForeignFlowSummaryCards } from '../components/foreign-flow/ForeignFlowSummaryCards';
 import { ForeignFlowTreemap } from '../components/foreign-flow/ForeignFlowTreemap';
+import { ForeignFlowSymbolAnalyticsPanel, type SymbolForeignFlowWindow } from '../components/foreign-flow/ForeignFlowSymbolAnalyticsPanel';
+import type { SymbolForeignFlowChartMode } from '../components/foreign-flow/ForeignFlowSymbolHistoryChart';
+import type { SymbolForeignFlowMetric, SymbolForeignFlowRange } from '../components/foreign-flow/foreignFlowSymbolAnalyticsModel';
 import { Vn30ForeignFlowHistoryChart, type Vn30ForeignFlowChartMode, type Vn30ForeignFlowChartRange } from '../components/foreign-flow/Vn30ForeignFlowHistoryChart';
 import { Vn30ForeignFlowSummary } from '../components/foreign-flow/Vn30ForeignFlowSummary';
 import {
@@ -22,6 +25,7 @@ import {
 } from '../components/foreign-flow/foreignFlowViewModel';
 import { useForeignFlowWatchlistBatch } from '../hooks/useForeignFlowWatchlistBatch';
 import { useForeignFlowVn30 } from '../hooks/useForeignFlowVn30';
+import { useForeignFlowSymbolAnalytics } from '../hooks/useForeignFlowSymbolAnalytics';
 import type { VietnamForeignFlowBatchResponse, VietnamVn30ForeignFlowResponse } from '../api/stocks';
 import { readVietnamCustomWatchlistValues } from '../utils/vietnamCustomWatchlist';
 import { getVietnamMarketPhase } from '../utils/vietnamMarketPhase';
@@ -47,6 +51,10 @@ const validChartMode = (value: string | null): Vn30ForeignFlowChartMode => (
   value === 'buy-sell' || value === 'cumulative' || value === 'breadth' ? value : 'net'
 );
 const validChartRange = (value: string | null): Vn30ForeignFlowChartRange => value === '5' || value === '10' ? value : '20';
+const validSymbolMetric = (value: string | null): SymbolForeignFlowMetric => value === 'volume' ? 'volume' : 'value';
+const validSymbolRange = (value: string | null): SymbolForeignFlowRange => value === '20' || value === '40' ? Number(value) as 20 | 40 : 60;
+const validSymbolChart = (value: string | null): SymbolForeignFlowChartMode => value === 'buy-sell' || value === 'cumulative' || value === 'rolling' ? value : 'net';
+const validSymbolWindow = (value: string | null): SymbolForeignFlowWindow => value === '5' || value === '20' || value === '60' ? value : 'latest';
 
 const vn30AsBatchResponse = (
   data: VietnamVn30ForeignFlowResponse,
@@ -107,6 +115,10 @@ const ForeignFlowPage = () => {
   const view = validView(searchParams.get('view'));
   const chartMode = validChartMode(searchParams.get('chart'));
   const chartRange = validChartRange(searchParams.get('range'));
+  const symbolMetric = validSymbolMetric(searchParams.get('symbolMetric'));
+  const symbolRange = validSymbolRange(searchParams.get('symbolRange'));
+  const symbolChart = validSymbolChart(searchParams.get('symbolChart'));
+  const symbolWindow = validSymbolWindow(searchParams.get('symbolWindow'));
   const vn30BatchData = useMemo(() => vn30.data ? vn30AsBatchResponse(vn30.data, metric) : null, [metric, vn30.data]);
   const batch = scope === 'vn30'
     ? { ...vn30, data: vn30BatchData, scope: { tickers: vn30.data?.membership.memberTickers ?? [], limited: false, totalNormalizedCount: vn30.data?.membership.memberCount ?? 0, invalidCount: 0 } }
@@ -114,6 +126,8 @@ const ForeignFlowPage = () => {
   const scopeLabel = scope === 'vn30' ? 'VN30' : 'watchlist';
   const requestedTicker = normalizeVietnamTicker(searchParams.get('ticker') ?? '');
   const selectedTicker = batch.scope.tickers.includes(requestedTicker) ? requestedTicker : null;
+  const inspectOpen = searchParams.get('inspect') === '1' && Boolean(selectedTicker);
+  const symbolAnalytics = useForeignFlowSymbolAnalytics(selectedTicker, inspectOpen);
   const selectedSummary = useMemo(
     () => batch.data ? summarizeForeignFlow(batch.data.rows, window, metric) : null,
     [batch.data, metric, window],
@@ -180,7 +194,7 @@ const ForeignFlowPage = () => {
                   type="button"
                   className={`rounded-md px-3 py-1.5 text-sm font-medium ${scope === option ? 'bg-cyan/15 text-cyan' : 'text-secondary-text hover:text-foreground'}`}
                   aria-pressed={scope === option}
-                  onClick={() => updateQuery({ scope: option, ticker: null })}
+                  onClick={() => updateQuery({ scope: option, ticker: null, inspect: null })}
                 >{option === 'watchlist' ? 'Watchlist' : 'VN30'}</button>
               ))}
             </div>
@@ -291,6 +305,25 @@ const ForeignFlowPage = () => {
             onSelectTicker={(ticker) => updateQuery({ ticker })}
             scopeLabel={scopeLabel}
           />
+          {selectedTicker && !inspectOpen ? <div className="flex justify-end"><Button variant="outline" onClick={() => updateQuery({ inspect: '1' })}>Mở phân tích chi tiết · {selectedTicker}</Button></div> : null}
+          {selectedTicker && inspectOpen ? <ForeignFlowSymbolAnalyticsPanel
+            ticker={selectedTicker}
+            data={symbolAnalytics.data}
+            loading={symbolAnalytics.loading}
+            updating={symbolAnalytics.updating}
+            error={symbolAnalytics.error}
+            metric={symbolMetric}
+            range={symbolRange}
+            mode={symbolChart}
+            window={symbolWindow}
+            onMetricChange={(value) => updateQuery({ symbolMetric: value })}
+            onRangeChange={(value) => updateQuery({ symbolRange: String(value) })}
+            onModeChange={(value) => updateQuery({ symbolChart: value })}
+            onWindowChange={(value) => updateQuery({ symbolWindow: value })}
+            onRetry={symbolAnalytics.retry}
+            onForceRefresh={symbolAnalytics.forceRefresh}
+            onClose={() => updateQuery({ inspect: null })}
+          /> : null}
         </>
       ) : (
         <EmptyState

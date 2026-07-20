@@ -1,16 +1,17 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { BrowserRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { stocksApi, type VietnamForeignFlowBatchResponse, type VietnamForeignFlowBatchSymbol, type VietnamVn30ForeignFlowResponse } from '../../api/stocks';
+import { stocksApi, type VietnamForeignFlowBatchResponse, type VietnamForeignFlowBatchSymbol, type VietnamForeignFlowSymbolHistoryResponse, type VietnamVn30ForeignFlowResponse } from '../../api/stocks';
 import { VIETNAM_CUSTOM_WATCHLIST_STORAGE_KEY } from '../../utils/vietnamCustomWatchlist';
 import ForeignFlowPage from '../ForeignFlowPage';
 
 vi.mock('../../api/stocks', () => ({
-  stocksApi: { getVietnamForeignFlowBatch: vi.fn(), getVietnamVn30ForeignFlow: vi.fn() },
+  stocksApi: { getVietnamForeignFlowBatch: vi.fn(), getVietnamVn30ForeignFlow: vi.fn(), getVietnamForeignFlowSymbolHistory: vi.fn() },
 }));
 
 const mockedBatch = vi.mocked(stocksApi.getVietnamForeignFlowBatch);
 const mockedVn30 = vi.mocked(stocksApi.getVietnamVn30ForeignFlow);
+const mockedSymbolHistory = vi.mocked(stocksApi.getVietnamForeignFlowSymbolHistory);
 
 const makeRow = (ticker: string, index: number, overrides: Partial<VietnamForeignFlowBatchSymbol> = {}): VietnamForeignFlowBatchSymbol => ({
   ticker,
@@ -142,9 +143,22 @@ beforeEach(() => {
   window.history.pushState({}, '', '/foreign-flow');
   mockedBatch.mockImplementation(async (tickers) => makeResponse(tickers));
   mockedVn30.mockResolvedValue(makeVn30Response());
+  mockedSymbolHistory.mockImplementation(async (ticker) => ({ ticker, rows: [], dataState: 'empty', coverage: { coveredSessions: 0 } } as unknown as VietnamForeignFlowSymbolHistoryResponse));
 });
 
 describe('ForeignFlowPage', () => {
+  it('fetches symbol history only after the explicit inspection action and keeps local controls request-free', async () => {
+    window.localStorage.setItem(VIETNAM_CUSTOM_WATCHLIST_STORAGE_KEY, JSON.stringify(['FPT']));
+    renderPage('/foreign-flow?ticker=FPT');
+    await waitFor(() => expect(mockedBatch).toHaveBeenCalledTimes(1));
+    expect(mockedSymbolHistory).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Mở phân tích chi tiết · FPT' }));
+    await waitFor(() => expect(mockedSymbolHistory).toHaveBeenCalledTimes(1));
+    expect(window.location.search).toContain('inspect=1');
+    fireEvent.click(within(screen.getByRole('group', { name: 'Đơn vị phân tích mã' })).getByRole('button', { name: 'Khối lượng' }));
+    fireEvent.click(within(screen.getByRole('group', { name: 'Khoảng lịch sử mã' })).getByRole('button', { name: '20 phiên' }));
+    expect(mockedSymbolHistory).toHaveBeenCalledTimes(1);
+  });
   it('renders an empty-watchlist CTA without issuing a request', () => {
     renderPage();
 

@@ -517,6 +517,187 @@ export type VietnamWatchlistResponse = {
 
 export type VietnamForeignFlowDataState = 'ready' | 'partial' | 'stale' | 'empty' | 'unavailable';
 
+export type VietnamForeignFlowHistoryRow = {
+  tradingDate: string;
+  foreignBuyVolume?: number | null;
+  foreignSellVolume?: number | null;
+  foreignNetVolume?: number | null;
+  foreignBuyValue?: number | null;
+  foreignSellValue?: number | null;
+  foreignNetValue?: number | null;
+};
+
+export type VietnamForeignFlowHistoryWindow = {
+  requestedSessions: number;
+  coveredSessions: number;
+  complete: boolean;
+  startDate?: string | null;
+  endDate?: string | null;
+  cumulativeForeignNetVolume?: number | null;
+  cumulativeForeignNetValue?: number | null;
+  netVolumeContributingSessions: number;
+  netValueContributingSessions: number;
+  positiveNetVolumeSessions: number;
+  negativeNetVolumeSessions: number;
+  zeroNetVolumeSessions: number;
+  nullNetVolumeSessions: number;
+  positiveNetValueSessions: number;
+  negativeNetValueSessions: number;
+  zeroNetValueSessions: number;
+  nullNetValueSessions: number;
+};
+
+export type VietnamForeignFlowAnalyticsEvent = { value: number; tradingDate: string };
+export type VietnamForeignFlowAnalyticsWindow = {
+  requestedSessions: 5 | 20 | 60;
+  observedSessions: number;
+  coveredSessions: number;
+  complete: boolean;
+  startDate?: string | null;
+  endDate?: string | null;
+  netSum?: number | null;
+  averageNet?: number | null;
+  averageAbsoluteNet?: number | null;
+  netBuySessionCount: number;
+  netSellSessionCount: number;
+  zeroSessionCount: number;
+  unavailableSessionCount: number;
+  maxNetBuy?: VietnamForeignFlowAnalyticsEvent | null;
+  maxNetSell?: VietnamForeignFlowAnalyticsEvent | null;
+};
+export type VietnamForeignFlowAnalyticsFamily = {
+  latest?: { value?: number | null; tradingDate: string } | null;
+  windows: Record<'5' | '20' | '60', VietnamForeignFlowAnalyticsWindow>;
+  currentStreak: {
+    direction: 'net_buy' | 'net_sell' | 'none' | 'unavailable';
+    sessions: number;
+    startDate?: string | null;
+    endDate?: string | null;
+    basis: 'accepted_provider_rows';
+  };
+  latestReversal?: {
+    fromDirection: 'net_buy' | 'net_sell';
+    toDirection: 'net_buy' | 'net_sell';
+    tradingDate: string;
+    previousTradingDate: string;
+    currentValue: number;
+    previousValue: number;
+  } | null;
+  comparison: {
+    latestValue?: number | null;
+    sampleCount20d: number;
+    sampleCount60d: number;
+    averageNet20d?: number | null;
+    averageAbsoluteNet20d?: number | null;
+    averageNet60d?: number | null;
+    averageAbsoluteNet60d?: number | null;
+    signedPercentile20d?: number | null;
+    signedPercentile60d?: number | null;
+    absolutePercentile20d?: number | null;
+    absolutePercentile60d?: number | null;
+    zScore20d?: number | null;
+    zScore60d?: number | null;
+    unusualFlowState: 'unavailable' | 'normal' | 'elevated';
+    unusualFlowBasis: string[];
+  };
+};
+export type VietnamForeignFlowSymbolAnalytics = {
+  basis: 'accepted_provider_rows';
+  maxSessions: 60;
+  observedSessions: number;
+  value: VietnamForeignFlowAnalyticsFamily;
+  volume: VietnamForeignFlowAnalyticsFamily;
+  rollingSeries: Array<{
+    tradingDate: string;
+    rollingNet5dValue?: number | null;
+    rollingNet20dValue?: number | null;
+    rollingNet5dVolume?: number | null;
+    rollingNet20dVolume?: number | null;
+  }>;
+};
+export type VietnamForeignFlowSymbolHistoryResponse = {
+  ticker: string;
+  source: 'ssi_fastconnect';
+  sourceEndpoint: 'daily_stock_price';
+  volumeUnit: 'shares';
+  valueUnit: 'VND';
+  finality: 'daily_available';
+  dataState: 'ready' | 'empty' | 'stale' | 'unavailable';
+  freshness: 'fresh' | 'stale' | 'empty' | 'unavailable';
+  rows: VietnamForeignFlowHistoryRow[];
+  windows: Record<'5' | '20' | '60', VietnamForeignFlowHistoryWindow>;
+  analytics?: VietnamForeignFlowSymbolAnalytics | null;
+  latestRow?: VietnamForeignFlowHistoryRow | null;
+  requested: {
+    mode: 'recent_sessions' | 'date_range';
+    requestedLimit?: number | null;
+    requestedFromDate?: string | null;
+    requestedToDate?: string | null;
+    returnedSessionCount: number;
+  };
+  coverage: {
+    requestedSessions?: number | null;
+    coveredSessions: number;
+    complete?: boolean | null;
+    startDate?: string | null;
+    endDate?: string | null;
+  };
+  fetchedAt: string;
+  staleReason?: string | null;
+  failureClass?: string | null;
+};
+
+type VietnamForeignFlowSymbolHistoryCamelResponse = Omit<VietnamForeignFlowSymbolHistoryResponse, 'analytics'> & {
+  analytics?: Record<string, unknown> | null;
+};
+
+const normalizeForeignFlowAnalyticsFamily = (raw: unknown): VietnamForeignFlowAnalyticsFamily => {
+  const family = (raw ?? {}) as VietnamForeignFlowAnalyticsFamily & {
+    comparison?: Record<string, unknown>;
+  };
+  const comparison = (family.comparison ?? {}) as Record<string, unknown>;
+  return {
+    ...family,
+    comparison: {
+      ...family.comparison,
+      sampleCount20d: Number(comparison.sampleCount20D ?? comparison.sampleCount20d ?? 0),
+      sampleCount60d: Number(comparison.sampleCount60D ?? comparison.sampleCount60d ?? 0),
+      averageNet20d: (comparison.averageNet20D as number | null | undefined) ?? (comparison.averageNet20d as number | null | undefined) ?? null,
+      averageAbsoluteNet20d: (comparison.averageAbsoluteNet20D as number | null | undefined) ?? (comparison.averageAbsoluteNet20d as number | null | undefined) ?? null,
+      averageNet60d: (comparison.averageNet60D as number | null | undefined) ?? (comparison.averageNet60d as number | null | undefined) ?? null,
+      averageAbsoluteNet60d: (comparison.averageAbsoluteNet60D as number | null | undefined) ?? (comparison.averageAbsoluteNet60d as number | null | undefined) ?? null,
+      signedPercentile20d: (comparison.signedPercentile20D as number | null | undefined) ?? (comparison.signedPercentile20d as number | null | undefined) ?? null,
+      signedPercentile60d: (comparison.signedPercentile60D as number | null | undefined) ?? (comparison.signedPercentile60d as number | null | undefined) ?? null,
+      absolutePercentile20d: (comparison.absolutePercentile20D as number | null | undefined) ?? (comparison.absolutePercentile20d as number | null | undefined) ?? null,
+      absolutePercentile60d: (comparison.absolutePercentile60D as number | null | undefined) ?? (comparison.absolutePercentile60d as number | null | undefined) ?? null,
+      zScore20d: (comparison.zScore20D as number | null | undefined) ?? (comparison.zScore20d as number | null | undefined) ?? null,
+      zScore60d: (comparison.zScore60D as number | null | undefined) ?? (comparison.zScore60d as number | null | undefined) ?? null,
+    } as VietnamForeignFlowAnalyticsFamily['comparison'],
+  };
+};
+
+export const normalizeVietnamForeignFlowSymbolHistoryResponse = (
+  data: VietnamForeignFlowSymbolHistoryCamelResponse,
+): VietnamForeignFlowSymbolHistoryResponse => ({
+  ...data,
+  analytics: data.analytics ? (() => {
+    const analytics = data.analytics as Record<string, unknown>;
+    const rollingSeries = (analytics.rollingSeries ?? []) as Array<Record<string, number | string | null | undefined>>;
+    return {
+    ...analytics,
+    value: normalizeForeignFlowAnalyticsFamily(analytics.value),
+    volume: normalizeForeignFlowAnalyticsFamily(analytics.volume),
+    rollingSeries: rollingSeries.map((row) => ({
+      tradingDate: String(row.tradingDate ?? ''),
+      rollingNet5dValue: (row.rollingNet5DValue as number | null | undefined) ?? (row.rollingNet5dValue as number | null | undefined) ?? null,
+      rollingNet20dValue: (row.rollingNet20DValue as number | null | undefined) ?? (row.rollingNet20dValue as number | null | undefined) ?? null,
+      rollingNet5dVolume: (row.rollingNet5DVolume as number | null | undefined) ?? (row.rollingNet5dVolume as number | null | undefined) ?? null,
+      rollingNet20dVolume: (row.rollingNet20DVolume as number | null | undefined) ?? (row.rollingNet20dVolume as number | null | undefined) ?? null,
+    })),
+  } as VietnamForeignFlowSymbolAnalytics;
+  })() : null,
+});
+
 export type VietnamForeignFlowBatchSymbol = {
   ticker: string;
   dataState: Exclude<VietnamForeignFlowDataState, 'partial'>;
@@ -1569,6 +1750,29 @@ export const stocksApi = {
     const { toCamelCase } = await import('./utils');
     return normalizeVietnamVn30ForeignFlowResponse(
       toCamelCase<VietnamVn30ForeignFlowCamelResponse>(response.data),
+    );
+  },
+
+  async getVietnamForeignFlowSymbolHistory(
+    rawTicker: string,
+    options?: { limit?: number; forceRefresh?: boolean; signal?: AbortSignal },
+  ): Promise<VietnamForeignFlowSymbolHistoryResponse> {
+    const ticker = normalizeVietnamTicker(rawTicker);
+    if (!/^[A-Z0-9]{1,10}$/.test(ticker) || ticker === 'ALL') {
+      throw new Error(`Invalid Vietnam ticker: ${rawTicker}`);
+    }
+    const limit = Math.min(60, Math.max(1, Math.trunc(options?.limit ?? 60)));
+    const response = await apiClient.get(`/api/v1/stocks/vn/foreign-flow/symbol/${ticker}`, {
+      params: {
+        limit,
+        ...(options?.forceRefresh ? { force_refresh: true } : {}),
+      },
+      timeout: 120000,
+      signal: options?.signal,
+    });
+    const { toCamelCase } = await import('./utils');
+    return normalizeVietnamForeignFlowSymbolHistoryResponse(
+      toCamelCase<VietnamForeignFlowSymbolHistoryCamelResponse>(response.data),
     );
   },
 

@@ -241,6 +241,28 @@ describe('stocksApi Vietnam SSI-derived metric mapping', () => {
     expect(request.tickers[29]).toBe('A29');
   });
 
+  it('normalizes symbol analytics digit-suffixed fields and sends a bounded request', async () => {
+    const family = {
+      latest: { value: 10, trading_date: '2026-07-20' }, windows: {},
+      current_streak: { direction: 'net_buy', sessions: 1, basis: 'accepted_provider_rows' },
+      latest_reversal: null,
+      comparison: { sample_count_20d: 5, sample_count_60d: 6, average_net_20d: 2, absolute_percentile_60d: 90, z_score_60d: 2, unusual_flow_state: 'elevated', unusual_flow_basis: ['absolute_percentile_60d'] },
+    };
+    get.mockResolvedValueOnce({ data: {
+      ticker: 'FPT', source: 'ssi_fastconnect', source_endpoint: 'daily_stock_price', volume_unit: 'shares', value_unit: 'VND', finality: 'daily_available',
+      data_state: 'ready', freshness: 'fresh', rows: [], windows: {}, latest_row: null,
+      requested: { mode: 'recent_sessions', requested_limit: 60, returned_session_count: 0 }, coverage: { requested_sessions: 60, covered_sessions: 0 }, fetched_at: 'now',
+      analytics: { basis: 'accepted_provider_rows', max_sessions: 60, observed_sessions: 1, value: family, volume: family, rolling_series: [{ trading_date: '2026-07-20', rolling_net_5d_value: 12, rolling_net_20d_volume: 20 }] },
+    } });
+    const controller = new AbortController();
+
+    const result = await stocksApi.getVietnamForeignFlowSymbolHistory(' fpt.vn ', { limit: 99, forceRefresh: true, signal: controller.signal });
+
+    expect(get).toHaveBeenCalledWith('/api/v1/stocks/vn/foreign-flow/symbol/FPT', { params: { limit: 60, force_refresh: true }, timeout: 120000, signal: controller.signal });
+    expect(result.analytics?.value.comparison).toMatchObject({ sampleCount20d: 5, sampleCount60d: 6, averageNet20d: 2, absolutePercentile60d: 90, zScore60d: 2 });
+    expect(result.analytics?.rollingSeries[0]).toMatchObject({ rollingNet5dValue: 12, rollingNet20dVolume: 20 });
+  });
+
   it('maps the VN30 aggregate endpoint and numeric window suffixes', async () => {
     get.mockResolvedValueOnce({
       data: {
