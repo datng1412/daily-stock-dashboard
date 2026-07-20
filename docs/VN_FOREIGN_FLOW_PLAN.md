@@ -1,6 +1,6 @@
 # Vietnam Foreign Flow Product, Data, and Delivery Plan
 
-Status: Phase 4.12B implements the bounded SSI DailyStockPrice historical symbol API; UI, current-session, rankings, and aggregates remain deferred
+Status: Phase 4.12D-1 implements bounded DailyStockPrice watchlist batch summaries and watchlist-scoped rankings; current-session and market aggregates remain deferred
 
 Phase: 4.12-PLAN
 
@@ -8,13 +8,13 @@ Repository evidence reviewed: 2026-07-17
 
 ## Purpose
 
-This document is the implementation plan and phase record for a Vietnam foreign-investor flow product in StockClock. It defines the user journey, product surfaces, normalized data contract, source gates, delivery phases, and operational safeguards. It does not authorize an SSI field that has not been verified; only the Phase 4.12B historical symbol endpoint described below exists today.
+This document is the implementation plan and phase record for a Vietnam foreign-investor flow product in StockClock. It defines the user journey, product surfaces, normalized data contract, source gates, delivery phases, and operational safeguards. It does not authorize an SSI field that has not been verified; the implemented scope is the Phase 4.12B historical symbol endpoint plus the Phase 4.12D-1 daily watchlist batch and rankings described below.
 
 The product journey is:
 
 `scan -> compare -> inspect -> monitor`
 
-Phase 4.12A-Lite completed the DailyStockPrice-only gate on 2026-07-17. Phase 4.12B now implements the verified one-symbol historical API. Current-session semantics, aggregates, bulk behavior, rankings, and all foreign-flow UI shapes remain **planned, pending their separate gates, and not yet implemented**.
+Phase 4.12A-Lite completed the DailyStockPrice-only gate on 2026-07-17. Phase 4.12B implements the verified one-symbol historical API. Phase 4.12D-1 reuses that daily service for a bounded 30-symbol watchlist batch, value-based watchlist columns, and Today/5/20 watchlist-scoped rankings. Current-session semantics, market aggregates, broad-market bulk behavior, alerts, and visualization remain **planned and pending their separate gates**.
 
 ## Fixed source and interpretation boundaries
 
@@ -51,8 +51,8 @@ Phase 4.12A-Lite completed the DailyStockPrice-only gate on 2026-07-17. Phase 4.
 - No 60-session foreign-flow history or value-based 5/20/60 trend is implemented.
 - No canonical foreign-flow finality, freshness, coverage, aggregate, reconciliation, or counter-reset model exists.
 - No coverage-aware VN30 or HOSE foreign-flow aggregate exists.
-- No foreign-flow ranking or concentration API exists.
-- No dedicated symbol history endpoint or coherent batch product contract exists.
+- The implemented rankings are watchlist-scoped only; no VN30/HOSE aggregate or concentration API exists.
+- The dedicated symbol history and bounded watchlist batch contracts exist; broad-market bulk/materialization remains unproven.
 - Current watchlist hydration is provider-I/O bound and sequential; broad HOSE aggregation would be unsafe without a bulk or materialization strategy.
 - Sector metadata is partial, so sector aggregation has no proven authoritative classification coverage.
 - Existing alerts are not connected to foreign-flow states and cannot be enabled until finality, deduplication, and data-quality gates pass.
@@ -583,19 +583,20 @@ Explicit exclusions: advanced alert engine, sector heatmap, historical membershi
 - Dependencies: current-session source gate and historical API.
 - Acceptance: provisional never silently replaces final; reset cannot emit false negative intervals; unavailable current preserves final history.
 
-### Phase 4.12D - Watchlist integration and rankings (L)
+### Phase 4.12D-1 - Daily watchlist integration and rankings (implemented)
 
-- Goal/value: compare followed symbols and find the largest covered flows in one request.
-- Backend: additive watchlist summary or bounded batch alternative, rankings, request-local reuse/coalescing, response coverage.
-- Frontend: columns, filters, sorting, stable refresh state, unit/finality/trust labels, responsive layout.
-- Source: approved symbol historical/current service.
+- Goal/value: compare followed symbols and find the largest covered daily flows in one request.
+- Backend: `POST /api/v1/stocks/vn/foreign-flow/batch` accepts 1-30 normalized unique symbols, reuses the Phase 4.12B service with `limit=20`, caps concurrency at four, preserves request order, isolates failures, omits history arrays, exposes honest per-symbol/top-level coverage, and ranks latest/5-session/20-session net values.
+- Frontend: one cancellable request per non-empty current watchlist; `NN ròng` and `NN 5P` columns; sortable values; Today/5/20 watchlist-scoped rankings; prior successful same-scope data retained during unavailable refresh; responsive and accessible loading/partial/stale/empty/unavailable states.
+- Source: SSI DailyStockPrice daily rows only. No current-session or foreign-room input.
 - Likely files: Vietnam service/schemas/endpoints, `apps/dsa-web/src/api/stocks.ts`, dashboard/components/tests.
 - Tests: max 30, normalization, duplicates, invalid/missing rows, partial failure, no HTTP N+1, stale response protection, mobile states.
 - Observability: batch size, provider budget, cache/coalescing, partial results.
 - Risks: payload density and provider latency.
 - Exclusions: HOSE, sector, alerts.
-- Dependencies: Phase 4.12B; Phase 4.12C for current columns.
-- Acceptance: all valid requested symbols are represented, previous rows survive refresh, and the frontend makes one logical data request.
+- Dependencies: Phase 4.12B. Phase 4.12C remains required for any current-session column.
+- Acceptance: all normalized requested symbols are represented in stable order, previous same-scope rows survive unavailable refresh, and the frontend makes one logical batch request with no symbol-history N+1.
+- Runtime evidence: the bounded five-symbol smoke returned typed unavailable rows because SSI network access was unavailable; an immediate identical repeat used five negative-cache hits with no extra provider call and zero remaining active work. Invalid symbol input is rejected as sanitized HTTP 422 before service construction. Usable-row/ranking runtime evidence remains deterministic-test-owned until SSI network access is available.
 
 ### Phase 4.12E - VN30 aggregation with coverage (L)
 

@@ -487,6 +487,6 @@ The user experience has one market-data schedule, a separate request-free countd
 
 ## Phase 4.12 - Foreign Flow Product
 
-Phase 4.12 is planned in `docs/VN_FOREIGN_FLOW_PLAN.md`. The product will let users scan covered-market flow, compare a watchlist, inspect one symbol's current-versus-final history, and later monitor meaningful changes. Its first implementation gate is a bounded SSI capability verification; current-session fields, value fields, broader history, and aggregates remain pending verification and are not yet implemented.
+Phase 4.12 is defined in `docs/VN_FOREIGN_FLOW_PLAN.md`. The implemented daily slice lets users inspect bounded symbol history, compare up to 30 current-watchlist symbols, sort daily net value, and scan Today/5/20 watchlist-scoped rankings with explicit coverage and availability states. Current-session flow, covered-market aggregates, alerts, and broader visualization remain gated and are not implemented.
 
 Foreign flow, foreign room, and foreign ownership remain separate. SSI DailyStockPrice is the existing bounded historical-flow candidate; SSI `R` remains foreign-room context only. Missing value fields stay null, current provisional data cannot silently overwrite historical final data, VN30/HOSE aggregates require visible coverage, and product copy remains descriptive rather than predictive.

@@ -372,6 +372,29 @@ Response rules:
 - Empty periods return HTTP 200 with `rows=[]`; invalid ticker/query shape returns HTTP 422; unavailable provider state is sanitized and may use bounded stale positive cache recovery.
 - Cache and same-key coalescing are process-local. `force_refresh` bypasses fresh reuse but may join an identical in-flight fetch.
 
+## `POST /api/v1/stocks/vn/foreign-flow/batch`
+
+Purpose:
+
+- Return daily foreign-flow summaries and watchlist-scoped rankings for 1 to 30 normalized unique VN symbols in one request.
+- Reuse the Phase 4.12B SSI DailyStockPrice symbol service with a 20-session window; no history arrays, price joins, realtime/current-session fields, foreign-room data, or market-wide aggregate are returned.
+
+Request body:
+
+```json
+{"tickers":["FPT","VCB"],"top_n":5,"force_refresh":false}
+```
+
+`top_n` is 1 to 10. Symbols are trimmed, uppercased, deduplicated by first occurrence, and returned in stable normalized request order. Invalid syntax, wildcards, `ALL`, an empty normalized list, or more than 30 unique symbols returns HTTP 422.
+
+Response rules:
+
+- Every normalized requested symbol has one result, including typed `empty` or `unavailable` results; one symbol failure does not fail the batch.
+- Each `rows[]` result carries latest buy/sell/net volume and value plus 5-session/20-session cumulative net volume/value, coverage/completeness, `data_state`, freshness, source, and `daily_available` finality. Missing values remain null and explicit zero remains zero.
+- Top-level counts distinguish fresh, stale, empty, and unavailable symbols. Coverage is usable (`ready` or retained `stale`) divided by normalized symbols; `ready` requires complete fresh coverage.
+- Rankings contain `latest_net_value`, `net_value_5d`, and `net_value_20d` `top_buy`/`top_sell` lists, sort by signed net value with ticker as the deterministic tie-break, and exclude null and zero. Eligible stale or incomplete rows remain visible with their trust metadata.
+- The endpoint uses bounded concurrency capped at four. The underlying symbol service may make its existing bounded expanding-date attempts on a cold miss; batch execution adds no separate ranking fetch.
+
 ## Planned `GET /api/v1/stocks/vn/news`
 
 Status: planned only. No route, provider adapter, credentials, config flag, scraping path, or fallback provider is implemented in Phase 5.1A.

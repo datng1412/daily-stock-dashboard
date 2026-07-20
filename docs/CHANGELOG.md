@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [new feature] Add a bounded SSI DailyStockPrice foreign-flow batch API with stable per-symbol results and watchlist-scoped latest/5-session/20-session rankings.
+- [new feature] Add `NN ròng` and `NN 5P` watchlist columns plus compact Today/5/20 foreign-flow rankings with retained refresh state.
+- [test] Cover foreign-flow batch bounds, normalization, ordering, isolation, cache reuse, rankings, request cancellation, retained data, and frontend rendering.
+- [fix] Preserve HTTP 422 for invalid foreign-flow batch tickers under the production error handlers without constructing provider work.
 - [test] Record Phase 4.12B-R1 normal-launcher readiness, typed SSI network-unavailable responses, negative-cache reuse, and process-local foreign-flow observability acceptance.
 - [new feature] Add a bounded typed SSI DailyStockPrice historical foreign-flow API for one Vietnam symbol with 5/20/60-session summaries.
 - [improvement] Add dedicated positive, empty, negative, stale-recovery, and same-key coalescing behavior for historical foreign-flow requests.

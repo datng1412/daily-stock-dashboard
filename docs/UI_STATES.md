@@ -159,9 +159,9 @@ Primary status priority is `Completed`, `Loading`, `Pre-open`, `Lunch break`, `C
 
 These states apply only to existing X/X-QUOTE/X-TRADE/F/R/MI consumers. They do not change D1/1m chart loading, polling, labels, or data ownership, and they do not add a frontend WebSocket or higher polling frequency.
 
-## Planned Phase 4.12 Foreign Flow States
+## Phase 4.12 Foreign Flow States
 
-These states are planned, pending capability verification, and not yet implemented.
+Phase 4.12D-1 implements the daily watchlist batch subset below. Current-session provisional states and market aggregates remain planned.
 
 | State | Display behavior | Preserve | Never show |
 | --- | --- | --- | --- |
@@ -172,5 +172,7 @@ These states are planned, pending capability verification, and not yet implement
 | Stale | Keep last-known values with age and reason | Last verified source/finality | Current/ready wording |
 | Unavailable | Show concise reason and no metric-shaped placeholder | DailyOhlc price/chart and other independent sections | Null formatted as zero or fallback data |
 | Market closed | Prefer latest historical final; optionally show stale last-known provisional data with after-hours label | Final history and explicit age | Missing current data classified as provider failure |
+
+For the implemented watchlist batch, loading keeps the previous successful same-scope data visible; partial lists valid rows with coverage; stale rows show a stale marker; empty means the provider returned no accepted daily rows and does not display zero; unavailable shows a concise retry state. `NN ròng` and `NN 5P` use em dashes for null values, and Today/5/20 rankings are explicitly labeled `Trong watchlist`. A membership change cancels or ignores the older request so rankings from different scopes cannot mix.
 
 Foreign flow and foreign room render as separate sections. Price reaction copy is descriptive (`Flow and price moved in the same direction`, `Foreign buying occurred while price declined`, or `Foreign selling occurred while price increased`) and does not present an instruction or forecast.

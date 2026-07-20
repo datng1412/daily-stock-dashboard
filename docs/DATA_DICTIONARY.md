@@ -318,6 +318,19 @@ The intraday health path is distinct from the broader `GET /api/v1/stocks/vn/obs
 | `finality` | Availability semantics | constant `daily_available` | Does not mean realtime or provider-final. |
 | `data_state` / `freshness` | Response/cache state | `ready`, `empty`, `stale`, `unavailable` and matching freshness | Stale preserves the original positive fetch timestamp and gives a sanitized reason. |
 
+## Phase 4.12D-1 Daily Foreign-Flow Batch Fields
+
+`POST /api/v1/stocks/vn/foreign-flow/batch` reuses the Phase 4.12B SSI DailyStockPrice history service for a normalized 1-30 symbol watchlist. It returns summaries only, never history arrays.
+
+| Field | Meaning | Unit/source | Null/coverage rule |
+| --- | --- | --- | --- |
+| `rows[].foreign_*` | Latest accepted daily foreign buy/sell/net volume and value | shares/VND; SSI DailyStockPrice | Missing remains null; explicit provider zero remains zero. |
+| `rows[].foreign_net_*_5d` / `foreign_net_*_20d` | Complete-window cumulative net volume/value | shares/VND; StockClock sum of SSI rows | Null when no compatible values contribute; `covered_sessions_*` and `complete_*` expose coverage. |
+| `requested_count` / `normalized_count` / `returned_count` | Input and result counts | symbols | Normalized tickers are uppercase, unique, first-occurrence ordered, and capped at 30. |
+| `fresh_count` / `stale_count` / `empty_count` / `unavailable_count` | Partition of normalized results | symbols | Stale remains usable; empty/unavailable are not treated as zero flow. |
+| `coverage_ratio` / `complete` / `data_state` | Batch trust state | service-derived | Coverage is usable divided by normalized; complete requires all fresh usable rows. |
+| `rankings.latest_net_value|net_value_5d|net_value_20d.top_buy|top_sell` | Watchlist-scoped signed net-value rankings | VND | Null and zero excluded; ticker tie-break; stale/incomplete entries carry trust metadata. |
+
 ## Current Decision Points
 
 - Company shared daily fields: company `latest_price`, `daily_close`, daily OHLCV open/high/low/close/volume, and daily value align with the watchlist SSI DailyOhlc fields. Company reference, limits, foreign flow, matched/put-through, and adjusted-close values remain SSI DailyStockPrice-specific.
