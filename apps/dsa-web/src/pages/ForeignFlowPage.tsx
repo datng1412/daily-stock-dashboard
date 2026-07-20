@@ -5,12 +5,13 @@ import { AppPage, Badge, Button, EmptyState, PageHeader } from '../components/co
 import { ForeignFlowRankings } from '../components/foreign-flow/ForeignFlowRankings';
 import { ForeignFlowScannerTable } from '../components/foreign-flow/ForeignFlowScannerTable';
 import { ForeignFlowSummaryCards } from '../components/foreign-flow/ForeignFlowSummaryCards';
-import type {
-  ForeignFlowDirection,
-  ForeignFlowFilter,
-  ForeignFlowMetric,
-  ForeignFlowSort,
-  ForeignFlowWindow,
+import {
+  summarizeForeignFlow,
+  type ForeignFlowDirection,
+  type ForeignFlowFilter,
+  type ForeignFlowMetric,
+  type ForeignFlowSort,
+  type ForeignFlowWindow,
 } from '../components/foreign-flow/foreignFlowViewModel';
 import { useForeignFlowWatchlistBatch } from '../hooks/useForeignFlowWatchlistBatch';
 import { readVietnamCustomWatchlistValues } from '../utils/vietnamCustomWatchlist';
@@ -18,7 +19,7 @@ import { getVietnamMarketPhase } from '../utils/vietnamMarketPhase';
 import { normalizeVietnamTicker } from '../utils/vietnamWatchlist';
 
 const windows: Array<{ value: ForeignFlowWindow; label: string }> = [
-  { value: 'today', label: 'Hôm nay' },
+  { value: 'today', label: 'Phiên gần nhất' },
   { value: '5', label: '5 phiên' },
   { value: '20', label: '20 phiên' },
 ];
@@ -44,6 +45,10 @@ const ForeignFlowPage = () => {
   const direction = validDirection(searchParams.get('direction'));
   const requestedTicker = normalizeVietnamTicker(searchParams.get('ticker') ?? '');
   const selectedTicker = batch.scope.tickers.includes(requestedTicker) ? requestedTicker : null;
+  const selectedSummary = useMemo(
+    () => batch.data ? summarizeForeignFlow(batch.data.rows, window, metric) : null,
+    [batch.data, metric, window],
+  );
 
   useEffect(() => {
     const previousTitle = document.title;
@@ -71,12 +76,12 @@ const ForeignFlowPage = () => {
     if (batch.loading && !batch.data) return 'Đang tải dữ liệu DailyStockPrice cho watchlist.';
     if (batch.updating) return 'Đang cập nhật; tiếp tục hiển thị dữ liệu gần nhất.';
     if (batch.error && batch.data) return 'Cập nhật chưa khả dụng; đang giữ dữ liệu trước đó.';
-    if (batch.data?.dataState === 'partial') return 'Một số mã chưa có dữ liệu sử dụng được; không thay bằng giá trị 0.';
-    if (batch.data?.dataState === 'stale') return 'Dữ liệu gần nhất đã cũ; vẫn giữ nguyên ngày và trạng thái nguồn.';
-    if (batch.data?.dataState === 'empty') return 'SSI DailyStockPrice chưa trả về dòng dữ liệu được chấp nhận cho phạm vi này.';
-    if (batch.data?.dataState === 'unavailable') return 'Dữ liệu trong watchlist hiện chưa khả dụng; không tạo tổng hoặc xếp hạng thay thế.';
+    if (selectedSummary?.selectedWindowState === 'incomplete') return `Một số mã chưa có đủ dữ liệu cho cửa sổ ${window === 'today' ? 'phiên gần nhất' : `${window} phiên`}; không thay bằng giá trị 0.`;
+    if (selectedSummary?.selectedWindowState === 'stale') return 'Dữ liệu gần nhất đã cũ; vẫn giữ nguyên ngày và trạng thái nguồn.';
+    if (selectedSummary?.selectedWindowState === 'empty') return 'SSI DailyStockPrice chưa trả về dòng dữ liệu được chấp nhận cho phạm vi này.';
+    if (selectedSummary?.selectedWindowState === 'unavailable') return `Dữ liệu ${window === 'today' ? 'phiên gần nhất' : `${window} phiên`} hiện chưa khả dụng; không tạo tổng hoặc xếp hạng thay thế.`;
     return null;
-  }, [batch.data, batch.error, batch.loading, batch.updating]);
+  }, [batch.data, batch.error, batch.loading, batch.updating, selectedSummary, window]);
 
   return (
     <AppPage className="space-y-6">
@@ -95,9 +100,9 @@ const ForeignFlowPage = () => {
         <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <div>
             <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="info">Phạm vi: Watchlist</Badge>
-              <Badge>{batch.scope.tickers.length} mã yêu cầu</Badge>
-              <Badge variant="default">daily_available</Badge>
+              <Badge variant="info">Watchlist</Badge>
+              <Badge>{batch.scope.tickers.length} mã</Badge>
+              <Badge variant="default" aria-label="Nguồn: SSI DailyStockPrice · Trạng thái dữ liệu: daily_available">Dữ liệu theo phiên</Badge>
             </div>
             <p className="mt-2 text-sm text-secondary-text">Dữ liệu theo phiên giao dịch gần nhất có sẵn.</p>
             <p className="mt-1 text-xs text-secondary-text">Phiên thị trường: {marketPhase.phase}. Trạng thái phiên không thay đổi tính hợp lệ của dữ liệu ngày.</p>

@@ -3,6 +3,7 @@ import type { VietnamForeignFlowBatchSymbol } from '../../../api/stocks';
 import {
   buildForeignFlowRankings,
   filterForeignFlowRows,
+  foreignFlowWindowDisplay,
   sortForeignFlowRows,
   summarizeForeignFlow,
 } from '../foreignFlowViewModel';
@@ -56,6 +57,56 @@ describe('foreign-flow view model', () => {
     expect(summary.net).toEqual({ value: null, contributors: 0 });
     expect(summary.buy).toEqual({ value: null, contributors: 0 });
     expect(summary.sell).toEqual({ value: null, contributors: 0 });
+    expect(summary.selectedWindowState).toBe('unavailable');
+  });
+
+  it('derives selected-window state and validates coverage without clamping invalid values', () => {
+    expect(foreignFlowWindowDisplay(row('AAA', {
+      foreignNetValue5d: 500,
+      coveredSessions5d: 3,
+      complete5d: false,
+    }), '5', 'value')).toMatchObject({
+      value: 500,
+      coveredSessions: 3,
+      requestedSessions: 5,
+      complete: false,
+      usable: true,
+      state: 'incomplete',
+    });
+
+    expect(foreignFlowWindowDisplay(row('BBB', {
+      foreignNetValue5d: 500,
+      coveredSessions5d: 99,
+      complete5d: false,
+    }), '5', 'value')).toMatchObject({
+      coveredSessions: null,
+      complete: null,
+      state: 'incomplete',
+    });
+
+    expect(foreignFlowWindowDisplay(row('CCC', {
+      foreignNetValue5d: Number.NaN,
+    }), '5', 'value')).toMatchObject({ value: null, usable: false, state: 'unavailable' });
+  });
+
+  it('does not inherit latest-ready state when the selected multi-session value is absent', () => {
+    const summary = summarizeForeignFlow([
+      row('AAA', { foreignNetValue5d: null }),
+      row('BBB', { foreignNetValue5d: 200, coveredSessions5d: 3, complete5d: false }),
+    ], '5', 'value');
+
+    expect(summary.net).toEqual({ value: 200, contributors: 1 });
+    expect(summary.selectedWindowState).toBe('incomplete');
+    expect(foreignFlowWindowDisplay(row('AAA', { foreignNetValue5d: null }), '5', 'value').state).toBe('unavailable');
+  });
+
+  it('preserves stale usable selected-window values', () => {
+    const display = foreignFlowWindowDisplay(row('AAA', {
+      dataState: 'stale',
+      freshness: 'stale',
+    }), '20', 'value');
+
+    expect(display).toMatchObject({ value: 12_000, usable: true, stale: true, state: 'stale' });
   });
 
   it('reports the latest observed date and mixed-date state', () => {

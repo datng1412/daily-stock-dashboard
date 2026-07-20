@@ -1,7 +1,13 @@
 import type { VietnamForeignFlowBatchResponse } from '../../api/stocks';
 import { formatCompactShareVolume, formatCompactVndValue } from '../../utils/vietnamNumberFormat';
 import { Badge } from '../common';
-import { summarizeForeignFlow, type ForeignFlowMetric, type ForeignFlowWindow } from './foreignFlowViewModel';
+import {
+  foreignFlowWindowLabel,
+  summarizeForeignFlow,
+  type ForeignFlowMetric,
+  type ForeignFlowWindow,
+  type ForeignFlowWindowState,
+} from './foreignFlowViewModel';
 
 const SummaryCard = ({ label, value, detail }: { label: string; value: string; detail: string }) => (
   <div className="rounded-lg border border-border/70 bg-card p-4">
@@ -10,6 +16,20 @@ const SummaryCard = ({ label, value, detail }: { label: string; value: string; d
     <p className="mt-1 text-xs text-secondary-text">{detail}</p>
   </div>
 );
+
+const stateCopy = (state: ForeignFlowWindowState): string => {
+  if (state === 'ready') return 'Sẵn sàng';
+  if (state === 'incomplete') return 'Dữ liệu chưa đầy đủ';
+  if (state === 'stale') return 'Dữ liệu cũ';
+  if (state === 'empty') return 'Không có dữ liệu';
+  return 'Không khả dụng';
+};
+
+const formatTradingDate = (value: string | null): string => {
+  if (!value) return '—';
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  return match ? `${match[3]}/${match[2]}/${match[1]}` : value;
+};
 
 export const ForeignFlowSummaryCards = ({
   data,
@@ -23,44 +43,45 @@ export const ForeignFlowSummaryCards = ({
   const summary = summarizeForeignFlow(data.rows, window, metric);
   const formatter = metric === 'value' ? formatCompactVndValue : formatCompactShareVolume;
   const unit = metric === 'value' ? 'VND' : 'cổ phiếu';
-  const windowLabel = window === 'today' ? 'Phiên gần nhất' : `${window} phiên`;
-  const format = (value: number | null, signed = false) => formatter(value, 'Không khả dụng', signed);
+  const windowLabel = foreignFlowWindowLabel(window);
+  const format = (value: number | null, signed = false) => formatter(value, '—', signed);
+  const badgeVariant = summary.selectedWindowState === 'ready'
+    ? 'success'
+    : summary.selectedWindowState === 'unavailable'
+      ? 'danger'
+      : 'warning';
+  const contributorDetail = window === 'today'
+    ? `${summary.net.contributors}/${data.normalizedCount} mã có dữ liệu · Đơn vị: ${unit}`
+    : `${summary.net.contributors}/${data.normalizedCount} mã có dữ liệu ${windowLabel.toLowerCase()} · Đơn vị: ${unit}`;
 
   return (
     <section aria-labelledby="foreign-flow-summary-heading">
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <h2 id="foreign-flow-summary-heading" className="text-base font-semibold text-foreground">Tổng quan watchlist</h2>
-        <Badge variant={data.dataState === 'ready' ? 'success' : data.dataState === 'unavailable' ? 'danger' : 'warning'}>
-          {data.dataState}
-        </Badge>
+        <Badge variant="info">{windowLabel}</Badge>
+        <Badge variant={badgeVariant}>{stateCopy(summary.selectedWindowState)}</Badge>
       </div>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         <SummaryCard
-          label={`NN ròng · ${windowLabel}`}
+          label="Mua bán ròng"
           value={format(summary.net.value, true)}
-          detail={`${summary.net.contributors}/${data.normalizedCount} mã đóng góp · ${unit}`}
+          detail={contributorDetail}
         />
         {window === 'today' ? (
           <>
-            <SummaryCard label="NN mua · Phiên gần nhất" value={format(summary.buy.value)} detail={`${summary.buy.contributors} mã đóng góp · ${unit}`} />
-            <SummaryCard label="NN bán · Phiên gần nhất" value={format(summary.sell.value)} detail={`${summary.sell.contributors} mã đóng góp · ${unit}`} />
+            <SummaryCard label="Tổng mua" value={format(summary.buy.value)} detail={`${summary.buy.contributors}/${data.normalizedCount} mã có dữ liệu · Đơn vị: ${unit}`} />
+            <SummaryCard label="Tổng bán" value={format(summary.sell.value)} detail={`${summary.sell.contributors}/${data.normalizedCount} mã có dữ liệu · Đơn vị: ${unit}`} />
           </>
-        ) : (
-          <SummaryCard
-            label="Mua / bán theo cửa sổ"
-            value="Không khả dụng"
-            detail="Batch hiện chỉ cung cấp tổng ròng cho cửa sổ nhiều phiên."
-          />
-        )}
+        ) : null}
         <SummaryCard
           label="Độ phủ"
-          value={`${data.usableCount}/${data.normalizedCount} mã`}
-          detail={`Coverage ${Math.round(data.coverageRatio * 100)}%`}
+          value={`${summary.net.contributors}/${data.normalizedCount} mã`}
+          detail={summary.selectedWindowState === 'incomplete' ? `Chưa đủ dữ liệu ${windowLabel.toLowerCase()} cho toàn bộ watchlist` : `Số mã có giá trị ${windowLabel.toLowerCase()}`}
         />
         <SummaryCard
           label="Ngày dữ liệu gần nhất"
-          value={summary.latestTradingDate ?? 'Không khả dụng'}
-          detail={summary.mixedTradingDates ? 'Nhiều ngày dữ liệu trong watchlist' : 'Ngày SSI DailyStockPrice gần nhất'}
+          value={formatTradingDate(summary.latestTradingDate)}
+          detail={summary.mixedTradingDates ? 'Nhiều ngày dữ liệu trong watchlist' : `Dữ liệu phiên ${formatTradingDate(summary.latestTradingDate)}`}
         />
       </div>
     </section>

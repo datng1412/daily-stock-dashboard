@@ -112,7 +112,7 @@ describe('ForeignFlowPage', () => {
     renderPage('/foreign-flow?window=90&metric=price&direction=sideways');
     await waitFor(() => expect(mockedBatch).toHaveBeenCalledTimes(1));
 
-    expect(screen.getByRole('button', { name: 'Hôm nay' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Phiên gần nhất' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('button', { name: 'Giá trị' })).toHaveAttribute('aria-pressed', 'true');
     fireEvent.click(screen.getByRole('button', { name: '5 phiên' }));
     fireEvent.click(screen.getByRole('button', { name: 'Khối lượng' }));
@@ -157,7 +157,7 @@ describe('ForeignFlowPage', () => {
     window.localStorage.setItem(VIETNAM_CUSTOM_WATCHLIST_STORAGE_KEY, JSON.stringify(['FPT', 'HPG']));
     mockedBatch.mockResolvedValue(makeResponse(['FPT', 'HPG'], {
       rows: [
-        makeRow('FPT', 0, { foreignNetValue: 0, latestTradingDate: '2026-07-16' }),
+        makeRow('FPT', 0, { foreignNetValue: 0, latestTradingDate: '2026-07-16', foreignNetValue5d: 5_000_000_000, complete5d: false, coveredSessions5d: 3 }),
         makeRow('HPG', 1, { foreignNetValue: null, foreignNetValue5d: null, complete5d: false, coveredSessions5d: 2 }),
       ],
       usableCount: 1,
@@ -168,11 +168,37 @@ describe('ForeignFlowPage', () => {
     renderPage();
     await screen.findByText('Nhiều ngày dữ liệu trong watchlist');
 
-    expect(screen.getByText('Coverage 50%')).toBeInTheDocument();
+    expect(screen.getByText('1/2 mã')).toBeInTheDocument();
     expect(screen.getAllByText('0').length).toBeGreaterThan(0);
     expect(screen.getAllByLabelText('Không khả dụng').length).toBeGreaterThan(0);
-    expect(screen.getByText('2/5')).toBeInTheDocument();
-    expect(screen.getByText(/Một số mã chưa có dữ liệu/)).toBeInTheDocument();
+    expect(screen.getByText('3/5 phiên')).toBeInTheDocument();
+    expect(screen.queryByText('2/5 phiên')).not.toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent(/undefined|NaN|null\/5|null\/20/);
+    expect(screen.getByText(/Một số mã chưa có đủ dữ liệu/)).toBeInTheDocument();
+  });
+
+  it('uses selected-window readiness, user-facing finality, clear units, and one active sort column', async () => {
+    window.localStorage.setItem(VIETNAM_CUSTOM_WATCHLIST_STORAGE_KEY, JSON.stringify(['FPT', 'HPG']));
+    mockedBatch.mockResolvedValue(makeResponse(['FPT', 'HPG'], {
+      rows: [
+        makeRow('FPT', 0, { foreignNetValue5d: 5_000_000_000, coveredSessions5d: 3, complete5d: false }),
+        makeRow('HPG', 1, { foreignNetValue5d: null, coveredSessions5d: 2, complete5d: false }),
+      ],
+    }));
+    renderPage('/foreign-flow?window=5');
+
+    await screen.findByRole('heading', { name: 'Bộ quét watchlist' });
+    expect(screen.getByLabelText(/Nguồn: SSI DailyStockPrice.*daily_available/)).toHaveTextContent('Dữ liệu theo phiên');
+    expect(screen.queryByText('daily_available')).not.toBeInTheDocument();
+    expect(screen.getByText('2/2 mã · Đơn vị: VND')).toBeInTheDocument();
+    expect(screen.getAllByText('Dữ liệu chưa đầy đủ').length).toBeGreaterThan(0);
+    expect(screen.getByText('Chưa đủ 5 phiên')).toBeInTheDocument();
+    expect(screen.getByText('Thiếu dữ liệu 5 phiên')).toBeInTheDocument();
+    const scanner = screen.getByRole('heading', { name: 'Bộ quét watchlist' }).closest('section') as HTMLElement;
+    expect(within(scanner).getByRole('columnheader', { name: /NN ròng/ })).toHaveAttribute('aria-sort', 'descending');
+    expect(within(scanner).getByRole('columnheader', { name: 'NN mua' })).not.toHaveAttribute('aria-sort');
+    expect(within(scanner).getByRole('columnheader', { name: 'NN bán' })).not.toHaveAttribute('aria-sort');
+    expect(document.body).not.toHaveTextContent(/undefined|NaN|null\/5|null\/20/);
   });
 
   it('sorts and filters locally without additional requests', async () => {
@@ -200,10 +226,10 @@ describe('ForeignFlowPage', () => {
   });
 
   it.each([
-    ['partial', 'Một số mã chưa có dữ liệu sử dụng được'],
+    ['partial', 'Dữ liệu phiên gần nhất hiện chưa khả dụng'],
     ['stale', 'Dữ liệu gần nhất đã cũ'],
     ['empty', 'SSI DailyStockPrice chưa trả về dòng dữ liệu'],
-    ['unavailable', 'Dữ liệu trong watchlist hiện chưa khả dụng'],
+    ['unavailable', 'Dữ liệu phiên gần nhất hiện chưa khả dụng'],
   ] as const)('shows an honest %s batch state', async (dataState, copy) => {
     window.localStorage.setItem(VIETNAM_CUSTOM_WATCHLIST_STORAGE_KEY, JSON.stringify(['FPT']));
     mockedBatch.mockResolvedValue(makeResponse(['FPT'], {

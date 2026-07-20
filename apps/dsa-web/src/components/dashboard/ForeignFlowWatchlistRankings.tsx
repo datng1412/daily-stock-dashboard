@@ -11,7 +11,7 @@ import { Badge, Button } from '../common';
 type RankingMetric = 'latest' | '5d' | '20d';
 
 const metricOptions: Array<{ id: RankingMetric; label: string }> = [
-  { id: 'latest', label: 'Hôm nay' },
+  { id: 'latest', label: 'Phiên gần nhất' },
   { id: '5d', label: '5 phiên' },
   { id: '20d', label: '20 phiên' },
 ];
@@ -25,10 +25,12 @@ const RankingList = ({
   title,
   entries,
   emptyCopy,
+  requestedSessions,
 }: {
   title: string;
   entries: VietnamForeignFlowRankingPair['topBuy'];
   emptyCopy: string;
+  requestedSessions: 1 | 5 | 20;
 }) => (
   <div>
     <h3 className="text-sm font-semibold text-foreground">{title}</h3>
@@ -43,12 +45,14 @@ const RankingList = ({
               <div className="mt-0.5 flex flex-wrap gap-1 text-[11px] text-secondary-text">
                 <span>{entry.tradingDate ?? 'Ngày chưa có'}</span>
                 {entry.dataState === 'stale' ? <Badge variant="warning">Cũ</Badge> : null}
-                {!entry.complete ? <Badge variant="default">{entry.coveredSessions} phiên</Badge> : null}
+                {!entry.complete && Number.isInteger(entry.coveredSessions) && entry.coveredSessions >= 0 && entry.coveredSessions <= requestedSessions
+                  ? <Badge variant="default">{entry.coveredSessions}/{requestedSessions} phiên</Badge>
+                  : null}
               </div>
             </div>
             <span
               className={cn('shrink-0 font-medium tabular-nums', entry.value > 0 ? 'text-success' : 'text-danger')}
-              title={formatFullVndTitle(entry.value)}
+              aria-label={`Giá trị đầy đủ: ${formatFullVndTitle(entry.value)}`}
             >
               {formatCompactVndValue(entry.value, '—', true)}
             </span>
@@ -76,6 +80,7 @@ export const ForeignFlowWatchlistRankings = ({
 }) => {
   const [metric, setMetric] = useState<RankingMetric>('latest');
   const rankings = data ? rankingFor(data, metric) : null;
+  const requestedSessions = metric === 'latest' ? 1 : metric === '5d' ? 5 : 20;
   const stateLabel = loading && !data
     ? 'Loading'
     : updating
@@ -95,7 +100,7 @@ export const ForeignFlowWatchlistRankings = ({
             </Badge>
           </div>
           <p className="mt-1 text-xs text-secondary-text">
-            SSI DailyStockPrice · daily_available · VND{coverage ? ` · ${coverage}` : ''}
+            SSI DailyStockPrice · Dữ liệu theo phiên · VND{coverage ? ` · ${coverage}` : ''}
           </p>
           {totalTickerCount > 30 ? (
             <p className="mt-1 text-xs text-warning">Đang hiển thị dữ liệu dòng tiền ngoại cho 30/{totalTickerCount} mã.</p>
@@ -146,11 +151,13 @@ export const ForeignFlowWatchlistRankings = ({
               title="Top mua ròng trong watchlist"
               entries={rankings.topBuy}
               emptyCopy="Chưa có mã mua ròng trong phạm vi này."
+              requestedSessions={requestedSessions}
             />
             <RankingList
               title="Top bán ròng trong watchlist"
               entries={rankings.topSell}
               emptyCopy="Chưa có mã bán ròng trong phạm vi này."
+              requestedSessions={requestedSessions}
             />
           </div>
         </>

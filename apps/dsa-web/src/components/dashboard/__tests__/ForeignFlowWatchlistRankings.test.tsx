@@ -1,8 +1,34 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import type { VietnamForeignFlowBatchResponse } from '../../../api/stocks';
+import type { VietnamForeignFlowBatchResponse, VietnamForeignFlowBatchSymbol } from '../../../api/stocks';
 import { ForeignFlowWatchlistRankings } from '../ForeignFlowWatchlistRankings';
-
+const row = (ticker: string, overrides: Partial<VietnamForeignFlowBatchSymbol> = {}): VietnamForeignFlowBatchSymbol => ({
+  ticker,
+  dataState: 'ready',
+  freshness: 'fresh',
+  latestTradingDate: '2026-07-17',
+  foreignBuyVolume: 100,
+  foreignSellVolume: 40,
+  foreignNetVolume: 60,
+  foreignBuyValue: 3_500_000_000,
+  foreignSellValue: 1_000_000_000,
+  foreignNetValue: 2_500_000_000,
+  foreignNetVolume5d: 300,
+  foreignNetValue5d: 5_000_000_000,
+  foreignNetVolume20d: 1_200,
+  foreignNetValue20d: 12_000_000_000,
+  coveredSessions5d: 3,
+  complete5d: false,
+  coveredSessions20d: 20,
+  complete20d: true,
+  source: 'ssi_fastconnect',
+  sourceEndpoint: 'daily_stock_price',
+  volumeUnit: 'shares',
+  valueUnit: 'VND',
+  finality: 'daily_available',
+  fetchedAt: '2026-07-17T10:00:00+00:00',
+  ...overrides,
+});
 
 const response = (overrides: Partial<VietnamForeignFlowBatchResponse> = {}): VietnamForeignFlowBatchResponse => ({
   source: 'ssi_fastconnect',
@@ -23,7 +49,15 @@ const response = (overrides: Partial<VietnamForeignFlowBatchResponse> = {}): Vie
   coverageRatio: 0.5,
   complete: false,
   dataState: 'partial',
-  rows: [],
+  rows: [
+    row('FPT'),
+    row('VCB', {
+      dataState: 'stale',
+      freshness: 'stale',
+      foreignNetValue: -1_200_000_000,
+      foreignNetValue5d: null,
+    }),
+  ],
   rankings: {
     latestNetValue: {
       topBuy: [{ ticker: 'FPT', value: 2_500_000_000, tradingDate: '2026-07-17', coveredSessions: 1, complete: true, dataState: 'ready' }],
@@ -58,7 +92,9 @@ describe('ForeignFlowWatchlistRankings', () => {
     fireEvent.click(screen.getByRole('button', { name: '5 phiên' }));
 
     expect(screen.getByRole('button', { name: '5 phiên' })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByText('3 phiên')).toBeInTheDocument();
+    expect(screen.getByText('3/5 phiên')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Phiên gần nhất' })).toBeInTheDocument();
+    expect(screen.queryByText('daily_available')).not.toBeInTheDocument();
     expect(screen.getByText('Chưa có mã bán ròng trong phạm vi này.')).toBeInTheDocument();
   });
 

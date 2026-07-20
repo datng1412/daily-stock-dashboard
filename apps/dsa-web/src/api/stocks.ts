@@ -590,6 +590,66 @@ export type VietnamForeignFlowBatchResponse = {
   fetchedAt: string;
 };
 
+type VietnamForeignFlowCamelCaseBatchSymbol = Omit<
+  VietnamForeignFlowBatchSymbol,
+  | 'foreignNetVolume5d'
+  | 'foreignNetValue5d'
+  | 'foreignNetVolume20d'
+  | 'foreignNetValue20d'
+  | 'coveredSessions5d'
+  | 'complete5d'
+  | 'windowEndDate5d'
+  | 'coveredSessions20d'
+  | 'complete20d'
+  | 'windowEndDate20d'
+> & {
+  foreignNetVolume5D?: number | null;
+  foreignNetValue5D?: number | null;
+  foreignNetVolume20D?: number | null;
+  foreignNetValue20D?: number | null;
+  coveredSessions5D?: number | null;
+  complete5D?: boolean | null;
+  windowEndDate5D?: string | null;
+  coveredSessions20D?: number | null;
+  complete20D?: boolean | null;
+  windowEndDate20D?: string | null;
+};
+
+type VietnamForeignFlowCamelCaseBatchResponse = Omit<VietnamForeignFlowBatchResponse, 'rows' | 'rankings'> & {
+  rows?: VietnamForeignFlowCamelCaseBatchSymbol[];
+  rankings?: {
+    latestNetValue: VietnamForeignFlowRankingPair;
+    netValue5D?: VietnamForeignFlowRankingPair;
+    netValue20D?: VietnamForeignFlowRankingPair;
+  };
+};
+
+const emptyForeignFlowRankingPair = (): VietnamForeignFlowRankingPair => ({ topBuy: [], topSell: [] });
+
+const normalizeVietnamForeignFlowBatchResponse = (
+  data: VietnamForeignFlowCamelCaseBatchResponse,
+): VietnamForeignFlowBatchResponse => ({
+  ...data,
+  rows: (data.rows ?? []).map((row) => ({
+    ...row,
+    foreignNetVolume5d: row.foreignNetVolume5D ?? null,
+    foreignNetValue5d: row.foreignNetValue5D ?? null,
+    foreignNetVolume20d: row.foreignNetVolume20D ?? null,
+    foreignNetValue20d: row.foreignNetValue20D ?? null,
+    coveredSessions5d: row.coveredSessions5D ?? 0,
+    complete5d: row.complete5D ?? false,
+    windowEndDate5d: row.windowEndDate5D ?? null,
+    coveredSessions20d: row.coveredSessions20D ?? 0,
+    complete20d: row.complete20D ?? false,
+    windowEndDate20d: row.windowEndDate20D ?? null,
+  })),
+  rankings: {
+    latestNetValue: data.rankings?.latestNetValue ?? emptyForeignFlowRankingPair(),
+    netValue5d: data.rankings?.netValue5D ?? emptyForeignFlowRankingPair(),
+    netValue20d: data.rankings?.netValue20D ?? emptyForeignFlowRankingPair(),
+  },
+});
+
 export type VietnamRealtimeQuote = {
   symbol?: string | null;
   ticker?: string | null;
@@ -1333,7 +1393,9 @@ export const stocksApi = {
       signal: options?.signal,
     });
     const { toCamelCase } = await import('./utils');
-    return toCamelCase<VietnamForeignFlowBatchResponse>(response.data);
+    return normalizeVietnamForeignFlowBatchResponse(
+      toCamelCase<VietnamForeignFlowCamelCaseBatchResponse>(response.data),
+    );
   },
 
   async getVietnamChart(

@@ -5,21 +5,31 @@ import { formatCompactShareVolume, formatCompactVndValue, formatFullSharesTitle,
 import { Badge } from '../common';
 import {
   filterForeignFlowRows,
-  foreignFlowNetValue,
   foreignFlowTodaySideValue,
+  foreignFlowWindowDisplay,
+  foreignFlowWindowStateLabel,
   sortForeignFlowRows,
   type ForeignFlowDirection,
   type ForeignFlowFilter,
   type ForeignFlowMetric,
   type ForeignFlowSort,
   type ForeignFlowWindow,
+  type ForeignFlowWindowDisplay,
 } from './foreignFlowViewModel';
 
-const stateBadge = (row: VietnamForeignFlowBatchSymbol) => {
-  if (row.dataState === 'ready') return <Badge variant="success">Sẵn sàng</Badge>;
-  if (row.dataState === 'stale') return <Badge variant="warning">Dữ liệu cũ</Badge>;
-  if (row.dataState === 'empty') return <Badge>Không có dữ liệu</Badge>;
-  return <Badge variant="danger">Không khả dụng</Badge>;
+const stateBadge = (display: ForeignFlowWindowDisplay) => {
+  const variant = display.state === 'ready'
+    ? 'success'
+    : display.state === 'unavailable'
+      ? 'danger'
+      : 'warning';
+  return <Badge variant={variant}>{foreignFlowWindowStateLabel(display)}</Badge>;
+};
+
+type ScannerHeader = {
+  key?: ForeignFlowSort;
+  label: string;
+  align?: string;
 };
 
 export const ForeignFlowScannerTable = ({
@@ -45,28 +55,42 @@ export const ForeignFlowScannerTable = ({
   onFilter: (filter: ForeignFlowFilter) => void;
   onSelectTicker: (ticker: string) => void;
 }) => {
-  const visibleRows = sortForeignFlowRows(filterForeignFlowRows(rows, filter, window, metric), sort, direction, metric);
+  const visibleRows = sortForeignFlowRows(
+    filterForeignFlowRows(rows, filter, window, metric),
+    sort,
+    direction,
+    metric,
+    window,
+  );
   const formatter = metric === 'value' ? formatCompactVndValue : formatCompactShareVolume;
   const title = metric === 'value' ? formatFullVndTitle : formatFullSharesTitle;
-  const cell = (value: number | null, signed = false, incomplete?: string) => value === null ? (
-    <span aria-label="Không khả dụng" title="Không có giá trị từ SSI DailyStockPrice">
-      —{incomplete ? <span className="ml-1 text-[10px] text-warning">{incomplete}</span> : null}
-    </span>
-  ) : (
-    <span title={title(value)}>
-      {formatter(value, '—', signed)}
-      {incomplete ? <span className="ml-1 text-[10px] text-warning">{incomplete}</span> : null}
-    </span>
-  );
-  const headers: Array<{ key: ForeignFlowSort; label: string; align?: string }> = [
+  const cell = (
+    value: number | null,
+    signed = false,
+    display?: ForeignFlowWindowDisplay,
+  ) => {
+    if (value === null || !Number.isFinite(value)) {
+      return <span aria-label="Không khả dụng">—</span>;
+    }
+    const coverage = display?.state === 'incomplete' && display.coveredSessions !== null
+      ? `${display.coveredSessions}/${display.requestedSessions} phiên`
+      : null;
+    return (
+      <span aria-label={`Giá trị đầy đủ: ${title(value)}`}>
+        {formatter(value, '—', signed)}
+        {coverage ? <span className="ml-1 block text-[10px] text-warning">{coverage}</span> : null}
+      </span>
+    );
+  };
+  const headers: ScannerHeader[] = [
     { key: 'ticker', label: 'Mã' },
     { key: 'date', label: 'Ngày dữ liệu' },
-    { key: 'latest', label: 'NN mua', align: 'text-right' },
-    { key: 'latest', label: 'NN bán', align: 'text-right' },
+    { label: 'NN mua', align: 'text-right' },
+    { label: 'NN bán', align: 'text-right' },
     { key: 'latest', label: 'NN ròng', align: 'text-right' },
     { key: '5', label: 'NN 5P', align: 'text-right' },
     { key: '20', label: 'NN 20P', align: 'text-right' },
-    { key: 'state', label: 'Trạng thái' },
+    { key: 'state', label: 'Trạng thái', align: 'text-left' },
   ];
 
   return (
@@ -74,7 +98,9 @@ export const ForeignFlowScannerTable = ({
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 p-4">
         <div>
           <h2 id="foreign-flow-scanner-heading" className="text-base font-semibold text-foreground">Bộ quét watchlist</h2>
-          <p className="mt-1 text-xs text-secondary-text">{visibleRows.length}/{rows.length} mã · {metric === 'value' ? 'VND' : 'cổ phiếu'}</p>
+          <p className="mt-1 text-xs text-secondary-text">
+            {visibleRows.length}/{rows.length} mã · Đơn vị: {metric === 'value' ? 'VND' : 'cổ phiếu'}
+          </p>
         </div>
         <label className="text-xs text-secondary-text">
           Lọc trạng thái dòng tiền
@@ -90,18 +116,37 @@ export const ForeignFlowScannerTable = ({
         <table className="min-w-[900px] w-full border-collapse text-sm">
           <thead className="bg-elevated/60 text-left text-xs text-secondary-text">
             <tr>
-              {headers.map((header, index) => (
-                <th key={`${header.key}-${index}`} scope="col" className={cn('px-3 py-3 font-medium', header.align)}>
-                  <button type="button" className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => onSort(header.key)} aria-label={`Sắp xếp theo ${header.label}`}>
-                    {header.label}{sort === header.key ? <span aria-hidden="true">{direction === 'asc' ? '↑' : '↓'}</span> : null}
-                  </button>
-                </th>
-              ))}
+              {headers.map((header, index) => {
+                const active = header.key !== undefined && sort === header.key;
+                return (
+                  <th
+                    key={`${header.key ?? header.label}-${index}`}
+                    scope="col"
+                    aria-sort={header.key ? (active ? (direction === 'asc' ? 'ascending' : 'descending') : 'none') : undefined}
+                    className={cn('px-3 py-3 font-medium', header.align, active && 'bg-cyan/10 text-cyan')}
+                  >
+                    {header.key ? (
+                      <button
+                        type="button"
+                        className={cn('inline-flex items-center gap-1 hover:text-foreground', header.align === 'text-right' && 'ml-auto')}
+                        onClick={() => onSort(header.key as ForeignFlowSort)}
+                        aria-label={`Sắp xếp theo ${header.label}`}
+                      >
+                        {header.label}{active ? <span aria-hidden="true">{direction === 'asc' ? '↑' : '↓'}</span> : null}
+                      </button>
+                    ) : header.label}
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody>
             {visibleRows.map((row) => {
               const selected = row.ticker === selectedTicker;
+              const latest = foreignFlowWindowDisplay(row, 'today', metric);
+              const five = foreignFlowWindowDisplay(row, '5', metric);
+              const twenty = foreignFlowWindowDisplay(row, '20', metric);
+              const selectedWindow = foreignFlowWindowDisplay(row, window, metric);
               return (
                 <tr key={row.ticker} className={cn('border-t border-border/50 hover:bg-hover/50', selected && 'bg-cyan/10')} aria-selected={selected || undefined}>
                   <td className="px-3 py-3">
@@ -110,10 +155,10 @@ export const ForeignFlowScannerTable = ({
                   <td className="px-3 py-3 text-secondary-text">{row.latestTradingDate ?? '—'}</td>
                   <td className="px-3 py-3 text-right tabular-nums">{cell(foreignFlowTodaySideValue(row, 'buy', metric))}</td>
                   <td className="px-3 py-3 text-right tabular-nums">{cell(foreignFlowTodaySideValue(row, 'sell', metric))}</td>
-                  <td className={cn('px-3 py-3 text-right font-medium tabular-nums', (foreignFlowNetValue(row, 'today', metric) ?? 0) > 0 ? 'text-success' : (foreignFlowNetValue(row, 'today', metric) ?? 0) < 0 ? 'text-danger' : 'text-foreground')}>{cell(foreignFlowNetValue(row, 'today', metric), true)}</td>
-                  <td className="px-3 py-3 text-right tabular-nums">{cell(foreignFlowNetValue(row, '5', metric), true, row.complete5d ? undefined : `${row.coveredSessions5d}/5`)}</td>
-                  <td className="px-3 py-3 text-right tabular-nums">{cell(foreignFlowNetValue(row, '20', metric), true, row.complete20d ? undefined : `${row.coveredSessions20d}/20`)}</td>
-                  <td className="px-3 py-3">{stateBadge(row)}</td>
+                  <td className={cn('px-3 py-3 text-right font-medium tabular-nums', (latest.value ?? 0) > 0 ? 'text-success' : (latest.value ?? 0) < 0 ? 'text-danger' : 'text-foreground')}>{cell(latest.value, true)}</td>
+                  <td className="px-3 py-3 text-right tabular-nums">{cell(five.value, true, five)}</td>
+                  <td className="px-3 py-3 text-right tabular-nums">{cell(twenty.value, true, twenty)}</td>
+                  <td className="px-3 py-3">{stateBadge(selectedWindow)}</td>
                 </tr>
               );
             })}

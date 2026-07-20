@@ -166,7 +166,28 @@ describe('stocksApi Vietnam SSI-derived metric mapping', () => {
         coverage_ratio: 0.5,
         complete: false,
         data_state: 'partial',
-        rows: [],
+        rows: [{
+          ticker: 'FPT',
+          data_state: 'ready',
+          freshness: 'fresh',
+          latest_trading_date: '2026-07-17',
+          foreign_net_value_5d: 5_000_000_000,
+          foreign_net_volume_5d: 500_000,
+          foreign_net_value_20d: 12_000_000_000,
+          foreign_net_volume_20d: 1_200_000,
+          covered_sessions_5d: 3,
+          complete_5d: false,
+          window_end_date_5d: '2026-07-17',
+          covered_sessions_20d: 20,
+          complete_20d: true,
+          window_end_date_20d: '2026-07-17',
+          source: 'ssi_fastconnect',
+          source_endpoint: 'daily_stock_price',
+          volume_unit: 'shares',
+          value_unit: 'VND',
+          finality: 'daily_available',
+          fetched_at: '2026-07-17T10:00:00+00:00',
+        }],
         rankings: {
           latest_net_value: { top_buy: [], top_sell: [] },
           net_value_5d: { top_buy: [], top_sell: [] },
@@ -194,6 +215,18 @@ describe('stocksApi Vietnam SSI-derived metric mapping', () => {
     });
     expect(result.dataState).toBe('partial');
     expect(result.coverageRatio).toBe(0.5);
+    expect(result.rows[0]).toMatchObject({
+      foreignNetValue5d: 5_000_000_000,
+      foreignNetVolume5d: 500_000,
+      foreignNetValue20d: 12_000_000_000,
+      foreignNetVolume20d: 1_200_000,
+      coveredSessions5d: 3,
+      complete5d: false,
+      coveredSessions20d: 20,
+      complete20d: true,
+    });
+    expect(result.rankings.netValue5d).toEqual({ topBuy: [], topSell: [] });
+    expect(result.rankings.netValue20d).toEqual({ topBuy: [], topSell: [] });
   });
 
   it('caps foreign-flow requests at the stable first 30 unique symbols', async () => {
