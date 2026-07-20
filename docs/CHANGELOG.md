@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [fix] Correct foreign-flow 5/20-session frontend field mapping, selected-window states, unavailable rendering, latest-window wording, and scanner sorting accessibility.
+- [test] Cover foreign-flow digit-suffixed API normalization, invalid coverage and number guards, selected-window completeness, units, and active sort semantics.
 - [new feature] Add a dedicated `/foreign-flow` watchlist workspace with null-aware summaries, value/volume rankings, URL-owned controls, and a sortable scanner.
 - [improvement] Share one cancellable foreign-flow batch request owner between the Vietnam dashboard and dedicated workspace, retaining usable same-scope data without symbol-history fan-out.
 - [test] Cover foreign-flow route/navigation, empty and over-limit scopes, request ownership, URL history, summaries, rankings, scanner states, and Vietnam dashboard compatibility.

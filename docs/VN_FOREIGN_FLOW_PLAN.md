@@ -1,6 +1,6 @@
 # Vietnam Foreign Flow Product, Data, and Delivery Plan
 
-Status: Phase 4.12E-1 adds a dedicated watchlist-scoped foreign-flow workspace on top of the Phase 4.12D-1 batch; current-session and market aggregates remain deferred
+Status: Phase 4.12E-1-R1 corrects the dedicated watchlist workspace's 5/20-session mapping and selected-window presentation; current-session and market aggregates remain deferred
 
 Phase: 4.12-PLAN
 
@@ -587,7 +587,7 @@ Explicit exclusions: advanced alert engine, sector heatmap, historical membershi
 
 - Goal/value: compare followed symbols and find the largest covered daily flows in one request.
 - Backend: `POST /api/v1/stocks/vn/foreign-flow/batch` accepts 1-30 normalized unique symbols, reuses the Phase 4.12B service with `limit=20`, caps concurrency at four, preserves request order, isolates failures, omits history arrays, exposes honest per-symbol/top-level coverage, and ranks latest/5-session/20-session net values.
-- Frontend: one cancellable request per non-empty current watchlist; `NN ròng` and `NN 5P` columns; sortable values; Today/5/20 watchlist-scoped rankings; prior successful same-scope data retained during unavailable refresh; responsive and accessible loading/partial/stale/empty/unavailable states.
+- Frontend: one cancellable request per non-empty current watchlist; `NN ròng` and `NN 5P` columns; sortable values; latest-session/5/20-session watchlist-scoped rankings; prior successful same-scope data retained during unavailable refresh; responsive and accessible loading/partial/stale/empty/unavailable states.
 - Source: SSI DailyStockPrice daily rows only. No current-session or foreign-room input.
 - Likely files: Vietnam service/schemas/endpoints, `apps/dsa-web/src/api/stocks.ts`, dashboard/components/tests.
 - Tests: max 30, normalization, duplicates, invalid/missing rows, partial failure, no HTTP N+1, stale response protection, mobile states.
@@ -602,11 +602,12 @@ Explicit exclusions: advanced alert engine, sector heatmap, historical membershi
 
 - Route/navigation: `/foreign-flow` is a lazy top-level route labelled `Dòng tiền ngoại` in the shared desktop/mobile navigation.
 - Scope/request: it reads the same local custom-watchlist ownership as `/vietnam`, sends zero requests for an empty scope, and sends one cancellable batch request for the first 30 normalized unique symbols. A visible `30/N` notice identifies locally omitted symbols without classifying them as provider failures.
-- Presentation: Today/5/20 and value/volume are URL-owned controls. Summary totals are null-aware, explicit zero contributes, multi-session buy/sell totals remain unavailable, mixed provider dates are labelled, and coverage is always visible.
+- Presentation: `Phiên gần nhất`/5/20 and value/volume are URL-owned controls; the compatible query value remains `window=today`. Summary totals are null-aware, explicit zero contributes, 5/20 views expose only cumulative net, mixed provider dates are labelled, and valid incomplete coverage is shown only beside an available value.
 - Rankings/scanner: rankings exclude null/zero values and use magnitude plus ticker ordering. Volume rankings are derived from existing batch rows, so no second request is needed. The scanner exposes latest buy/sell/net and 5/20 net fields, local sorting/filtering, data state, and links to the existing company route.
 - Stability: the dashboard and workspace reuse one shared request hook. Local presentation changes do not refetch, older scopes are aborted/ignored, and a failed same-scope refresh keeps the previous usable response.
 - Exclusions: no current-session source, market aggregate, chart, polling, stream, symbol-history request, external provider, inferred value, dependency, or public API/schema change.
 - Validation: 35 focused route/navigation/hook/view/page tests and 207 existing Vietnam dashboard tests passed, together with TypeScript, ESLint, and the Vite production build. A bounded local browser pass confirmed desktop/mobile navigation, title, empty-scope state, URL controls, and back navigation with no console error. The browser profile had no saved watchlist, so it correctly made zero batch requests; populated/unavailable request-count behavior remains deterministic-test-owned for this phase.
+- Phase 4.12E-1-R1: the public snake-case batch contract remains unchanged. The frontend API boundary now explicitly normalizes digit-suffixed camel-case keys produced as `5D`/`20D`, and one canonical selected-window model drives summary, rankings, scanner values, coverage, and state. Invalid/non-finite values render `—`; incomplete values may show valid `covered/requested phiên`; unavailable values never append malformed coverage. Scanner units and `aria-sort` are explicit, technical `daily_available` remains internal/tooltip context, and compact/dedicated controls use `Phiên gần nhất`. A two-symbol browser smoke under the current SSI `network_error` condition rendered typed unavailable rows with no malformed strings, switched 5-session/value-volume/sort presentation without increasing foreign-flow request or provider-call counters, exposed `aria-sort=descending`, and logged no console errors; usable-row browser proof remains pending SSI network availability.
 
 ### Phase 4.12E - VN30 aggregation with coverage (L)
 
