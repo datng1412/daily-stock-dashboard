@@ -1,6 +1,6 @@
 # Vietnam Foreign Flow Product, Data, and Delivery Plan
 
-Status: Phase 4.12D-1 implements bounded DailyStockPrice watchlist batch summaries and watchlist-scoped rankings; current-session and market aggregates remain deferred
+Status: Phase 4.12E-1 adds a dedicated watchlist-scoped foreign-flow workspace on top of the Phase 4.12D-1 batch; current-session and market aggregates remain deferred
 
 Phase: 4.12-PLAN
 
@@ -8,13 +8,13 @@ Repository evidence reviewed: 2026-07-17
 
 ## Purpose
 
-This document is the implementation plan and phase record for a Vietnam foreign-investor flow product in StockClock. It defines the user journey, product surfaces, normalized data contract, source gates, delivery phases, and operational safeguards. It does not authorize an SSI field that has not been verified; the implemented scope is the Phase 4.12B historical symbol endpoint plus the Phase 4.12D-1 daily watchlist batch and rankings described below.
+This document is the implementation plan and phase record for a Vietnam foreign-investor flow product in StockClock. It defines the user journey, product surfaces, normalized data contract, source gates, delivery phases, and operational safeguards. It does not authorize an SSI field that has not been verified; the implemented scope is the Phase 4.12B historical symbol endpoint, the Phase 4.12D-1 daily watchlist batch, and the Phase 4.12E-1 dedicated watchlist workspace described below.
 
 The product journey is:
 
 `scan -> compare -> inspect -> monitor`
 
-Phase 4.12A-Lite completed the DailyStockPrice-only gate on 2026-07-17. Phase 4.12B implements the verified one-symbol historical API. Phase 4.12D-1 reuses that daily service for a bounded 30-symbol watchlist batch, value-based watchlist columns, and Today/5/20 watchlist-scoped rankings. Current-session semantics, market aggregates, broad-market bulk behavior, alerts, and visualization remain **planned and pending their separate gates**.
+Phase 4.12A-Lite completed the DailyStockPrice-only gate on 2026-07-17. Phase 4.12B implements the verified one-symbol historical API. Phase 4.12D-1 reuses that daily service for a bounded 30-symbol watchlist batch and compact dashboard integration. Phase 4.12E-1 exposes that same bounded batch through `/foreign-flow` with null-aware summaries, value/volume rankings, a sortable scanner, URL-owned presentation state, and no symbol-history N+1. Current-session semantics, market aggregates, broad-market bulk behavior, alerts, and charts remain **planned and pending their separate gates**.
 
 ## Fixed source and interpretation boundaries
 
@@ -597,6 +597,16 @@ Explicit exclusions: advanced alert engine, sector heatmap, historical membershi
 - Dependencies: Phase 4.12B. Phase 4.12C remains required for any current-session column.
 - Acceptance: all normalized requested symbols are represented in stable order, previous same-scope rows survive unavailable refresh, and the frontend makes one logical batch request with no symbol-history N+1.
 - Runtime evidence: the bounded five-symbol smoke returned typed unavailable rows because SSI network access was unavailable; an immediate identical repeat used five negative-cache hits with no extra provider call and zero remaining active work. Invalid symbol input is rejected as sanitized HTTP 422 before service construction. Usable-row/ranking runtime evidence remains deterministic-test-owned until SSI network access is available.
+
+### Phase 4.12E-1 - Dedicated foreign-flow workspace (implemented)
+
+- Route/navigation: `/foreign-flow` is a lazy top-level route labelled `Dòng tiền ngoại` in the shared desktop/mobile navigation.
+- Scope/request: it reads the same local custom-watchlist ownership as `/vietnam`, sends zero requests for an empty scope, and sends one cancellable batch request for the first 30 normalized unique symbols. A visible `30/N` notice identifies locally omitted symbols without classifying them as provider failures.
+- Presentation: Today/5/20 and value/volume are URL-owned controls. Summary totals are null-aware, explicit zero contributes, multi-session buy/sell totals remain unavailable, mixed provider dates are labelled, and coverage is always visible.
+- Rankings/scanner: rankings exclude null/zero values and use magnitude plus ticker ordering. Volume rankings are derived from existing batch rows, so no second request is needed. The scanner exposes latest buy/sell/net and 5/20 net fields, local sorting/filtering, data state, and links to the existing company route.
+- Stability: the dashboard and workspace reuse one shared request hook. Local presentation changes do not refetch, older scopes are aborted/ignored, and a failed same-scope refresh keeps the previous usable response.
+- Exclusions: no current-session source, market aggregate, chart, polling, stream, symbol-history request, external provider, inferred value, dependency, or public API/schema change.
+- Validation: 35 focused route/navigation/hook/view/page tests and 207 existing Vietnam dashboard tests passed, together with TypeScript, ESLint, and the Vite production build. A bounded local browser pass confirmed desktop/mobile navigation, title, empty-scope state, URL controls, and back navigation with no console error. The browser profile had no saved watchlist, so it correctly made zero batch requests; populated/unavailable request-count behavior remains deterministic-test-owned for this phase.
 
 ### Phase 4.12E - VN30 aggregation with coverage (L)
 

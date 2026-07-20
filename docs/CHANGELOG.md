@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [new feature] Add a dedicated `/foreign-flow` watchlist workspace with null-aware summaries, value/volume rankings, URL-owned controls, and a sortable scanner.
+- [improvement] Share one cancellable foreign-flow batch request owner between the Vietnam dashboard and dedicated workspace, retaining usable same-scope data without symbol-history fan-out.
+- [test] Cover foreign-flow route/navigation, empty and over-limit scopes, request ownership, URL history, summaries, rankings, scanner states, and Vietnam dashboard compatibility.
 - [new feature] Add a bounded SSI DailyStockPrice foreign-flow batch API with stable per-symbol results and watchlist-scoped latest/5-session/20-session rankings.
 - [new feature] Add `NN ròng` and `NN 5P` watchlist columns plus compact Today/5/20 foreign-flow rankings with retained refresh state.
 - [test] Cover foreign-flow batch bounds, normalization, ordering, isolation, cache reuse, rankings, request cancellation, retained data, and frontend rendering.
