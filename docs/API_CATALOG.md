@@ -377,6 +377,13 @@ Response rules:
 Purpose:
 
 - Return daily foreign-flow summaries and watchlist-scoped rankings for 1 to 30 normalized unique VN symbols in one request.
+
+## `GET /api/v1/stocks/vn/foreign-flow/vn30`
+
+- Query: `top_n=1..10` (default 10), `force_refresh=false|true`.
+- Uses exact SSI IndexComponents `VN30` membership and SSI DailyStockPrice only; no IndexList prerequisite, hardcoded members, or fallback.
+- Returns current-membership identity/disclosure, at most 20 observed dates, aligned latest/5/20 buy/sell/net value and volume, separate family coverage/breadth, member summaries, six deterministic ranking pairs, cache/single-flight metadata, and bounded timing.
+- Membership unavailable is HTTP 200 typed `unavailable` with empty series/components/rankings and no component-history work.
 - Reuse the Phase 4.12B SSI DailyStockPrice symbol service with a 20-session window; no history arrays, price joins, realtime/current-session fields, foreign-room data, or market-wide aggregate are returned.
 
 Request body:

@@ -1,6 +1,6 @@
 # Vietnam Foreign Flow Product, Data, and Delivery Plan
 
-Status: Phase 4.12E-1-R1 corrects the dedicated watchlist workspace's 5/20-session mapping and selected-window presentation; current-session and market aggregates remain deferred
+Status: Phase 4.12E-2 implements the current-membership VN30 daily aggregate and workspace scope; runtime acceptance remains inconclusive because both bounded launcher attempts exited before HTTP readiness
 
 Phase: 4.12-PLAN
 
@@ -8,13 +8,13 @@ Repository evidence reviewed: 2026-07-17
 
 ## Purpose
 
-This document is the implementation plan and phase record for a Vietnam foreign-investor flow product in StockClock. It defines the user journey, product surfaces, normalized data contract, source gates, delivery phases, and operational safeguards. It does not authorize an SSI field that has not been verified; the implemented scope is the Phase 4.12B historical symbol endpoint, the Phase 4.12D-1 daily watchlist batch, and the Phase 4.12E-1 dedicated watchlist workspace described below.
+This document is the implementation plan and phase record for a Vietnam foreign-investor flow product in StockClock. The implemented scope includes the Phase 4.12B historical symbol endpoint, the Phase 4.12D-1 watchlist batch, the Phase 4.12E-1 workspace, and the Phase 4.12E-2 current-membership VN30 daily aggregate.
 
 The product journey is:
 
 `scan -> compare -> inspect -> monitor`
 
-Phase 4.12A-Lite completed the DailyStockPrice-only gate on 2026-07-17. Phase 4.12B implements the verified one-symbol historical API. Phase 4.12D-1 reuses that daily service for a bounded 30-symbol watchlist batch and compact dashboard integration. Phase 4.12E-1 exposes that same bounded batch through `/foreign-flow` with null-aware summaries, value/volume rankings, a sortable scanner, URL-owned presentation state, and no symbol-history N+1. Current-session semantics, market aggregates, broad-market bulk behavior, alerts, and charts remain **planned and pending their separate gates**.
+Phase 4.12E-2 adds `GET /api/v1/stocks/vn/foreign-flow/vn30` and `scope=vn30`. Exact SSI IndexComponents membership is resolved before at most four concurrent cached symbol-history reads. The backend builds one common observed date axis capped at 20 dates, then calculates aligned latest/5/20 buy, sell, and net value/volume, metric-specific coverage and breadth, component summaries, and deterministic rankings. The frontend makes one aggregate request and derives 5/10/20 net, buy/sell, cumulative-net, and breadth charts locally. Historical totals use current membership and are not constituent-correct. Current-session semantics, HOSE/HNX/UPCOM/sector scopes, broad-market behavior, and alerts remain gated.
 
 ## Fixed source and interpretation boundaries
 

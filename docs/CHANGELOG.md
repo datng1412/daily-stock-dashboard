@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [fix] Standardize foreign-flow net-value colors so positive is green, negative is red, zero is neutral, and unavailable remains visually unavailable across VN30 history, summaries, rankings, and scanner cells.
+- [new feature] Add an SSI-owned current-membership VN30 daily foreign-flow aggregate with aligned latest/5/20 value and volume totals, separate coverage/breadth, component summaries, rankings, caching, and single-flight.
+- [new feature] Add `scope=vn30` to the foreign-flow workspace with one request owner and local net, buy/sell, cumulative-net, and breadth charts over 5/10/20 sessions.
+- [test] Cover VN30 membership failure, common-date aggregation, missing/zero semantics, concurrency, cache coalescing, API normalization, scope ownership, and existing Vietnam regressions; record inconclusive bounded runtime readiness.
 - [test] Complete populated foreign-flow runtime acceptance with normal-launcher readiness, one bounded page request, zero symbol-history fan-out, request-free presentation controls, and honest SSI-unavailable desktop/mobile states.
 - [new feature] Add watchlist-only foreign-flow breadth, concentration, deterministic treemap, shared-scale buy/sell bars, and overview/detail scanner views.
 - [improvement] Show paired value/volume daily summaries and selected-window coverage without inventing cumulative 5/20-session buy or sell totals.

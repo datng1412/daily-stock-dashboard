@@ -322,6 +322,18 @@ The intraday health path is distinct from the broader `GET /api/v1/stocks/vn/obs
 
 `POST /api/v1/stocks/vn/foreign-flow/batch` reuses the Phase 4.12B SSI DailyStockPrice history service for a normalized 1-30 symbol watchlist. It returns summaries only, never history arrays.
 
+## Phase 4.12E-2 VN30 Foreign-Flow Aggregate Fields
+
+| Field | Meaning | Source/unit | Null/state rule |
+| --- | --- | --- | --- |
+| `membership.member_tickers` | Exact current VN30 membership | SSI IndexComponents | Empty on unavailable, empty, or mismatched membership; never hardcoded |
+| `aggregate_session_dates` | Common observed date axis, ascending | SSI DailyStockPrice dates | At most 20; no calendar or weekend synthesis |
+| `series[].foreign_*_value` / `foreign_*_volume` | Daily current-membership buy, sell, and net sums | VND / shares | Missing component rows do not become zero |
+| `series[].value_coverage` / `volume_coverage` | Covered/expected components, ratio, completeness | service-derived | Families are calculated separately |
+| `series[].value_breadth` / `volume_breadth` | Net-buy, net-sell, zero, unavailable component counts | service-derived | Uses the corresponding provider net field only |
+| `windows.5` / `windows.20` | Aligned rolling totals and symbol-session coverage | service-derived | Uses the common date axis; short history is incomplete |
+| `components[]` | Membership-ordered aligned latest/5/20 summary | SSI DailyStockPrice | Every resolved member remains represented; raw history is omitted |
+
 | Field | Meaning | Unit/source | Null/coverage rule |
 | --- | --- | --- | --- |
 | `rows[].foreign_*` | Latest accepted daily foreign buy/sell/net volume and value | shares/VND; SSI DailyStockPrice | Missing remains null; explicit provider zero remains zero. |
