@@ -1052,6 +1052,94 @@ class VietnamForeignFlowCoverage(BaseModel):
     end_date: Optional[str] = None
 
 
+class VietnamForeignFlowAnalyticsEvent(BaseModel):
+    value: int
+    trading_date: str
+
+
+class VietnamForeignFlowAnalyticsLatest(BaseModel):
+    value: Optional[int] = None
+    trading_date: str
+
+
+class VietnamForeignFlowAnalyticsWindow(BaseModel):
+    requested_sessions: Literal[5, 20, 60]
+    observed_sessions: int = Field(ge=0, le=60)
+    covered_sessions: int = Field(ge=0, le=60)
+    complete: bool
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    net_sum: Optional[int] = None
+    average_net: Optional[float] = None
+    average_absolute_net: Optional[float] = None
+    net_buy_session_count: int = Field(ge=0, le=60)
+    net_sell_session_count: int = Field(ge=0, le=60)
+    zero_session_count: int = Field(ge=0, le=60)
+    unavailable_session_count: int = Field(ge=0, le=60)
+    max_net_buy: Optional[VietnamForeignFlowAnalyticsEvent] = None
+    max_net_sell: Optional[VietnamForeignFlowAnalyticsEvent] = None
+
+
+class VietnamForeignFlowAnalyticsStreak(BaseModel):
+    direction: Literal["net_buy", "net_sell", "none", "unavailable"]
+    sessions: int = Field(ge=0, le=60)
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    basis: Literal["accepted_provider_rows"] = "accepted_provider_rows"
+
+
+class VietnamForeignFlowAnalyticsReversal(BaseModel):
+    from_direction: Literal["net_buy", "net_sell"]
+    to_direction: Literal["net_buy", "net_sell"]
+    trading_date: str
+    previous_trading_date: str
+    current_value: int
+    previous_value: int
+
+
+class VietnamForeignFlowAnalyticsComparison(BaseModel):
+    latest_value: Optional[int] = None
+    sample_count_20d: int = Field(ge=0, le=20)
+    sample_count_60d: int = Field(ge=0, le=60)
+    average_net_20d: Optional[float] = None
+    average_absolute_net_20d: Optional[float] = None
+    average_net_60d: Optional[float] = None
+    average_absolute_net_60d: Optional[float] = None
+    signed_percentile_20d: Optional[float] = Field(default=None, ge=0, le=100)
+    signed_percentile_60d: Optional[float] = Field(default=None, ge=0, le=100)
+    absolute_percentile_20d: Optional[float] = Field(default=None, ge=0, le=100)
+    absolute_percentile_60d: Optional[float] = Field(default=None, ge=0, le=100)
+    z_score_20d: Optional[float] = None
+    z_score_60d: Optional[float] = None
+    unusual_flow_state: Literal["unavailable", "normal", "elevated"]
+    unusual_flow_basis: List[str] = Field(default_factory=list, max_length=2)
+
+
+class VietnamForeignFlowAnalyticsFamily(BaseModel):
+    latest: Optional[VietnamForeignFlowAnalyticsLatest] = None
+    windows: Dict[Literal["5", "20", "60"], VietnamForeignFlowAnalyticsWindow]
+    current_streak: VietnamForeignFlowAnalyticsStreak
+    latest_reversal: Optional[VietnamForeignFlowAnalyticsReversal] = None
+    comparison: VietnamForeignFlowAnalyticsComparison
+
+
+class VietnamForeignFlowAnalyticsRollingRow(BaseModel):
+    trading_date: str
+    rolling_net_5d_value: Optional[int] = None
+    rolling_net_20d_value: Optional[int] = None
+    rolling_net_5d_volume: Optional[int] = None
+    rolling_net_20d_volume: Optional[int] = None
+
+
+class VietnamForeignFlowSymbolAnalytics(BaseModel):
+    basis: Literal["accepted_provider_rows"] = "accepted_provider_rows"
+    max_sessions: Literal[60] = 60
+    observed_sessions: int = Field(ge=0, le=60)
+    value: VietnamForeignFlowAnalyticsFamily
+    volume: VietnamForeignFlowAnalyticsFamily
+    rolling_series: List[VietnamForeignFlowAnalyticsRollingRow] = Field(default_factory=list, max_length=60)
+
+
 class VietnamForeignFlowSymbolHistoryResponse(BaseModel):
     """Bounded one-symbol historical foreign-flow response."""
 
@@ -1065,6 +1153,7 @@ class VietnamForeignFlowSymbolHistoryResponse(BaseModel):
     freshness: Literal["fresh", "stale", "empty", "unavailable"]
     rows: List[VietnamForeignFlowRow] = Field(default_factory=list, max_length=120)
     windows: Dict[Literal["5", "20", "60"], VietnamForeignFlowWindow]
+    analytics: Optional[VietnamForeignFlowSymbolAnalytics] = None
     latest_row: Optional[VietnamForeignFlowRow] = None
     requested: VietnamForeignFlowRequested
     coverage: VietnamForeignFlowCoverage

@@ -31,7 +31,7 @@ DEFAULT_LIMIT = 20
 MAX_ROWS = 120
 MAX_DATE_RANGE_DAYS = 168
 MAX_RECENT_LOOKBACK_DAYS = 200
-CACHE_VERSION = "v1"
+CACHE_VERSION = "v2"
 POSITIVE_CURRENT_TTL_SECONDS = 300
 POSITIVE_COMPLETED_TTL_SECONDS = 3_600
 EMPTY_TTL_SECONDS = 60
@@ -352,6 +352,186 @@ def _window(rows: List[Dict[str, Any]], requested: int) -> Dict[str, Any]:
     }
 
 
+def _metric_sign(value: Optional[int]) -> Optional[str]:
+    if value is None:
+        return None
+    if value > 0:
+        return "net_buy"
+    if value < 0:
+        return "net_sell"
+    return "zero"
+
+
+def _extreme_event(rows: List[Dict[str, Any]], field: str, *, positive: bool) -> Optional[Dict[str, Any]]:
+    candidates = [row for row in rows if row.get(field) is not None and (row[field] > 0 if positive else row[field] < 0)]
+    if not candidates:
+        return None
+    extreme_value = (max if positive else min)(row[field] for row in candidates)
+    row = max((item for item in candidates if item[field] == extreme_value), key=lambda item: item["trading_date"])
+    return {"value": row[field], "trading_date": row["trading_date"]}
+
+
+def _analytics_window(rows: List[Dict[str, Any]], field: str, requested: int) -> Dict[str, Any]:
+    selected = rows[-requested:]
+    values = [row[field] for row in selected if row.get(field) is not None]
+    covered = len(values)
+    return {
+        "requested_sessions": requested,
+        "observed_sessions": len(selected),
+        "covered_sessions": covered,
+        "complete": len(selected) == requested and covered == requested,
+        "start_date": selected[0]["trading_date"] if selected else None,
+        "end_date": selected[-1]["trading_date"] if selected else None,
+        "net_sum": sum(values) if values else None,
+        "average_net": sum(values) / covered if covered else None,
+        "average_absolute_net": sum(abs(value) for value in values) / covered if covered else None,
+        "net_buy_session_count": sum(value > 0 for value in values),
+        "net_sell_session_count": sum(value < 0 for value in values),
+        "zero_session_count": sum(value == 0 for value in values),
+        "unavailable_session_count": len(selected) - covered,
+        "max_net_buy": _extreme_event(selected, field, positive=True),
+        "max_net_sell": _extreme_event(selected, field, positive=False),
+    }
+
+
+def _current_streak(rows: List[Dict[str, Any]], field: str) -> Dict[str, Any]:
+    if not rows:
+        return {"direction": "unavailable", "sessions": 0, "start_date": None, "end_date": None, "basis": "accepted_provider_rows"}
+    latest = rows[-1]
+    direction = _metric_sign(latest.get(field))
+    if direction is None:
+        return {"direction": "unavailable", "sessions": 0, "start_date": None, "end_date": latest["trading_date"], "basis": "accepted_provider_rows"}
+    if direction == "zero":
+        return {"direction": "none", "sessions": 0, "start_date": latest["trading_date"], "end_date": latest["trading_date"], "basis": "accepted_provider_rows"}
+    sessions = 0
+    start_date = latest["trading_date"]
+    for row in reversed(rows):
+        if _metric_sign(row.get(field)) != direction:
+            break
+        sessions += 1
+        start_date = row["trading_date"]
+    return {
+        "direction": direction,
+        "sessions": sessions,
+        "start_date": start_date,
+        "end_date": latest["trading_date"],
+        "basis": "accepted_provider_rows",
+    }
+
+
+def _latest_reversal(rows: List[Dict[str, Any]], field: str) -> Optional[Dict[str, Any]]:
+    for index in range(len(rows) - 1, 0, -1):
+        previous = rows[index - 1]
+        current = rows[index]
+        previous_direction = _metric_sign(previous.get(field))
+        current_direction = _metric_sign(current.get(field))
+        if previous_direction not in {"net_buy", "net_sell"} or current_direction not in {"net_buy", "net_sell"}:
+            continue
+        if previous_direction != current_direction:
+            return {
+                "from_direction": previous_direction,
+                "to_direction": current_direction,
+                "trading_date": current["trading_date"],
+                "previous_trading_date": previous["trading_date"],
+                "current_value": current[field],
+                "previous_value": previous[field],
+            }
+    return None
+
+
+def _percentile(latest: Optional[int], values: List[int], *, absolute: bool = False) -> Optional[float]:
+    if latest is None or len(values) < 5:
+        return None
+    target = abs(latest) if absolute else latest
+    sample = [abs(value) for value in values] if absolute else values
+    return sum(value <= target for value in sample) / len(sample) * 100.0
+
+
+def _z_score(latest: Optional[int], values: List[int]) -> Optional[float]:
+    if latest is None or len(values) < 5:
+        return None
+    mean = sum(values) / len(values)
+    variance = sum((value - mean) ** 2 for value in values) / len(values)
+    if variance <= 0:
+        return None
+    result = (latest - mean) / math.sqrt(variance)
+    return result if math.isfinite(result) else None
+
+
+def _comparison(rows: List[Dict[str, Any]], field: str) -> Dict[str, Any]:
+    latest_value = rows[-1].get(field) if rows else None
+    values_20 = [row[field] for row in rows[-20:] if row.get(field) is not None]
+    values_60 = [row[field] for row in rows[-60:] if row.get(field) is not None]
+    signed_20 = _percentile(latest_value, values_20)
+    signed_60 = _percentile(latest_value, values_60)
+    absolute_20 = _percentile(latest_value, values_20, absolute=True)
+    absolute_60 = _percentile(latest_value, values_60, absolute=True)
+    z_20 = _z_score(latest_value, values_20)
+    z_60 = _z_score(latest_value, values_60)
+    basis: List[str] = []
+    if absolute_60 is not None and absolute_60 >= 90:
+        basis.append("absolute_percentile_60d_gte_90")
+    if z_60 is not None and abs(z_60) >= 2:
+        basis.append("absolute_z_score_60d_gte_2")
+    sufficient = absolute_60 is not None or z_60 is not None
+    state = "elevated" if basis else "normal" if latest_value is not None and sufficient else "unavailable"
+    return {
+        "latest_value": latest_value,
+        "sample_count_20d": len(values_20),
+        "sample_count_60d": len(values_60),
+        "average_net_20d": sum(values_20) / len(values_20) if values_20 else None,
+        "average_absolute_net_20d": sum(abs(value) for value in values_20) / len(values_20) if values_20 else None,
+        "average_net_60d": sum(values_60) / len(values_60) if values_60 else None,
+        "average_absolute_net_60d": sum(abs(value) for value in values_60) / len(values_60) if values_60 else None,
+        "signed_percentile_20d": signed_20,
+        "signed_percentile_60d": signed_60,
+        "absolute_percentile_20d": absolute_20,
+        "absolute_percentile_60d": absolute_60,
+        "z_score_20d": z_20,
+        "z_score_60d": z_60,
+        "unusual_flow_state": state,
+        "unusual_flow_basis": basis if basis else (["within_recent_distribution"] if state == "normal" else ["insufficient_finite_history"]),
+    }
+
+
+def _rolling_series(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    result: List[Dict[str, Any]] = []
+    for index, row in enumerate(rows):
+        derived: Dict[str, Any] = {"trading_date": row["trading_date"]}
+        for family, field in (("value", "foreign_net_value"), ("volume", "foreign_net_volume")):
+            for requested in (5, 20):
+                selected = rows[max(0, index - requested + 1):index + 1]
+                values = [item.get(field) for item in selected]
+                derived[f"rolling_net_{requested}d_{family}"] = (
+                    sum(values) if len(values) == requested and all(value is not None for value in values) else None
+                )
+        result.append(derived)
+    return result
+
+
+def _symbol_analytics(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    bounded = rows[-60:]
+
+    def family(field: str) -> Dict[str, Any]:
+        latest = bounded[-1] if bounded else None
+        return {
+            "latest": {"value": latest.get(field), "trading_date": latest["trading_date"]} if latest else None,
+            "windows": {str(size): _analytics_window(bounded, field, size) for size in (5, 20, 60)},
+            "current_streak": _current_streak(bounded, field),
+            "latest_reversal": _latest_reversal(bounded, field),
+            "comparison": _comparison(bounded, field),
+        }
+
+    return {
+        "basis": "accepted_provider_rows",
+        "max_sessions": 60,
+        "observed_sessions": len(bounded),
+        "value": family("foreign_net_value"),
+        "volume": family("foreign_net_volume"),
+        "rolling_series": _rolling_series(bounded),
+    }
+
+
 class VietnamForeignFlowService:
     def __init__(self, fetcher: Optional[SsiFastConnectFetcher] = None):
         self._fetcher = fetcher
@@ -646,6 +826,7 @@ class VietnamForeignFlowService:
             "freshness": freshness,
             "rows": rows,
             "windows": {"5": _window(rows, 5), "20": _window(rows, 20), "60": _window(rows, 60)},
+            "analytics": _symbol_analytics(rows),
             "latest_row": rows[-1] if rows else None,
             "requested": {
                 "mode": mode,

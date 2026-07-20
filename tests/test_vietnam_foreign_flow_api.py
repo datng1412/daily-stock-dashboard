@@ -245,6 +245,8 @@ def test_openapi_registers_foreign_flow_route_and_response_schema():
     assert route["responses"]["200"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/VietnamForeignFlowSymbolHistoryResponse"
     }
+    analytics = schema["components"]["schemas"]["VietnamForeignFlowSymbolHistoryResponse"]["properties"]["analytics"]
+    assert "VietnamForeignFlowSymbolAnalytics" in str(analytics)
 
 
 def test_batch_endpoint_normalizes_through_service_and_returns_typed_response(monkeypatch):
