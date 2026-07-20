@@ -1073,6 +1073,91 @@ class VietnamForeignFlowSymbolHistoryResponse(BaseModel):
     failure_class: Optional[str] = None
 
 
+class VietnamForeignFlowBatchRequest(BaseModel):
+    """Bounded daily foreign-flow request for a selected symbol set."""
+
+    tickers: List[str] = Field(min_length=1, max_length=120)
+    top_n: int = Field(default=5, ge=1, le=10)
+    force_refresh: bool = False
+
+
+class VietnamForeignFlowBatchSymbol(BaseModel):
+    ticker: str
+    data_state: Literal["ready", "empty", "stale", "unavailable"]
+    freshness: Literal["fresh", "stale", "empty", "unavailable"]
+    failure_class: Optional[str] = None
+    stale_reason: Optional[str] = None
+    latest_trading_date: Optional[str] = None
+    foreign_buy_volume: Optional[int] = None
+    foreign_sell_volume: Optional[int] = None
+    foreign_net_volume: Optional[int] = None
+    foreign_buy_value: Optional[int] = None
+    foreign_sell_value: Optional[int] = None
+    foreign_net_value: Optional[int] = None
+    foreign_net_volume_5d: Optional[int] = None
+    foreign_net_value_5d: Optional[int] = None
+    foreign_net_volume_20d: Optional[int] = None
+    foreign_net_value_20d: Optional[int] = None
+    covered_sessions_5d: int = Field(ge=0, le=20)
+    complete_5d: bool
+    window_end_date_5d: Optional[str] = None
+    covered_sessions_20d: int = Field(ge=0, le=20)
+    complete_20d: bool
+    window_end_date_20d: Optional[str] = None
+    source: Literal["ssi_fastconnect"] = "ssi_fastconnect"
+    source_endpoint: Literal["daily_stock_price"] = "daily_stock_price"
+    volume_unit: Literal["shares"] = "shares"
+    value_unit: Literal["VND"] = "VND"
+    finality: Literal["daily_available"] = "daily_available"
+    fetched_at: str
+
+
+class VietnamForeignFlowRankingEntry(BaseModel):
+    ticker: str
+    value: int
+    trading_date: Optional[str] = None
+    covered_sessions: int = Field(ge=1, le=20)
+    complete: bool
+    data_state: Literal["ready", "stale"]
+
+
+class VietnamForeignFlowRankingPair(BaseModel):
+    top_buy: List[VietnamForeignFlowRankingEntry] = Field(default_factory=list, max_length=10)
+    top_sell: List[VietnamForeignFlowRankingEntry] = Field(default_factory=list, max_length=10)
+
+
+class VietnamForeignFlowRankings(BaseModel):
+    latest_net_value: VietnamForeignFlowRankingPair
+    net_value_5d: VietnamForeignFlowRankingPair
+    net_value_20d: VietnamForeignFlowRankingPair
+
+
+class VietnamForeignFlowBatchResponse(BaseModel):
+    """Bounded watchlist-scoped daily foreign-flow summaries and rankings."""
+
+    source: Literal["ssi_fastconnect"] = "ssi_fastconnect"
+    source_endpoint: Literal["daily_stock_price"] = "daily_stock_price"
+    volume_unit: Literal["shares"] = "shares"
+    value_unit: Literal["VND"] = "VND"
+    finality: Literal["daily_available"] = "daily_available"
+    requested_tickers: List[str] = Field(max_length=120)
+    normalized_tickers: List[str] = Field(max_length=30)
+    requested_count: int = Field(ge=1, le=120)
+    normalized_count: int = Field(ge=1, le=30)
+    returned_count: int = Field(ge=1, le=30)
+    usable_count: int = Field(ge=0, le=30)
+    fresh_count: int = Field(ge=0, le=30)
+    stale_count: int = Field(ge=0, le=30)
+    empty_count: int = Field(ge=0, le=30)
+    unavailable_count: int = Field(ge=0, le=30)
+    coverage_ratio: float = Field(ge=0, le=1)
+    complete: bool
+    data_state: Literal["ready", "partial", "stale", "empty", "unavailable"]
+    rows: List[VietnamForeignFlowBatchSymbol] = Field(max_length=30)
+    rankings: VietnamForeignFlowRankings
+    fetched_at: str
+
+
 class VietnamForeignFlowObservability(BaseModel):
     """Sanitized process-local historical foreign-flow counters."""
 
@@ -1106,6 +1191,28 @@ class VietnamForeignFlowObservability(BaseModel):
     unavailable_results: int = Field(0, ge=0)
     last_success_at: Optional[str] = None
     last_failure_class: Optional[str] = None
+    batch_requests: int = Field(0, ge=0)
+    batch_force_refresh_requests: int = Field(0, ge=0)
+    batch_requested_symbols: int = Field(0, ge=0)
+    batch_normalized_symbols: int = Field(0, ge=0)
+    batch_usable_symbols: int = Field(0, ge=0)
+    batch_stale_symbols: int = Field(0, ge=0)
+    batch_empty_symbols: int = Field(0, ge=0)
+    batch_unavailable_symbols: int = Field(0, ge=0)
+    batch_ready_results: int = Field(0, ge=0)
+    batch_partial_results: int = Field(0, ge=0)
+    batch_stale_results: int = Field(0, ge=0)
+    batch_empty_results: int = Field(0, ge=0)
+    batch_unavailable_results: int = Field(0, ge=0)
+    batch_latency_count: int = Field(0, ge=0)
+    batch_latency_total_ms: int = Field(0, ge=0)
+    batch_latency_max_ms: int = Field(0, ge=0)
+    batch_active_requests: int = Field(0, ge=0)
+    batch_max_active_requests: int = Field(0, ge=0)
+    ranking_build_count: int = Field(0, ge=0)
+    ranking_eligible_values: int = Field(0, ge=0)
+    ranking_excluded_null_values: int = Field(0, ge=0)
+    ranking_excluded_zero_values: int = Field(0, ge=0)
 
 
 class VietnamMozyfinObservability(BaseModel):

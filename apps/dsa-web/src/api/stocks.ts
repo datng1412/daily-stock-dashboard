@@ -1,4 +1,5 @@
 import apiClient from './index';
+import { normalizeVietnamTicker, VIETNAM_WATCHLIST_MAX_SIZE } from '../utils/vietnamWatchlist';
 
 export type ExtractItem = {
   code?: string | null;
@@ -512,6 +513,81 @@ export type VietnamWatchlistResponse = {
   watchlist: VietnamWatchItem[];
   ruleMetadata?: { ruleSetName?: string; ruleSetVersion?: string; noRecommendation?: boolean };
   formulas: Record<string, string>;
+};
+
+export type VietnamForeignFlowDataState = 'ready' | 'partial' | 'stale' | 'empty' | 'unavailable';
+
+export type VietnamForeignFlowBatchSymbol = {
+  ticker: string;
+  dataState: Exclude<VietnamForeignFlowDataState, 'partial'>;
+  freshness: 'fresh' | 'stale' | 'empty' | 'unavailable';
+  failureClass?: string | null;
+  staleReason?: string | null;
+  latestTradingDate?: string | null;
+  foreignBuyVolume?: number | null;
+  foreignSellVolume?: number | null;
+  foreignNetVolume?: number | null;
+  foreignBuyValue?: number | null;
+  foreignSellValue?: number | null;
+  foreignNetValue?: number | null;
+  foreignNetVolume5d?: number | null;
+  foreignNetValue5d?: number | null;
+  foreignNetVolume20d?: number | null;
+  foreignNetValue20d?: number | null;
+  coveredSessions5d: number;
+  complete5d: boolean;
+  windowEndDate5d?: string | null;
+  coveredSessions20d: number;
+  complete20d: boolean;
+  windowEndDate20d?: string | null;
+  source: 'ssi_fastconnect';
+  sourceEndpoint: 'daily_stock_price';
+  volumeUnit: 'shares';
+  valueUnit: 'VND';
+  finality: 'daily_available';
+  fetchedAt: string;
+};
+
+export type VietnamForeignFlowRankingEntry = {
+  ticker: string;
+  value: number;
+  tradingDate?: string | null;
+  coveredSessions: number;
+  complete: boolean;
+  dataState: 'ready' | 'stale';
+};
+
+export type VietnamForeignFlowRankingPair = {
+  topBuy: VietnamForeignFlowRankingEntry[];
+  topSell: VietnamForeignFlowRankingEntry[];
+};
+
+export type VietnamForeignFlowBatchResponse = {
+  source: 'ssi_fastconnect';
+  sourceEndpoint: 'daily_stock_price';
+  volumeUnit: 'shares';
+  valueUnit: 'VND';
+  finality: 'daily_available';
+  requestedTickers: string[];
+  normalizedTickers: string[];
+  requestedCount: number;
+  normalizedCount: number;
+  returnedCount: number;
+  usableCount: number;
+  freshCount: number;
+  staleCount: number;
+  emptyCount: number;
+  unavailableCount: number;
+  coverageRatio: number;
+  complete: boolean;
+  dataState: VietnamForeignFlowDataState;
+  rows: VietnamForeignFlowBatchSymbol[];
+  rankings: {
+    latestNetValue: VietnamForeignFlowRankingPair;
+    netValue5d: VietnamForeignFlowRankingPair;
+    netValue20d: VietnamForeignFlowRankingPair;
+  };
+  fetchedAt: string;
 };
 
 export type VietnamRealtimeQuote = {
@@ -1229,6 +1305,35 @@ export const stocksApi = {
     });
     const { toCamelCase } = await import('./utils');
     return toCamelCase<VietnamWatchlistHealthResponse>(response.data);
+  },
+
+  async getVietnamForeignFlowBatch(
+    tickers: string[],
+    options?: { topN?: number; forceRefresh?: boolean; signal?: AbortSignal },
+  ): Promise<VietnamForeignFlowBatchResponse> {
+    const normalizedTickers: string[] = [];
+    const seen = new Set<string>();
+    for (const raw of tickers) {
+      const ticker = normalizeVietnamTicker(raw);
+      if (!/^[A-Z0-9]{1,10}$/.test(ticker) || ticker === 'ALL') {
+        throw new Error(`Invalid Vietnam ticker: ${raw}`);
+      }
+      if (seen.has(ticker)) continue;
+      seen.add(ticker);
+      normalizedTickers.push(ticker);
+      if (normalizedTickers.length === VIETNAM_WATCHLIST_MAX_SIZE) break;
+    }
+    if (!normalizedTickers.length) throw new Error('At least one Vietnam ticker is required.');
+    const response = await apiClient.post('/api/v1/stocks/vn/foreign-flow/batch', {
+      tickers: normalizedTickers,
+      top_n: options?.topN ?? 5,
+      force_refresh: options?.forceRefresh ?? false,
+    }, {
+      timeout: 120000,
+      signal: options?.signal,
+    });
+    const { toCamelCase } = await import('./utils');
+    return toCamelCase<VietnamForeignFlowBatchResponse>(response.data);
   },
 
   async getVietnamChart(

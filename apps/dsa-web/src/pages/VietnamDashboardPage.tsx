@@ -9,6 +9,8 @@ import {
   type VietnamCorporateActionEvent,
   type VietnamCorporateActionsResponse,
   type VietnamDailyIndexResponse,
+  type VietnamForeignFlowBatchResponse,
+  type VietnamForeignFlowBatchSymbol,
   type VietnamIndexComponentsResponse,
   type VietnamIndexListResponse,
   type VietnamObservabilityResponse,
@@ -21,7 +23,7 @@ import {
 import { AppPage, Badge, Button, Loading, Tooltip } from '../components/common';
 import { VietnamLightweightChart } from '../components/charts/VietnamLightweightChart';
 import { normalizeShortTermChartZones } from '../components/charts/lightweightChartData';
-import { DataQualitySummary, OrderBookLadder } from '../components/dashboard';
+import { DataQualitySummary, ForeignFlowWatchlistRankings, OrderBookLadder } from '../components/dashboard';
 import { cn } from '../utils/cn';
 import { buildVietnamConditionSummary, VIETNAM_CONDITION_SUMMARY_SUBTITLE } from '../utils/vietnamConditionSummary';
 import { getRealtimeSnapshotDisplayState, type RealtimeSnapshotDisplayResult } from '../utils/realtimeSnapshotState';
@@ -2598,7 +2600,7 @@ const WatchlistScanSummary: React.FC<{
   );
 };
 
-type IndicatorSortKey = 'ticker' | 'dailyClose' | 'changePct' | 'rsi14' | 'volumeRatio' | 'foreignNetVolume' | 'dataQuality';
+type IndicatorSortKey = 'ticker' | 'dailyClose' | 'changePct' | 'rsi14' | 'volumeRatio' | 'foreignNetVolume' | 'foreignNetValue' | 'foreignNetValue5d' | 'dataQuality';
 type IndicatorSortDirection = 'asc' | 'desc';
 type IndicatorSortState = { key: IndicatorSortKey; direction: IndicatorSortDirection } | null;
 type IndicatorDataQualityFilter = 'all' | 'ready' | 'partial' | 'unavailable';
@@ -2849,10 +2851,10 @@ const matchesIndicatorFilters = (
   if (filters.dataQuality !== 'all' && dataQualityStatus(item) !== filters.dataQuality) return false;
   if (filters.liveStatus !== 'all' && liveStatusFilterValue(item, realtimeQuotes[item.ticker], marketPhase) !== filters.liveStatus) return false;
 
-  const foreignNetVolume = foreignNetVolumeValue(item);
-  if (filters.foreignNet === 'positive' && !(foreignNetVolume !== null && foreignNetVolume > 0)) return false;
-  if (filters.foreignNet === 'negative' && !(foreignNetVolume !== null && foreignNetVolume < 0)) return false;
-  if (filters.foreignNet === 'zero-missing' && !(foreignNetVolume === null || foreignNetVolume === 0)) return false;
+  const foreignNet = foreignNetVolumeValue(item);
+  if (filters.foreignNet === 'positive' && !(foreignNet !== null && foreignNet > 0)) return false;
+  if (filters.foreignNet === 'negative' && !(foreignNet !== null && foreignNet < 0)) return false;
+  if (filters.foreignNet === 'zero-missing' && !(foreignNet === null || foreignNet === 0)) return false;
 
   if (filters.volumeRatio !== 'all' && volumeRatioFilterValue(item) !== filters.volumeRatio) return false;
   if (filters.rsiRange !== 'all' && rsiRangeFilterValue(item) !== filters.rsiRange) return false;
@@ -2860,7 +2862,11 @@ const matchesIndicatorFilters = (
   return true;
 };
 
-const sortValueForItem = (item: VietnamWatchItem, key: IndicatorSortKey): string | number | null => {
+const sortValueForItem = (
+  item: VietnamWatchItem,
+  key: IndicatorSortKey,
+  foreignFlow?: VietnamForeignFlowBatchSymbol,
+): string | number | null => {
   switch (key) {
     case 'ticker':
       return item.ticker;
@@ -2874,6 +2880,10 @@ const sortValueForItem = (item: VietnamWatchItem, key: IndicatorSortKey): string
       return volumeRatioValue(item);
     case 'foreignNetVolume':
       return foreignNetVolumeValue(item);
+    case 'foreignNetValue':
+      return finiteNumber(foreignFlow?.foreignNetValue);
+    case 'foreignNetValue5d':
+      return finiteNumber(foreignFlow?.foreignNetValue5d);
     case 'dataQuality':
       return dataQualityRank(item);
     default:
@@ -2937,6 +2947,8 @@ const IndicatorTable: React.FC<{
   hydrationStatus?: Vn30HydrationStatus;
   selectedTicker?: string | null;
   marketPhase: VietnamMarketPhase;
+  foreignFlowRows?: Record<string, VietnamForeignFlowBatchSymbol | undefined>;
+  foreignFlowLoading?: boolean;
   onSelect: (ticker: string) => void;
 }> = ({
   items,
@@ -2948,6 +2960,8 @@ const IndicatorTable: React.FC<{
   hydrationStatus = 'idle',
   selectedTicker,
   marketPhase,
+  foreignFlowRows = {},
+  foreignFlowLoading = false,
   onSelect,
 }) => {
   const [sortState, setSortState] = useState<IndicatorSortState>(null);
@@ -2975,14 +2989,18 @@ const IndicatorTable: React.FC<{
       .map((item, index) => ({ item, index }))
       .sort((left, right) => {
         const result = compareIndicatorSortValues(
-          sortValueForItem(left.item, sortState.key),
-          sortValueForItem(right.item, sortState.key),
+          sortValueForItem(left.item, sortState.key, foreignFlowRows[left.item.ticker]),
+          sortValueForItem(right.item, sortState.key, foreignFlowRows[right.item.ticker]),
           sortState.direction,
         );
-        return result || left.index - right.index;
+        if (result) return result;
+        if (sortState.key === 'foreignNetValue' || sortState.key === 'foreignNetValue5d') {
+          return left.item.ticker.localeCompare(right.item.ticker) || left.index - right.index;
+        }
+        return left.index - right.index;
       })
       .map(({ item }) => item);
-  }, [filteredItems, sortState]);
+  }, [filteredItems, foreignFlowRows, sortState]);
   const selectedTickerHiddenByFilters = Boolean(
     selectedTicker
     && items.some((item) => item.ticker === selectedTicker)
@@ -3071,8 +3089,8 @@ const IndicatorTable: React.FC<{
                 className="h-9 rounded-lg border border-border/70 bg-card px-3 text-sm font-normal text-foreground outline-none transition-colors focus:border-cyan/50 focus:ring-2 focus:ring-cyan/15"
               >
                 <option value="all">All</option>
-                <option value="positive">Foreign net positive</option>
-                <option value="negative">Foreign net negative</option>
+                <option value="positive">Net buy</option>
+                <option value="negative">Net sell</option>
                 <option value="zero-missing">Zero / missing</option>
               </select>
             </label>
@@ -3137,7 +3155,7 @@ const IndicatorTable: React.FC<{
       ) : null}
       {filteredItems.length ? (
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[1240px] text-left text-sm">
+        <table className="w-full min-w-[1500px] text-left text-sm">
           <thead className="border-b border-border/70 text-xs uppercase text-secondary-text">
             <tr>
               <th className="py-2 pr-3">{sortButton('ticker', 'Ticker')}</th>
@@ -3163,6 +3181,12 @@ const IndicatorTable: React.FC<{
               </th>
               <th className="px-3 py-2 text-right">{sortButton('volumeRatio', 'Volume / 20D avg', 'ml-auto')}</th>
               <th className="px-3 py-2 text-right">{sortButton('foreignNetVolume', 'Foreign net volume', 'ml-auto')}</th>
+              <th className="px-3 py-2 text-right" title="Latest daily_available foreign net value from SSI DailyStockPrice">
+                {sortButton('foreignNetValue', 'NN ròng', 'ml-auto')}
+              </th>
+              <th className="px-3 py-2 text-right" title="Five-session cumulative foreign net value from SSI DailyStockPrice">
+                {sortButton('foreignNetValue5d', 'NN 5P', 'ml-auto')}
+              </th>
               <th className="px-3 py-2">{sortButton('dataQuality', 'Data quality')}</th>
               <th className="px-3 py-2">Realtime / live status</th>
             </tr>
@@ -3186,7 +3210,7 @@ const IndicatorTable: React.FC<{
                         {item.membershipSource ?? 'SSI IndexComponents'} membership
                       </div>
                     </td>
-                    {(['Daily close', '% change', 'RSI14', 'MA state', 'Support', 'Resistance', 'Volume / 20D avg', 'Foreign net volume'] as const).map((label) => (
+                    {(['Daily close', '% change', 'RSI14', 'MA state', 'Support', 'Resistance', 'Volume / 20D avg', 'Foreign net volume', 'NN ròng', 'NN 5P'] as const).map((label) => (
                       <td
                         key={label}
                         className={cn('px-3 py-3', label !== 'MA state' && 'text-right tabular-nums')}
@@ -3220,6 +3244,7 @@ const IndicatorTable: React.FC<{
               const close = dailyCloseValue(item);
               const volumeRatio = volumeRatioValue(item);
               const foreignNetVolume = foreignNetVolumeValue(item);
+              const foreignFlow = foreignFlowRows[item.ticker];
               const dataQuality = dataQualityBadge(item);
               const maState = maStateBadge(item);
               const liveStatus = liveStatusBadge(item, quote, marketPhase);
@@ -3271,6 +3296,31 @@ const IndicatorTable: React.FC<{
                   <td className={cn('px-3 py-3 text-right font-medium tabular-nums', signalTone(foreignNetVolume))}>
                     <div>{hasDisplayValue(foreignNetVolume) ? formatSignedNumber(foreignNetVolume, 0) : missingValue(missingCellReason(item, 'foreignNetVolume'))}</div>
                     <div className="mt-1 text-xs font-normal text-secondary-text">{hasDisplayValue(foreignNetVolume) ? 'SSI DailyStockPrice' : 'DailyStockPrice unavailable'}</div>
+                  </td>
+                  <td className={cn('px-3 py-3 text-right font-medium tabular-nums', signalTone(foreignFlow?.foreignNetValue))}>
+                    {foreignFlowLoading && !foreignFlow ? (
+                      <span className="text-muted" aria-label={`${item.ticker} NN ròng loading`}>Loading...</span>
+                    ) : hasDisplayValue(foreignFlow?.foreignNetValue) ? (
+                      <div title={formatFullVndTitle(foreignFlow?.foreignNetValue)}>
+                        {formatSignedVndValue(foreignFlow?.foreignNetValue)}
+                        {foreignFlow?.freshness === 'stale' ? <span className="ml-1 text-xs text-warning">Cũ</span> : null}
+                      </div>
+                    ) : missingValue(foreignFlow?.dataState === 'empty'
+                      ? 'SSI DailyStockPrice returned no daily foreign-flow history.'
+                      : 'Latest daily foreign net value unavailable from SSI DailyStockPrice.')}
+                  </td>
+                  <td className={cn('px-3 py-3 text-right font-medium tabular-nums', signalTone(foreignFlow?.foreignNetValue5d))}>
+                    {foreignFlowLoading && !foreignFlow ? (
+                      <span className="text-muted" aria-label={`${item.ticker} NN 5P loading`}>Loading...</span>
+                    ) : hasDisplayValue(foreignFlow?.foreignNetValue5d) ? (
+                      <div title={formatFullVndTitle(foreignFlow?.foreignNetValue5d)}>
+                        {formatSignedVndValue(foreignFlow?.foreignNetValue5d)}
+                        {!foreignFlow?.complete5d ? <span className="ml-1 text-xs text-warning">{foreignFlow?.coveredSessions5d}/5</span> : null}
+                        {foreignFlow?.freshness === 'stale' ? <span className="ml-1 text-xs text-warning">Cũ</span> : null}
+                      </div>
+                    ) : missingValue(foreignFlow?.dataState === 'empty'
+                      ? 'SSI DailyStockPrice returned no rows for the five-session window.'
+                      : 'Five-session foreign net value unavailable from SSI DailyStockPrice.')}
                   </td>
                   <td className="px-3 py-3">
                     <Badge variant={dataQuality.variant} title={dataQuality.title} aria-label={`Data quality: ${dataQuality.label}. ${dataQuality.title}`}>
@@ -5005,6 +5055,9 @@ const VietnamDashboardPage: React.FC = () => {
   const [watchlistError, setWatchlistError] = useState<string | null>(null);
   const [customNotice, setCustomNotice] = useState<string | null>(initialCustomWatchlist.length ? 'Saved locally in this browser.' : null);
   const [data, setData] = useState<VietnamWatchlistResponse | null>(null);
+  const [foreignFlowData, setForeignFlowData] = useState<VietnamForeignFlowBatchResponse | null>(null);
+  const [foreignFlowLoading, setForeignFlowLoading] = useState(false);
+  const [foreignFlowError, setForeignFlowError] = useState<string | null>(null);
   const [realtimeQuotes, setRealtimeQuotes] = useState<Record<string, VietnamRealtimeQuote | undefined>>({});
   const [realtimeLoading, setRealtimeLoading] = useState(false);
   const [realtimeError, setRealtimeError] = useState<string | null>(null);
@@ -5068,6 +5121,8 @@ const VietnamDashboardPage: React.FC = () => {
   selectedTickerRef.current = selectedTicker;
   const dataRef = useRef(data);
   dataRef.current = data;
+  const foreignFlowDataRef = useRef(foreignFlowData);
+  foreignFlowDataRef.current = foreignFlowData;
   const vn30HydrationRef = useRef(vn30Hydration);
   vn30HydrationRef.current = vn30Hydration;
   const requestIdRef = useRef(0);
@@ -5091,6 +5146,8 @@ const VietnamDashboardPage: React.FC = () => {
   const pendingRealtimeSnapshotTickersRef = useRef<string[] | null>(null);
   const pendingTradeTapeSymbolRef = useRef<string | null>(null);
   const pendingSelectedLiveContextSymbolRef = useRef<string | null>(null);
+  const foreignFlowRequestIdRef = useRef(0);
+  const foreignFlowAbortRef = useRef<AbortController | null>(null);
   const unmountedRef = useRef(false);
 
   useEffect(() => {
@@ -5104,6 +5161,8 @@ const VietnamDashboardPage: React.FC = () => {
       filterIntentIdRef.current += 1;
       vn30HydrationRunIdRef.current += 1;
       vn30ComponentsRequestIdRef.current += 1;
+      foreignFlowRequestIdRef.current += 1;
+      foreignFlowAbortRef.current?.abort();
     };
   }, []);
 
@@ -5115,6 +5174,60 @@ const VietnamDashboardPage: React.FC = () => {
       // Observability is diagnostic only; keep dashboard data flows independent.
     }
   }, []);
+
+  const loadForeignFlow = useCallback(async (tickers: string[], forceRefresh = false) => {
+    const seen = new Set<string>();
+    const requestedTickers = tickers
+      .map((ticker) => normalizeVietnamTicker(ticker))
+      .filter((ticker) => {
+        if (!/^[A-Z0-9]{1,10}$/.test(ticker) || ticker === 'ALL' || seen.has(ticker)) return false;
+        seen.add(ticker);
+        return true;
+      })
+      .slice(0, VIETNAM_WATCHLIST_MAX_SIZE);
+    foreignFlowRequestIdRef.current += 1;
+    const requestId = foreignFlowRequestIdRef.current;
+    foreignFlowAbortRef.current?.abort();
+    if (!requestedTickers.length) {
+      foreignFlowAbortRef.current = null;
+      setForeignFlowData(null);
+      setForeignFlowLoading(false);
+      setForeignFlowError(null);
+      return;
+    }
+    const scopeKey = requestedTickers.join(',');
+    const controller = new AbortController();
+    foreignFlowAbortRef.current = controller;
+    setForeignFlowLoading(true);
+    setForeignFlowError(null);
+    try {
+      const response = await stocksApi.getVietnamForeignFlowBatch(requestedTickers, {
+        topN: 5,
+        forceRefresh,
+        signal: controller.signal,
+      });
+      if (requestId !== foreignFlowRequestIdRef.current || unmountedRef.current) return;
+      const previous = foreignFlowDataRef.current;
+      const sameScope = previous?.normalizedTickers.join(',') === scopeKey;
+      if (sameScope && previous.usableCount > 0 && response.usableCount === 0) {
+        setForeignFlowError('Latest foreign-flow refresh returned no usable rows.');
+      } else {
+        setForeignFlowData(response);
+      }
+    } catch (err) {
+      if (controller.signal.aborted || requestId !== foreignFlowRequestIdRef.current || unmountedRef.current) return;
+      setForeignFlowError(err instanceof Error ? err.message : 'Foreign-flow batch unavailable.');
+    } finally {
+      if (requestId === foreignFlowRequestIdRef.current && !unmountedRef.current) {
+        setForeignFlowLoading(false);
+        if (foreignFlowAbortRef.current === controller) foreignFlowAbortRef.current = null;
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadForeignFlow(logicalWatchlistRef.current, false);
+  }, [loadForeignFlow, logicalWatchlistKey]);
 
   const loadRealtimeQuotes = useCallback(async (tickers: string[]) => {
     const seen = new Set<string>();
@@ -5562,6 +5675,11 @@ const VietnamDashboardPage: React.FC = () => {
       }
     }
   }, [loadObservability, refreshRealtimeSnapshots]);
+
+  const refreshWatchlistData = useCallback((forceRefresh = false, refreshKind: 'manual' | 'auto' | 'force live' = forceRefresh ? 'force live' : 'manual') => {
+    void load(forceRefresh, refreshKind);
+    void loadForeignFlow(logicalWatchlistRef.current, forceRefresh);
+  }, [load, loadForeignFlow]);
 
   const hydrateVn30Watchlist = useCallback(async (
     tickers: string[],
@@ -6038,12 +6156,12 @@ const VietnamDashboardPage: React.FC = () => {
         setNextRefreshAt(newNext);
         setCountdownSeconds(autoRefreshInterval);
         if (logicalWatchlistRef.current.length) {
-          void load(false, 'auto');
+          refreshWatchlistData(false, 'auto');
         }
       }
     }, 1000);
     return () => window.clearInterval(timer);
-  }, [autoRefreshEnabled, autoRefreshInterval, hasActiveWatchlist, load]);
+  }, [autoRefreshEnabled, autoRefreshInterval, hasActiveWatchlist, refreshWatchlistData]);
 
   useEffect(() => {
     if (!realtimeAutoRefreshEnabled) {
@@ -6194,6 +6312,14 @@ const VietnamDashboardPage: React.FC = () => {
   const indicatorRows: Vn30WatchItem[] = vn30Hydration.status === 'idle'
     ? data?.watchlist ?? []
     : vn30Hydration.rows;
+  const foreignFlowScopeKey = logicalWatchlist.slice(0, VIETNAM_WATCHLIST_MAX_SIZE).join(',');
+  const currentForeignFlowData = foreignFlowData?.normalizedTickers.join(',') === foreignFlowScopeKey
+    ? foreignFlowData
+    : null;
+  const foreignFlowRows = useMemo(
+    () => Object.fromEntries((currentForeignFlowData?.rows ?? []).map((row) => [row.ticker, row])),
+    [currentForeignFlowData],
+  );
   const vn30ComponentTickers = useMemo(() => getVn30ComponentTickers(indexComponents), [indexComponents]);
   const vn30ComponentsLoading = vn30MemberState.status === 'loading';
   const vn30ComponentsReady = vn30MemberState.status === 'ready' && Boolean(vn30ComponentTickers?.length);
@@ -6281,11 +6407,11 @@ const VietnamDashboardPage: React.FC = () => {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="secondary" onClick={() => void load(false)} isLoading={loading && !forceLoading} loadingText="Refreshing" disabled={!hasActiveWatchlist || isWatchlistFilterBusy}>
+          <Button variant="secondary" onClick={() => refreshWatchlistData(false)} isLoading={loading && !forceLoading} loadingText="Refreshing" disabled={!hasActiveWatchlist || isWatchlistFilterBusy}>
             <RefreshCw className="h-4 w-4" />
             Refresh
           </Button>
-          <Button variant="outline" onClick={() => void load(true)} isLoading={forceLoading} loadingText="Refreshing live" disabled={!hasActiveWatchlist || isWatchlistFilterBusy}>
+          <Button variant="outline" onClick={() => refreshWatchlistData(true)} isLoading={forceLoading} loadingText="Refreshing live" disabled={!hasActiveWatchlist || isWatchlistFilterBusy}>
             <DatabaseZap className="h-4 w-4" />
             Force live refresh
           </Button>
@@ -6763,6 +6889,14 @@ const VietnamDashboardPage: React.FC = () => {
             realtimeQuotes={realtimeQuotes}
             marketPhase={marketPhase}
           />
+          <ForeignFlowWatchlistRankings
+            data={currentForeignFlowData}
+            loading={foreignFlowLoading}
+            updating={foreignFlowLoading && Boolean(currentForeignFlowData)}
+            error={foreignFlowError}
+            totalTickerCount={logicalWatchlist.length}
+            onRetry={() => void loadForeignFlow(logicalWatchlistRef.current, false)}
+          />
           <IndicatorTable
             items={indicatorRows}
             realtimeQuotes={realtimeQuotes}
@@ -6773,6 +6907,8 @@ const VietnamDashboardPage: React.FC = () => {
             hydrationStatus={vn30Hydration.status}
             selectedTicker={selectedItem?.ticker}
             marketPhase={marketPhase}
+            foreignFlowRows={foreignFlowRows}
+            foreignFlowLoading={foreignFlowLoading}
             onSelect={setSelectedTicker}
           />
           <SelectedTickerHeader

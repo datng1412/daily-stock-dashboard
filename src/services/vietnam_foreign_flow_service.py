@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict
-from concurrent.futures import Future
+from concurrent.futures import Future, ThreadPoolExecutor
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
@@ -37,6 +37,10 @@ EMPTY_TTL_SECONDS = 60
 NEGATIVE_TTL_SECONDS = 30
 STALE_MAX_SECONDS = 86_400
 CACHE_MAX_ENTRIES = 512
+BATCH_MAX_TICKERS = 30
+BATCH_DEFAULT_TOP_N = 5
+BATCH_MAX_TOP_N = 10
+BATCH_MAX_CONCURRENCY = 4
 _SAFE_FAILURE_CLASSES = {
     "auth_failed",
     "permission_denied",
@@ -94,6 +98,28 @@ _METRIC_DEFAULTS: Dict[str, Any] = {
     "unavailable_results": 0,
     "last_success_at": None,
     "last_failure_class": None,
+    "batch_requests": 0,
+    "batch_force_refresh_requests": 0,
+    "batch_requested_symbols": 0,
+    "batch_normalized_symbols": 0,
+    "batch_usable_symbols": 0,
+    "batch_stale_symbols": 0,
+    "batch_empty_symbols": 0,
+    "batch_unavailable_symbols": 0,
+    "batch_ready_results": 0,
+    "batch_partial_results": 0,
+    "batch_stale_results": 0,
+    "batch_empty_results": 0,
+    "batch_unavailable_results": 0,
+    "batch_latency_count": 0,
+    "batch_latency_total_ms": 0,
+    "batch_latency_max_ms": 0,
+    "batch_active_requests": 0,
+    "batch_max_active_requests": 0,
+    "ranking_build_count": 0,
+    "ranking_eligible_values": 0,
+    "ranking_excluded_null_values": 0,
+    "ranking_excluded_zero_values": 0,
 }
 _METRICS = deepcopy(_METRIC_DEFAULTS)
 
@@ -134,6 +160,26 @@ def _normalize_ticker(value: str) -> str:
     if not re.fullmatch(r"[A-Z0-9]{1,10}", ticker):
         raise ValueError("ticker must contain 1 to 10 uppercase letters or digits")
     return ticker
+
+
+def normalize_vietnam_foreign_flow_tickers(values: Iterable[str]) -> Tuple[List[str], List[str]]:
+    """Return trimmed request values and normalized unique VN tickers."""
+    requested = [str(value or "").strip() for value in values]
+    if not requested:
+        raise ValueError("tickers must contain at least one symbol")
+    normalized: List[str] = []
+    seen = set()
+    for raw in requested:
+        ticker = _normalize_ticker(raw)
+        if ticker == "ALL":
+            raise ValueError("ALL is not a supported foreign-flow batch symbol")
+        if ticker in seen:
+            continue
+        seen.add(ticker)
+        normalized.append(ticker)
+    if len(normalized) > BATCH_MAX_TICKERS:
+        raise ValueError(f"tickers cannot contain more than {BATCH_MAX_TICKERS} normalized unique symbols")
+    return requested, normalized
 
 
 def _parse_iso_date(value: Optional[str], field_name: str) -> Optional[date]:
@@ -586,3 +632,257 @@ class VietnamForeignFlowService:
             "stale_reason": None,
             "failure_class": failure_class,
         }
+
+
+class VietnamForeignFlowBatchService:
+    """Compose bounded watchlist summaries from the authoritative symbol service."""
+
+    def __init__(
+        self,
+        symbol_service: Optional[VietnamForeignFlowService] = None,
+        *,
+        max_concurrency: int = BATCH_MAX_CONCURRENCY,
+    ) -> None:
+        self._symbol_service = symbol_service or VietnamForeignFlowService(SsiFastConnectFetcher())
+        self._max_concurrency = max(1, min(int(max_concurrency), BATCH_MAX_CONCURRENCY))
+
+    def get_batch(
+        self,
+        tickers: Iterable[str],
+        *,
+        top_n: int = BATCH_DEFAULT_TOP_N,
+        force_refresh: bool = False,
+    ) -> Dict[str, Any]:
+        requested_tickers, normalized_tickers = normalize_vietnam_foreign_flow_tickers(tickers)
+        requested_top_n = int(top_n)
+        if not 1 <= requested_top_n <= BATCH_MAX_TOP_N:
+            raise ValueError(f"top_n must be between 1 and {BATCH_MAX_TOP_N}")
+        effective_top_n = min(requested_top_n, len(normalized_tickers))
+        started = perf_counter()
+        with _LOCK:
+            _METRICS["batch_requests"] += 1
+            if force_refresh:
+                _METRICS["batch_force_refresh_requests"] += 1
+            _METRICS["batch_requested_symbols"] += len(requested_tickers)
+            _METRICS["batch_normalized_symbols"] += len(normalized_tickers)
+            _METRICS["batch_active_requests"] += 1
+            _METRICS["batch_max_active_requests"] = max(
+                _METRICS["batch_max_active_requests"],
+                _METRICS["batch_active_requests"],
+            )
+
+        result_state = "unavailable"
+        counts = {"usable": 0, "fresh": 0, "stale": 0, "empty": 0, "unavailable": 0}
+        ranking_stats = {"eligible": 0, "excluded_null": 0, "excluded_zero": 0}
+        try:
+            histories = self._load_histories(normalized_tickers, force_refresh=force_refresh)
+            rows = [self._compose_symbol(ticker, histories[ticker]) for ticker in normalized_tickers]
+            counts = self._count_states(rows)
+            result_state = self._batch_state(len(rows), counts)
+            rankings, ranking_stats = self._build_rankings(rows, effective_top_n)
+            coverage_ratio = counts["usable"] / len(normalized_tickers)
+            payload = {
+                "source": SOURCE,
+                "source_endpoint": SOURCE_ENDPOINT,
+                "volume_unit": VOLUME_UNIT,
+                "value_unit": VALUE_UNIT,
+                "finality": FINALITY,
+                "requested_tickers": requested_tickers,
+                "normalized_tickers": normalized_tickers,
+                "requested_count": len(requested_tickers),
+                "normalized_count": len(normalized_tickers),
+                "returned_count": len(rows),
+                "usable_count": counts["usable"],
+                "fresh_count": counts["fresh"],
+                "stale_count": counts["stale"],
+                "empty_count": counts["empty"],
+                "unavailable_count": counts["unavailable"],
+                "coverage_ratio": coverage_ratio,
+                "complete": result_state == "ready",
+                "data_state": result_state,
+                "rows": rows,
+                "rankings": rankings,
+                "fetched_at": _iso_now(),
+            }
+            return payload
+        finally:
+            latency_ms = max(0, int((perf_counter() - started) * 1000))
+            with _LOCK:
+                _METRICS["batch_usable_symbols"] += counts["usable"]
+                _METRICS["batch_stale_symbols"] += counts["stale"]
+                _METRICS["batch_empty_symbols"] += counts["empty"]
+                _METRICS["batch_unavailable_symbols"] += counts["unavailable"]
+                result_metric = f"batch_{result_state}_results"
+                if result_metric in _METRICS:
+                    _METRICS[result_metric] += 1
+                _METRICS["batch_latency_count"] += 1
+                _METRICS["batch_latency_total_ms"] += latency_ms
+                _METRICS["batch_latency_max_ms"] = max(_METRICS["batch_latency_max_ms"], latency_ms)
+                _METRICS["batch_active_requests"] = max(0, _METRICS["batch_active_requests"] - 1)
+                _METRICS["ranking_build_count"] += 1
+                _METRICS["ranking_eligible_values"] += ranking_stats["eligible"]
+                _METRICS["ranking_excluded_null_values"] += ranking_stats["excluded_null"]
+                _METRICS["ranking_excluded_zero_values"] += ranking_stats["excluded_zero"]
+            logger.info(
+                "vn_foreign_flow_batch_complete",
+                extra={
+                    "vn_foreign_flow_batch": {
+                        "requested_count": len(requested_tickers),
+                        "normalized_count": len(normalized_tickers),
+                        "usable_count": counts["usable"],
+                        "stale_count": counts["stale"],
+                        "empty_count": counts["empty"],
+                        "unavailable_count": counts["unavailable"],
+                        "result_state": result_state,
+                        "duration_ms": latency_ms,
+                        "force_refresh": bool(force_refresh),
+                    }
+                },
+            )
+
+    def _load_histories(self, tickers: List[str], *, force_refresh: bool) -> Dict[str, Dict[str, Any]]:
+        def load(ticker: str) -> Dict[str, Any]:
+            try:
+                return self._symbol_service.get_symbol_history(
+                    ticker,
+                    limit=20,
+                    force_refresh=force_refresh,
+                )
+            except Exception:
+                return self._unavailable_history(ticker)
+
+        worker_count = min(self._max_concurrency, len(tickers))
+        if worker_count <= 1:
+            return {ticker: load(ticker) for ticker in tickers}
+        with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="vn-foreign-flow") as executor:
+            futures = {ticker: executor.submit(load, ticker) for ticker in tickers}
+            return {ticker: futures[ticker].result() for ticker in tickers}
+
+    @staticmethod
+    def _unavailable_history(ticker: str) -> Dict[str, Any]:
+        return VietnamForeignFlowService._build_payload(
+            ticker,
+            "recent_sessions",
+            20,
+            None,
+            None,
+            [],
+            "unavailable",
+            "unavailable",
+            "provider_exception",
+        )
+
+    @staticmethod
+    def _compose_symbol(ticker: str, history: Dict[str, Any]) -> Dict[str, Any]:
+        state = str(history.get("data_state") or "unavailable")
+        if state not in {"ready", "stale", "empty", "unavailable"}:
+            state = "unavailable"
+        freshness = str(history.get("freshness") or state)
+        if freshness not in {"fresh", "stale", "empty", "unavailable"}:
+            freshness = "unavailable"
+        latest = history.get("latest_row") if isinstance(history.get("latest_row"), dict) else {}
+        windows = history.get("windows") if isinstance(history.get("windows"), dict) else {}
+        window_5 = windows.get("5") if isinstance(windows.get("5"), dict) else {}
+        window_20 = windows.get("20") if isinstance(windows.get("20"), dict) else {}
+        return {
+            "ticker": ticker,
+            "data_state": state,
+            "freshness": freshness,
+            "failure_class": history.get("failure_class"),
+            "stale_reason": history.get("stale_reason"),
+            "latest_trading_date": latest.get("trading_date"),
+            "foreign_buy_volume": latest.get("foreign_buy_volume"),
+            "foreign_sell_volume": latest.get("foreign_sell_volume"),
+            "foreign_net_volume": latest.get("foreign_net_volume"),
+            "foreign_buy_value": latest.get("foreign_buy_value"),
+            "foreign_sell_value": latest.get("foreign_sell_value"),
+            "foreign_net_value": latest.get("foreign_net_value"),
+            "foreign_net_volume_5d": window_5.get("cumulative_foreign_net_volume"),
+            "foreign_net_value_5d": window_5.get("cumulative_foreign_net_value"),
+            "foreign_net_volume_20d": window_20.get("cumulative_foreign_net_volume"),
+            "foreign_net_value_20d": window_20.get("cumulative_foreign_net_value"),
+            "covered_sessions_5d": int(window_5.get("covered_sessions") or 0),
+            "complete_5d": bool(window_5.get("complete")),
+            "window_end_date_5d": window_5.get("end_date"),
+            "covered_sessions_20d": int(window_20.get("covered_sessions") or 0),
+            "complete_20d": bool(window_20.get("complete")),
+            "window_end_date_20d": window_20.get("end_date"),
+            "source": history.get("source") or SOURCE,
+            "source_endpoint": history.get("source_endpoint") or SOURCE_ENDPOINT,
+            "volume_unit": history.get("volume_unit") or VOLUME_UNIT,
+            "value_unit": history.get("value_unit") or VALUE_UNIT,
+            "finality": history.get("finality") or FINALITY,
+            "fetched_at": history.get("fetched_at") or _iso_now(),
+        }
+
+    @staticmethod
+    def _count_states(rows: List[Dict[str, Any]]) -> Dict[str, int]:
+        fresh = sum(row["data_state"] == "ready" and row["freshness"] == "fresh" for row in rows)
+        stale = sum(row["data_state"] == "stale" or row["freshness"] == "stale" for row in rows)
+        empty = sum(row["data_state"] == "empty" for row in rows)
+        unavailable = sum(row["data_state"] == "unavailable" for row in rows)
+        return {
+            "usable": fresh + stale,
+            "fresh": fresh,
+            "stale": stale,
+            "empty": empty,
+            "unavailable": unavailable,
+        }
+
+    @staticmethod
+    def _batch_state(row_count: int, counts: Dict[str, int]) -> str:
+        if counts["fresh"] == row_count:
+            return "ready"
+        if counts["stale"] == row_count:
+            return "stale"
+        if counts["empty"] == row_count:
+            return "empty"
+        if counts["usable"] > 0:
+            return "partial"
+        if counts["unavailable"] > 0:
+            return "unavailable"
+        return "partial"
+
+    @staticmethod
+    def _build_rankings(rows: List[Dict[str, Any]], top_n: int) -> Tuple[Dict[str, Any], Dict[str, int]]:
+        specifications = {
+            "latest_net_value": ("foreign_net_value", "latest_trading_date", None, None),
+            "net_value_5d": ("foreign_net_value_5d", "window_end_date_5d", "covered_sessions_5d", "complete_5d"),
+            "net_value_20d": ("foreign_net_value_20d", "window_end_date_20d", "covered_sessions_20d", "complete_20d"),
+        }
+        rankings: Dict[str, Any] = {}
+        stats = {"eligible": 0, "excluded_null": 0, "excluded_zero": 0}
+        for name, (value_key, date_key, covered_key, complete_key) in specifications.items():
+            entries = []
+            for row in rows:
+                if row["data_state"] not in {"ready", "stale"}:
+                    continue
+                value = row.get(value_key)
+                if value is None:
+                    stats["excluded_null"] += 1
+                    continue
+                if value == 0:
+                    stats["excluded_zero"] += 1
+                    continue
+                stats["eligible"] += 1
+                entries.append(
+                    {
+                        "ticker": row["ticker"],
+                        "value": value,
+                        "trading_date": row.get(date_key),
+                        "covered_sessions": int(row.get(covered_key) or 1) if covered_key else 1,
+                        "complete": bool(row.get(complete_key)) if complete_key else True,
+                        "data_state": row["data_state"],
+                    }
+                )
+            rankings[name] = {
+                "top_buy": sorted(
+                    (entry for entry in entries if entry["value"] > 0),
+                    key=lambda entry: (-entry["value"], entry["ticker"]),
+                )[:top_n],
+                "top_sell": sorted(
+                    (entry for entry in entries if entry["value"] < 0),
+                    key=lambda entry: (entry["value"], entry["ticker"]),
+                )[:top_n],
+            }
+        return rankings, stats

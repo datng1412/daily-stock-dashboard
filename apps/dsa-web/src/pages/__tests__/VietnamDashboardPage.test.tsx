@@ -7,6 +7,7 @@ import {
   type VietnamIntradayChartResponse,
   type VietnamCorporateActionsResponse,
   type VietnamDailyIndexResponse,
+  type VietnamForeignFlowBatchResponse,
   type VietnamIndexComponentsResponse,
   type VietnamIndexListResponse,
   type VietnamObservabilityResponse,
@@ -30,6 +31,7 @@ const mockedGetVietnamMarketPhase = vi.fn();
 vi.mock('../../api/stocks', () => ({
   stocksApi: {
     getVietnamWatchlist: vi.fn(),
+    getVietnamForeignFlowBatch: vi.fn(),
     getVietnamRealtimeQuotes: vi.fn(),
     getVietnamRealtimeTrades: vi.fn(),
     getVietnamCorporateActions: vi.fn(),
@@ -446,6 +448,66 @@ const makeResponse = (tickers: string[], options: { fixtureMode?: boolean } = {}
   formulas: { neutralStatusLabels: 'Rule-based neutral condition labels only; no trading recommendations are generated' },
 });
 
+const makeForeignFlowResponse = (tickers: string[]): VietnamForeignFlowBatchResponse => ({
+  source: 'ssi_fastconnect',
+  sourceEndpoint: 'daily_stock_price',
+  volumeUnit: 'shares',
+  valueUnit: 'VND',
+  finality: 'daily_available',
+  requestedTickers: tickers,
+  normalizedTickers: tickers,
+  requestedCount: tickers.length,
+  normalizedCount: tickers.length,
+  returnedCount: tickers.length,
+  usableCount: tickers.length,
+  freshCount: tickers.length,
+  staleCount: 0,
+  emptyCount: 0,
+  unavailableCount: 0,
+  coverageRatio: tickers.length ? 1 : 0,
+  complete: true,
+  dataState: 'ready',
+  rows: tickers.map((ticker, index) => ({
+    ticker,
+    dataState: 'ready',
+    freshness: 'fresh',
+    failureClass: null,
+    staleReason: null,
+    latestTradingDate: '2026-06-10',
+    foreignBuyVolume: 100,
+    foreignSellVolume: 40,
+    foreignNetVolume: 60,
+    foreignBuyValue: 3_000_000_000,
+    foreignSellValue: 1_000_000_000,
+    foreignNetValue: index % 2 ? -1_000_000_000 : 2_000_000_000,
+    foreignNetVolume5d: 300,
+    foreignNetValue5d: index % 2 ? -3_000_000_000 : 5_000_000_000,
+    foreignNetVolume20d: 1_200,
+    foreignNetValue20d: index % 2 ? -8_000_000_000 : 12_000_000_000,
+    coveredSessions5d: 5,
+    complete5d: true,
+    windowEndDate5d: '2026-06-10',
+    coveredSessions20d: 20,
+    complete20d: true,
+    windowEndDate20d: '2026-06-10',
+    source: 'ssi_fastconnect',
+    sourceEndpoint: 'daily_stock_price',
+    volumeUnit: 'shares',
+    valueUnit: 'VND',
+    finality: 'daily_available',
+    fetchedAt: '2026-06-10T08:00:00Z',
+  })),
+  rankings: {
+    latestNetValue: {
+      topBuy: tickers.length ? [{ ticker: tickers[0], value: 2_000_000_000, tradingDate: '2026-06-10', coveredSessions: 1, complete: true, dataState: 'ready' }] : [],
+      topSell: tickers.length > 1 ? [{ ticker: tickers[1], value: -1_000_000_000, tradingDate: '2026-06-10', coveredSessions: 1, complete: true, dataState: 'ready' }] : [],
+    },
+    netValue5d: { topBuy: [], topSell: [] },
+    netValue20d: { topBuy: [], topSell: [] },
+  },
+  fetchedAt: '2026-06-10T08:00:00Z',
+});
+
 const makeCurrentIntradayCandles = () => [
   {
     dateTime: '2026-06-10T10:00:00+07:00',
@@ -459,6 +521,7 @@ const makeCurrentIntradayCandles = () => [
 ];
 
 const mockedGetVietnamWatchlist = vi.mocked(stocksApi.getVietnamWatchlist);
+const mockedGetVietnamForeignFlowBatch = vi.mocked(stocksApi.getVietnamForeignFlowBatch);
 const mockedGetVietnamRealtimeQuotes = vi.mocked(stocksApi.getVietnamRealtimeQuotes);
 const mockedGetVietnamRealtimeTrades = vi.mocked(stocksApi.getVietnamRealtimeTrades);
 const mockedGetVietnamCorporateActions = vi.mocked(stocksApi.getVietnamCorporateActions);
@@ -935,6 +998,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     localStorage.clear();
     localStorage.setItem(customWatchlistStorageKey, JSON.stringify(defaultTickers));
     mockedGetVietnamWatchlist.mockReset();
+    mockedGetVietnamForeignFlowBatch.mockReset();
     mockedGetVietnamRealtimeQuotes.mockReset();
     mockedGetVietnamRealtimeTrades.mockReset();
     mockedGetVietnamCorporateActions.mockReset();
@@ -948,6 +1012,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     mockedGetVietnamMarketPhase.mockReset();
     mockedGetVietnamMarketPhase.mockReturnValue(makeMarketPhase());
     mockedGetVietnamWatchlist.mockImplementation(async (tickers) => makeResponse(tickers?.length ? tickers : defaultTickers));
+    mockedGetVietnamForeignFlowBatch.mockImplementation(async (tickers) => makeForeignFlowResponse(tickers));
     mockedGetVietnamRealtimeQuotes.mockImplementation(async (tickers) => makeRealtimeResponse(tickers));
     mockedGetVietnamRealtimeTrades.mockImplementation(async (symbol) => makeTradesResponse(symbol));
     mockedGetVietnamCorporateActions.mockImplementation(async (tickers) => makeCorporateActionsResponse(tickers));
@@ -990,6 +1055,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     await waitFor(() => expect(mockedGetVietnamObservability).toHaveBeenCalled());
 
     expect(mockedGetVietnamWatchlist).not.toHaveBeenCalled();
+    expect(mockedGetVietnamForeignFlowBatch).not.toHaveBeenCalled();
     expect(mockedGetVietnamRealtimeQuotes).not.toHaveBeenCalled();
     expect(mockedGetVietnamRealtimeTrades).not.toHaveBeenCalled();
     expect(mockedGetVietnamCorporateActions).not.toHaveBeenCalled();
@@ -1446,7 +1512,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Apply custom watchlist' }));
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(['VPB', 'ACB'], false));
-    expect(selectedTickerHeader().getByRole('heading', { name: 'VPB' })).toBeInTheDocument();
+    await waitFor(() => expect(selectedTickerHeader().getByRole('heading', { name: 'VPB' })).toBeInTheDocument());
     expect(JSON.parse(localStorage.getItem(customWatchlistStorageKey) ?? '[]')).toEqual(['VPB', 'ACB']);
   });
 
@@ -5002,6 +5068,96 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(chartCard.getByTestId('vietnam-lightweight-chart')).toHaveAttribute('data-points-count', '70');
     expect(chartCard.getByTestId('vietnam-lightweight-chart')).toHaveAttribute('data-ticker', 'FPT');
     expect(chartCard.queryByText(/buy|sell|hold|recommendation/i)).not.toBeInTheDocument();
+  });
+
+  it('loads foreign flow with one bounded request and renders watchlist columns and scoped rankings', async () => {
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamForeignFlowBatch).toHaveBeenCalledTimes(1));
+
+    expect(mockedGetVietnamForeignFlowBatch).toHaveBeenCalledWith(defaultTickers, expect.objectContaining({
+      topN: 5,
+      forceRefresh: false,
+      signal: expect.any(AbortSignal),
+    }));
+    expect(screen.getByRole('button', { name: /^Sort by NN ròng/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Sort by NN 5P/ })).toBeInTheDocument();
+    expect(screen.getByText('Top mua ròng trong watchlist')).toBeInTheDocument();
+    expect(screen.getByText('Top bán ròng trong watchlist')).toBeInTheDocument();
+    expect(screen.getByText('Trong watchlist')).toBeInTheDocument();
+    expect(screen.queryByText(/market-wide ranking/i)).not.toBeInTheDocument();
+  });
+
+  it('sorts daily foreign net values deterministically with ticker tie-breaks', async () => {
+    render(<VietnamDashboardPage />);
+    await waitFor(() => expect(mockedGetVietnamForeignFlowBatch).toHaveBeenCalledTimes(1));
+
+    clickIndicatorSort(/Sort by NN ròng/i);
+    expect(indicatorRowOrder()).toEqual(['ACB', 'SCS', 'VPB', 'ACV', 'FPT', 'MSB']);
+
+    clickIndicatorSort(/Sort by NN ròng asc/i);
+    expect(indicatorRowOrder()).toEqual(['ACV', 'FPT', 'MSB', 'ACB', 'SCS', 'VPB']);
+  });
+
+  it('keeps one foreign-flow request owner across a watchlist change and ignores the older response', async () => {
+    let resolveInitial: ((value: VietnamForeignFlowBatchResponse) => void) | undefined;
+    mockedGetVietnamForeignFlowBatch
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveInitial = resolve; }))
+      .mockImplementationOnce(async (tickers) => makeForeignFlowResponse(tickers));
+
+    render(<VietnamDashboardPage />);
+    await waitFor(() => expect(mockedGetVietnamForeignFlowBatch).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Banks' }));
+    await waitFor(() => expect(mockedGetVietnamForeignFlowBatch).toHaveBeenCalledTimes(2));
+    expect(mockedGetVietnamForeignFlowBatch.mock.calls[0][1]?.signal?.aborted).toBe(true);
+    expect(mockedGetVietnamForeignFlowBatch.mock.calls[1][0]).toEqual([...presetTickers.Banks]);
+
+    await act(async () => {
+      resolveInitial?.(makeForeignFlowResponse(defaultTickers));
+    });
+    await waitFor(() => expect(screen.getByTestId('foreign-flow-rankings')).toHaveTextContent(`${presetTickers.Banks.length}/${presetTickers.Banks.length} mã có dữ liệu`));
+    expect(screen.getByTestId('foreign-flow-rankings')).not.toHaveTextContent(`${defaultTickers.length}/${defaultTickers.length} mã có dữ liệu`);
+  });
+
+  it('retains the previous usable foreign-flow batch during and after an unavailable refresh', async () => {
+    let resolveRefresh: ((value: VietnamForeignFlowBatchResponse) => void) | undefined;
+    mockedGetVietnamForeignFlowBatch
+      .mockImplementationOnce(async (tickers) => makeForeignFlowResponse(tickers))
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveRefresh = resolve; }));
+
+    render(<VietnamDashboardPage />);
+    await waitFor(() => expect(screen.getByTestId('foreign-flow-rankings')).toHaveTextContent('+2.0B'));
+
+    fireEvent.click(screen.getByRole('button', { name: /^Refresh$/ }));
+    await waitFor(() => expect(mockedGetVietnamForeignFlowBatch).toHaveBeenCalledTimes(2));
+    expect(screen.getByTestId('foreign-flow-rankings')).toHaveTextContent('Đang cập nhật; tiếp tục hiển thị dữ liệu gần nhất.');
+    expect(screen.getByTestId('foreign-flow-rankings')).toHaveTextContent('+2.0B');
+
+    const unavailable = makeForeignFlowResponse(defaultTickers);
+    unavailable.usableCount = 0;
+    unavailable.freshCount = 0;
+    unavailable.unavailableCount = defaultTickers.length;
+    unavailable.coverageRatio = 0;
+    unavailable.complete = false;
+    unavailable.dataState = 'unavailable';
+    unavailable.rows = unavailable.rows.map((row) => ({
+      ...row,
+      dataState: 'unavailable',
+      freshness: 'unavailable',
+      foreignNetValue: null,
+      foreignNetValue5d: null,
+      foreignNetValue20d: null,
+    }));
+    unavailable.rankings = {
+      latestNetValue: { topBuy: [], topSell: [] },
+      netValue5d: { topBuy: [], topSell: [] },
+      netValue20d: { topBuy: [], topSell: [] },
+    };
+    await act(async () => resolveRefresh?.(unavailable));
+
+    await waitFor(() => expect(screen.getByTestId('foreign-flow-rankings')).toHaveTextContent('Cập nhật chưa khả dụng; đang giữ dữ liệu trước đó.'));
+    expect(screen.getByTestId('foreign-flow-rankings')).toHaveTextContent('+2.0B');
   });
 
   it('shows reconnecting lifecycle copy without exposing transport errors', async () => {

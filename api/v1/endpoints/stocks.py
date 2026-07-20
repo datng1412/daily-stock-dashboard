@@ -33,6 +33,8 @@ from api.v1.schemas.stocks import (
     VietnamCompanyResearchResponse,
     VietnamCorporateActionsResponse,
     VietnamDailyIndexResponse,
+    VietnamForeignFlowBatchRequest,
+    VietnamForeignFlowBatchResponse,
     VietnamForeignFlowSymbolHistoryResponse,
     VietnamIndexComponentsResponse,
     VietnamIndexListResponse,
@@ -58,7 +60,11 @@ from src.services.import_parser import (
 from src.services.stock_service import StockService
 from src.services.system_config_service import SystemConfigService
 from src.services.vietnam_company_research_service import VietnamCompanyResearchService
-from src.services.vietnam_foreign_flow_service import VietnamForeignFlowService
+from src.services.vietnam_foreign_flow_service import (
+    VietnamForeignFlowBatchService,
+    VietnamForeignFlowService,
+    normalize_vietnam_foreign_flow_tickers,
+)
 from src.services.vietnam_market_service import VietnamMarketService, vietnam_intraday_chart_health_snapshot
 from src.services.vietnam_observability import vietnam_observability_snapshot
 from data_provider.base import normalize_stock_code
@@ -736,6 +742,36 @@ def get_vietnam_foreign_flow_symbol_history(
         raise HTTPException(
             status_code=500,
             detail={"error": "vn_foreign_flow_failed", "message": "Vietnam foreign-flow request failed"},
+        ) from exc
+
+
+@router.post(
+    "/vn/foreign-flow/batch",
+    response_model=VietnamForeignFlowBatchResponse,
+    summary="Vietnam watchlist-scoped daily foreign flow",
+    description="Return bounded SSI DailyStockPrice summaries and rankings for up to 30 normalized VN symbols.",
+)
+def post_vietnam_foreign_flow_batch(
+    request: VietnamForeignFlowBatchRequest,
+) -> VietnamForeignFlowBatchResponse:
+    try:
+        normalize_vietnam_foreign_flow_tickers(request.tickers)
+        payload = VietnamForeignFlowBatchService().get_batch(
+            request.tickers,
+            top_n=request.top_n,
+            force_refresh=request.force_refresh,
+        )
+        return VietnamForeignFlowBatchResponse(**payload)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"error": "vn_foreign_flow_batch_invalid_request", "message": str(exc)},
+        ) from exc
+    except Exception as exc:
+        logger.error("Vietnam foreign-flow batch failed")
+        raise HTTPException(
+            status_code=500,
+            detail={"error": "vn_foreign_flow_batch_failed", "message": "Vietnam foreign-flow batch request failed"},
         ) from exc
 
 

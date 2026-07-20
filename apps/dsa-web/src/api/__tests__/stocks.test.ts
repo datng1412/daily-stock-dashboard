@@ -2,16 +2,19 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { stocksApi } from '../stocks';
 
 const get = vi.hoisted(() => vi.fn());
+const post = vi.hoisted(() => vi.fn());
 
 vi.mock('../index', () => ({
   default: {
     get,
+    post,
   },
 }));
 
 describe('stocksApi Vietnam SSI-derived metric mapping', () => {
   beforeEach(() => {
     get.mockReset();
+    post.mockReset();
   });
 
   it('normalizes watchlist SSI-derived value keys that include numeric suffixes', async () => {
@@ -140,5 +143,68 @@ describe('stocksApi Vietnam SSI-derived metric mapping', () => {
     expect(result.newestBarAgeSeconds).toBe(8);
     expect(result.providerSnapshotAgeSeconds).toBe(3);
     expect(result.currentBarState).toBe('provisional');
+  });
+
+  it('sends one normalized bounded foreign-flow batch request with abort ownership', async () => {
+    post.mockResolvedValueOnce({
+      data: {
+        source: 'ssi_fastconnect',
+        source_endpoint: 'daily_stock_price',
+        volume_unit: 'shares',
+        value_unit: 'VND',
+        finality: 'daily_available',
+        requested_tickers: ['FPT', 'VCB'],
+        normalized_tickers: ['FPT', 'VCB'],
+        requested_count: 2,
+        normalized_count: 2,
+        returned_count: 2,
+        usable_count: 1,
+        fresh_count: 1,
+        stale_count: 0,
+        empty_count: 0,
+        unavailable_count: 1,
+        coverage_ratio: 0.5,
+        complete: false,
+        data_state: 'partial',
+        rows: [],
+        rankings: {
+          latest_net_value: { top_buy: [], top_sell: [] },
+          net_value_5d: { top_buy: [], top_sell: [] },
+          net_value_20d: { top_buy: [], top_sell: [] },
+        },
+        fetched_at: '2026-07-17T10:00:00+00:00',
+      },
+    });
+    const controller = new AbortController();
+
+    const result = await stocksApi.getVietnamForeignFlowBatch([' fpt ', 'FPT.VN', 'vcb'], {
+      topN: 3,
+      forceRefresh: true,
+      signal: controller.signal,
+    });
+
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(post).toHaveBeenCalledWith('/api/v1/stocks/vn/foreign-flow/batch', {
+      tickers: ['FPT', 'VCB'],
+      top_n: 3,
+      force_refresh: true,
+    }, {
+      timeout: 120000,
+      signal: controller.signal,
+    });
+    expect(result.dataState).toBe('partial');
+    expect(result.coverageRatio).toBe(0.5);
+  });
+
+  it('caps foreign-flow requests at the stable first 30 unique symbols', async () => {
+    post.mockResolvedValueOnce({ data: { normalized_tickers: [] } });
+    const tickers = Array.from({ length: 35 }, (_, index) => `A${index.toString().padStart(2, '0')}`);
+
+    await stocksApi.getVietnamForeignFlowBatch(tickers);
+
+    const request = post.mock.calls[0][1] as { tickers: string[] };
+    expect(request.tickers).toHaveLength(30);
+    expect(request.tickers[0]).toBe('A00');
+    expect(request.tickers[29]).toBe('A29');
   });
 });
