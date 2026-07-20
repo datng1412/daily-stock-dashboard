@@ -621,6 +621,15 @@ Explicit exclusions: advanced alert engine, sector heatmap, historical membershi
 - Explicit exclusions: no historical watchlist aggregate chart, 5/20 cumulative buy/sell reconstruction, VN30/HOSE/HNX/UPCOM/sector scope, market-wide ranking, current-session claim, polling, WebSocket, backend/schema, dependency, or lockfile change.
 - Validation/runtime: 43 focused visualization/API/page tests, 18 route/navigation/request-owner regressions, 207 isolated Vietnam dashboard tests, TypeScript, ESLint, and the production build passed. The supplemental suite recorded 908 passed, two skipped, and five unrelated existing failures. The normal backend launcher did not open port 8012 within the bounded readiness window, so populated browser acceptance was not claimed; the phase-owned foreground process was terminated without switching launchers.
 
+### Phase 4.12E-1-R2A - Runtime acceptance (completed with SSI unavailable)
+
+- Startup: the normal hardened launcher completed application lifespan startup and began listening on `127.0.0.1:8012` in about five seconds. The earlier no-listener finding was not reproduced; its readiness script had already received HTTP 200 but treated a later listener-inspection failure as probe failure. Direct Uvicorn was therefore not used and no startup repair was made.
+- API/provider: the five-symbol ordered batch contract remained HTTP 200 and typed. The environment classified SSI DailyStockPrice access as `network_error`; immediate repeats exercised the negative cache, and final active batch/in-flight counts were zero. No raw history, provider payload, exception, or credential entered the response.
+- Browser: direct `/foreign-flow` loading recognized FPT, ACB, VPB, VIX, and HDB. The page issued one batch POST for that scope and no automatic symbol-history request. Latest/5/20, value/volume, overview/detail, filter, and sort controls changed presentation without increasing the batch counter. Summary, breadth, concentration, treemap, bars, and scanner all rendered the honest unavailable state; no `undefined`, `NaN`, or `Infinity` appeared and the browser console remained clean.
+- Responsive/accessibility: desktop and 390x844 mobile layouts kept the controls, analytics cards, and scanner usable. Group labels, pressed states, selected filter, scanner text alternatives, and sortable controls remained exposed. Positive treemap-cell keyboard behavior remains deterministic-test-owned until usable live rows are available.
+- Runtime tooling: the repository `npm.cmd` dev command hit the known Windows profile `EPERM`; the direct Vite fallback started on 5174 because an unrelated pre-existing process owned 5173, but that origin was browser-blocked. Acceptance therefore used the same current production build served by the healthy backend. The unrelated 5173 process was preserved.
+- Primary outcome: **B - runtime accepted with SSI unavailable**. The workspace remains watchlist-only and usable positive-row browser proof remains pending network availability.
+
 ### Phase 4.12E - VN30 aggregation with coverage (L)
 
 - Goal/value: provide a trustworthy current-basket aggregate and rankings.

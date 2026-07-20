@@ -118,6 +118,8 @@ Phase 4.12B exposes bounded one-symbol SSI DailyStockPrice foreign-flow history 
 
 Phase 4.12B-R1 confirmed the normal backend launcher and endpoint contract at runtime. In the bounded local smoke, SSI network access was unavailable, so the endpoint returned a typed unavailable state; an identical request reused the short negative cache without another provider call. Live usable-row proof remains pending network availability, and no fallback provider is used.
 
+Phase 4.12E-1-R2A completed populated runtime acceptance for the rich workspace. The normal launcher and backend-served frontend were healthy; a five-symbol direct page load used one watchlist batch and no symbol-history fan-out. SSI remained network-unavailable, and the page kept all rows visible while leaving summaries and visual rankings honestly unavailable on desktop and mobile. Presentation controls did not refetch. Positive live visualization proof remains pending SSI network availability.
+
 ## Phase 4.11D-1 Current-Session Audit
 
 Phase 4.11D-1 audited current-session chart sources. Phase 4.11D-2 now implements the approved delayed-only path: SSI IntradayOhlc remains authoritative, the current bucket is `provisional` only while its normalized minute matches the active Vietnam minute, older current-day buckets are `inferred_final`, and bounded replacement polling runs without stream aggregation. X-TRADE aggregation remains blocked because observed events lack stable identity/sequence and include indistinguishable duplicates. TradingView supplies rendering only, never market data. Holidays, halts, half sessions, HNX, and UPCOM session differences remain unresolved.

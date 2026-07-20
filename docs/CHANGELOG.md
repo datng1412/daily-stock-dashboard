@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [test] Complete populated foreign-flow runtime acceptance with normal-launcher readiness, one bounded page request, zero symbol-history fan-out, request-free presentation controls, and honest SSI-unavailable desktop/mobile states.
 - [new feature] Add watchlist-only foreign-flow breadth, concentration, deterministic treemap, shared-scale buy/sell bars, and overview/detail scanner views.
 - [improvement] Show paired value/volume daily summaries and selected-window coverage without inventing cumulative 5/20-session buy or sell totals.
 - [test] Cover foreign-flow visualization derivation, finite-number guards, deterministic treemap geometry, shared bar scaling, accessibility, and request-free presentation changes.
