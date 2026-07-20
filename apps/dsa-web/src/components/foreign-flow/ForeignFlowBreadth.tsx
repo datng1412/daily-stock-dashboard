@@ -8,10 +8,12 @@ export const ForeignFlowBreadth = ({
   breadth,
   window,
   metric,
+  scopeLabel = 'watchlist',
 }: {
   breadth: ForeignFlowBreadthModel;
   window: ForeignFlowWindow;
   metric: ForeignFlowMetric;
+  scopeLabel?: string;
 }) => {
   const groups = [
     { key: 'buy', label: 'Mua ròng', count: breadth.buyCount, className: 'bg-success/75' },
@@ -24,7 +26,7 @@ export const ForeignFlowBreadth = ({
     <section className="rounded-lg border border-border/70 bg-card p-4" aria-labelledby="foreign-flow-breadth-heading">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
-          <h2 id="foreign-flow-breadth-heading" className="text-base font-semibold text-foreground">Độ rộng watchlist</h2>
+          <h2 id="foreign-flow-breadth-heading" className="text-base font-semibold text-foreground">Độ rộng {scopeLabel}</h2>
           <p className="mt-1 text-xs text-secondary-text">{foreignFlowWindowLabel(window)} · {metric === 'value' ? 'Giá trị' : 'Khối lượng'}</p>
         </div>
         <p className="text-sm font-medium tabular-nums text-foreground">

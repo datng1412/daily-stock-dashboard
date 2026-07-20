@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 import type { VietnamForeignFlowBatchResponse, VietnamForeignFlowBatchSymbol } from '../../../api/stocks';
@@ -6,6 +6,7 @@ import { ForeignFlowBreadth } from '../ForeignFlowBreadth';
 import { ForeignFlowConcentration } from '../ForeignFlowConcentration';
 import { ForeignFlowDivergingBars } from '../ForeignFlowDivergingBars';
 import { ForeignFlowSummaryCards } from '../ForeignFlowSummaryCards';
+import { ForeignFlowScannerTable } from '../ForeignFlowScannerTable';
 import { ForeignFlowTreemap } from '../ForeignFlowTreemap';
 import { buildForeignFlowWorkspaceViewModel } from '../foreignFlowViewModel';
 
@@ -157,5 +158,43 @@ describe('foreign-flow visualization components', () => {
     );
     expect(screen.getByText('Chưa có mã bán ròng đủ dữ liệu.')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'AAA' })).toBeInTheDocument();
+  });
+
+  it('colors latest, 5-session, and 20-session scanner net cells by sign', () => {
+    const rows = [
+      row('POS', 100),
+      row('NEG', -50),
+      row('ZERO', 0),
+      row('NONE', null),
+    ];
+    render(
+      <MemoryRouter>
+        <ForeignFlowScannerTable
+          rows={rows}
+          window="5"
+          metric="value"
+          sort="ticker"
+          direction="asc"
+          filter="all"
+          view="detailed"
+          selectedTicker={null}
+          onSort={vi.fn()}
+          onFilter={vi.fn()}
+          onSelectTicker={vi.fn()}
+          scopeLabel="VN30"
+        />
+      </MemoryRouter>,
+    );
+
+    const signedCells = (ticker: string) => within(screen.getByRole('button', { name: ticker }).closest('tr') as HTMLTableRowElement)
+      .getAllByRole('cell')
+      .slice(4, 7);
+    signedCells('POS').forEach((cell) => expect(cell).toHaveClass('text-success'));
+    signedCells('NEG').forEach((cell) => expect(cell).toHaveClass('text-danger'));
+    signedCells('ZERO').forEach((cell) => expect(cell).toHaveClass('text-foreground'));
+    signedCells('NONE').forEach((cell) => {
+      expect(cell).toHaveClass('text-secondary-text');
+      expect(within(cell).getByLabelText('Không khả dụng')).toHaveTextContent('—');
+    });
   });
 });

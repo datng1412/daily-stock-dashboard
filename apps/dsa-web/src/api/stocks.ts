@@ -650,6 +650,163 @@ const normalizeVietnamForeignFlowBatchResponse = (
   },
 });
 
+export type VietnamVn30ForeignFlowDaily = {
+  tradingDate: string;
+  foreignBuyVolume?: number | null;
+  foreignSellVolume?: number | null;
+  foreignNetVolume?: number | null;
+  foreignBuyValue?: number | null;
+  foreignSellValue?: number | null;
+  foreignNetValue?: number | null;
+  volumeCoverageCount: number;
+  volumeCoverageRatio: number;
+  valueCoverageCount: number;
+  valueCoverageRatio: number;
+  volumeCoverage: { coveredComponents: number; expectedComponents: number; coverageRatio: number; complete: boolean };
+  valueCoverage: { coveredComponents: number; expectedComponents: number; coverageRatio: number; complete: boolean };
+  volumeBreadth: { netBuyCount: number; netSellCount: number; zeroCount: number; unavailableCount: number };
+  valueBreadth: { netBuyCount: number; netSellCount: number; zeroCount: number; unavailableCount: number };
+  positiveComponents: number;
+  negativeComponents: number;
+  zeroComponents: number;
+  missingComponents: number;
+  dataState: 'ready' | 'partial' | 'stale' | 'unavailable';
+  state: 'ready' | 'partial' | 'stale' | 'unavailable';
+};
+
+export type VietnamVn30ForeignFlowWindow = {
+  requestedSessions: 5 | 20;
+  coveredSessions: number;
+  complete: boolean;
+  startDate?: string | null;
+  endDate?: string | null;
+  foreignBuyVolume?: number | null;
+  foreignSellVolume?: number | null;
+  foreignNetVolume?: number | null;
+  foreignBuyValue?: number | null;
+  foreignSellValue?: number | null;
+  foreignNetValue?: number | null;
+  volumeComponentSessions: number;
+  volumeCoverageRatio: number;
+  volumeComplete: boolean;
+  valueComponentSessions: number;
+  valueCoverageRatio: number;
+  valueComplete: boolean;
+  positiveComponentSessions: number;
+  negativeComponentSessions: number;
+  zeroComponentSessions: number;
+  missingComponentSessions: number;
+};
+
+export type VietnamVn30ForeignFlowComponent = Omit<
+  VietnamForeignFlowBatchSymbol,
+  'source' | 'sourceEndpoint' | 'volumeUnit' | 'valueUnit' | 'finality' | 'fetchedAt' | 'coveredSessions5d' | 'complete5d' | 'coveredSessions20d' | 'complete20d'
+> & {
+  aggregateLatestDate?: string | null;
+  foreignBuyVolume5d?: number | null;
+  foreignSellVolume5d?: number | null;
+  foreignBuyValue5d?: number | null;
+  foreignSellValue5d?: number | null;
+  foreignBuyVolume20d?: number | null;
+  foreignSellVolume20d?: number | null;
+  foreignBuyValue20d?: number | null;
+  foreignSellValue20d?: number | null;
+  volumeCoveredSessions5d: number;
+  volumeComplete5d: boolean;
+  valueCoveredSessions5d: number;
+  valueComplete5d: boolean;
+  volumeCoveredSessions20d: number;
+  volumeComplete20d: boolean;
+  valueCoveredSessions20d: number;
+  valueComplete20d: boolean;
+};
+
+export type VietnamVn30ForeignFlowResponse = {
+  scope: 'vn30';
+  indexCode: 'VN30';
+  source: 'ssi_fastconnect';
+  sourceEndpoint: 'DailyStockPrice';
+  membershipSource: 'SSI IndexComponents';
+  volumeUnit: 'shares';
+  valueUnit: 'VND';
+  finality: 'daily_available';
+  aggregationBasis: 'current_vn30_membership';
+  historicalConstituentCorrect: false;
+  dataState: Exclude<VietnamForeignFlowDataState, 'empty'>;
+  membership: {
+    status: 'ready' | 'unavailable';
+    indexCode: 'VN30';
+    source: 'SSI IndexComponents';
+    memberCount: number;
+    componentCount: number;
+    memberTickers: string[];
+    cacheStatus?: string | null;
+    failureClass?: string | null;
+    reason?: string | null;
+    fetchedAt: string;
+    resolvedAt: string;
+  };
+  aggregateSessionDates: string[];
+  latest?: VietnamVn30ForeignFlowDaily | null;
+  windows: { '5': VietnamVn30ForeignFlowWindow; '20': VietnamVn30ForeignFlowWindow };
+  series: VietnamVn30ForeignFlowDaily[];
+  components: VietnamVn30ForeignFlowComponent[];
+  componentCounts: { usable: number; stale: number; empty: number; unavailable: number };
+  rankings: Record<string, VietnamForeignFlowRankingPair>;
+  cache: { status: string; coalesced: boolean; ageSeconds: number; ttlSeconds: number; negative: boolean };
+  timing: { membershipMs: number; componentHistoriesMs: number; aggregateBuildMs: number; totalMs: number };
+  fetchedAt: string;
+};
+
+type VietnamVn30ForeignFlowCamelComponent = Omit<VietnamVn30ForeignFlowComponent,
+  | 'foreignNetVolume5d' | 'foreignNetValue5d' | 'foreignNetVolume20d' | 'foreignNetValue20d'
+  | 'foreignBuyVolume5d' | 'foreignSellVolume5d' | 'foreignBuyValue5d' | 'foreignSellValue5d'
+  | 'foreignBuyVolume20d' | 'foreignSellVolume20d' | 'foreignBuyValue20d' | 'foreignSellValue20d'
+  | 'volumeCoveredSessions5d' | 'volumeComplete5d' | 'valueCoveredSessions5d' | 'valueComplete5d'
+  | 'volumeCoveredSessions20d' | 'volumeComplete20d' | 'valueCoveredSessions20d' | 'valueComplete20d'
+  | 'windowEndDate5d' | 'windowEndDate20d'
+> & Record<string, unknown>;
+
+type VietnamVn30ForeignFlowCamelResponse = Omit<VietnamVn30ForeignFlowResponse, 'components' | 'rankings'> & {
+  components?: VietnamVn30ForeignFlowCamelComponent[];
+  rankings?: Record<string, VietnamForeignFlowRankingPair>;
+};
+
+const normalizeVietnamVn30ForeignFlowResponse = (
+  data: VietnamVn30ForeignFlowCamelResponse,
+): VietnamVn30ForeignFlowResponse => ({
+  ...data,
+  components: (data.components ?? []).map((raw) => {
+    const row = raw as VietnamVn30ForeignFlowCamelComponent & Record<string, number | boolean | string | null | undefined>;
+    return {
+      ...row,
+      foreignBuyVolume5d: row.foreignBuyVolume5D ?? null,
+      foreignSellVolume5d: row.foreignSellVolume5D ?? null,
+      foreignNetVolume5d: row.foreignNetVolume5D ?? null,
+      foreignBuyValue5d: row.foreignBuyValue5D ?? null,
+      foreignSellValue5d: row.foreignSellValue5D ?? null,
+      foreignNetValue5d: row.foreignNetValue5D ?? null,
+      foreignBuyVolume20d: row.foreignBuyVolume20D ?? null,
+      foreignSellVolume20d: row.foreignSellVolume20D ?? null,
+      foreignNetVolume20d: row.foreignNetVolume20D ?? null,
+      foreignBuyValue20d: row.foreignBuyValue20D ?? null,
+      foreignSellValue20d: row.foreignSellValue20D ?? null,
+      foreignNetValue20d: row.foreignNetValue20D ?? null,
+      volumeCoveredSessions5d: Number(row.volumeCoveredSessions5D ?? 0),
+      volumeComplete5d: Boolean(row.volumeComplete5D),
+      valueCoveredSessions5d: Number(row.valueCoveredSessions5D ?? 0),
+      valueComplete5d: Boolean(row.valueComplete5D),
+      volumeCoveredSessions20d: Number(row.volumeCoveredSessions20D ?? 0),
+      volumeComplete20d: Boolean(row.volumeComplete20D),
+      valueCoveredSessions20d: Number(row.valueCoveredSessions20D ?? 0),
+      valueComplete20d: Boolean(row.valueComplete20D),
+      windowEndDate5d: (row.windowEndDate5D as string | null | undefined) ?? null,
+      windowEndDate20d: (row.windowEndDate20D as string | null | undefined) ?? null,
+    } as VietnamVn30ForeignFlowComponent;
+  }),
+  rankings: data.rankings ?? {},
+});
+
 export type VietnamRealtimeQuote = {
   symbol?: string | null;
   ticker?: string | null;
@@ -1395,6 +1552,23 @@ export const stocksApi = {
     const { toCamelCase } = await import('./utils');
     return normalizeVietnamForeignFlowBatchResponse(
       toCamelCase<VietnamForeignFlowCamelCaseBatchResponse>(response.data),
+    );
+  },
+
+  async getVietnamVn30ForeignFlow(
+    options?: { topN?: number; forceRefresh?: boolean; signal?: AbortSignal },
+  ): Promise<VietnamVn30ForeignFlowResponse> {
+    const response = await apiClient.get('/api/v1/stocks/vn/foreign-flow/vn30', {
+      params: {
+        top_n: options?.topN ?? 10,
+        force_refresh: options?.forceRefresh ?? false,
+      },
+      timeout: 180000,
+      signal: options?.signal,
+    });
+    const { toCamelCase } = await import('./utils');
+    return normalizeVietnamVn30ForeignFlowResponse(
+      toCamelCase<VietnamVn30ForeignFlowCamelResponse>(response.data),
     );
   },
 

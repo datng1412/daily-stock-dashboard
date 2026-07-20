@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { VietnamForeignFlowBatchResponse, VietnamForeignFlowBatchSymbol } from '../../../api/stocks';
 import { ForeignFlowWatchlistRankings } from '../ForeignFlowWatchlistRankings';
@@ -82,7 +82,11 @@ describe('ForeignFlowWatchlistRankings', () => {
     expect(screen.getByTestId('foreign-flow-rankings')).toHaveTextContent('1/2 mã có dữ liệu');
     expect(screen.getByText('Top mua ròng trong watchlist')).toBeInTheDocument();
     expect(screen.getByText('Top bán ròng trong watchlist')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'FPT' })).toHaveAttribute('href', '/vietnam/company/FPT');
+    const fptLink = screen.getByRole('link', { name: 'FPT' });
+    const vcbLink = screen.getByRole('link', { name: 'VCB' });
+    expect(fptLink).toHaveAttribute('href', '/vietnam/company/FPT');
+    expect(within(fptLink.closest('li') as HTMLLIElement).getByLabelText(/Giá trị đầy đủ/)).toHaveClass('text-success');
+    expect(within(vcbLink.closest('li') as HTMLLIElement).getByLabelText(/Giá trị đầy đủ/)).toHaveClass('text-danger');
     expect(screen.getByText('Cũ')).toBeInTheDocument();
   });
 

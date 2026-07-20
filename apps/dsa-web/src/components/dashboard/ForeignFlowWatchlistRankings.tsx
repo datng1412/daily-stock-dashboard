@@ -5,6 +5,7 @@ import type {
 } from '../../api/stocks';
 import { buildForeignFlowRankings, type ForeignFlowWindow } from '../foreign-flow/foreignFlowViewModel';
 import { cn } from '../../utils/cn';
+import { foreignFlowSignTextClass } from '../../utils/foreignFlowSign';
 import { formatCompactVndValue, formatFullVndTitle } from '../../utils/vietnamNumberFormat';
 import { Badge, Button } from '../common';
 
@@ -51,7 +52,7 @@ const RankingList = ({
               </div>
             </div>
             <span
-              className={cn('shrink-0 font-medium tabular-nums', entry.value > 0 ? 'text-success' : 'text-danger')}
+              className={cn('shrink-0 font-medium tabular-nums', foreignFlowSignTextClass(entry.value))}
               aria-label={`Giá trị đầy đủ: ${formatFullVndTitle(entry.value)}`}
             >
               {formatCompactVndValue(entry.value, '—', true)}

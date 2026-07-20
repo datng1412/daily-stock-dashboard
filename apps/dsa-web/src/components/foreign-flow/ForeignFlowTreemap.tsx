@@ -12,23 +12,26 @@ export const ForeignFlowTreemap = ({
   metric,
   selectedTicker,
   onSelectTicker,
+  scopeLabel = 'watchlist',
 }: {
   items: ForeignFlowWorkspaceRow[];
   window: ForeignFlowWindow;
   metric: ForeignFlowMetric;
   selectedTicker: string | null;
   onSelectTicker: (ticker: string) => void;
+  scopeLabel?: string;
 }) => {
   const rectangles = layoutForeignFlowTreemap(items, WIDTH, HEIGHT);
   const formatter = metric === 'value' ? formatCompactVndValue : formatCompactShareVolume;
   const fullFormatter = metric === 'value' ? formatFullVndTitle : formatFullSharesTitle;
   const windowLabel = foreignFlowWindowLabel(window);
+  const displayScopeLabel = scopeLabel === 'watchlist' ? 'Watchlist' : scopeLabel;
 
   return (
     <section className="rounded-lg border border-border/70 bg-card p-4" aria-labelledby="foreign-flow-treemap-heading">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
-          <h2 id="foreign-flow-treemap-heading" className="text-base font-semibold text-foreground">Bản đồ dòng tiền · Watchlist</h2>
+          <h2 id="foreign-flow-treemap-heading" className="text-base font-semibold text-foreground">Bản đồ dòng tiền · {displayScopeLabel}</h2>
           <p className="mt-1 text-xs text-secondary-text">Diện tích theo độ lớn tuyệt đối · {windowLabel} · {metric === 'value' ? 'Giá trị' : 'Khối lượng'}</p>
         </div>
         <p className="text-xs text-secondary-text">{items.length} mã khác 0</p>
@@ -44,7 +47,7 @@ export const ForeignFlowTreemap = ({
             viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
             preserveAspectRatio="none"
             role="group"
-            aria-label={`Bản đồ ${items.length} mã trong watchlist, ${windowLabel}, ${metric === 'value' ? 'giá trị' : 'khối lượng'}`}
+            aria-label={`Bản đồ ${items.length} mã trong ${scopeLabel}, ${windowLabel}, ${metric === 'value' ? 'giá trị' : 'khối lượng'}`}
           >
             {rectangles.map(({ item, x, y, width, height }) => {
               const padding = 2;

@@ -69,11 +69,13 @@ export const ForeignFlowDivergingBars = ({
   sellers,
   window,
   metric,
+  scopeLabel = 'watchlist',
 }: {
   buyers: ForeignFlowWorkspaceRow[];
   sellers: ForeignFlowWorkspaceRow[];
   window: ForeignFlowWindow;
   metric: ForeignFlowMetric;
+  scopeLabel?: string;
 }) => {
   const maxMagnitude = Math.max(0, ...buyers.map((item) => item.magnitude), ...sellers.map((item) => item.magnitude));
   return (
@@ -81,7 +83,7 @@ export const ForeignFlowDivergingBars = ({
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <h2 id="foreign-flow-bars-heading" className="text-base font-semibold text-foreground">Dòng tiền nổi bật</h2>
-          <p className="mt-1 text-xs text-secondary-text">Trong watchlist · Cùng một thang độ lớn</p>
+          <p className="mt-1 text-xs text-secondary-text">Trong {scopeLabel} · Cùng một thang độ lớn</p>
         </div>
         <p className="text-xs text-secondary-text">{foreignFlowWindowLabel(window)}</p>
       </div>

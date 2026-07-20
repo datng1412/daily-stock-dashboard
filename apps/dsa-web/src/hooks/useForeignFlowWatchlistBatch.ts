@@ -4,6 +4,7 @@ import { resolveVietnamForeignFlowScope } from '../utils/vietnamCustomWatchlist'
 
 type UseForeignFlowWatchlistBatchOptions = {
   topN?: number;
+  active?: boolean;
 };
 
 export const useForeignFlowWatchlistBatch = (
@@ -11,6 +12,7 @@ export const useForeignFlowWatchlistBatch = (
   options: UseForeignFlowWatchlistBatchOptions = {},
 ) => {
   const topN = options.topN ?? 5;
+  const active = options.active ?? true;
   const scope = resolveVietnamForeignFlowScope(tickers);
   const scopeKey = scope.tickers.join(',');
   const requestedTickers = useMemo(() => scopeKey ? scopeKey.split(',') : [], [scopeKey]);
@@ -37,7 +39,7 @@ export const useForeignFlowWatchlistBatch = (
     const requestId = requestIdRef.current;
     abortRef.current?.abort();
 
-    if (!requestedTickers.length) {
+    if (!active || !requestedTickers.length) {
       abortRef.current = null;
       setData(null);
       setLoading(false);
@@ -72,7 +74,7 @@ export const useForeignFlowWatchlistBatch = (
         if (abortRef.current === controller) abortRef.current = null;
       }
     }
-  }, [requestedTickers, scopeKey, topN]);
+  }, [active, requestedTickers, scopeKey, topN]);
 
   useEffect(() => {
     void load(false);

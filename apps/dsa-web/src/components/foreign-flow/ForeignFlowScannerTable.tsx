@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import type { VietnamForeignFlowBatchSymbol } from '../../api/stocks';
 import { cn } from '../../utils/cn';
+import { foreignFlowSignTextClass } from '../../utils/foreignFlowSign';
 import { formatCompactShareVolume, formatCompactVndValue, formatFullSharesTitle, formatFullVndTitle } from '../../utils/vietnamNumberFormat';
 import { Badge } from '../common';
 import {
@@ -46,6 +47,7 @@ export const ForeignFlowScannerTable = ({
   onSort,
   onFilter,
   onSelectTicker,
+  scopeLabel = 'watchlist',
 }: {
   rows: VietnamForeignFlowBatchSymbol[];
   window: ForeignFlowWindow;
@@ -58,6 +60,7 @@ export const ForeignFlowScannerTable = ({
   onSort: (sort: ForeignFlowSort) => void;
   onFilter: (filter: ForeignFlowFilter) => void;
   onSelectTicker: (ticker: string) => void;
+  scopeLabel?: string;
 }) => {
   const visibleRows = sortForeignFlowRows(
     filterForeignFlowRows(rows, filter, window, metric),
@@ -96,14 +99,14 @@ export const ForeignFlowScannerTable = ({
     { key: 'latest', label: 'NN ròng', align: 'text-right' },
     { key: '5', label: 'NN 5P', align: 'text-right' },
     { key: '20', label: 'NN 20P', align: 'text-right' },
-    { key: 'share', label: 'Tỷ trọng watchlist', align: 'text-right' },
+    { key: 'share', label: `Tỷ trọng ${scopeLabel}`, align: 'text-right' },
     { key: 'state', label: 'Trạng thái', align: 'text-left' },
   ];
   const overviewHeaders: ScannerHeader[] = [
     { key: 'ticker', label: 'Mã' },
     { key: 'date', label: 'Ngày kết thúc' },
     { key: 'selected', label: metric === 'value' ? 'NN ròng đã chọn' : 'KL NN ròng đã chọn', align: 'text-right' },
-    { key: 'share', label: 'Tỷ trọng watchlist', align: 'text-right' },
+    { key: 'share', label: `Tỷ trọng ${scopeLabel}`, align: 'text-right' },
     { label: 'Độ phủ' },
     { key: 'state', label: 'Trạng thái' },
   ];
@@ -113,7 +116,7 @@ export const ForeignFlowScannerTable = ({
     <section className="rounded-lg border border-border/70 bg-card" aria-labelledby="foreign-flow-scanner-heading">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 p-4">
         <div>
-          <h2 id="foreign-flow-scanner-heading" className="text-base font-semibold text-foreground">Bộ quét watchlist</h2>
+          <h2 id="foreign-flow-scanner-heading" className="text-base font-semibold text-foreground">Bộ quét {scopeLabel}</h2>
           <p className="mt-1 text-xs text-secondary-text">
             {visibleRows.length}/{rows.length} mã · Đơn vị: {metric === 'value' ? 'VND' : 'cổ phiếu'}
           </p>
@@ -179,16 +182,16 @@ export const ForeignFlowScannerTable = ({
                     <>
                       <td className="px-3 py-3 text-right tabular-nums">{cell(foreignFlowTodaySideValue(row, 'buy', metric))}</td>
                       <td className="px-3 py-3 text-right tabular-nums">{cell(foreignFlowTodaySideValue(row, 'sell', metric))}</td>
-                      <td className={cn('px-3 py-3 text-right font-medium tabular-nums', (latest.value ?? 0) > 0 ? 'text-success' : (latest.value ?? 0) < 0 ? 'text-danger' : 'text-foreground')}>{cell(latest.value, true)}</td>
-                      <td className="px-3 py-3 text-right tabular-nums">{cell(five.value, true, five)}</td>
-                      <td className="px-3 py-3 text-right tabular-nums">{cell(twenty.value, true, twenty)}</td>
+                      <td className={cn('px-3 py-3 text-right font-medium tabular-nums', foreignFlowSignTextClass(latest.value))}>{cell(latest.value, true)}</td>
+                      <td className={cn('px-3 py-3 text-right font-medium tabular-nums', foreignFlowSignTextClass(five.value))}>{cell(five.value, true, five)}</td>
+                      <td className={cn('px-3 py-3 text-right font-medium tabular-nums', foreignFlowSignTextClass(twenty.value))}>{cell(twenty.value, true, twenty)}</td>
                     </>
                   ) : (
-                    <td className={cn('px-3 py-3 text-right font-medium tabular-nums', (selectedWindow.value ?? 0) > 0 ? 'text-success' : (selectedWindow.value ?? 0) < 0 ? 'text-danger' : 'text-foreground')}>
+                    <td className={cn('px-3 py-3 text-right font-medium tabular-nums', foreignFlowSignTextClass(selectedWindow.value))}>
                       {cell(selectedWindow.value, true, selectedWindow)}
                     </td>
                   )}
-                  <td className="px-3 py-3 text-right tabular-nums" aria-label={share === null ? 'Tỷ trọng trong watchlist không khả dụng' : `Tỷ trọng trong watchlist ${shareCell}`}>{shareCell}</td>
+                  <td className="px-3 py-3 text-right tabular-nums" aria-label={share === null ? `Tỷ trọng trong ${scopeLabel} không khả dụng` : `Tỷ trọng trong ${scopeLabel} ${shareCell}`}>{shareCell}</td>
                   {view === 'overview' ? (
                     <td className="px-3 py-3 text-secondary-text">
                       {selectedWindow.coveredSessions === null ? '—' : `${selectedWindow.coveredSessions}/${selectedWindow.requestedSessions} phiên`}

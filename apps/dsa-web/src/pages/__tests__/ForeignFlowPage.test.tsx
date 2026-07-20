@@ -1,15 +1,16 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { BrowserRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { stocksApi, type VietnamForeignFlowBatchResponse, type VietnamForeignFlowBatchSymbol } from '../../api/stocks';
+import { stocksApi, type VietnamForeignFlowBatchResponse, type VietnamForeignFlowBatchSymbol, type VietnamVn30ForeignFlowResponse } from '../../api/stocks';
 import { VIETNAM_CUSTOM_WATCHLIST_STORAGE_KEY } from '../../utils/vietnamCustomWatchlist';
 import ForeignFlowPage from '../ForeignFlowPage';
 
 vi.mock('../../api/stocks', () => ({
-  stocksApi: { getVietnamForeignFlowBatch: vi.fn() },
+  stocksApi: { getVietnamForeignFlowBatch: vi.fn(), getVietnamVn30ForeignFlow: vi.fn() },
 }));
 
 const mockedBatch = vi.mocked(stocksApi.getVietnamForeignFlowBatch);
+const mockedVn30 = vi.mocked(stocksApi.getVietnamVn30ForeignFlow);
 
 const makeRow = (ticker: string, index: number, overrides: Partial<VietnamForeignFlowBatchSymbol> = {}): VietnamForeignFlowBatchSymbol => ({
   ticker,
@@ -71,6 +72,65 @@ const makeResponse = (
   ...overrides,
 });
 
+const makeVn30Response = (): VietnamVn30ForeignFlowResponse => ({
+  scope: 'vn30',
+  indexCode: 'VN30',
+  source: 'ssi_fastconnect',
+  sourceEndpoint: 'DailyStockPrice',
+  membershipSource: 'SSI IndexComponents',
+  volumeUnit: 'shares',
+  valueUnit: 'VND',
+  finality: 'daily_available',
+  aggregationBasis: 'current_vn30_membership',
+  historicalConstituentCorrect: false,
+  dataState: 'partial',
+  membership: {
+    status: 'ready', indexCode: 'VN30', source: 'SSI IndexComponents', memberCount: 2, componentCount: 2,
+    memberTickers: ['FPT', 'HPG'], cacheStatus: 'hit', fetchedAt: '2026-07-20T08:00:00Z', resolvedAt: '2026-07-20T08:00:00Z',
+  },
+  aggregateSessionDates: ['2026-07-17', '2026-07-20'],
+  latest: {
+    tradingDate: '2026-07-20', foreignBuyVolume: 20, foreignSellVolume: 8, foreignNetVolume: 12,
+    foreignBuyValue: 2_000, foreignSellValue: 800, foreignNetValue: 1_200,
+    volumeCoverageCount: 2, volumeCoverageRatio: 1, valueCoverageCount: 2, valueCoverageRatio: 1,
+    volumeCoverage: { coveredComponents: 2, expectedComponents: 2, coverageRatio: 1, complete: true },
+    valueCoverage: { coveredComponents: 2, expectedComponents: 2, coverageRatio: 1, complete: true },
+    volumeBreadth: { netBuyCount: 1, netSellCount: 1, zeroCount: 0, unavailableCount: 0 },
+    valueBreadth: { netBuyCount: 1, netSellCount: 1, zeroCount: 0, unavailableCount: 0 },
+    positiveComponents: 1, negativeComponents: 1, zeroComponents: 0, missingComponents: 0, dataState: 'ready', state: 'ready',
+  },
+  windows: {
+    '5': {
+      requestedSessions: 5, coveredSessions: 2, complete: false, startDate: '2026-07-17', endDate: '2026-07-20',
+      foreignBuyVolume: 40, foreignSellVolume: 16, foreignNetVolume: 24, foreignBuyValue: 4_000, foreignSellValue: 1_600, foreignNetValue: 2_400,
+      volumeComponentSessions: 4, volumeCoverageRatio: 0.4, volumeComplete: false, valueComponentSessions: 4, valueCoverageRatio: 0.4, valueComplete: false,
+      positiveComponentSessions: 2, negativeComponentSessions: 2, zeroComponentSessions: 0, missingComponentSessions: 0,
+    },
+    '20': {
+      requestedSessions: 20, coveredSessions: 2, complete: false, startDate: '2026-07-17', endDate: '2026-07-20',
+      foreignBuyVolume: 40, foreignSellVolume: 16, foreignNetVolume: 24, foreignBuyValue: 4_000, foreignSellValue: 1_600, foreignNetValue: 2_400,
+      volumeComponentSessions: 4, volumeCoverageRatio: 0.1, volumeComplete: false, valueComponentSessions: 4, valueCoverageRatio: 0.1, valueComplete: false,
+      positiveComponentSessions: 2, negativeComponentSessions: 2, zeroComponentSessions: 0, missingComponentSessions: 0,
+    },
+  },
+  series: [
+    { tradingDate: '2026-07-17', foreignBuyVolume: 20, foreignSellVolume: 8, foreignNetVolume: 12, foreignBuyValue: 2_000, foreignSellValue: 800, foreignNetValue: 1_200, volumeCoverageCount: 2, volumeCoverageRatio: 1, valueCoverageCount: 2, valueCoverageRatio: 1, volumeCoverage: { coveredComponents: 2, expectedComponents: 2, coverageRatio: 1, complete: true }, valueCoverage: { coveredComponents: 2, expectedComponents: 2, coverageRatio: 1, complete: true }, volumeBreadth: { netBuyCount: 1, netSellCount: 1, zeroCount: 0, unavailableCount: 0 }, valueBreadth: { netBuyCount: 1, netSellCount: 1, zeroCount: 0, unavailableCount: 0 }, positiveComponents: 1, negativeComponents: 1, zeroComponents: 0, missingComponents: 0, dataState: 'ready', state: 'ready' },
+    { tradingDate: '2026-07-20', foreignBuyVolume: 20, foreignSellVolume: 8, foreignNetVolume: 12, foreignBuyValue: 2_000, foreignSellValue: 800, foreignNetValue: 1_200, volumeCoverageCount: 2, volumeCoverageRatio: 1, valueCoverageCount: 2, valueCoverageRatio: 1, volumeCoverage: { coveredComponents: 2, expectedComponents: 2, coverageRatio: 1, complete: true }, valueCoverage: { coveredComponents: 2, expectedComponents: 2, coverageRatio: 1, complete: true }, volumeBreadth: { netBuyCount: 1, netSellCount: 1, zeroCount: 0, unavailableCount: 0 }, valueBreadth: { netBuyCount: 1, netSellCount: 1, zeroCount: 0, unavailableCount: 0 }, positiveComponents: 1, negativeComponents: 1, zeroComponents: 0, missingComponents: 0, dataState: 'ready', state: 'ready' },
+  ],
+  components: ['FPT', 'HPG'].map((ticker, index) => ({
+    ...makeRow(ticker, index), aggregateLatestDate: '2026-07-20',
+    foreignBuyVolume5d: 20, foreignSellVolume5d: 8, foreignBuyValue5d: 2_000, foreignSellValue5d: 800,
+    foreignBuyVolume20d: 20, foreignSellVolume20d: 8, foreignBuyValue20d: 2_000, foreignSellValue20d: 800,
+    volumeCoveredSessions5d: 2, volumeComplete5d: false, valueCoveredSessions5d: 2, valueComplete5d: false,
+    volumeCoveredSessions20d: 2, volumeComplete20d: false, valueCoveredSessions20d: 2, valueComplete20d: false,
+  })),
+  componentCounts: { usable: 2, stale: 0, empty: 0, unavailable: 0 },
+  rankings: {},
+  cache: { status: 'miss', coalesced: false, ageSeconds: 0, ttlSeconds: 300, negative: false },
+  timing: { membershipMs: 1, componentHistoriesMs: 2, aggregateBuildMs: 1, totalMs: 4 },
+  fetchedAt: '2026-07-20T08:00:00Z',
+});
+
 const renderPage = (url = '/foreign-flow') => {
   window.history.pushState({}, '', url);
   return render(<BrowserRouter><ForeignFlowPage /></BrowserRouter>);
@@ -81,6 +141,7 @@ beforeEach(() => {
   window.localStorage.clear();
   window.history.pushState({}, '', '/foreign-flow');
   mockedBatch.mockImplementation(async (tickers) => makeResponse(tickers));
+  mockedVn30.mockResolvedValue(makeVn30Response());
 });
 
 describe('ForeignFlowPage', () => {
@@ -107,6 +168,27 @@ describe('ForeignFlowPage', () => {
     expect(screen.getByRole('heading', { name: 'Bộ quét watchlist' })).toBeInTheDocument();
     expect(screen.getAllByRole('row')).toHaveLength(4);
     expect(mockedBatch).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses one VN30 request owner and keeps chart controls local', async () => {
+    window.localStorage.setItem(VIETNAM_CUSTOM_WATCHLIST_STORAGE_KEY, JSON.stringify(['SSI']));
+    renderPage('/foreign-flow?scope=vn30');
+
+    await waitFor(() => expect(mockedVn30).toHaveBeenCalledTimes(1));
+    expect(mockedBatch).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'VN30' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('heading', { name: 'Tổng quan VN30' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Lịch sử dòng tiền VN30' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Bộ quét VN30' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mua / bán' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Lũy kế ròng' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Độ rộng' }));
+    fireEvent.click(within(screen.getByRole('group', { name: 'Khoảng biểu đồ VN30' })).getByRole('button', { name: '10 phiên' }));
+    expect(window.location.search).toContain('chart=breadth');
+    expect(window.location.search).toContain('range=10');
+    expect(mockedVn30).toHaveBeenCalledTimes(1);
+    expect(mockedBatch).not.toHaveBeenCalled();
   });
 
   it('updates URL presentation state without refetching and supports symbol navigation', async () => {

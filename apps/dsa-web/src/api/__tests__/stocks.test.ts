@@ -240,4 +240,56 @@ describe('stocksApi Vietnam SSI-derived metric mapping', () => {
     expect(request.tickers[0]).toBe('A00');
     expect(request.tickers[29]).toBe('A29');
   });
+
+  it('maps the VN30 aggregate endpoint and numeric window suffixes', async () => {
+    get.mockResolvedValueOnce({
+      data: {
+        scope: 'vn30',
+        index_code: 'VN30',
+        source: 'ssi_fastconnect',
+        source_endpoint: 'DailyStockPrice',
+        membership_source: 'SSI IndexComponents',
+        volume_unit: 'shares',
+        value_unit: 'VND',
+        finality: 'daily_available',
+        aggregation_basis: 'current_vn30_membership',
+        historical_constituent_correct: false,
+        data_state: 'partial',
+        membership: { status: 'ready', index_code: 'VN30', source: 'SSI IndexComponents', member_count: 1, component_count: 1, member_tickers: ['FPT'], fetched_at: 'now', resolved_at: 'now' },
+        aggregate_session_dates: ['2026-07-20'],
+        windows: {},
+        series: [],
+        components: [{
+          ticker: 'FPT', data_state: 'ready', freshness: 'fresh',
+          foreign_net_value_5d: 500, foreign_buy_value_5d: 800, foreign_sell_value_5d: 300,
+          foreign_net_volume_20d: 200, value_covered_sessions_5d: 5, value_complete_5d: true,
+          volume_covered_sessions_20d: 20, volume_complete_20d: true,
+          window_end_date_5d: '2026-07-20', window_end_date_20d: '2026-07-20',
+        }],
+        component_counts: { usable: 1, stale: 0, empty: 0, unavailable: 0 },
+        rankings: {}, cache: {}, timing: {}, fetched_at: 'now',
+      },
+    });
+    const controller = new AbortController();
+
+    const result = await stocksApi.getVietnamVn30ForeignFlow({ topN: 7, forceRefresh: true, signal: controller.signal });
+
+    expect(get).toHaveBeenCalledWith('/api/v1/stocks/vn/foreign-flow/vn30', {
+      params: { top_n: 7, force_refresh: true },
+      timeout: 180000,
+      signal: controller.signal,
+    });
+    expect(result.components[0]).toMatchObject({
+      foreignNetValue5d: 500,
+      foreignBuyValue5d: 800,
+      foreignSellValue5d: 300,
+      foreignNetVolume20d: 200,
+      valueCoveredSessions5d: 5,
+      valueComplete5d: true,
+      volumeCoveredSessions20d: 20,
+      volumeComplete20d: true,
+      windowEndDate5d: '2026-07-20',
+      windowEndDate20d: '2026-07-20',
+    });
+  });
 });
