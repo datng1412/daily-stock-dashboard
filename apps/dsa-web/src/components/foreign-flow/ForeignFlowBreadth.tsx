@@ -1,7 +1,8 @@
+import { formatForeignFlowPercent } from '../../utils/vietnamNumberFormat';
 import { foreignFlowWindowLabel, type ForeignFlowBreadthModel, type ForeignFlowMetric, type ForeignFlowWindow } from './foreignFlowViewModel';
 
-const percentage = (count: number, total: number): string => (
-  total > 0 ? `${(count / total) * 100}%` : '0%'
+const percentage = (count: number, total: number): string => formatForeignFlowPercent(
+  total > 0 ? (count / total) * 100 : 0,
 );
 
 export const ForeignFlowBreadth = ({

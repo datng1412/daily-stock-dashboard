@@ -1,7 +1,7 @@
 import type { VietnamForeignFlowBatchResponse } from '../../api/stocks';
 import { cn } from '../../utils/cn';
 import { foreignFlowSignTextClass } from '../../utils/foreignFlowSign';
-import { formatCompactShareVolume, formatCompactVndValue } from '../../utils/vietnamNumberFormat';
+import { formatForeignFlowValue, formatForeignFlowVolume } from '../../utils/vietnamNumberFormat';
 import { Badge } from '../common';
 import {
   buildForeignFlowWorkspaceViewModel,
@@ -42,11 +42,11 @@ const PairedMetricCard = ({
     <dl className="mt-3 grid grid-cols-2 gap-3">
       <div className={cn('rounded-md px-3 py-2', metric === 'value' ? 'bg-cyan/10' : 'bg-elevated/45')}>
         <dt className="text-[11px] text-secondary-text">Giá trị</dt>
-        <dd className={cn('mt-1 font-semibold tabular-nums', label === 'Mua bán ròng' ? foreignFlowSignTextClass(value) : 'text-foreground')}>{formatCompactVndValue(value, '—', label === 'Mua bán ròng')}</dd>
+        <dd className={cn('mt-1 font-semibold tabular-nums', label === 'Mua bán ròng' ? foreignFlowSignTextClass(value) : 'text-foreground')}>{formatForeignFlowValue(value)}</dd>
       </div>
       <div className={cn('rounded-md px-3 py-2', metric === 'volume' ? 'bg-cyan/10' : 'bg-elevated/45')}>
         <dt className="text-[11px] text-secondary-text">Khối lượng</dt>
-        <dd className={cn('mt-1 font-semibold tabular-nums', label === 'Mua bán ròng' ? foreignFlowSignTextClass(volume) : 'text-foreground')}>{formatCompactShareVolume(volume, '—', label === 'Mua bán ròng')}</dd>
+        <dd className={cn('mt-1 font-semibold tabular-nums', label === 'Mua bán ròng' ? foreignFlowSignTextClass(volume) : 'text-foreground')}>{formatForeignFlowVolume(volume)}</dd>
       </div>
     </dl>
   </div>
@@ -102,13 +102,13 @@ export const ForeignFlowSummaryCards = ({
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <MetricCard
             label={`Mua bán ròng ${windowLabel} · Giá trị`}
-            value={formatCompactVndValue(valueSummary.net.value, '—', true)}
+            value={formatForeignFlowValue(valueSummary.net.value)}
             valueClassName={foreignFlowSignTextClass(valueSummary.net.value)}
             detail={`${valueSummary.net.contributors}/${data.normalizedCount} mã có dữ liệu`}
           />
           <MetricCard
             label={`Mua bán ròng ${windowLabel} · Khối lượng`}
-            value={formatCompactShareVolume(volumeSummary.net.value, '—', true)}
+            value={formatForeignFlowVolume(volumeSummary.net.value)}
             valueClassName={foreignFlowSignTextClass(volumeSummary.net.value)}
             detail={`${volumeSummary.net.contributors}/${data.normalizedCount} mã có dữ liệu`}
           />

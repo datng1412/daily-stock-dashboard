@@ -83,7 +83,7 @@ describe('foreign-flow visualization components', () => {
     expect(screen.getByText('Mua bán ròng')).toBeInTheDocument();
     expect(screen.getAllByText('Giá trị')).toHaveLength(3);
     expect(screen.getAllByText('Khối lượng')).toHaveLength(3);
-    expect(screen.getByText('2K')).toBeInTheDocument();
+    expect(screen.getByText('2,000')).toBeInTheDocument();
     expect(screen.getByText('800')).toBeInTheDocument();
 
     rerender(<ForeignFlowSummaryCards data={data} window="5" metric="volume" />);
@@ -104,8 +104,8 @@ describe('foreign-flow visualization components', () => {
   it('renders absolute-flow concentration and an honest zero-data state', () => {
     const { rerender } = render(<ForeignFlowConcentration concentration={workspace.concentration} window="5" metric="value" />);
 
-    expect(screen.getByText('66.7%')).toBeInTheDocument();
-    expect(screen.getAllByText('100.0%')).toHaveLength(2);
+    expect(screen.getByText('66.67%')).toBeInTheDocument();
+    expect(screen.getAllByText('100.00%')).toHaveLength(2);
     expect(screen.getByText(/Tổng độ lớn 150/)).toBeInTheDocument();
 
     const empty = buildForeignFlowWorkspaceViewModel([row('ZERO', 0)], 'today', 'value');

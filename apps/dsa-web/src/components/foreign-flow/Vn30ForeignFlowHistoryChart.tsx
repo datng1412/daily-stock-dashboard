@@ -12,7 +12,7 @@ import {
   YAxis,
 } from 'recharts';
 import type { VietnamVn30ForeignFlowDaily } from '../../api/stocks';
-import { formatCompactShareVolume, formatCompactVndValue } from '../../utils/vietnamNumberFormat';
+import { formatForeignFlowValue, formatForeignFlowVolume } from '../../utils/vietnamNumberFormat';
 import { foreignFlowSignChartColor } from '../../utils/foreignFlowSign';
 import type { ForeignFlowMetric } from './foreignFlowViewModel';
 
@@ -36,7 +36,7 @@ export const Vn30ForeignFlowHistoryChart = ({
 }) => {
   const selected = series.slice(-Number(range));
   const suffix = metric === 'value' ? 'Value' : 'Volume';
-  const formatter = metric === 'value' ? formatCompactVndValue : formatCompactShareVolume;
+  const formatter = metric === 'value' ? formatForeignFlowValue : formatForeignFlowVolume;
   const chartRows = selected.map((row, index) => {
     const net = row[`foreignNet${suffix}` as keyof VietnamVn30ForeignFlowDaily] as number | null;
     const cumulativeValues = selected.slice(0, index + 1)
@@ -56,7 +56,7 @@ export const Vn30ForeignFlowHistoryChart = ({
   });
   const valueFormatter = mode === 'breadth'
     ? (value: number | null) => value === null ? '—' : `${Math.abs(value)} mã`
-    : (value: number | null) => formatter(value, '—', true);
+    : (value: number | null) => formatter(value);
   return (
     <section className="rounded-lg border border-border/70 bg-card p-4" aria-labelledby="vn30-flow-history-heading">
       <div className="flex flex-wrap items-start justify-between gap-3">

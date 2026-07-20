@@ -1,5 +1,5 @@
 import { cn } from '../../utils/cn';
-import { formatCompactShareVolume, formatCompactVndValue, formatFullSharesTitle, formatFullVndTitle } from '../../utils/vietnamNumberFormat';
+import { formatForeignFlowValue, formatForeignFlowVolume, formatFullSharesTitle, formatFullVndTitle } from '../../utils/vietnamNumberFormat';
 import { foreignFlowWindowLabel, type ForeignFlowMetric, type ForeignFlowWindow, type ForeignFlowWorkspaceRow } from './foreignFlowViewModel';
 import { layoutForeignFlowTreemap } from './foreignFlowTreemapLayout';
 
@@ -22,7 +22,7 @@ export const ForeignFlowTreemap = ({
   scopeLabel?: string;
 }) => {
   const rectangles = layoutForeignFlowTreemap(items, WIDTH, HEIGHT);
-  const formatter = metric === 'value' ? formatCompactVndValue : formatCompactShareVolume;
+  const formatter = metric === 'value' ? formatForeignFlowValue : formatForeignFlowVolume;
   const fullFormatter = metric === 'value' ? formatFullVndTitle : formatFullSharesTitle;
   const windowLabel = foreignFlowWindowLabel(window);
   const displayScopeLabel = scopeLabel === 'watchlist' ? 'Watchlist' : scopeLabel;
@@ -94,7 +94,7 @@ export const ForeignFlowTreemap = ({
                     <text x={x + 12} y={y + 23} className="fill-foreground text-[15px] font-semibold pointer-events-none">{item.ticker}</text>
                   ) : null}
                   {showValue ? (
-                    <text x={x + 12} y={y + 44} className="fill-foreground text-[12px] pointer-events-none">{formatter(item.value, '—', true)}</text>
+                    <text x={x + 12} y={y + 44} className="fill-foreground text-[12px] pointer-events-none">{formatter(item.value)}</text>
                   ) : null}
                   {showMarker ? (
                     <text x={x + 12} y={y + 64} className="fill-secondary-text text-[10px] pointer-events-none">

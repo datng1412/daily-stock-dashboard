@@ -1,5 +1,5 @@
 import { Bar, CartesianGrid, Cell, ComposedChart, Legend, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { formatCompactShareVolume, formatCompactVndValue } from '../../utils/vietnamNumberFormat';
+import { formatForeignFlowValue, formatForeignFlowVolume } from '../../utils/vietnamNumberFormat';
 import { foreignFlowSignChartColor } from '../../utils/foreignFlowSign';
 import type { SymbolForeignFlowMetricRow, SymbolForeignFlowMetric } from './foreignFlowSymbolAnalyticsModel';
 
@@ -10,7 +10,7 @@ export const ForeignFlowSymbolHistoryChart = ({ rows, metric, mode }: {
   metric: SymbolForeignFlowMetric;
   mode: SymbolForeignFlowChartMode;
 }) => {
-  const format = metric === 'value' ? formatCompactVndValue : formatCompactShareVolume;
+  const format = metric === 'value' ? formatForeignFlowValue : formatForeignFlowVolume;
   return (
     <section aria-labelledby="symbol-flow-chart-heading">
       <h3 id="symbol-flow-chart-heading" className="text-sm font-semibold text-foreground">Lịch sử theo phiên</h3>
@@ -20,8 +20,8 @@ export const ForeignFlowSymbolHistoryChart = ({ rows, metric, mode }: {
           <ComposedChart data={rows} margin={{ top: 8, right: 12, bottom: 8, left: 8 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.5} />
             <XAxis dataKey="tradingDate" tickFormatter={(value: string) => value.slice(5)} tick={{ fontSize: 11 }} />
-            <YAxis tickFormatter={(value: number) => format(value, '—', true)} tick={{ fontSize: 11 }} width={76} />
-            <Tooltip formatter={(value) => format(typeof value === 'number' ? value : null, 'Không có', true)} labelFormatter={(label) => `Ngày ${label}`} />
+            <YAxis tickFormatter={(value: number) => format(value)} tick={{ fontSize: 11 }} width={76} />
+            <Tooltip formatter={(value) => format(typeof value === 'number' ? value : null, 'Không có')} labelFormatter={(label) => `Ngày ${label}`} />
             <Legend /><ReferenceLine y={0} stroke="hsl(var(--border))" />
             {mode === 'net' ? <Bar dataKey="net" name="Ròng">{rows.map((row) => <Cell key={row.tradingDate} fill={foreignFlowSignChartColor(row.net)} />)}</Bar> : null}
             {mode === 'buy-sell' ? <><Bar dataKey="buy" name="Mua" fill="hsl(var(--success))" /><Bar dataKey="sell" name="Bán" fill="hsl(var(--danger))" /></> : null}

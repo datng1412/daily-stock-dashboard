@@ -1,5 +1,5 @@
 import type { VietnamVn30ForeignFlowResponse } from '../../api/stocks';
-import { formatCompactShareVolume, formatCompactVndValue } from '../../utils/vietnamNumberFormat';
+import { formatForeignFlowPercent, formatForeignFlowValue, formatForeignFlowVolume } from '../../utils/vietnamNumberFormat';
 import { cn } from '../../utils/cn';
 import { foreignFlowSignTextClass } from '../../utils/foreignFlowSign';
 import { Badge } from '../common';
@@ -29,7 +29,7 @@ export const Vn30ForeignFlowSummary = ({
   const coverage = window === 'today'
     ? (metric === 'value' ? data.latest?.valueCoverageRatio : data.latest?.volumeCoverageRatio)
     : (metric === 'value' ? data.windows[window].valueCoverageRatio : data.windows[window].volumeCoverageRatio);
-  const formatter = metric === 'value' ? formatCompactVndValue : formatCompactShareVolume;
+  const formatter = metric === 'value' ? formatForeignFlowValue : formatForeignFlowVolume;
   const cards = [
     { label: 'Tổng mua', value: buy, signed: false },
     { label: 'Tổng bán', value: sell, signed: false },
@@ -46,12 +46,12 @@ export const Vn30ForeignFlowSummary = ({
         {cards.map((card) => (
           <div key={card.label} className="rounded-lg border border-border/70 bg-card p-4">
             <p className="text-xs font-medium uppercase tracking-wide text-secondary-text">{card.label}</p>
-            <p className={cn('mt-2 text-xl font-semibold tabular-nums', card.signed ? foreignFlowSignTextClass(card.value) : 'text-foreground')}>{formatter(card.value, '—', card.signed)}</p>
+            <p className={cn('mt-2 text-xl font-semibold tabular-nums', card.signed ? foreignFlowSignTextClass(card.value) : 'text-foreground')}>{formatter(card.value)}</p>
           </div>
         ))}
       </div>
       <p className="mt-3 text-xs text-secondary-text">
-        Độ phủ {coverage === undefined ? '—' : `${(coverage * 100).toFixed(1)}%`} · {data.componentCounts.usable}/{data.membership.memberCount} mã có lịch sử dùng được · Thành phần hiện tại từ SSI IndexComponents
+        Độ phủ {formatForeignFlowPercent(coverage === undefined ? null : coverage * 100)} · {data.componentCounts.usable}/{data.membership.memberCount} mã có lịch sử dùng được · Thành phần hiện tại từ SSI IndexComponents
       </p>
     </section>
   );

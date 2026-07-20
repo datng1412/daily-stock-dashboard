@@ -1,7 +1,7 @@
-import { formatCompactShareVolume, formatCompactVndValue } from '../../utils/vietnamNumberFormat';
+import { formatForeignFlowPercent, formatForeignFlowValue, formatForeignFlowVolume } from '../../utils/vietnamNumberFormat';
 import { foreignFlowWindowLabel, type ForeignFlowConcentrationModel, type ForeignFlowMetric, type ForeignFlowWindow } from './foreignFlowViewModel';
 
-const formatShare = (value: number | null): string => value === null ? '—' : `${(value * 100).toFixed(1)}%`;
+const formatShare = (value: number | null): string => formatForeignFlowPercent(value === null ? null : value * 100);
 
 export const ForeignFlowConcentration = ({
   concentration,
@@ -12,7 +12,7 @@ export const ForeignFlowConcentration = ({
   window: ForeignFlowWindow;
   metric: ForeignFlowMetric;
 }) => {
-  const formatter = metric === 'value' ? formatCompactVndValue : formatCompactShareVolume;
+  const formatter = metric === 'value' ? formatForeignFlowValue : formatForeignFlowVolume;
   return (
     <section className="rounded-lg border border-border/70 bg-card p-4" aria-labelledby="foreign-flow-concentration-heading">
       <h2 id="foreign-flow-concentration-heading" className="text-base font-semibold text-foreground">Mức độ tập trung</h2>

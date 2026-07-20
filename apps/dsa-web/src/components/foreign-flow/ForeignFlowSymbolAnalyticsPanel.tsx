@@ -2,7 +2,7 @@ import { RefreshCw, X } from 'lucide-react';
 import type { VietnamForeignFlowSymbolHistoryResponse } from '../../api/stocks';
 import { Button } from '../common';
 import { cn } from '../../utils/cn';
-import { formatCompactShareVolume, formatCompactVndValue } from '../../utils/vietnamNumberFormat';
+import { formatForeignFlowPercent, formatForeignFlowValue, formatForeignFlowVolume } from '../../utils/vietnamNumberFormat';
 import { foreignFlowSignTextClass } from '../../utils/foreignFlowSign';
 import { buildSymbolForeignFlowRows, type SymbolForeignFlowMetric, type SymbolForeignFlowRange } from './foreignFlowSymbolAnalyticsModel';
 import { ForeignFlowSymbolHistoryChart, type SymbolForeignFlowChartMode } from './ForeignFlowSymbolHistoryChart';
@@ -10,9 +10,9 @@ import { ForeignFlowSymbolHistoryTable } from './ForeignFlowSymbolHistoryTable';
 
 export type SymbolForeignFlowWindow = 'latest' | '5' | '20' | '60';
 
-const formatMetric = (value: number | null | undefined, metric: SymbolForeignFlowMetric, signed = false) => metric === 'value'
-  ? formatCompactVndValue(value, '—', signed)
-  : formatCompactShareVolume(value, '—', signed);
+const formatMetric = (value: number | null | undefined, metric: SymbolForeignFlowMetric) => metric === 'value'
+  ? formatForeignFlowValue(value)
+  : formatForeignFlowVolume(value);
 
 export const ForeignFlowSymbolAnalyticsPanel = ({ ticker, data, loading, updating, error, metric, range, mode, window, onMetricChange, onRangeChange, onModeChange, onWindowChange, onRetry, onForceRefresh, onClose }: {
   ticker: string;
@@ -38,7 +38,7 @@ export const ForeignFlowSymbolAnalyticsPanel = ({ ticker, data, loading, updatin
   const latest = data?.latestRow ?? null;
   const selectedWindow = window === 'latest' ? null : family?.windows[window] ?? null;
   const contextWindow = selectedWindow ?? family?.windows['60'] ?? null;
-  const format = (value: number | null | undefined, signed = false) => formatMetric(value, metric, signed);
+  const format = (value: number | null | undefined) => formatMetric(value, metric);
   const card = (label: string, value: string, detail?: string, signedValue?: number | null) => <div className="rounded-lg border border-border/70 bg-elevated/30 p-3"><dt className="text-xs text-secondary-text">{label}</dt><dd className={cn('mt-1 font-semibold tabular-nums', signedValue === undefined ? 'text-foreground' : foreignFlowSignTextClass(signedValue))}>{value}</dd>{detail ? <p className="mt-1 text-xs text-secondary-text">{detail}</p> : null}</div>;
   return <section className="rounded-lg border border-cyan/30 bg-card p-4" aria-labelledby="symbol-analytics-heading">
     <div className="flex flex-wrap items-start justify-between gap-3">
@@ -60,24 +60,24 @@ export const ForeignFlowSymbolAnalyticsPanel = ({ ticker, data, loading, updatin
       {window === 'latest' ? <dl className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {card('Giá trị mua', formatMetric(latest?.foreignBuyValue, 'value'), latest?.tradingDate)}
         {card('Giá trị bán', formatMetric(latest?.foreignSellValue, 'value'), latest?.tradingDate)}
-        {card('Giá trị ròng', formatMetric(latest?.foreignNetValue, 'value', true), latest?.tradingDate, latest?.foreignNetValue)}
+        {card('Giá trị ròng', formatMetric(latest?.foreignNetValue, 'value'), latest?.tradingDate, latest?.foreignNetValue)}
         {card('Khối lượng mua', formatMetric(latest?.foreignBuyVolume, 'volume'), latest?.tradingDate)}
         {card('Khối lượng bán', formatMetric(latest?.foreignSellVolume, 'volume'), latest?.tradingDate)}
-        {card('Khối lượng ròng', formatMetric(latest?.foreignNetVolume, 'volume', true), latest?.tradingDate, latest?.foreignNetVolume)}
+        {card('Khối lượng ròng', formatMetric(latest?.foreignNetVolume, 'volume'), latest?.tradingDate, latest?.foreignNetVolume)}
       </dl> : selectedWindow ? <dl className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {card(`Ròng ${window} phiên`, format(selectedWindow.netSum, true), `${selectedWindow.coveredSessions}/${selectedWindow.requestedSessions} phiên · ${selectedWindow.complete ? 'đủ' : 'chưa đủ'}`, selectedWindow.netSum)}
-        {card('Bình quân ròng', format(selectedWindow.averageNet, true), `${selectedWindow.startDate ?? '—'} → ${selectedWindow.endDate ?? '—'}`, selectedWindow.averageNet)}
+        {card(`Ròng ${window} phiên`, format(selectedWindow.netSum), `${selectedWindow.coveredSessions}/${selectedWindow.requestedSessions} phiên · ${selectedWindow.complete ? 'đủ' : 'chưa đủ'}`, selectedWindow.netSum)}
+        {card('Bình quân ròng', format(selectedWindow.averageNet), `${selectedWindow.startDate ?? '—'} → ${selectedWindow.endDate ?? '—'}`, selectedWindow.averageNet)}
         {card('Bình quân độ lớn', format(selectedWindow.averageAbsoluteNet), 'Giá trị tuyệt đối')}
         {card('Phân bố phiên', `${selectedWindow.netBuySessionCount} mua · ${selectedWindow.netSellSessionCount} bán`, `${selectedWindow.zeroSessionCount} trung tính · ${selectedWindow.unavailableSessionCount} thiếu`) }
       </dl> : null}
       <dl className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {card('Chuỗi hiện tại', family.currentStreak.direction === 'net_buy' ? `Mua ròng ${family.currentStreak.sessions} phiên` : family.currentStreak.direction === 'net_sell' ? `Bán ròng ${family.currentStreak.sessions} phiên` : family.currentStreak.direction === 'none' ? 'Phiên gần nhất trung tính' : 'Không đủ dữ liệu chuỗi', `${family.currentStreak.startDate ?? '—'} → ${family.currentStreak.endDate ?? '—'}`)}
         {card('Đảo chiều gần nhất', family.latestReversal ? `${family.latestReversal.fromDirection === 'net_buy' ? 'Mua' : 'Bán'} → ${family.latestReversal.toDirection === 'net_buy' ? 'Mua' : 'Bán'}` : 'Chưa ghi nhận', family.latestReversal?.tradingDate ?? 'Trong phạm vi dữ liệu')}
-        {card('Độ lớn gần nhất', family.comparison.unusualFlowState === 'elevated' ? 'Cao so với phạm vi quan sát' : family.comparison.unusualFlowState === 'normal' ? 'Trong phạm vi bình thường' : 'Chưa đủ dữ liệu so sánh', family.comparison.absolutePercentile60d == null ? undefined : `Percentile ${family.comparison.absolutePercentile60d.toFixed(0)} / 60 phiên`)}
+        {card('Độ lớn gần nhất', family.comparison.unusualFlowState === 'elevated' ? 'Cao so với phạm vi quan sát' : family.comparison.unusualFlowState === 'normal' ? 'Trong phạm vi bình thường' : 'Chưa đủ dữ liệu so sánh', family.comparison.absolutePercentile60d == null ? undefined : `Percentile ${formatForeignFlowPercent(family.comparison.absolutePercentile60d)} / 60 phiên`)}
         {card('Bao phủ', `${analytics?.observedSessions ?? 0}/60 phiên`, `${data.coverage.startDate ?? '—'} → ${data.coverage.endDate ?? '—'}`)}
         {card('Phân bố phiên', contextWindow ? `${contextWindow.netBuySessionCount} mua · ${contextWindow.netSellSessionCount} bán` : '—', contextWindow ? `${contextWindow.zeroSessionCount} trung tính · ${contextWindow.unavailableSessionCount} thiếu` : undefined)}
-        {card('Phiên mua ròng lớn nhất', contextWindow?.maxNetBuy ? format(contextWindow.maxNetBuy.value, true) : '—', contextWindow?.maxNetBuy?.tradingDate, contextWindow?.maxNetBuy?.value)}
-        {card('Phiên bán ròng lớn nhất', contextWindow?.maxNetSell ? format(contextWindow.maxNetSell.value, true) : '—', contextWindow?.maxNetSell?.tradingDate, contextWindow?.maxNetSell?.value)}
+        {card('Phiên mua ròng lớn nhất', contextWindow?.maxNetBuy ? format(contextWindow.maxNetBuy.value) : '—', contextWindow?.maxNetBuy?.tradingDate, contextWindow?.maxNetBuy?.value)}
+        {card('Phiên bán ròng lớn nhất', contextWindow?.maxNetSell ? format(contextWindow.maxNetSell.value) : '—', contextWindow?.maxNetSell?.tradingDate, contextWindow?.maxNetSell?.value)}
       </dl>
       <ForeignFlowSymbolHistoryChart rows={rows} metric={metric} mode={mode} />
       <ForeignFlowSymbolHistoryTable rows={rows} metric={metric} />

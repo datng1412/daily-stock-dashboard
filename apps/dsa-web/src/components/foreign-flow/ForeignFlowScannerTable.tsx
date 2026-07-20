@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom';
 import type { VietnamForeignFlowBatchSymbol } from '../../api/stocks';
 import { cn } from '../../utils/cn';
 import { foreignFlowSignTextClass } from '../../utils/foreignFlowSign';
-import { formatCompactShareVolume, formatCompactVndValue, formatFullSharesTitle, formatFullVndTitle } from '../../utils/vietnamNumberFormat';
+import { formatForeignFlowPercent, formatForeignFlowValue, formatForeignFlowVolume, formatFullSharesTitle, formatFullVndTitle } from '../../utils/vietnamNumberFormat';
 import { Badge } from '../common';
 import {
   buildForeignFlowWorkspaceViewModel,
@@ -71,11 +71,10 @@ export const ForeignFlowScannerTable = ({
   );
   const workspace = buildForeignFlowWorkspaceViewModel(rows, window, metric);
   const workspaceByTicker = new Map(workspace.selectedRows.map((item) => [item.ticker, item]));
-  const formatter = metric === 'value' ? formatCompactVndValue : formatCompactShareVolume;
+  const formatter = metric === 'value' ? formatForeignFlowValue : formatForeignFlowVolume;
   const title = metric === 'value' ? formatFullVndTitle : formatFullSharesTitle;
   const cell = (
     value: number | null,
-    signed = false,
     display?: ForeignFlowWindowDisplay,
   ) => {
     if (value === null || !Number.isFinite(value)) {
@@ -86,7 +85,7 @@ export const ForeignFlowScannerTable = ({
       : null;
     return (
       <span aria-label={`Giá trị đầy đủ: ${title(value)}`}>
-        {formatter(value, '—', signed)}
+        {formatter(value)}
         {coverage ? <span className="ml-1 block text-[10px] text-warning">{coverage}</span> : null}
       </span>
     );
@@ -171,7 +170,7 @@ export const ForeignFlowScannerTable = ({
               const selectedWindow = foreignFlowWindowDisplay(row, window, metric);
               const workspaceRow = workspaceByTicker.get(row.ticker);
               const share = workspaceRow?.shareOfAbsoluteFlow ?? null;
-              const shareCell = share === null || !Number.isFinite(share) ? '—' : `${(share * 100).toFixed(1)}%`;
+              const shareCell = formatForeignFlowPercent(share === null ? null : share * 100);
               return (
                 <tr key={row.ticker} className={cn('border-t border-border/50 hover:bg-hover/50', selected && 'bg-cyan/10')} aria-selected={selected || undefined}>
                   <td className="px-3 py-3">
@@ -182,13 +181,13 @@ export const ForeignFlowScannerTable = ({
                     <>
                       <td className="px-3 py-3 text-right tabular-nums">{cell(foreignFlowTodaySideValue(row, 'buy', metric))}</td>
                       <td className="px-3 py-3 text-right tabular-nums">{cell(foreignFlowTodaySideValue(row, 'sell', metric))}</td>
-                      <td className={cn('px-3 py-3 text-right font-medium tabular-nums', foreignFlowSignTextClass(latest.value))}>{cell(latest.value, true)}</td>
-                      <td className={cn('px-3 py-3 text-right font-medium tabular-nums', foreignFlowSignTextClass(five.value))}>{cell(five.value, true, five)}</td>
-                      <td className={cn('px-3 py-3 text-right font-medium tabular-nums', foreignFlowSignTextClass(twenty.value))}>{cell(twenty.value, true, twenty)}</td>
+                      <td className={cn('px-3 py-3 text-right font-medium tabular-nums', foreignFlowSignTextClass(latest.value))}>{cell(latest.value)}</td>
+                      <td className={cn('px-3 py-3 text-right font-medium tabular-nums', foreignFlowSignTextClass(five.value))}>{cell(five.value, five)}</td>
+                      <td className={cn('px-3 py-3 text-right font-medium tabular-nums', foreignFlowSignTextClass(twenty.value))}>{cell(twenty.value, twenty)}</td>
                     </>
                   ) : (
                     <td className={cn('px-3 py-3 text-right font-medium tabular-nums', foreignFlowSignTextClass(selectedWindow.value))}>
-                      {cell(selectedWindow.value, true, selectedWindow)}
+                      {cell(selectedWindow.value, selectedWindow)}
                     </td>
                   )}
                   <td className="px-3 py-3 text-right tabular-nums" aria-label={share === null ? `Tỷ trọng trong ${scopeLabel} không khả dụng` : `Tỷ trọng trong ${scopeLabel} ${shareCell}`}>{shareCell}</td>

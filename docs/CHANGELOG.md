@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [fix] Make foreign-flow VND, share, percentage, ratio, and count separators deterministic across browser locales.
 - [new feature] Add explicit on-demand 60-session symbol foreign-flow analytics with null-aware summaries, charts, and history table.
 - [test] Cover symbol analytics formulas, API normalization, and frontend request ownership deterministically.
 - [documentation] Document Phase 4.12E-3 completed-session analytics, request boundaries, and deferred price-context and alert phases.

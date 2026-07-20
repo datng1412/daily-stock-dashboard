@@ -21,6 +21,8 @@ Rules that apply to every state:
 - **Unavailable:** show a retry action and no numeric analytics.
 
 Panel URL state uses `ticker`, `inspect`, `symbolMetric`, `symbolWindow`, `symbolRange`, and `symbolChart`. Metric, window, 20/40/60 range, chart mode, and table sorting are local presentation controls and make zero additional requests. Signed positive/negative/zero/null states use green/red/neutral/unavailable styling plus numeric/text labels; color is not the only cue.
+
+Foreign-flow numeric text is locale-independent: decimal points use `.`, grouped integers use `,`, VND values of at least one billion use exactly two decimals plus `Tỷ` without a space, lower VND values and all share volumes remain complete grouped integers, percentages use exactly two decimals, zero renders as `0`, and unavailable/non-finite values render as `—`. Formatting never changes the raw values used for calculations, sorting, filtering, or requests.
 - Endpoint attempts, HTTP status, raw provider error summaries, stale-date details, and retryability belong in diagnostics, not primary metric rows.
 - User-facing copy must stay neutral and must not become investment advice.
 

@@ -19,6 +19,63 @@ const finiteNumber = (value?: number | string | null): number | null => (
   typeof value === 'number' && Number.isFinite(value) ? value : null
 );
 
+const FOREIGN_FLOW_INTEGER_FORMATTER = new Intl.NumberFormat('en-US', {
+  useGrouping: true,
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 0,
+});
+
+const FOREIGN_FLOW_DECIMAL_FORMATTER = new Intl.NumberFormat('en-US', {
+  useGrouping: true,
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
+/** Deterministic foreign-flow VND display; never relies on the browser locale. */
+export const formatForeignFlowValue = (
+  value?: number | string | null,
+  fallback = '—',
+) => {
+  const numeric = finiteNumber(value);
+  if (numeric === null) return fallback;
+  if (numeric === 0) return '0';
+  if (Math.abs(numeric) >= 1_000_000_000) {
+    return `${FOREIGN_FLOW_DECIMAL_FORMATTER.format(numeric / 1_000_000_000)}Tỷ`;
+  }
+  return FOREIGN_FLOW_INTEGER_FORMATTER.format(numeric);
+};
+
+/** Foreign-flow volumes are always complete share counts, never K/M compact values. */
+export const formatForeignFlowVolume = (
+  value?: number | string | null,
+  fallback = '—',
+) => {
+  const numeric = finiteNumber(value);
+  if (numeric === null) return fallback;
+  if (numeric === 0) return '0';
+  return FOREIGN_FLOW_INTEGER_FORMATTER.format(numeric);
+};
+
+export const formatForeignFlowCount = formatForeignFlowVolume;
+
+export const formatForeignFlowPercent = (
+  value?: number | string | null,
+  fallback = '—',
+) => {
+  const numeric = finiteNumber(value);
+  if (numeric === null) return fallback;
+  return `${FOREIGN_FLOW_DECIMAL_FORMATTER.format(numeric === 0 ? 0 : numeric)}%`;
+};
+
+export const formatForeignFlowRatio = (
+  value?: number | string | null,
+  fallback = '—',
+) => {
+  const numeric = finiteNumber(value);
+  if (numeric === null) return fallback;
+  return FOREIGN_FLOW_DECIMAL_FORMATTER.format(numeric === 0 ? 0 : numeric);
+};
+
 export type SsiBoardPriceState = 'ceiling' | 'floor' | 'reference' | 'above_reference' | 'below_reference' | 'neutral';
 export type SsiBoardPriceRole = 'reference' | 'ceiling' | 'floor';
 

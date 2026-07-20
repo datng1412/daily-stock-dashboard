@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { formatCompactShareVolume, formatCompactVndValue, formatFullSharesTitle, formatFullVndTitle } from '../../utils/vietnamNumberFormat';
+import { formatForeignFlowValue, formatForeignFlowVolume, formatFullSharesTitle, formatFullVndTitle } from '../../utils/vietnamNumberFormat';
 import { Tooltip } from '../common';
 import { foreignFlowWindowLabel, type ForeignFlowMetric, type ForeignFlowWindow, type ForeignFlowWorkspaceRow } from './foreignFlowViewModel';
 
@@ -24,7 +24,7 @@ const BarList = ({
   window: ForeignFlowWindow;
   metric: ForeignFlowMetric;
 }) => {
-  const formatter = metric === 'value' ? formatCompactVndValue : formatCompactShareVolume;
+  const formatter = metric === 'value' ? formatForeignFlowValue : formatForeignFlowVolume;
   const fullFormatter = metric === 'value' ? formatFullVndTitle : formatFullSharesTitle;
   return (
     <div>
@@ -40,7 +40,7 @@ const BarList = ({
                   <span className="block w-full" aria-label={details}>
                     <span className="mb-1 flex items-center justify-between gap-2 text-xs">
                       <Link className="font-semibold text-foreground hover:text-cyan" to={`/vietnam/company/${item.ticker}`}>{item.ticker}</Link>
-                      <span className="flex items-center gap-2 tabular-nums text-foreground"><Marker item={item} />{formatter(item.value, '—', true)}</span>
+                      <span className="flex items-center gap-2 tabular-nums text-foreground"><Marker item={item} />{formatter(item.value)}</span>
                     </span>
                     <span className="block h-2.5 overflow-hidden rounded-full bg-elevated" aria-hidden="true">
                       <span

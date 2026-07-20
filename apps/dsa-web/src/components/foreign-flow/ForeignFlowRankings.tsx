@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom';
 import type { VietnamForeignFlowBatchSymbol, VietnamForeignFlowRankingEntry } from '../../api/stocks';
 import { cn } from '../../utils/cn';
 import { foreignFlowSignTextClass } from '../../utils/foreignFlowSign';
-import { formatCompactShareVolume, formatCompactVndValue, formatFullSharesTitle, formatFullVndTitle } from '../../utils/vietnamNumberFormat';
+import { formatForeignFlowValue, formatForeignFlowVolume, formatFullSharesTitle, formatFullVndTitle } from '../../utils/vietnamNumberFormat';
 import { Badge } from '../common';
 import { buildForeignFlowRankings, foreignFlowWindowLabel, type ForeignFlowMetric, type ForeignFlowWindow } from './foreignFlowViewModel';
 
@@ -41,8 +41,8 @@ const RankingList = ({
               aria-label={`Giá trị đầy đủ: ${metric === 'value' ? formatFullVndTitle(entry.value) : formatFullSharesTitle(entry.value)}`}
             >
               {metric === 'value'
-                ? formatCompactVndValue(entry.value, '—', true)
-                : formatCompactShareVolume(entry.value, '—', true)}
+                ? formatForeignFlowValue(entry.value)
+                : formatForeignFlowVolume(entry.value)}
             </span>
           </li>
         ))}

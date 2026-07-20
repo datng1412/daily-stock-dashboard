@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { cn } from '../../utils/cn';
-import { formatCompactShareVolume, formatCompactVndValue } from '../../utils/vietnamNumberFormat';
+import { formatForeignFlowValue, formatForeignFlowVolume } from '../../utils/vietnamNumberFormat';
 import { foreignFlowSignTextClass } from '../../utils/foreignFlowSign';
 import type { SymbolForeignFlowMetric, SymbolForeignFlowMetricRow } from './foreignFlowSymbolAnalyticsModel';
 
@@ -9,7 +9,7 @@ type SortKey = 'tradingDate' | 'buy' | 'sell' | 'net' | 'rolling5' | 'rolling20'
 export const ForeignFlowSymbolHistoryTable = ({ rows, metric }: { rows: SymbolForeignFlowMetricRow[]; metric: SymbolForeignFlowMetric }) => {
   const [sort, setSort] = useState<SortKey>('tradingDate');
   const [direction, setDirection] = useState<'asc' | 'desc'>('desc');
-  const format = metric === 'value' ? formatCompactVndValue : formatCompactShareVolume;
+  const format = metric === 'value' ? formatForeignFlowValue : formatForeignFlowVolume;
   const sorted = useMemo(() => [...rows].sort((left, right) => {
     const a = left[sort]; const b = right[sort];
     if (a === null && b === null) return right.tradingDate.localeCompare(left.tradingDate);
@@ -31,7 +31,7 @@ export const ForeignFlowSymbolHistoryTable = ({ rows, metric }: { rows: SymbolFo
         <tbody>{sorted.map((row) => <tr key={row.tradingDate} className="border-t border-border/60">
           <td className="px-3 py-2 tabular-nums">{row.tradingDate}</td>
           <td className="px-3 py-2 text-right tabular-nums">{format(row.buy, '—')}</td><td className="px-3 py-2 text-right tabular-nums">{format(row.sell, '—')}</td>
-          {[row.net, row.rolling5, row.rolling20].map((value, index) => <td key={index} className={cn('px-3 py-2 text-right tabular-nums', foreignFlowSignTextClass(value))}>{format(value, '—', true)}</td>)}
+          {[row.net, row.rolling5, row.rolling20].map((value, index) => <td key={index} className={cn('px-3 py-2 text-right tabular-nums', foreignFlowSignTextClass(value))}>{format(value)}</td>)}
           <td className="px-3 py-2 text-secondary-text">{row.state === 'ready' ? 'Đủ' : row.state === 'partial' ? 'Thiếu trường' : 'Không có'}</td>
         </tr>)}</tbody>
       </table>
