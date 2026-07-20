@@ -1158,6 +1158,190 @@ class VietnamForeignFlowBatchResponse(BaseModel):
     fetched_at: str
 
 
+class VietnamVn30ForeignFlowMembership(BaseModel):
+    status: Literal["ready", "unavailable"]
+    index_code: Literal["VN30"] = "VN30"
+    source: Literal["SSI IndexComponents"] = "SSI IndexComponents"
+    member_count: int = Field(ge=0, le=30)
+    component_count: int = Field(ge=0, le=30)
+    member_tickers: List[str] = Field(default_factory=list, max_length=30)
+    cache_status: Optional[str] = None
+    failure_class: Optional[str] = None
+    reason: Optional[str] = None
+    fetched_at: str
+    resolved_at: str
+
+
+class VietnamVn30ForeignFlowCoverage(BaseModel):
+    covered_components: int = Field(ge=0, le=30)
+    expected_components: int = Field(ge=0, le=30)
+    coverage_ratio: float = Field(ge=0, le=1)
+    complete: bool
+
+
+class VietnamVn30ForeignFlowBreadth(BaseModel):
+    net_buy_count: int = Field(ge=0, le=30)
+    net_sell_count: int = Field(ge=0, le=30)
+    zero_count: int = Field(ge=0, le=30)
+    unavailable_count: int = Field(ge=0, le=30)
+
+
+class VietnamVn30ForeignFlowDaily(BaseModel):
+    trading_date: str
+    foreign_buy_volume: Optional[int] = None
+    foreign_sell_volume: Optional[int] = None
+    foreign_net_volume: Optional[int] = None
+    foreign_buy_value: Optional[int] = None
+    foreign_sell_value: Optional[int] = None
+    foreign_net_value: Optional[int] = None
+    volume_coverage_count: int = Field(ge=0, le=30)
+    volume_coverage_ratio: float = Field(ge=0, le=1)
+    value_coverage_count: int = Field(ge=0, le=30)
+    value_coverage_ratio: float = Field(ge=0, le=1)
+    volume_coverage: VietnamVn30ForeignFlowCoverage
+    value_coverage: VietnamVn30ForeignFlowCoverage
+    volume_breadth: VietnamVn30ForeignFlowBreadth
+    value_breadth: VietnamVn30ForeignFlowBreadth
+    positive_components: int = Field(ge=0, le=30)
+    negative_components: int = Field(ge=0, le=30)
+    zero_components: int = Field(ge=0, le=30)
+    missing_components: int = Field(ge=0, le=30)
+    data_state: Literal["ready", "partial", "stale", "unavailable"]
+    state: Literal["ready", "partial", "stale", "unavailable"]
+
+
+class VietnamVn30ForeignFlowWindow(BaseModel):
+    requested_sessions: Literal[5, 20]
+    covered_sessions: int = Field(ge=0, le=20)
+    complete: bool
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    foreign_buy_volume: Optional[int] = None
+    foreign_sell_volume: Optional[int] = None
+    foreign_net_volume: Optional[int] = None
+    foreign_buy_value: Optional[int] = None
+    foreign_sell_value: Optional[int] = None
+    foreign_net_value: Optional[int] = None
+    volume_component_sessions: int = Field(ge=0, le=600)
+    volume_coverage_ratio: float = Field(ge=0, le=1)
+    volume_complete: bool
+    value_component_sessions: int = Field(ge=0, le=600)
+    value_coverage_ratio: float = Field(ge=0, le=1)
+    value_complete: bool
+    positive_component_sessions: int = Field(ge=0, le=600)
+    negative_component_sessions: int = Field(ge=0, le=600)
+    zero_component_sessions: int = Field(ge=0, le=600)
+    missing_component_sessions: int = Field(ge=0, le=600)
+
+
+class VietnamVn30ForeignFlowComponent(BaseModel):
+    ticker: str
+    data_state: Literal["ready", "stale", "empty", "unavailable"]
+    freshness: Literal["fresh", "stale", "empty", "unavailable"]
+    failure_class: Optional[str] = None
+    stale_reason: Optional[str] = None
+    latest_trading_date: Optional[str] = None
+    aggregate_latest_date: Optional[str] = None
+    foreign_buy_volume: Optional[int] = None
+    foreign_sell_volume: Optional[int] = None
+    foreign_net_volume: Optional[int] = None
+    foreign_buy_value: Optional[int] = None
+    foreign_sell_value: Optional[int] = None
+    foreign_net_value: Optional[int] = None
+    foreign_buy_volume_5d: Optional[int] = None
+    foreign_sell_volume_5d: Optional[int] = None
+    foreign_net_volume_5d: Optional[int] = None
+    foreign_buy_value_5d: Optional[int] = None
+    foreign_sell_value_5d: Optional[int] = None
+    foreign_net_value_5d: Optional[int] = None
+    foreign_buy_volume_20d: Optional[int] = None
+    foreign_sell_volume_20d: Optional[int] = None
+    foreign_net_volume_20d: Optional[int] = None
+    foreign_buy_value_20d: Optional[int] = None
+    foreign_sell_value_20d: Optional[int] = None
+    foreign_net_value_20d: Optional[int] = None
+    volume_covered_sessions_5d: int = Field(ge=0, le=5)
+    volume_complete_5d: bool
+    value_covered_sessions_5d: int = Field(ge=0, le=5)
+    value_complete_5d: bool
+    window_end_date_5d: Optional[str] = None
+    volume_covered_sessions_20d: int = Field(ge=0, le=20)
+    volume_complete_20d: bool
+    value_covered_sessions_20d: int = Field(ge=0, le=20)
+    value_complete_20d: bool
+    window_end_date_20d: Optional[str] = None
+
+
+class VietnamVn30ForeignFlowRankingEntry(BaseModel):
+    ticker: str
+    value: int
+    trading_date: Optional[str] = None
+    data_state: Literal["ready", "stale"]
+
+
+class VietnamVn30ForeignFlowRankingPair(BaseModel):
+    top_buy: List[VietnamVn30ForeignFlowRankingEntry] = Field(default_factory=list, max_length=10)
+    top_sell: List[VietnamVn30ForeignFlowRankingEntry] = Field(default_factory=list, max_length=10)
+
+
+class VietnamVn30ForeignFlowRankings(BaseModel):
+    latest_net_value: VietnamVn30ForeignFlowRankingPair
+    latest_net_volume: VietnamVn30ForeignFlowRankingPair
+    net_value_5d: VietnamVn30ForeignFlowRankingPair
+    net_volume_5d: VietnamVn30ForeignFlowRankingPair
+    net_value_20d: VietnamVn30ForeignFlowRankingPair
+    net_volume_20d: VietnamVn30ForeignFlowRankingPair
+
+
+class VietnamVn30ForeignFlowComponentCounts(BaseModel):
+    usable: int = Field(ge=0, le=30)
+    stale: int = Field(ge=0, le=30)
+    empty: int = Field(ge=0, le=30)
+    unavailable: int = Field(ge=0, le=30)
+
+
+class VietnamVn30ForeignFlowCache(BaseModel):
+    status: str
+    coalesced: bool
+    age_seconds: int = Field(ge=0)
+    ttl_seconds: int = Field(ge=1)
+    negative: bool
+
+
+class VietnamVn30ForeignFlowTiming(BaseModel):
+    membership_ms: int = Field(ge=0)
+    component_histories_ms: int = Field(ge=0)
+    aggregate_build_ms: int = Field(ge=0)
+    total_ms: int = Field(ge=0)
+
+
+class VietnamVn30ForeignFlowResponse(BaseModel):
+    """Daily aggregate over the current SSI-derived VN30 membership."""
+
+    scope: Literal["vn30"] = "vn30"
+    index_code: Literal["VN30"] = "VN30"
+    source: Literal["ssi_fastconnect"] = "ssi_fastconnect"
+    source_endpoint: Literal["DailyStockPrice"] = "DailyStockPrice"
+    membership_source: Literal["SSI IndexComponents"] = "SSI IndexComponents"
+    volume_unit: Literal["shares"] = "shares"
+    value_unit: Literal["VND"] = "VND"
+    finality: Literal["daily_available"] = "daily_available"
+    aggregation_basis: Literal["current_vn30_membership"] = "current_vn30_membership"
+    historical_constituent_correct: Literal[False] = False
+    data_state: Literal["ready", "partial", "stale", "unavailable"]
+    membership: VietnamVn30ForeignFlowMembership
+    aggregate_session_dates: List[str] = Field(default_factory=list, max_length=20)
+    latest: Optional[VietnamVn30ForeignFlowDaily] = None
+    windows: Dict[Literal["5", "20"], VietnamVn30ForeignFlowWindow]
+    series: List[VietnamVn30ForeignFlowDaily] = Field(default_factory=list, max_length=20)
+    components: List[VietnamVn30ForeignFlowComponent] = Field(default_factory=list, max_length=30)
+    component_counts: VietnamVn30ForeignFlowComponentCounts
+    rankings: VietnamVn30ForeignFlowRankings
+    cache: VietnamVn30ForeignFlowCache
+    timing: VietnamVn30ForeignFlowTiming
+    fetched_at: str
+
+
 class VietnamForeignFlowObservability(BaseModel):
     """Sanitized process-local historical foreign-flow counters."""
 
@@ -1213,6 +1397,26 @@ class VietnamForeignFlowObservability(BaseModel):
     ranking_eligible_values: int = Field(0, ge=0)
     ranking_excluded_null_values: int = Field(0, ge=0)
     ranking_excluded_zero_values: int = Field(0, ge=0)
+    vn30_requests: int = Field(0, ge=0)
+    vn30_force_refresh_requests: int = Field(0, ge=0)
+    vn30_membership_unavailable_results: int = Field(0, ge=0)
+    vn30_cache_hits: int = Field(0, ge=0)
+    vn30_cache_misses: int = Field(0, ge=0)
+    vn30_negative_cache_hits: int = Field(0, ge=0)
+    vn30_coalesced_waiters: int = Field(0, ge=0)
+    vn30_active_in_flight: int = Field(0, ge=0)
+    vn30_component_histories: int = Field(0, ge=0)
+    vn30_usable_components: int = Field(0, ge=0)
+    vn30_stale_components: int = Field(0, ge=0)
+    vn30_empty_components: int = Field(0, ge=0)
+    vn30_unavailable_components: int = Field(0, ge=0)
+    vn30_ready_results: int = Field(0, ge=0)
+    vn30_partial_results: int = Field(0, ge=0)
+    vn30_stale_results: int = Field(0, ge=0)
+    vn30_unavailable_results: int = Field(0, ge=0)
+    vn30_latency_count: int = Field(0, ge=0)
+    vn30_latency_total_ms: int = Field(0, ge=0)
+    vn30_latency_max_ms: int = Field(0, ge=0)
 
 
 class VietnamMozyfinObservability(BaseModel):

@@ -9,6 +9,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
+import hashlib
 import logging
 import math
 import re
@@ -41,6 +42,12 @@ BATCH_MAX_TICKERS = 30
 BATCH_DEFAULT_TOP_N = 5
 BATCH_MAX_TOP_N = 10
 BATCH_MAX_CONCURRENCY = 4
+VN30_INDEX_CODE = "VN30"
+VN30_HISTORY_SESSIONS = 20
+VN30_AGGREGATE_CACHE_TTL_SECONDS = 300
+VN30_AGGREGATE_NEGATIVE_CACHE_TTL_SECONDS = 60
+VN30_AGGREGATE_CACHE_MAX_ENTRIES = 16
+VN30_PUBLIC_SOURCE_ENDPOINT = "DailyStockPrice"
 _SAFE_FAILURE_CLASSES = {
     "auth_failed",
     "permission_denied",
@@ -67,6 +74,9 @@ _LOCK = RLock()
 _CACHE: "OrderedDict[Tuple[Any, ...], _CacheEntry]" = OrderedDict()
 _IN_FLIGHT: Dict[Tuple[Any, ...], Future] = {}
 _WAITERS: Dict[Tuple[Any, ...], int] = {}
+_VN30_CACHE: "OrderedDict[Tuple[Any, ...], _CacheEntry]" = OrderedDict()
+_VN30_IN_FLIGHT: Dict[Tuple[Any, ...], Future] = {}
+_VN30_WAITERS: Dict[Tuple[Any, ...], int] = {}
 _METRIC_DEFAULTS: Dict[str, Any] = {
     "scope": "process_local",
     "endpoint_requests": 0,
@@ -120,6 +130,26 @@ _METRIC_DEFAULTS: Dict[str, Any] = {
     "ranking_eligible_values": 0,
     "ranking_excluded_null_values": 0,
     "ranking_excluded_zero_values": 0,
+    "vn30_requests": 0,
+    "vn30_force_refresh_requests": 0,
+    "vn30_membership_unavailable_results": 0,
+    "vn30_cache_hits": 0,
+    "vn30_cache_misses": 0,
+    "vn30_negative_cache_hits": 0,
+    "vn30_coalesced_waiters": 0,
+    "vn30_active_in_flight": 0,
+    "vn30_component_histories": 0,
+    "vn30_usable_components": 0,
+    "vn30_stale_components": 0,
+    "vn30_empty_components": 0,
+    "vn30_unavailable_components": 0,
+    "vn30_ready_results": 0,
+    "vn30_partial_results": 0,
+    "vn30_stale_results": 0,
+    "vn30_unavailable_results": 0,
+    "vn30_latency_count": 0,
+    "vn30_latency_total_ms": 0,
+    "vn30_latency_max_ms": 0,
 }
 _METRICS = deepcopy(_METRIC_DEFAULTS)
 
@@ -143,6 +173,9 @@ def reset_vietnam_foreign_flow_state() -> None:
         _CACHE.clear()
         _IN_FLIGHT.clear()
         _WAITERS.clear()
+        _VN30_CACHE.clear()
+        _VN30_IN_FLIGHT.clear()
+        _VN30_WAITERS.clear()
         _METRICS.clear()
         _METRICS.update(deepcopy(_METRIC_DEFAULTS))
 
@@ -886,3 +919,552 @@ class VietnamForeignFlowBatchService:
                 )[:top_n],
             }
         return rankings, stats
+
+
+class VietnamForeignFlowVn30Service:
+    """Aggregate SSI daily foreign flow for the current SSI-derived VN30 membership."""
+
+    def __init__(
+        self,
+        symbol_service: Optional[VietnamForeignFlowService] = None,
+        market_service: Optional[Any] = None,
+        *,
+        max_concurrency: int = BATCH_MAX_CONCURRENCY,
+    ) -> None:
+        self._symbol_service = symbol_service or VietnamForeignFlowService(SsiFastConnectFetcher())
+        self._market_service = market_service
+        self._max_concurrency = max(1, min(int(max_concurrency), BATCH_MAX_CONCURRENCY))
+
+    def _get_market_service(self) -> Any:
+        if self._market_service is None:
+            from src.services.vietnam_market_service import VietnamMarketService
+
+            self._market_service = VietnamMarketService()
+        return self._market_service
+
+    def get_vn30_aggregate(
+        self,
+        *,
+        top_n: int = BATCH_DEFAULT_TOP_N,
+        force_refresh: bool = False,
+    ) -> Dict[str, Any]:
+        requested_top_n = int(top_n)
+        if not 1 <= requested_top_n <= BATCH_MAX_TOP_N:
+            raise ValueError(f"top_n must be between 1 and {BATCH_MAX_TOP_N}")
+        request_started = perf_counter()
+        _metric_add("vn30_requests")
+        if force_refresh:
+            _metric_add("vn30_force_refresh_requests")
+
+        membership_started = perf_counter()
+        membership_payload = self._get_market_service().build_index_components(
+            VN30_INDEX_CODE,
+            force_refresh=force_refresh,
+        )
+        membership_ms = max(0, int((perf_counter() - membership_started) * 1000))
+        membership = self._normalize_membership(membership_payload)
+        membership_hash = hashlib.sha256(
+            ",".join(membership["member_tickers"]).encode("ascii", errors="ignore")
+        ).hexdigest()[:16]
+        cache_key = (
+            SOURCE,
+            SOURCE_ENDPOINT,
+            VN30_INDEX_CODE,
+            membership_hash,
+            VN30_HISTORY_SESSIONS,
+            requested_top_n,
+            CACHE_VERSION,
+        )
+        now = _utc_now()
+        with _LOCK:
+            active = _VN30_IN_FLIGHT.get(cache_key)
+            if active is not None:
+                _VN30_WAITERS[cache_key] = _VN30_WAITERS.get(cache_key, 0) + 1
+                _METRICS["vn30_coalesced_waiters"] += 1
+                future = active
+                owner = False
+                cache_status = "coalesced"
+            else:
+                entry = _VN30_CACHE.get(cache_key)
+                if entry is not None and entry.expires_at > now and not force_refresh:
+                    _VN30_CACHE.move_to_end(cache_key)
+                    metric = "vn30_cache_hits" if entry.kind == "positive" else "vn30_negative_cache_hits"
+                    _METRICS[metric] += 1
+                    return self._with_cache_metadata(entry.payload, entry, "hit", False)
+                _METRICS["vn30_cache_misses"] += 1
+                future = Future()
+                _VN30_IN_FLIGHT[cache_key] = future
+                _VN30_WAITERS[cache_key] = 0
+                _METRICS["vn30_active_in_flight"] += 1
+                owner = True
+                cache_status = "refresh" if force_refresh else "miss"
+        if not owner:
+            try:
+                payload = deepcopy(future.result())
+                payload["cache"] = dict(payload.get("cache") or {}, status=cache_status, coalesced=True)
+                return payload
+            finally:
+                with _LOCK:
+                    _VN30_WAITERS[cache_key] = max(0, _VN30_WAITERS.get(cache_key, 1) - 1)
+
+        result_state = "unavailable"
+        component_counts = {"usable": 0, "stale": 0, "empty": 0, "unavailable": 0}
+        try:
+            if membership["status"] != "ready":
+                _metric_add("vn30_membership_unavailable_results")
+                payload = self._unavailable_payload(
+                    requested_top_n,
+                    membership,
+                    membership_ms=membership_ms,
+                    total_ms=max(0, int((perf_counter() - request_started) * 1000)),
+                )
+                kind = "negative"
+            else:
+                histories_started = perf_counter()
+                histories = self._load_histories(
+                    membership["member_tickers"],
+                    force_refresh=force_refresh,
+                )
+                histories_ms = max(0, int((perf_counter() - histories_started) * 1000))
+                aggregate_started = perf_counter()
+                payload = self._build_aggregate(
+                    membership,
+                    histories,
+                    requested_top_n,
+                    membership_ms=membership_ms,
+                    histories_ms=histories_ms,
+                    build_started=aggregate_started,
+                    request_started=request_started,
+                )
+                result_state = payload["data_state"]
+                component_counts = payload["component_counts"]
+                kind = "positive" if component_counts["usable"] > 0 else "negative"
+            entry = self._store_vn30(cache_key, payload, kind)
+            payload = self._with_cache_metadata(payload, entry, cache_status, False)
+            future.set_result(deepcopy(payload))
+            return payload
+        except Exception as exc:
+            future.set_exception(exc)
+            raise
+        finally:
+            total_ms = max(0, int((perf_counter() - request_started) * 1000))
+            with _LOCK:
+                _VN30_IN_FLIGHT.pop(cache_key, None)
+                _VN30_WAITERS.pop(cache_key, None)
+                _METRICS["vn30_active_in_flight"] = max(0, _METRICS["vn30_active_in_flight"] - 1)
+                _METRICS["vn30_component_histories"] += len(membership["member_tickers"])
+                for name in ("usable", "stale", "empty", "unavailable"):
+                    _METRICS[f"vn30_{name}_components"] += component_counts[name]
+                state_metric = f"vn30_{result_state}_results"
+                if state_metric in _METRICS:
+                    _METRICS[state_metric] += 1
+                _METRICS["vn30_latency_count"] += 1
+                _METRICS["vn30_latency_total_ms"] += total_ms
+                _METRICS["vn30_latency_max_ms"] = max(_METRICS["vn30_latency_max_ms"], total_ms)
+            logger.info(
+                "vn30_foreign_flow_aggregate_complete",
+                extra={
+                    "vn30_foreign_flow": {
+                        "membership_count": len(membership["member_tickers"]),
+                        "usable_count": component_counts["usable"],
+                        "data_state": result_state,
+                        "duration_ms": total_ms,
+                        "force_refresh": bool(force_refresh),
+                    }
+                },
+            )
+
+    @staticmethod
+    def _normalize_membership(payload: Dict[str, Any]) -> Dict[str, Any]:
+        rows = payload.get("rows") if isinstance(payload, dict) and isinstance(payload.get("rows"), list) else []
+        members: List[str] = []
+        seen = set()
+        mismatched_rows = 0
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            row_index = str(row.get("index_code") or VN30_INDEX_CODE).strip().upper()
+            if row_index != VN30_INDEX_CODE:
+                mismatched_rows += 1
+                continue
+            if not row.get("symbol"):
+                continue
+            try:
+                ticker = _normalize_ticker(row.get("symbol"))
+            except ValueError:
+                continue
+            if ticker not in seen:
+                seen.add(ticker)
+                members.append(ticker)
+        diagnostics = payload.get("diagnostics") if isinstance(payload, dict) and isinstance(payload.get("diagnostics"), dict) else {}
+        membership_too_large = len(members) > BATCH_MAX_TICKERS
+        ready = (
+            payload.get("status") == "ok"
+            and bool(members)
+            and mismatched_rows == 0
+            and not membership_too_large
+        )
+        published_members = members if ready else []
+        resolved_at = _iso_now()
+        return {
+            "status": "ready" if ready else "unavailable",
+            "index_code": VN30_INDEX_CODE,
+            "source": "SSI IndexComponents",
+            "member_count": len(published_members),
+            "component_count": len(published_members),
+            "member_tickers": published_members,
+            "cache_status": diagnostics.get("cache_status"),
+            "failure_class": None if ready else (
+                "membership_mismatch"
+                if mismatched_rows
+                else "membership_count_exceeded"
+                if membership_too_large
+                else diagnostics.get("failure_class") or "membership_unavailable"
+            ),
+            "reason": None if ready else "SSI VN30 membership is unavailable.",
+            "fetched_at": resolved_at,
+            "resolved_at": resolved_at,
+        }
+
+    def _load_histories(self, tickers: List[str], *, force_refresh: bool) -> Dict[str, Dict[str, Any]]:
+        def load(ticker: str) -> Dict[str, Any]:
+            try:
+                return self._symbol_service.get_symbol_history(
+                    ticker,
+                    limit=VN30_HISTORY_SESSIONS,
+                    force_refresh=force_refresh,
+                )
+            except Exception:
+                return VietnamForeignFlowBatchService._unavailable_history(ticker)
+
+        workers = min(self._max_concurrency, len(tickers))
+        if workers <= 1:
+            return {ticker: load(ticker) for ticker in tickers}
+        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="vn30-foreign-flow") as executor:
+            futures = {ticker: executor.submit(load, ticker) for ticker in tickers}
+            return {ticker: futures[ticker].result() for ticker in tickers}
+
+    @staticmethod
+    def _history_rows(history: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+        rows = history.get("rows") if isinstance(history.get("rows"), list) else []
+        return {
+            row["trading_date"]: row
+            for row in rows
+            if isinstance(row, dict) and _valid_date(row.get("trading_date"))
+        }
+
+    @staticmethod
+    def _metric_family_coverage(row: Optional[Dict[str, Any]], family: str) -> bool:
+        if not row:
+            return False
+        return all(row.get(f"foreign_{side}_{family}") is not None for side in ("buy", "sell", "net"))
+
+    @classmethod
+    def _aggregate_day(
+        cls,
+        trading_date: str,
+        tickers: List[str],
+        rows_by_ticker: Dict[str, Dict[str, Dict[str, Any]]],
+        histories: Dict[str, Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        result: Dict[str, Any] = {"trading_date": trading_date}
+        any_numeric = False
+        for family in ("volume", "value"):
+            coverage = 0
+            for side in ("buy", "sell", "net"):
+                values = []
+                for ticker in tickers:
+                    row = rows_by_ticker[ticker].get(trading_date)
+                    value = row.get(f"foreign_{side}_{family}") if row else None
+                    if value is not None:
+                        values.append(value)
+                result[f"foreign_{side}_{family}"] = sum(values) if values else None
+                any_numeric = any_numeric or bool(values)
+            coverage = sum(
+                cls._metric_family_coverage(rows_by_ticker[ticker].get(trading_date), family)
+                for ticker in tickers
+            )
+            result[f"{family}_coverage_count"] = coverage
+            result[f"{family}_coverage_ratio"] = coverage / len(tickers) if tickers else 0.0
+            result[f"{family}_coverage"] = {
+                "covered_components": coverage,
+                "expected_components": len(tickers),
+                "coverage_ratio": coverage / len(tickers) if tickers else 0.0,
+                "complete": coverage == len(tickers) and bool(tickers),
+            }
+            net_values = {
+                ticker: (rows_by_ticker[ticker].get(trading_date) or {}).get(f"foreign_net_{family}")
+                for ticker in tickers
+            }
+            result[f"{family}_breadth"] = {
+                "net_buy_count": sum(value is not None and value > 0 for value in net_values.values()),
+                "net_sell_count": sum(value is not None and value < 0 for value in net_values.values()),
+                "zero_count": sum(value == 0 for value in net_values.values()),
+                "unavailable_count": sum(value is None for value in net_values.values()),
+            }
+        result["positive_components"] = result["value_breadth"]["net_buy_count"]
+        result["negative_components"] = result["value_breadth"]["net_sell_count"]
+        result["zero_components"] = result["value_breadth"]["zero_count"]
+        result["missing_components"] = result["value_breadth"]["unavailable_count"]
+        contributing = [
+            ticker
+            for ticker in tickers
+            if any(
+                (rows_by_ticker[ticker].get(trading_date) or {}).get(f"foreign_{side}_{family}") is not None
+                for family in ("volume", "value")
+                for side in ("buy", "sell", "net")
+            )
+        ]
+        all_stale = bool(contributing) and all(histories[ticker].get("freshness") == "stale" for ticker in contributing)
+        full = result["value_coverage_count"] == len(tickers) and result["volume_coverage_count"] == len(tickers)
+        if not any_numeric:
+            result["data_state"] = "unavailable"
+        elif all_stale:
+            result["data_state"] = "stale"
+        elif full:
+            result["data_state"] = "ready"
+        else:
+            result["data_state"] = "partial"
+        result["state"] = result["data_state"]
+        return result
+
+    @staticmethod
+    def _aggregate_window(series: List[Dict[str, Any]], requested_sessions: int, member_count: int) -> Dict[str, Any]:
+        selected = series[-requested_sessions:]
+        result: Dict[str, Any] = {
+            "requested_sessions": requested_sessions,
+            "covered_sessions": len(selected),
+            "complete": len(selected) == requested_sessions,
+            "start_date": selected[0]["trading_date"] if selected else None,
+            "end_date": selected[-1]["trading_date"] if selected else None,
+        }
+        for family in ("volume", "value"):
+            for side in ("buy", "sell", "net"):
+                values = [row[f"foreign_{side}_{family}"] for row in selected if row.get(f"foreign_{side}_{family}") is not None]
+                result[f"foreign_{side}_{family}"] = sum(values) if values else None
+            observed = sum(int(row.get(f"{family}_coverage_count") or 0) for row in selected)
+            expected = member_count * requested_sessions
+            result[f"{family}_component_sessions"] = observed
+            result[f"{family}_coverage_ratio"] = observed / expected if expected else 0.0
+            result[f"{family}_complete"] = len(selected) == requested_sessions and observed == expected
+        result["positive_component_sessions"] = sum(int(row.get("positive_components") or 0) for row in selected)
+        result["negative_component_sessions"] = sum(int(row.get("negative_components") or 0) for row in selected)
+        result["zero_component_sessions"] = sum(int(row.get("zero_components") or 0) for row in selected)
+        result["missing_component_sessions"] = sum(int(row.get("missing_components") or 0) for row in selected)
+        return result
+
+    @classmethod
+    def _compose_component(
+        cls,
+        ticker: str,
+        history: Dict[str, Any],
+        rows_by_date: Dict[str, Dict[str, Any]],
+        session_dates: List[str],
+    ) -> Dict[str, Any]:
+        global_latest = session_dates[-1] if session_dates else None
+        latest = rows_by_date.get(global_latest) if global_latest else None
+        own_dates = sorted(rows_by_date)
+        result: Dict[str, Any] = {
+            "ticker": ticker,
+            "data_state": history.get("data_state") if history.get("data_state") in {"ready", "stale", "empty", "unavailable"} else "unavailable",
+            "freshness": history.get("freshness") if history.get("freshness") in {"fresh", "stale", "empty", "unavailable"} else "unavailable",
+            "failure_class": history.get("failure_class"),
+            "stale_reason": history.get("stale_reason"),
+            "latest_trading_date": own_dates[-1] if own_dates else None,
+            "aggregate_latest_date": global_latest,
+        }
+        for family in ("volume", "value"):
+            for side in ("buy", "sell", "net"):
+                result[f"foreign_{side}_{family}"] = latest.get(f"foreign_{side}_{family}") if latest else None
+        for size, suffix in ((5, "5d"), (20, "20d")):
+            selected_dates = session_dates[-size:]
+            selected_rows = [rows_by_date[day] for day in selected_dates if day in rows_by_date]
+            for family in ("volume", "value"):
+                for side in ("buy", "sell", "net"):
+                    values = [row[f"foreign_{side}_{family}"] for row in selected_rows if row.get(f"foreign_{side}_{family}") is not None]
+                    result[f"foreign_{side}_{family}_{suffix}"] = sum(values) if values else None
+                covered = sum(cls._metric_family_coverage(rows_by_date.get(day), family) for day in selected_dates)
+                result[f"{family}_covered_sessions_{suffix}"] = covered
+                result[f"{family}_complete_{suffix}"] = len(selected_dates) == size and covered == size
+            result[f"window_end_date_{suffix}"] = selected_dates[-1] if selected_dates else None
+        return result
+
+    @staticmethod
+    def _ranking_pair(components: List[Dict[str, Any]], key: str, date_key: str, top_n: int) -> Dict[str, Any]:
+        entries = [
+            {
+                "ticker": row["ticker"],
+                "value": row[key],
+                "trading_date": row.get(date_key),
+                "data_state": row["data_state"],
+            }
+            for row in components
+            if row.get(key) is not None and row.get(key) != 0 and row.get("data_state") in {"ready", "stale"}
+        ]
+        return {
+            "top_buy": sorted((item for item in entries if item["value"] > 0), key=lambda item: (-item["value"], item["ticker"]))[:top_n],
+            "top_sell": sorted((item for item in entries if item["value"] < 0), key=lambda item: (item["value"], item["ticker"]))[:top_n],
+        }
+
+    def _build_aggregate(
+        self,
+        membership: Dict[str, Any],
+        histories: Dict[str, Dict[str, Any]],
+        top_n: int,
+        *,
+        membership_ms: int,
+        histories_ms: int,
+        build_started: float,
+        request_started: float,
+    ) -> Dict[str, Any]:
+        tickers = membership["member_tickers"]
+        rows_by_ticker = {ticker: self._history_rows(histories[ticker]) for ticker in tickers}
+        session_dates = sorted({day for rows in rows_by_ticker.values() for day in rows})[-VN30_HISTORY_SESSIONS:]
+        series = [self._aggregate_day(day, tickers, rows_by_ticker, histories) for day in session_dates]
+        components = [self._compose_component(ticker, histories[ticker], rows_by_ticker[ticker], session_dates) for ticker in tickers]
+        counts = {
+            "usable": sum(row["data_state"] in {"ready", "stale"} for row in components),
+            "stale": sum(row["data_state"] == "stale" or row["freshness"] == "stale" for row in components),
+            "empty": sum(row["data_state"] == "empty" for row in components),
+            "unavailable": sum(row["data_state"] == "unavailable" for row in components),
+        }
+        latest = series[-1] if series else None
+        if counts["usable"] == 0:
+            state = "unavailable"
+        elif counts["stale"] == len(tickers):
+            state = "stale"
+        elif latest and latest["data_state"] == "ready" and counts["usable"] == len(tickers):
+            state = "ready"
+        else:
+            state = "partial"
+        rankings = {
+            "latest_net_value": self._ranking_pair(components, "foreign_net_value", "aggregate_latest_date", top_n),
+            "latest_net_volume": self._ranking_pair(components, "foreign_net_volume", "aggregate_latest_date", top_n),
+            "net_value_5d": self._ranking_pair(components, "foreign_net_value_5d", "window_end_date_5d", top_n),
+            "net_volume_5d": self._ranking_pair(components, "foreign_net_volume_5d", "window_end_date_5d", top_n),
+            "net_value_20d": self._ranking_pair(components, "foreign_net_value_20d", "window_end_date_20d", top_n),
+            "net_volume_20d": self._ranking_pair(components, "foreign_net_volume_20d", "window_end_date_20d", top_n),
+        }
+        build_ms = max(0, int((perf_counter() - build_started) * 1000))
+        return {
+            "scope": "vn30",
+            "index_code": VN30_INDEX_CODE,
+            "source": SOURCE,
+            "source_endpoint": VN30_PUBLIC_SOURCE_ENDPOINT,
+            "membership_source": "SSI IndexComponents",
+            "volume_unit": VOLUME_UNIT,
+            "value_unit": VALUE_UNIT,
+            "finality": FINALITY,
+            "aggregation_basis": "current_vn30_membership",
+            "historical_constituent_correct": False,
+            "data_state": state,
+            "membership": membership,
+            "aggregate_session_dates": session_dates,
+            "latest": latest,
+            "windows": {
+                "5": self._aggregate_window(series, 5, len(tickers)),
+                "20": self._aggregate_window(series, 20, len(tickers)),
+            },
+            "series": series,
+            "components": components,
+            "component_counts": counts,
+            "rankings": rankings,
+            "cache": {},
+            "timing": {
+                "membership_ms": membership_ms,
+                "component_histories_ms": histories_ms,
+                "aggregate_build_ms": build_ms,
+                "total_ms": max(0, int((perf_counter() - request_started) * 1000)),
+            },
+            "fetched_at": _iso_now(),
+        }
+
+    @staticmethod
+    def _unavailable_payload(top_n: int, membership: Dict[str, Any], *, membership_ms: int, total_ms: int) -> Dict[str, Any]:
+        empty_pair = {"top_buy": [], "top_sell": []}
+        empty_window = {
+            "requested_sessions": 5,
+            "covered_sessions": 0,
+            "complete": False,
+            "start_date": None,
+            "end_date": None,
+            "foreign_buy_volume": None,
+            "foreign_sell_volume": None,
+            "foreign_net_volume": None,
+            "foreign_buy_value": None,
+            "foreign_sell_value": None,
+            "foreign_net_value": None,
+            "volume_component_sessions": 0,
+            "volume_coverage_ratio": 0.0,
+            "volume_complete": False,
+            "value_component_sessions": 0,
+            "value_coverage_ratio": 0.0,
+            "value_complete": False,
+            "positive_component_sessions": 0,
+            "negative_component_sessions": 0,
+            "zero_component_sessions": 0,
+            "missing_component_sessions": 0,
+        }
+        window_20 = dict(empty_window, requested_sessions=20)
+        return {
+            "scope": "vn30",
+            "index_code": VN30_INDEX_CODE,
+            "source": SOURCE,
+            "source_endpoint": VN30_PUBLIC_SOURCE_ENDPOINT,
+            "membership_source": "SSI IndexComponents",
+            "volume_unit": VOLUME_UNIT,
+            "value_unit": VALUE_UNIT,
+            "finality": FINALITY,
+            "aggregation_basis": "current_vn30_membership",
+            "historical_constituent_correct": False,
+            "data_state": "unavailable",
+            "membership": membership,
+            "aggregate_session_dates": [],
+            "latest": None,
+            "windows": {"5": empty_window, "20": window_20},
+            "series": [],
+            "components": [],
+            "component_counts": {"usable": 0, "stale": 0, "empty": 0, "unavailable": 0},
+            "rankings": {
+                "latest_net_value": deepcopy(empty_pair),
+                "latest_net_volume": deepcopy(empty_pair),
+                "net_value_5d": deepcopy(empty_pair),
+                "net_volume_5d": deepcopy(empty_pair),
+                "net_value_20d": deepcopy(empty_pair),
+                "net_volume_20d": deepcopy(empty_pair),
+            },
+            "cache": {},
+            "timing": {"membership_ms": membership_ms, "component_histories_ms": 0, "aggregate_build_ms": 0, "total_ms": total_ms},
+            "fetched_at": _iso_now(),
+        }
+
+    @staticmethod
+    def _store_vn30(key: Tuple[Any, ...], payload: Dict[str, Any], kind: str) -> _CacheEntry:
+        now = _utc_now()
+        ttl = VN30_AGGREGATE_CACHE_TTL_SECONDS if kind == "positive" else VN30_AGGREGATE_NEGATIVE_CACHE_TTL_SECONDS
+        entry = _CacheEntry(
+            payload=deepcopy(payload),
+            kind=kind,
+            fetched_at=now,
+            expires_at=now + timedelta(seconds=ttl),
+            stale_until=now + timedelta(seconds=ttl),
+        )
+        with _LOCK:
+            _VN30_CACHE[key] = entry
+            _VN30_CACHE.move_to_end(key)
+            while len(_VN30_CACHE) > VN30_AGGREGATE_CACHE_MAX_ENTRIES:
+                _VN30_CACHE.popitem(last=False)
+        return entry
+
+    @staticmethod
+    def _with_cache_metadata(payload: Dict[str, Any], entry: _CacheEntry, status: str, coalesced: bool) -> Dict[str, Any]:
+        result = deepcopy(payload)
+        now = _utc_now()
+        result["cache"] = {
+            "status": status,
+            "coalesced": coalesced,
+            "age_seconds": max(0, int((now - entry.fetched_at).total_seconds())),
+            "ttl_seconds": VN30_AGGREGATE_CACHE_TTL_SECONDS if entry.kind == "positive" else VN30_AGGREGATE_NEGATIVE_CACHE_TTL_SECONDS,
+            "negative": entry.kind != "positive",
+        }
+        return result

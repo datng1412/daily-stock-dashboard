@@ -36,6 +36,7 @@ from api.v1.schemas.stocks import (
     VietnamForeignFlowBatchRequest,
     VietnamForeignFlowBatchResponse,
     VietnamForeignFlowSymbolHistoryResponse,
+    VietnamVn30ForeignFlowResponse,
     VietnamIndexComponentsResponse,
     VietnamIndexListResponse,
     VietnamMarketIndexPulseResponse,
@@ -63,6 +64,7 @@ from src.services.vietnam_company_research_service import VietnamCompanyResearch
 from src.services.vietnam_foreign_flow_service import (
     VietnamForeignFlowBatchService,
     VietnamForeignFlowService,
+    VietnamForeignFlowVn30Service,
     normalize_vietnam_foreign_flow_tickers,
 )
 from src.services.vietnam_market_service import VietnamMarketService, vietnam_intraday_chart_health_snapshot
@@ -775,6 +777,33 @@ def post_vietnam_foreign_flow_batch(
         ) from exc
 
 
+@router.get(
+    "/vn/foreign-flow/vn30",
+    response_model=VietnamVn30ForeignFlowResponse,
+    summary="Vietnam VN30 daily foreign-flow aggregate",
+    description="Aggregate SSI DailyStockPrice foreign flow over the current SSI IndexComponents VN30 membership.",
+)
+def get_vietnam_vn30_foreign_flow(
+    top_n: int = Query(10, ge=1, le=10, description="Maximum gainers and decliners returned per ranking."),
+    force_refresh: bool = Query(False, description="Bypass aggregate, membership, and component-history caches."),
+) -> VietnamVn30ForeignFlowResponse:
+    try:
+        payload = VietnamForeignFlowVn30Service().get_vn30_aggregate(
+            top_n=top_n,
+            force_refresh=force_refresh,
+        )
+        return VietnamVn30ForeignFlowResponse(**payload)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"error": "vn30_foreign_flow_invalid_request", "message": str(exc)},
+        ) from exc
+    except Exception as exc:
+        logger.error("Vietnam VN30 foreign-flow aggregate failed")
+        raise HTTPException(
+            status_code=500,
+            detail={"error": "vn30_foreign_flow_failed", "message": "Vietnam VN30 foreign-flow request failed"},
+        ) from exc
 @router.get(
     "/vn/observability",
     response_model=VietnamObservabilityResponse,

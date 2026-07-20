@@ -143,6 +143,70 @@ def _batch_payload(state="ready"):
     }
 
 
+def _vn30_payload():
+    empty_pair = {"top_buy": [], "top_sell": []}
+    window = {
+        "requested_sessions": 5,
+        "covered_sessions": 0,
+        "complete": False,
+        "start_date": None,
+        "end_date": None,
+        "foreign_buy_volume": None,
+        "foreign_sell_volume": None,
+        "foreign_net_volume": None,
+        "foreign_buy_value": None,
+        "foreign_sell_value": None,
+        "foreign_net_value": None,
+        "volume_component_sessions": 0,
+        "volume_coverage_ratio": 0,
+        "volume_complete": False,
+        "value_component_sessions": 0,
+        "value_coverage_ratio": 0,
+        "value_complete": False,
+        "positive_component_sessions": 0,
+        "negative_component_sessions": 0,
+        "zero_component_sessions": 0,
+        "missing_component_sessions": 0,
+    }
+    return {
+        "scope": "vn30",
+        "index_code": "VN30",
+        "source": "ssi_fastconnect",
+        "source_endpoint": "DailyStockPrice",
+        "membership_source": "SSI IndexComponents",
+        "volume_unit": "shares",
+        "value_unit": "VND",
+        "finality": "daily_available",
+        "aggregation_basis": "current_vn30_membership",
+        "historical_constituent_correct": False,
+        "data_state": "unavailable",
+        "membership": {
+            "status": "unavailable",
+            "index_code": "VN30",
+            "source": "SSI IndexComponents",
+            "member_count": 0,
+            "component_count": 0,
+            "member_tickers": [],
+            "cache_status": "negative_hit",
+            "failure_class": "index_components_unavailable",
+            "reason": "SSI VN30 membership is unavailable.",
+            "fetched_at": "2026-07-20T01:00:00+00:00",
+            "resolved_at": "2026-07-20T01:00:00+00:00",
+        },
+        "aggregate_session_dates": [],
+        "latest": None,
+        "windows": {"5": window, "20": {**window, "requested_sessions": 20}},
+        "series": [],
+        "components": [],
+        "component_counts": {"usable": 0, "stale": 0, "empty": 0, "unavailable": 0},
+        "rankings": {name: empty_pair for name in (
+            "latest_net_value", "latest_net_volume", "net_value_5d",
+            "net_volume_5d", "net_value_20d", "net_volume_20d",
+        )},
+        "cache": {"status": "miss", "coalesced": False, "age_seconds": 0, "ttl_seconds": 60, "negative": True},
+        "timing": {"membership_ms": 1, "component_histories_ms": 0, "aggregate_build_ms": 0, "total_ms": 1},
+        "fetched_at": "2026-07-20T01:00:00+00:00",
+    }
 def test_http_endpoint_exposes_typed_contract(monkeypatch):
     calls = []
 
@@ -260,4 +324,27 @@ def test_openapi_registers_foreign_flow_batch_contract():
     }
     assert route["responses"]["200"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/VietnamForeignFlowBatchResponse"
+    }
+
+
+def test_vn30_endpoint_exposes_typed_unavailable_state(monkeypatch):
+    calls = []
+
+    class StubService:
+        def get_vn30_aggregate(self, **kwargs):
+            calls.append(kwargs)
+            return _vn30_payload()
+
+    monkeypatch.setattr(stocks, "VietnamForeignFlowVn30Service", StubService)
+    response = _client().get("/api/v1/stocks/vn/foreign-flow/vn30?top_n=7&force_refresh=true")
+
+    assert response.status_code == 200
+    assert response.json()["membership"]["failure_class"] == "index_components_unavailable"
+    assert calls == [{"top_n": 7, "force_refresh": True}]
+
+
+def test_openapi_registers_vn30_foreign_flow_contract():
+    route = _client().get("/openapi.json").json()["paths"]["/api/v1/stocks/vn/foreign-flow/vn30"]["get"]
+    assert route["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/VietnamVn30ForeignFlowResponse"
     }
