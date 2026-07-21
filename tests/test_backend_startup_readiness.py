@@ -27,6 +27,8 @@ class _ReadyServer:
     def run(self):
         self.run_calls += 1
         self.started = True
+        while not self.should_exit:
+            time.sleep(0.001)
 
 
 class _FailingServer(_ReadyServer):
@@ -50,11 +52,11 @@ def test_normal_launcher_starts_expected_app_once_and_waits_for_readiness(monkey
 
     monkeypatch.setattr("uvicorn.Config", FakeConfig)
     monkeypatch.setattr("uvicorn.Server", _ReadyServer)
+    monkeypatch.setattr(main, "_probe_api_health", lambda port: "HEALTH_RESPONSE_READY")
 
     thread = main.start_api_server("127.0.0.1", 8123, _config())
 
     server = _ReadyServer.instances[0]
-    thread.join(timeout=1)
     assert captured["app"] == "api.app:app"
     assert captured["host"] == "127.0.0.1"
     assert captured["port"] == 8123
@@ -63,6 +65,9 @@ def test_normal_launcher_starts_expected_app_once_and_waits_for_readiness(monkey
     assert server.run_calls == 1
     assert server.started is True
     assert thread.name == "stockclock-fastapi-server"
+    server.should_exit = True
+    thread.join(timeout=1)
+    assert not thread.is_alive()
 
 
 def test_normal_launcher_propagates_background_startup_failure(monkeypatch):
@@ -70,33 +75,100 @@ def test_normal_launcher_propagates_background_startup_failure(monkeypatch):
     monkeypatch.setattr("uvicorn.Config", lambda *args, **kwargs: object())
     monkeypatch.setattr("uvicorn.Server", _FailingServer)
 
-    with pytest.raises(RuntimeError, match="failed before HTTP readiness") as exc_info:
+    with pytest.raises(RuntimeError, match="state=CHILD_EXITED") as exc_info:
         main.start_api_server("127.0.0.1", 8123, _config())
 
     assert isinstance(exc_info.value.__cause__, RuntimeError)
+    assert "exit_code=not_applicable_in_process_thread" in str(exc_info.value)
+    assert "host=127.0.0.1 port=8123" in str(exc_info.value)
+    assert "diagnostic_tail=RuntimeError: bind failed" in str(exc_info.value)
     assert _FailingServer.instances[0].run_calls == 1
 
 
 def test_normal_launcher_times_out_without_claiming_readiness(monkeypatch):
-    release = threading.Event()
-
     class BlockingServer(_ReadyServer):
         def run(self):
             self.run_calls += 1
-            release.wait(timeout=1)
+            while not self.should_exit:
+                time.sleep(0.001)
 
     BlockingServer.instances = []
     monkeypatch.setattr("uvicorn.Config", lambda *args, **kwargs: object())
     monkeypatch.setattr("uvicorn.Server", BlockingServer)
+    monkeypatch.setattr(main, "_probe_api_health", lambda port: "CONNECTION_REFUSED")
     monkeypatch.setattr(main, "_API_SERVER_STARTUP_TIMEOUT_SECONDS", 0.05)
     monkeypatch.setattr(main, "_API_SERVER_SHUTDOWN_GRACE_SECONDS", 0.05)
 
-    try:
-        with pytest.raises(RuntimeError, match="did not become HTTP-ready"):
-            main.start_api_server("127.0.0.1", 8123, _config())
-        assert BlockingServer.instances[0].should_exit is True
-    finally:
-        release.set()
+    with pytest.raises(RuntimeError, match="last_probe_state=CONNECTION_REFUSED"):
+        main.start_api_server("127.0.0.1", 8123, _config())
+    assert BlockingServer.instances[0].should_exit is True
+    assert not any(
+        thread.name == "stockclock-fastapi-server" and thread.is_alive()
+        for thread in threading.enumerate()
+    )
+
+
+@pytest.mark.parametrize(
+    ("environment", "expected"),
+    [
+        ({}, 8000),
+        ({"PORT": "10000"}, 10000),
+        ({"WEBUI_PORT": "8123"}, 8123),
+    ],
+)
+def test_port_resolution_uses_one_validated_source(environment, expected):
+    assert main.resolve_api_server_port(environ=environment) == expected
+
+
+@pytest.mark.parametrize("value", ["", "not-a-port", "0", "65536", "-1"])
+def test_explicit_invalid_render_port_fails_clearly(value):
+    with pytest.raises(ValueError, match="PORT must"):
+        main.resolve_api_server_port(environ={"PORT": value})
+
+
+def test_render_port_takes_precedence_over_cli_port():
+    assert main.resolve_api_server_port(9000, {"PORT": "10000"}) == 10000
+
+
+def test_readiness_retries_connection_refusal_and_uses_bound_port(monkeypatch):
+    _ReadyServer.instances = []
+    states = iter(["CONNECTION_REFUSED", "HEALTH_RESPONSE_READY"])
+    probed_ports = []
+
+    def probe(port):
+        probed_ports.append(port)
+        return next(states)
+
+    monkeypatch.setattr("uvicorn.Config", lambda *args, **kwargs: object())
+    monkeypatch.setattr("uvicorn.Server", _ReadyServer)
+    monkeypatch.setattr(main, "_probe_api_health", probe)
+
+    thread = main.start_api_server("0.0.0.0", 10000, _config())
+    assert probed_ports == [10000, 10000]
+    assert main._api_readiness_url(10000) == "http://127.0.0.1:10000/api/health"
+    _ReadyServer.instances[0].should_exit = True
+    thread.join(timeout=1)
+
+
+def test_readiness_retries_non_ready_health_response(monkeypatch):
+    _ReadyServer.instances = []
+    states = iter(["HEALTH_RESPONSE_NOT_READY", "HEALTH_RESPONSE_READY"])
+    monkeypatch.setattr("uvicorn.Config", lambda *args, **kwargs: object())
+    monkeypatch.setattr("uvicorn.Server", _ReadyServer)
+    monkeypatch.setattr(main, "_probe_api_health", lambda port: next(states))
+
+    thread = main.start_api_server("0.0.0.0", 10000, _config())
+    _ReadyServer.instances[0].should_exit = True
+    thread.join(timeout=1)
+
+
+def test_startup_diagnostic_is_bounded_and_redacts_secrets():
+    diagnostic = main._bounded_startup_diagnostic(
+        RuntimeError("prefix " + ("x" * 5000) + " apiSecret=do-not-print")
+    )
+    assert len(diagnostic) <= 4000
+    assert "do-not-print" not in diagnostic
+    assert "[REDACTED]" in diagnostic
 
 
 def test_serve_only_returns_failure_instead_of_sleeping_after_server_error(monkeypatch):
@@ -129,6 +201,74 @@ def test_serve_only_returns_failure_instead_of_sleeping_after_server_error(monke
     )
 
     assert main.main() == 1
+
+
+def test_render_port_forces_external_bind_and_reaches_server_launcher(monkeypatch):
+    args = SimpleNamespace(
+        debug=False,
+        check_notify=False,
+        stocks=None,
+        webui=False,
+        webui_only=False,
+        serve=False,
+        serve_only=True,
+        host="127.0.0.1",
+        port=9000,
+    )
+    config = SimpleNamespace(
+        log_dir="logs",
+        log_level="INFO",
+        webui_enabled=False,
+        validate=lambda: [],
+    )
+    captured = {}
+
+    def capture_start(**kwargs):
+        captured.update(kwargs)
+        raise RuntimeError("stop after bind capture")
+
+    monkeypatch.setenv("PORT", "10000")
+    monkeypatch.setenv("WEBUI_HOST", "127.0.0.1")
+    monkeypatch.setattr(main, "parse_arguments", lambda: args)
+    monkeypatch.setattr(main, "get_config", lambda: config)
+    monkeypatch.setattr(main, "_setup_bootstrap_logging", lambda **kwargs: None)
+    monkeypatch.setattr(main, "_setup_runtime_logging", lambda *args, **kwargs: True)
+    monkeypatch.setattr(main, "prepare_webui_frontend_assets", lambda: True)
+    monkeypatch.setattr(main, "start_api_server", capture_start)
+
+    assert main.main() == 1
+    assert captured["host"] == "0.0.0.0"
+    assert captured["port"] == 10000
+
+
+def test_invalid_render_port_fails_before_server_launch(monkeypatch):
+    args = SimpleNamespace(
+        debug=False,
+        check_notify=False,
+        stocks=None,
+        webui=False,
+        webui_only=False,
+        serve=False,
+        serve_only=True,
+        host="0.0.0.0",
+        port=8000,
+    )
+    config = SimpleNamespace(
+        log_dir="logs",
+        log_level="INFO",
+        webui_enabled=False,
+        validate=lambda: [],
+    )
+    launch_calls = []
+    monkeypatch.setenv("PORT", "invalid")
+    monkeypatch.setattr(main, "parse_arguments", lambda: args)
+    monkeypatch.setattr(main, "get_config", lambda: config)
+    monkeypatch.setattr(main, "_setup_bootstrap_logging", lambda **kwargs: None)
+    monkeypatch.setattr(main, "_setup_runtime_logging", lambda *args, **kwargs: True)
+    monkeypatch.setattr(main, "start_api_server", lambda **kwargs: launch_calls.append(kwargs))
+
+    assert main.main() == 1
+    assert launch_calls == []
 
 
 @pytest.mark.parametrize(

@@ -45,9 +45,13 @@ if os.getenv("GITHUB_ACTIONS") != "true" and os.getenv("USE_PROXY", "false").low
     os.environ["https_proxy"] = proxy_url
 
 import argparse
+import json
 import logging
+import re
 import sys
 import time
+import urllib.error
+import urllib.request
 import uuid
 from datetime import datetime, timezone, timedelta
 
@@ -62,6 +66,14 @@ _RUNTIME_ENV_FILE_KEYS = set()
 _API_SERVER_STARTUP_TIMEOUT_SECONDS = 30.0
 _API_SERVER_STARTUP_POLL_SECONDS = 0.05
 _API_SERVER_SHUTDOWN_GRACE_SECONDS = 2.0
+_API_SERVER_HEALTH_REQUEST_TIMEOUT_SECONDS = 0.5
+_API_SERVER_HEALTH_PATH = "/api/health"
+_API_SERVER_LOCAL_DEFAULT_PORT = 8000
+_STARTUP_DIAGNOSTIC_MAX_CHARS = 4000
+_STARTUP_SECRET_PATTERN = re.compile(
+    r"(?i)(authorization|bearer|access[_-]?token|api[_-]?key|api[_-]?secret|"
+    r"consumer[_-]?secret|password|private[_-]?key)(\s*[:=]\s*|\s+)([^\s,;]+)"
+)
 
 
 def _get_active_env_path() -> Path:
@@ -154,8 +166,9 @@ def _setup_runtime_logging(log_dir: str, debug: bool = False) -> bool:
         logger.warning(
             "File logging initialization failed; falling back to console logging. "
             "Log directory %r is not writable or cannot be created: %s. "
-            "The official Docker image entrypoint automatically fixes default mounted directory permissions; "
-            "if it still fails, check for --user, read-only mounts, rootless Docker, NFS, or other write restrictions.",
+            "The official image pre-owns built-in runtime directories for non-root user dsa; "
+            "mounted paths must also permit UID/GID 1000:1000 writes. Check read-only mounts, "
+            "rootless Docker, NFS, or other host permission restrictions.",
             log_dir,
             exc,
         )
@@ -668,6 +681,82 @@ def run_full_analysis(
         logger.exception(f"Analysis flow execution failed: {e}")
 
 
+def resolve_api_server_port(
+    cli_port: int = _API_SERVER_LOCAL_DEFAULT_PORT,
+    environ: Optional[Dict[str, str]] = None,
+) -> int:
+    """Resolve and validate the single runtime port used by Uvicorn and readiness."""
+    env = os.environ if environ is None else environ
+    source = "command line"
+    raw_port: Any = cli_port
+
+    if "PORT" in env:
+        source = "PORT"
+        raw_port = env["PORT"]
+    elif cli_port == _API_SERVER_LOCAL_DEFAULT_PORT:
+        if "WEBUI_PORT" in env:
+            source = "WEBUI_PORT"
+            raw_port = env["WEBUI_PORT"]
+
+    try:
+        port = int(raw_port)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{source} must be an integer TCP port") from exc
+
+    if not 1 <= port <= 65535:
+        raise ValueError(f"{source} must be between 1 and 65535")
+    return port
+
+
+def _api_readiness_url(port: int) -> str:
+    return f"http://127.0.0.1:{port}{_API_SERVER_HEALTH_PATH}"
+
+
+def _probe_api_health(port: int) -> str:
+    """Return a stable readiness state without depending on external services."""
+    request = urllib.request.Request(
+        _api_readiness_url(port),
+        headers={"Accept": "application/json"},
+        method="GET",
+    )
+    try:
+        # Never let HTTP_PROXY route the local startup probe outside the container.
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(
+            request,
+            timeout=_API_SERVER_HEALTH_REQUEST_TIMEOUT_SECONDS,
+        ) as response:
+            if response.status != 200:
+                return "HEALTH_RESPONSE_NOT_READY"
+            try:
+                payload = json.loads(response.read(4096).decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                return "HEALTH_RESPONSE_NOT_READY"
+            return (
+                "HEALTH_RESPONSE_READY"
+                if isinstance(payload, dict) and payload.get("status") == "ok"
+                else "HEALTH_RESPONSE_NOT_READY"
+            )
+    except urllib.error.HTTPError:
+        return "HEALTH_RESPONSE_NOT_READY"
+    except (urllib.error.URLError, TimeoutError, OSError):
+        return "CONNECTION_REFUSED"
+
+
+def _bounded_startup_diagnostic(error: Optional[BaseException]) -> str:
+    if error is None:
+        text = "server thread exited without an exception"
+    else:
+        text = f"{type(error).__name__}: {error}"
+    text = _STARTUP_SECRET_PATTERN.sub(r"\1\2[REDACTED]", text)
+    return text[-_STARTUP_DIAGNOSTIC_MAX_CHARS:]
+
+
+def _stop_api_server(server: Any, thread: Any) -> None:
+    server.should_exit = True
+    thread.join(timeout=_API_SERVER_SHUTDOWN_GRACE_SECONDS)
+
+
 def start_api_server(host: str, port: int, config: Config) -> Any:
     """
     在后台线程启动 FastAPI 服务
@@ -706,25 +795,46 @@ def start_api_server(host: str, port: int, config: Config) -> Any:
         daemon=True,
     )
     thread.start()
+    logger.info(
+        "Starting FastAPI server thread: host=%s port=%s pid=%s thread=%s",
+        host,
+        port,
+        os.getpid(),
+        thread.name,
+    )
 
     deadline = time.monotonic() + _API_SERVER_STARTUP_TIMEOUT_SECONDS
-    while thread.is_alive() and not server.started and time.monotonic() < deadline:
+    last_state = "CONNECTION_REFUSED"
+    while time.monotonic() < deadline:
+        if not thread.is_alive():
+            startup_error = startup_result.get("error")
+            diagnostic = _bounded_startup_diagnostic(startup_error)
+            raise RuntimeError(
+                "FastAPI server thread exited before readiness: "
+                f"state=CHILD_EXITED exit_code=not_applicable_in_process_thread "
+                f"host={host} port={port} diagnostic_tail={diagnostic}"
+            ) from startup_error
+
+        last_state = _probe_api_health(port)
+        if last_state == "HEALTH_RESPONSE_READY":
+            logger.info(
+                "FastAPI service is HTTP-ready: bind=http://%s:%s probe=%s",
+                host,
+                port,
+                _api_readiness_url(port),
+            )
+            return thread
+
         remaining = max(0.0, deadline - time.monotonic())
         thread.join(timeout=min(_API_SERVER_STARTUP_POLL_SECONDS, remaining))
 
-    startup_error = startup_result.get("error")
-    if startup_error is not None:
-        raise RuntimeError("FastAPI service failed before HTTP readiness.") from startup_error
-    if not server.started:
-        server.should_exit = True
-        thread.join(timeout=_API_SERVER_SHUTDOWN_GRACE_SECONDS)
-        raise RuntimeError(
-            f"FastAPI service did not become HTTP-ready within "
-            f"{_API_SERVER_STARTUP_TIMEOUT_SECONDS:g} seconds."
-        )
-
-    logger.info(f"FastAPI service started: http://{host}:{port}")
-    return thread
+    _stop_api_server(server, thread)
+    cleanup_state = "stopped" if not thread.is_alive() else "shutdown_grace_expired"
+    raise RuntimeError(
+        f"FastAPI service did not become HTTP-ready within "
+        f"{_API_SERVER_STARTUP_TIMEOUT_SECONDS:g} seconds: state=TIMEOUT "
+        f"last_probe_state={last_state} host={host} port={port} cleanup={cleanup_state}"
+    )
 
 
 def _is_truthy_env(var_name: str, default: str = "true") -> bool:
@@ -884,14 +994,18 @@ def main() -> int:
     # === 启动 Web 服务 (如果启用) ===
     start_serve = (args.serve or args.serve_only) and os.getenv("GITHUB_ACTIONS") != "true"
 
-    # 兼容旧版 WEBUI_HOST/WEBUI_PORT：如果用户未通过 --host/--port 指定，则使用旧变量
+    # Resolve one bind contract for both Uvicorn and the loopback readiness probe.
     if start_serve:
-        if args.host == '0.0.0.0' and os.getenv('WEBUI_HOST'):
-            args.host = os.getenv('WEBUI_HOST')
-        if args.port == 8000:
-            port_env = os.getenv('PORT') or os.getenv('WEBUI_PORT')
-            if port_env:
-                args.port = int(port_env)
+        try:
+            if "PORT" in os.environ:
+                # Render's dynamic-port contract must be externally reachable.
+                args.host = "0.0.0.0"
+            elif args.host == "0.0.0.0" and os.getenv("WEBUI_HOST"):
+                args.host = os.environ["WEBUI_HOST"]
+            args.port = resolve_api_server_port(args.port)
+        except ValueError as exc:
+            logger.error("Invalid FastAPI bind configuration: %s", exc)
+            return 1
 
     bot_clients_started = False
     if start_serve:

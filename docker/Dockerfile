@@ -18,6 +18,7 @@ FROM python:3.11-slim-bookworm
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONUTF8=1 \
+    HOME=/home/dsa \
     WEBUI_HOST=0.0.0.0 \
     WEBUI_AUTO_BUILD=false \
     PORT=8000 \
@@ -66,8 +67,9 @@ COPY apps/dsa-web/public/ ./apps/dsa-web/public/
 COPY --from=web-builder /app/static/ ./static/
 COPY docker/entrypoint.sh /entrypoint.sh
 
-RUN mkdir -p /app/data/cache /app/logs /app/reports \
-    && chown -R dsa:dsa /app \
+RUN mkdir -p /app/data/cache /app/logs /app/reports /home/dsa/.longbridge \
+    && chown -R dsa:dsa /app /home/dsa \
+    && chmod 700 /home/dsa/.longbridge \
     && chmod +x /entrypoint.sh
 
 EXPOSE 8000
@@ -75,5 +77,6 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD sh -c 'curl -fsS "http://127.0.0.1:${PORT:-8000}/api/health" >/dev/null || exit 1'
 
+USER dsa
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["python", "main.py", "--webui-only"]

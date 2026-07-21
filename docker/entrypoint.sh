@@ -1,103 +1,32 @@
 #!/bin/sh
 set -eu
 
-APP_USER="dsa"
-APP_GROUP="dsa"
-APP_UID="1000"
-APP_GID="1000"
+HOME="${HOME:-/home/dsa}"
 DATA_CACHE_DIR="${DATA_CACHE_DIR:-/app/data/cache}"
-WRITABLE_DIRS="/app/data $DATA_CACHE_DIR /app/logs /app/reports /home/dsa/.longbridge"
-DATABASE_FILE="${DATABASE_PATH:-/app/data/stock_analysis.db}"
+export HOME
 
-warn() {
-    printf '%s\n' "$*" >&2
+fail() {
+    printf 'ERROR: %s\n' "$*" >&2
+    exit 1
 }
 
-can_write_dir_as_app_user() {
-    gosu "$APP_USER:$APP_GROUP" sh -c '
-        tmp="$1/.dsa-write-check.$$"
-        : > "$tmp" && rm -f "$tmp"
-    ' sh "$1"
-}
-
-can_write_file_as_app_user() {
-    gosu "$APP_USER:$APP_GROUP" test -w "$1"
-}
-
-has_unwritable_mount_path() {
+assert_writable_dir() {
     dir="$1"
+    mkdir -p "$dir" 2>/dev/null || fail "required runtime directory is not creatable: $dir"
+    [ -w "$dir" ] || fail "required runtime directory is not writable: $dir"
 
-    if ! can_write_dir_as_app_user "$dir"; then
-        return 0
+    probe="$dir/.dsa-write-check.$$"
+    if ! (: > "$probe") 2>/dev/null; then
+        fail "required runtime directory failed its write probe: $dir"
     fi
-
-    if [ "$dir" = "/app/data" ]; then
-        for file in "$DATABASE_FILE" "$DATABASE_FILE-wal" "$DATABASE_FILE-shm"; do
-            if [ -e "$file" ] && ! can_write_file_as_app_user "$file"; then
-                return 0
-            fi
-        done
-    fi
-
-    return 1
+    rm -f "$probe" 2>/dev/null || fail "runtime write probe could not be removed: $dir"
 }
 
-directory_needs_repair() {
-    dir="$1"
-
-    if has_unwritable_mount_path "$dir"; then
-        return 0
-    fi
-
-    mismatched_path="$(
-        find "$dir" \
-            \( ! -user "$APP_UID" -o ! -group "$APP_GID" \) \
-            -print -quit 2>/dev/null || true
-    )"
-    if [ -n "$mismatched_path" ]; then
-        return 0
-    fi
-
-    return 1
-}
-
-if [ "$(id -u)" = "0" ]; then
-    for dir in $WRITABLE_DIRS; do
-        if ! mkdir -p "$dir"; then
-            warn "WARN: unable to create $dir; application writes may fail for this path."
-            continue
-        fi
-
-        if ! directory_needs_repair "$dir"; then
-            continue
-        fi
-
-        if chown -R "$APP_UID:$APP_GID" "$dir"; then
-            if ! chmod -R u+rwX "$dir"; then
-                warn "WARN: unable to adjust owner permissions for $dir after ownership repair; check read-only, rootless, or NFS mount permissions if writes fail."
-            fi
-        else
-            warn "WARN: unable to set ownership for $dir; skipping owner-only chmod because it would not grant writes to $APP_USER without ownership."
-        fi
-
-        if has_unwritable_mount_path "$dir"; then
-            warn "WARN: $dir is still not writable by $APP_USER after permission repair; check host mount ownership or read-only, rootless, and NFS mount settings."
-        fi
-    done
-
-    HOME="/home/dsa"
-    export HOME
-    exec gosu "$APP_USER:$APP_GROUP" "$@"
-fi
-
-for dir in $WRITABLE_DIRS; do
-    if ! mkdir -p "$dir" 2>/dev/null; then
-        warn "WARN: unable to create $dir as $(id -un); application writes may fail for this path."
-        continue
-    fi
-    if [ ! -w "$dir" ]; then
-        warn "WARN: $dir is not writable by $(id -un); check container user, mounted volume, or DATA_CACHE_DIR settings."
-    fi
-done
+assert_writable_dir "$HOME"
+assert_writable_dir "$HOME/.longbridge"
+assert_writable_dir /app/data
+assert_writable_dir "$DATA_CACHE_DIR"
+assert_writable_dir /app/logs
+assert_writable_dir /app/reports
 
 exec "$@"
