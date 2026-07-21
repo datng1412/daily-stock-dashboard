@@ -1,6 +1,6 @@
 # Project State
 
-Last updated: 2026-07-20
+Last updated: 2026-07-21
 
 ## Purpose
 
@@ -13,6 +13,7 @@ This document gives Codex and other agents enough context to resume project work
 - Stock endpoints: `api/v1/endpoints/stocks.py`
 - Vietnam market service: `src/services/vietnam_market_service.py`
 - SSI FastConnect provider: `data_provider/ssi_fastconnect_fetcher.py`
+- SSI-V3-A1 migration gate: outcome D — one authorized raw V3 auth request reused the current V2 identifier/secret values as `apiKey`/`apiSecret` and received HTTP 401. No retry or market-data/WebSocket call followed. This proves rejection of that exact mapping, not the reason; SSI must confirm V3 activation and `client_id`/API-key mapping. V2 remains the sole production path through the recorded 30/06/2027 maintenance date. See `docs/SSI_FASTCONNECT_V3_MIGRATION.md`.
 - Legacy Mozyfin provider code: `data_provider/mozyfin_fetcher.py`
 - Legacy KBS/vnstock adapter: `data_provider/vnstock_realtime_fetcher.py`
 - Web frontend: `apps/dsa-web/`

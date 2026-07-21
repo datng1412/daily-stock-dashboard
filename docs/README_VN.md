@@ -2,6 +2,10 @@
 
 This page is the current entry point for VN dashboard setup. The active runtime is strict SSI FastConnect mode.
 
+## FastConnect V3 planning status
+
+FastConnect V2 remains the active VN dashboard provider. The SSI customer notice recorded for this project says V2 is maintained through 30/06/2027 and V3 officially replaces it from 01/07/2027. Phase SSI-V3-A identified official V3 SDK/API documentation but has no local V3 package or account-access proof, so the current result is **deferred**. Nothing in the dashboard switches to V3, falls back between versions, or changes data ownership. Technical migration details and the access-enablement gate are in `docs/SSI_FASTCONNECT_V3_MIGRATION.md`.
+
 ## Current Runtime
 
 - Daily OHLCV, daily chart candles, and canonical `latest_price` come from SSI `DailyOhlc` close when DailyOhlc rows exist.

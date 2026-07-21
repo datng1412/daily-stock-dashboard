@@ -46,6 +46,12 @@ Out of scope:
 * Provider comparison endpoint.
 * Trading-instruction, price-target, or recommendation wording.
 
+## FastConnect V3 migration gate
+
+Phase SSI-V3-A1 is audit-only. The SSI customer notice supplied to this project records V2 maintenance through 30/06/2027 and official V3 replacement from 01/07/2027. It does not change V2 runtime, configuration, traffic, or source ownership. The official V3 Python candidate (`ssi-sdk` / `ssi_sdk`) and V3 REST/WebSocket contracts are documented. One authorized auth sequence mapped the current V2 identifier/secret values to V3 raw `apiKey`/`apiSecret`; V3 returned HTTP 401, with no token, retry, data call, stream, or file request. The current decision is **D — existing credentials rejected by V3 for that exact mapping**. SSI must confirm V3 account activation and `client_id`/API-key mapping before another bounded attempt. See `docs/SSI_FASTCONNECT_V3_MIGRATION.md` for the complete change-impact matrix and exit criteria.
+
+Phase SSI-V3-CONTRACT-DIFF adds a documentation-only URL/parameter table to that migration document. It confirms that all compared URLs change, while REST methods remain POST for auth and GET for market data. Important name changes are `market`/`exchange` → `board`, `fromDate`/`toDate` → `from`/`to`, `indexId`/`indexCode` → `index`, and IntradayOhlc `resolution` → common V3 OHLC `timeFrame`. V3 retains `pageIndex`/`pageSize` only for summary/OHLC candidates, with a documented default size of 10 rather than the V2 model's 100. This comparison makes no credential, entitlement, unit, finality, runtime, or data-parity claim.
+
 ## Provider roles
 
 SSI FastConnect is the preferred future official market-data provider for:

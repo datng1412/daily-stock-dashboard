@@ -4,6 +4,10 @@
 
 This strategy defines the expected validation for VN dashboard documentation, API contracts, and UI states. It is scoped to SSI-first VN dashboard work and should be referenced before data-quality, contract, progressive workspace, live-section, provider, and packaging tasks.
 
+## SSI-V3-A1 migration-gate validation
+
+`tests/test_audit_ssi_fastconnect_v3_capability.py` is offline-only. It proves audit import safety; existing V2-name-to-V3-field mapping; value/token redaction; auth success, explicit rejection, and network classification; V2/V3 inventory; one-decision-per-capability mapping; mandatory exit criteria for retained V2 paths; null/zero/unit conservatism; index comparison; bounded WebSocket planning; atomic sanitized output; the 512 KiB output bound; and exact A-F decisions. It never authenticates with SSI or imports/installs the V3 SDK. A separate `--mode change-impact --allow-live` command may perform exactly one raw V3 auth sequence with current values retained in memory only. On 2026-07-21 that sequence returned HTTP 401 and outcome D; no parity call or retry followed.
+
 ## Required Backend Tests
 
 Phase 4.12E-3 deterministic coverage includes symbol row normalization, 5/20/60 completeness, null/zero sign counts, accepted-row streak breaks, adjacent nonzero reversal, inclusive percentiles, population z-scores, unusual thresholds, deterministic extrema, rolling gaps, empty analytics, Pydantic/OpenAPI exposure, and cache/single-flight regressions. Frontend coverage includes digit-suffix API normalization, zero requests while closed, one request on open, cancellation and stale-response ownership on ticker switch, retained same-ticker refresh, local-control no-refetch, finite/null-safe canonical metric modeling, URL restoration, charts, and sortable table behavior. Runtime smoke is optional and must not replace deterministic evidence.
@@ -16,6 +20,7 @@ Run these before a Phase 0/1/2/3 runtime milestone commit:
 python -m pytest tests/test_vietnam_observability.py -q
 python -m pytest tests/test_vietnam_market_service_no_mozyfin.py -q
 python -m pytest tests/test_ssi_fastconnect_fetcher.py -q
+python -m pytest tests/test_audit_ssi_fastconnect_v3_capability.py -q
 python -m pytest tests/test_vietnam_market_service_realtime.py -q
 python -m pytest tests/test_vietnam_market_service_intraday.py -q
 python -m pytest tests/test_vietnam_intraday_chart.py -q

@@ -72,6 +72,8 @@ These rules must not be broken.
 
 This roadmap is the source of truth for Vietnam dashboard provider ownership. SSI FastConnect Data is the strict official market-data source for supported Vietnam market data, including realtime snapshot and trade-tape contracts where SSI endpoints are available. Mozyfin is disabled for VN dashboard runtime because the free tier no longer supports the news/social API paths the dashboard previously used. KBS is disabled by default and is legacy-only behind explicit development flags.
 
+Phase SSI-V3-A1 records a future FastConnect migration gate only: official V3 API/SDK contracts were mapped, then one authorized existing-key request received HTTP 401 when current V2 values were supplied as V3 raw `apiKey`/`apiSecret`. Outcome D keeps V2 unchanged while SSI resolves V3 activation and identifier/key mapping. The customer notice records V2 maintenance through 30/06/2027 and V3 replacement from 01/07/2027. No V3 adapter, traffic, automatic fallback, or dashboard behavior is authorized before a later A/B gate. See `docs/SSI_FASTCONNECT_V3_MIGRATION.md`.
+
 ### Current provider ownership
 
 | Capability or data domain | Owner | Current implementation state | Dashboard rule |

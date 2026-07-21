@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [test] Add an import-safe, secret-safe SSI FastConnect V3 capability-gate audit with deterministic mapping, bounded live-plan, and A-F decision tests.
+- [documentation] Record SSI-V3-A outcome C: official V3 contracts are identified, while local V3 package/access proof is unavailable; V2 remains unchanged through the recorded 30/06/2027 maintenance date.
+- [test] Extend the SSI V3 audit with existing-key name mapping, one-shot auth classification, complete V2/V3 change-impact decisions, V2 exit criteria, and atomic bounded evidence output.
+- [documentation] Record SSI-V3-A1 outcome D: the single existing-key raw V3 auth mapping returned HTTP 401; V2 remains primary while SSI resolves V3 activation and identifier/key mapping.
+- [documentation] Compare current SSI V2 and official V3 REST/WebSocket URLs, methods, request parameters, pagination, date formats, and main response field names without live calls or runtime changes.
 - [test] Add a secret-safe SSI HOSE foreign-flow capability gate with deterministic universe, bulk, sampling, escalation, measurement, and outcome tests.
 - [documentation] Record Phase 4.12F-A outcome E: SSI Securities returned 736 exact HOSE symbols without security types, so HOSE aggregation remains unavailable and no DailyStockPrice scale probe ran.
 - [test] Extend the SSI HOSE audit with raw security-type field inventory, exact SecuritiesDetails sampling, coded-value rejection, conflict detection, and authority outcomes.

@@ -2,6 +2,8 @@
 
 Status: Phase 4.12E-3 implements deterministic, on-demand single-symbol analytics over at most 60 accepted SSI DailyStockPrice sessions; runtime smoke was intentionally skipped and the Phase 4.12E-2 runtime follow-up remains deferred
 
+> SSI-V3-A1 migration note: V3 `securitiesSummary` documents foreign buy/sell totals and values, but the existing-key raw V3 auth mapping received HTTP 401, so no V3 data parity request ran. Shares/VND units, completed-session finality, direct-net precedence, and multi-symbol replacement remain unverified. V2 DailyStockPrice remains the only foreign-flow runtime source under outcome D. See `docs/SSI_FASTCONNECT_V3_MIGRATION.md`.
+
 Phase: 4.12-PLAN
 
 Repository evidence reviewed: 2026-07-17

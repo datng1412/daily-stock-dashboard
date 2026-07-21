@@ -12,6 +12,10 @@ Last local audit baseline: 2026-06-24, using `FPT,VPB,ACB,SSI,GMD,GAS,POW,VNM` a
 
 Latest bounded DailyStockPrice live gate: 2026-07-17. Phase 4.12A-Lite returned 22 distinct dated foreign-flow rows each for FPT/VCB/HPG/SSI and stable same-date after-close repeats. The older 2026-06-29 index smoke remains the latest evidence for VN30 DailyIndex/IndexComponents: DailyIndex was partial, exact `VNINDEX` unresolved, and VN30 IndexComponents returned 30 rows.
 
+FastConnect V3 is a future migration candidate only. Phase SSI-V3-A1 records outcome D: the existing V2 credential values, mapped once to raw V3 `apiKey`/`apiSecret`, received HTTP 401. No data contract was probed afterward. SSI must resolve V3 activation and identifier/key mapping; V2 SSI DailyOhlc and DailyStockPrice ownership, source labels, data quality, units, finality, and no-fallback policy remain unchanged. See `docs/SSI_FASTCONNECT_V3_MIGRATION.md`.
+
+Phase SSI-V3-CONTRACT-DIFF documents URL, HTTP-method, request-name, paging, date-format, and main response-name changes only. It does not change capability status or claim semantic parity. The complete comparison is in `docs/SSI_FASTCONNECT_V3_MIGRATION.md`.
+
 Phase 4.11C implements the verified completed-session slice of `IntradayOhlc`, and Phase 4.11D-2 extends the same fixed `resolution=1`, page 1, size 1,000 request to Today with delayed polling and typed freshness metadata. This is SSI-authoritative 1-minute chart data, not realtime. 5m/15m/30m/1h, aggregation, additional pages, HNX/UPCOM proof, and official volume-unit documentation remain unverified/deferred.
 
 ## Status Vocabulary
