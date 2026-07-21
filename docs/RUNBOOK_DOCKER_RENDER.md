@@ -14,6 +14,7 @@ Do not commit runtime secrets. Pass `MOZYFIN_API_KEY` through environment variab
 - The final image runs as non-root user `dsa` (`1000:1000`) with `HOME=/home/dsa`.
 - `/home/dsa/.longbridge`, `/app/data/cache`, `/app/logs`, and `/app/reports` are created and owned during the image build; the entrypoint fails clearly if a runtime mount makes one unwritable.
 - Startup readiness uses the local, provider-independent `http://127.0.0.1:$PORT/api/health` endpoint and the same resolved port used by Uvicorn.
+- Pre-bind startup does not import the optional LiteLLM analyzer path. Logs emit one bounded `fastapi_startup stage=...` sequence from `FASTAPI_THREAD_ENTERED` through `UVICORN_SOCKET_READY`; a timeout reports `last_lifecycle_stage` so app import, required local initialization, and optional background scheduling can be distinguished.
 - The Vite frontend is built inside the Docker image and copied to `static/`.
 - FastAPI serves `static/index.html` and `/assets/*` through the existing web UI flow.
 - Live Vietnam data uses Mozyfin. Fixture mode is local testing only.
