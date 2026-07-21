@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [test] Add a secret-safe SSI HOSE foreign-flow capability gate with deterministic universe, bulk, sampling, escalation, measurement, and outcome tests.
+- [documentation] Record Phase 4.12F-A outcome E: SSI Securities returned 736 exact HOSE symbols without security types, so HOSE aggregation remains unavailable and no DailyStockPrice scale probe ran.
+- [test] Extend the SSI HOSE audit with raw security-type field inventory, exact SecuritiesDetails sampling, coded-value rejection, conflict detection, and authority outcomes.
+- [documentation] Record Phase 4.12F-A1 outcome F: Securities has no raw type field and the first deterministic SecuritiesDetails request returned no exact HOSE row, so larger stages and HOSE production work remain blocked.
+- [test] Add bounded SSI SecuritiesDetails request-contract, response-shape, exact-match, and provider-derived candidate diagnostics without DailyStockPrice access.
+- [documentation] Record Phase 4.12F-A2 outcome F: the official SecuritiesDetails serialization is resolved, but the single bounded live result was not retained, so no provider or production-fix conclusion is claimed.
 - [fix] Make foreign-flow VND, share, percentage, ratio, and count separators deterministic across browser locales.
 - [new feature] Add explicit on-demand 60-session symbol foreign-flow analytics with null-aware summaries, charts, and history table.
 - [test] Cover symbol analytics formulas, API normalization, and frontend request ownership deterministically.
