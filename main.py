@@ -45,6 +45,7 @@ if os.getenv("GITHUB_ACTIONS") != "true" and os.getenv("USE_PROXY", "false").low
     os.environ["https_proxy"] = proxy_url
 
 import argparse
+import importlib
 import json
 import logging
 import re
@@ -59,6 +60,11 @@ from data_provider.base import canonical_stock_code
 from src.webui_frontend import prepare_webui_frontend_assets
 from src.config import get_config, Config
 from src.logging_config import setup_logging
+from src.startup_trace import (
+    get_last_startup_stage,
+    mark_startup_stage,
+    reset_startup_trace,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -752,9 +758,22 @@ def _bounded_startup_diagnostic(error: Optional[BaseException]) -> str:
     return text[-_STARTUP_DIAGNOSTIC_MAX_CHARS:]
 
 
-def _stop_api_server(server: Any, thread: Any) -> None:
-    server.should_exit = True
+def _stop_api_server(server: Optional[Any], thread: Any) -> None:
+    if server is not None:
+        server.should_exit = True
     thread.join(timeout=_API_SERVER_SHUTDOWN_GRACE_SECONDS)
+
+
+def stop_api_server(thread: Optional[Any]) -> bool:
+    """Request bounded shutdown for a successfully started in-process server."""
+    if thread is None:
+        return True
+    _stop_api_server(getattr(thread, "stockclock_uvicorn_server", None), thread)
+    return not thread.is_alive()
+
+
+def _load_fastapi_app() -> Any:
+    return importlib.import_module("api.app").app
 
 
 def start_api_server(host: str, port: int, config: Config) -> Any:
@@ -769,22 +788,30 @@ def start_api_server(host: str, port: int, config: Config) -> Any:
     import threading
     import uvicorn
 
+    reset_startup_trace()
     level_name = (config.log_level or "INFO").lower()
-    server = uvicorn.Server(
-        uvicorn.Config(
-            "api.app:app",
-            host=host,
-            port=port,
-            log_level=level_name,
-            log_config=None,
-            reload=False,
-            workers=1,
-        )
-    )
     startup_result: Dict[str, BaseException] = {}
+    runtime: Dict[str, Any] = {}
 
     def run_server() -> None:
         try:
+            mark_startup_stage("FASTAPI_THREAD_ENTERED")
+            mark_startup_stage("FASTAPI_APP_IMPORT_START")
+            fastapi_app = _load_fastapi_app()
+            mark_startup_stage("FASTAPI_APP_IMPORT_COMPLETE")
+            uvicorn_config = uvicorn.Config(
+                fastapi_app,
+                host=host,
+                port=port,
+                log_level=level_name,
+                log_config=None,
+                reload=False,
+                workers=1,
+            )
+            mark_startup_stage("UVICORN_CONFIG_CREATED")
+            server = uvicorn.Server(uvicorn_config)
+            runtime["server"] = server
+            mark_startup_stage("UVICORN_RUN_ENTERED")
             server.run()
         except BaseException as exc:  # Uvicorn may raise SystemExit on bind/config failure.
             startup_result["error"] = exc
@@ -812,11 +839,14 @@ def start_api_server(host: str, port: int, config: Config) -> Any:
             raise RuntimeError(
                 "FastAPI server thread exited before readiness: "
                 f"state=CHILD_EXITED exit_code=not_applicable_in_process_thread "
-                f"host={host} port={port} diagnostic_tail={diagnostic}"
+                f"host={host} port={port} last_lifecycle_stage={get_last_startup_stage()} "
+                f"diagnostic_tail={diagnostic}"
             ) from startup_error
 
         last_state = _probe_api_health(port)
         if last_state == "HEALTH_RESPONSE_READY":
+            mark_startup_stage("UVICORN_SOCKET_READY")
+            thread.stockclock_uvicorn_server = runtime.get("server")
             logger.info(
                 "FastAPI service is HTTP-ready: bind=http://%s:%s probe=%s",
                 host,
@@ -828,12 +858,13 @@ def start_api_server(host: str, port: int, config: Config) -> Any:
         remaining = max(0.0, deadline - time.monotonic())
         thread.join(timeout=min(_API_SERVER_STARTUP_POLL_SECONDS, remaining))
 
-    _stop_api_server(server, thread)
+    _stop_api_server(runtime.get("server"), thread)
     cleanup_state = "stopped" if not thread.is_alive() else "shutdown_grace_expired"
     raise RuntimeError(
         f"FastAPI service did not become HTTP-ready within "
         f"{_API_SERVER_STARTUP_TIMEOUT_SECONDS:g} seconds: state=TIMEOUT "
-        f"last_probe_state={last_state} host={host} port={port} cleanup={cleanup_state}"
+        f"last_probe_state={last_state} last_lifecycle_stage={get_last_startup_stage()} "
+        f"host={host} port={port} cleanup={cleanup_state}"
     )
 
 
@@ -1008,11 +1039,12 @@ def main() -> int:
             return 1
 
     bot_clients_started = False
+    api_server_thread = None
     if start_serve:
         if not prepare_webui_frontend_assets():
             logger.warning("Frontend static assets are not ready; continuing to start FastAPI service. Web pages may be unavailable.")
         try:
-            start_api_server(host=args.host, port=args.port, config=config)
+            api_server_thread = start_api_server(host=args.host, port=args.port, config=config)
             bot_clients_started = True
         except Exception as e:
             logger.error(f"Failed to start FastAPI service: {e}")
@@ -1034,6 +1066,9 @@ def main() -> int:
                 time.sleep(1)
         except KeyboardInterrupt:
             logger.info("\nInterrupted by user, exiting")
+        finally:
+            if not stop_api_server(api_server_thread):
+                logger.warning("FastAPI server thread did not stop within the shutdown grace period")
         return 0
 
     try:

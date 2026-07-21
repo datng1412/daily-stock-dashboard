@@ -32,6 +32,8 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
+from src.startup_trace import mark_startup_stage
+
 from data_provider.ssi_streaming_realtime import sanitize_streaming_error
 from src.services.ssi_streaming_realtime_lifecycle import (
     bootstrap_ssi_streaming_realtime,
@@ -204,9 +206,17 @@ def _schedule_ssi_streaming_realtime_bootstrap(app: FastAPI) -> None:
 @asynccontextmanager
 async def app_lifespan(app: FastAPI):
     """Initialize and release shared services for the app lifecycle."""
+    mark_startup_stage("LIFESPAN_START_ENTERED")
+    mark_startup_stage("SYSTEM_CONFIG_INIT_START")
     app.state.system_config_service = SystemConfigService()
+    mark_startup_stage("SYSTEM_CONFIG_INIT_COMPLETE")
+    mark_startup_stage("STOCK_INDEX_BACKGROUND_INIT_START")
     _schedule_stock_index_background_refresh(app, "startup")
+    mark_startup_stage("STOCK_INDEX_BACKGROUND_INIT_COMPLETE")
+    mark_startup_stage("SSI_STREAMING_BACKGROUND_INIT_START")
     _schedule_ssi_streaming_realtime_bootstrap(app)
+    mark_startup_stage("SSI_STREAMING_BACKGROUND_INIT_COMPLETE")
+    mark_startup_stage("LIFESPAN_START_COMPLETE")
     try:
         yield
     finally:

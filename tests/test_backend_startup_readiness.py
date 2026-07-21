@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import subprocess
+import sys
 import threading
 import time
+from pathlib import Path
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
@@ -12,6 +16,7 @@ import pytest
 
 import api.app as app_module
 import main
+from src.startup_trace import get_startup_stages, reset_startup_trace
 
 
 class _ReadyServer:
@@ -43,6 +48,7 @@ def _config():
 
 def test_normal_launcher_starts_expected_app_once_and_waits_for_readiness(monkeypatch):
     captured = {}
+    expected_app = object()
     _ReadyServer.instances = []
 
     class FakeConfig:
@@ -52,12 +58,13 @@ def test_normal_launcher_starts_expected_app_once_and_waits_for_readiness(monkey
 
     monkeypatch.setattr("uvicorn.Config", FakeConfig)
     monkeypatch.setattr("uvicorn.Server", _ReadyServer)
+    monkeypatch.setattr(main, "_load_fastapi_app", lambda: expected_app)
     monkeypatch.setattr(main, "_probe_api_health", lambda port: "HEALTH_RESPONSE_READY")
 
     thread = main.start_api_server("127.0.0.1", 8123, _config())
 
     server = _ReadyServer.instances[0]
-    assert captured["app"] == "api.app:app"
+    assert captured["app"] is expected_app
     assert captured["host"] == "127.0.0.1"
     assert captured["port"] == 8123
     assert captured["reload"] is False
@@ -65,8 +72,15 @@ def test_normal_launcher_starts_expected_app_once_and_waits_for_readiness(monkey
     assert server.run_calls == 1
     assert server.started is True
     assert thread.name == "stockclock-fastapi-server"
-    server.should_exit = True
-    thread.join(timeout=1)
+    assert get_startup_stages() == (
+        "FASTAPI_THREAD_ENTERED",
+        "FASTAPI_APP_IMPORT_START",
+        "FASTAPI_APP_IMPORT_COMPLETE",
+        "UVICORN_CONFIG_CREATED",
+        "UVICORN_RUN_ENTERED",
+        "UVICORN_SOCKET_READY",
+    )
+    assert main.stop_api_server(thread) is True
     assert not thread.is_alive()
 
 
@@ -74,6 +88,7 @@ def test_normal_launcher_propagates_background_startup_failure(monkeypatch):
     _FailingServer.instances = []
     monkeypatch.setattr("uvicorn.Config", lambda *args, **kwargs: object())
     monkeypatch.setattr("uvicorn.Server", _FailingServer)
+    monkeypatch.setattr(main, "_load_fastapi_app", object)
 
     with pytest.raises(RuntimeError, match="state=CHILD_EXITED") as exc_info:
         main.start_api_server("127.0.0.1", 8123, _config())
@@ -95,13 +110,47 @@ def test_normal_launcher_times_out_without_claiming_readiness(monkeypatch):
     BlockingServer.instances = []
     monkeypatch.setattr("uvicorn.Config", lambda *args, **kwargs: object())
     monkeypatch.setattr("uvicorn.Server", BlockingServer)
+    monkeypatch.setattr(main, "_load_fastapi_app", object)
     monkeypatch.setattr(main, "_probe_api_health", lambda port: "CONNECTION_REFUSED")
     monkeypatch.setattr(main, "_API_SERVER_STARTUP_TIMEOUT_SECONDS", 0.05)
     monkeypatch.setattr(main, "_API_SERVER_SHUTDOWN_GRACE_SECONDS", 0.05)
 
-    with pytest.raises(RuntimeError, match="last_probe_state=CONNECTION_REFUSED"):
+    with pytest.raises(RuntimeError, match="last_lifecycle_stage=UVICORN_RUN_ENTERED"):
         main.start_api_server("127.0.0.1", 8123, _config())
     assert BlockingServer.instances[0].should_exit is True
+    assert not any(
+        thread.name == "stockclock-fastapi-server" and thread.is_alive()
+        for thread in threading.enumerate()
+    )
+
+
+def test_blocked_app_import_timeout_reports_exact_lifecycle_stage(monkeypatch):
+    entered = threading.Event()
+    release = threading.Event()
+
+    def blocked_import():
+        entered.set()
+        release.wait(timeout=1)
+        raise RuntimeError("released blocked import")
+
+    monkeypatch.setattr(main, "_load_fastapi_app", blocked_import)
+    monkeypatch.setattr(main, "_probe_api_health", lambda port: "CONNECTION_REFUSED")
+    monkeypatch.setattr(main, "_API_SERVER_STARTUP_TIMEOUT_SECONDS", 0.05)
+    monkeypatch.setattr(main, "_API_SERVER_SHUTDOWN_GRACE_SECONDS", 0.01)
+
+    try:
+        with pytest.raises(RuntimeError, match="last_lifecycle_stage=FASTAPI_APP_IMPORT_START"):
+            main.start_api_server("127.0.0.1", 8123, _config())
+        assert entered.is_set()
+    finally:
+        release.set()
+        deadline = time.monotonic() + 1
+        while time.monotonic() < deadline and any(
+            thread.name == "stockclock-fastapi-server" and thread.is_alive()
+            for thread in threading.enumerate()
+        ):
+            time.sleep(0.005)
+
     assert not any(
         thread.name == "stockclock-fastapi-server" and thread.is_alive()
         for thread in threading.enumerate()
@@ -141,6 +190,7 @@ def test_readiness_retries_connection_refusal_and_uses_bound_port(monkeypatch):
 
     monkeypatch.setattr("uvicorn.Config", lambda *args, **kwargs: object())
     monkeypatch.setattr("uvicorn.Server", _ReadyServer)
+    monkeypatch.setattr(main, "_load_fastapi_app", object)
     monkeypatch.setattr(main, "_probe_api_health", probe)
 
     thread = main.start_api_server("0.0.0.0", 10000, _config())
@@ -155,6 +205,7 @@ def test_readiness_retries_non_ready_health_response(monkeypatch):
     states = iter(["HEALTH_RESPONSE_NOT_READY", "HEALTH_RESPONSE_READY"])
     monkeypatch.setattr("uvicorn.Config", lambda *args, **kwargs: object())
     monkeypatch.setattr("uvicorn.Server", _ReadyServer)
+    monkeypatch.setattr(main, "_load_fastapi_app", object)
     monkeypatch.setattr(main, "_probe_api_health", lambda port: next(states))
 
     thread = main.start_api_server("0.0.0.0", 10000, _config())
@@ -169,6 +220,52 @@ def test_startup_diagnostic_is_bounded_and_redacts_secrets():
     assert len(diagnostic) <= 4000
     assert "do-not-print" not in diagnostic
     assert "[REDACTED]" in diagnostic
+
+
+def test_cold_app_import_completes_without_loading_optional_litellm():
+    environment = os.environ.copy()
+    environment.pop("LITELLM_LOCAL_MODEL_COST_MAP", None)
+    environment.pop("LITELLM_LOCAL_ANTHROPIC_BETA_HEADERS", None)
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys; import api.app; "
+                "print('litellm' in sys.modules)"
+            ),
+        ],
+        cwd=os.fspath(Path(__file__).resolve().parents[1]),
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=True,
+    )
+    assert result.stdout.splitlines() == ["False"]
+
+
+def test_required_system_config_initializer_failure_is_named(monkeypatch, tmp_path):
+    class RequiredInitFailure(RuntimeError):
+        pass
+
+    def fail_system_config():
+        raise RequiredInitFailure("local initialization failed")
+
+    monkeypatch.setattr(app_module, "SystemConfigService", fail_system_config)
+    reset_startup_trace()
+    app = app_module.create_app(static_dir=tmp_path / "static")
+
+    async def exercise():
+        async with app_module.app_lifespan(app):
+            pass
+
+    with pytest.raises(RequiredInitFailure, match="local initialization failed"):
+        asyncio.run(exercise())
+    assert get_startup_stages() == (
+        "LIFESPAN_START_ENTERED",
+        "SYSTEM_CONFIG_INIT_START",
+    )
 
 
 def test_serve_only_returns_failure_instead_of_sleeping_after_server_error(monkeypatch):
@@ -327,6 +424,7 @@ def test_http_routes_are_ready_while_stream_start_is_blocked(monkeypatch, tmp_pa
         "shutdown_ssi_streaming_realtime",
         lambda: shutdown_calls.append("shutdown") or {"bootstrap_status": "stopped"},
     )
+    reset_startup_trace()
     app = app_module.create_app(static_dir=tmp_path / "static")
 
     try:
@@ -336,6 +434,16 @@ def test_http_routes_are_ready_while_stream_start_is_blocked(monkeypatch, tmp_pa
             assert client.get("/api/health").status_code == 200
             assert client.get("/api/v1/stocks/vn/observability").status_code == 200
             assert client.get("/api/v1/stocks/vn/intraday-chart/health").status_code == 200
+            assert get_startup_stages() == (
+                "LIFESPAN_START_ENTERED",
+                "SYSTEM_CONFIG_INIT_START",
+                "SYSTEM_CONFIG_INIT_COMPLETE",
+                "STOCK_INDEX_BACKGROUND_INIT_START",
+                "STOCK_INDEX_BACKGROUND_INIT_COMPLETE",
+                "SSI_STREAMING_BACKGROUND_INIT_START",
+                "SSI_STREAMING_BACKGROUND_INIT_COMPLETE",
+                "LIFESPAN_START_COMPLETE",
+            )
             release.set()
     finally:
         release.set()

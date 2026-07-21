@@ -10,9 +10,11 @@
 3. 保存和发送复盘报告
 """
 
+from __future__ import annotations
+
 import logging
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
 import uuid
 
 from src.config import get_config
@@ -20,7 +22,9 @@ from src.notification import NotificationService
 from src.market_analyzer import MarketAnalyzer
 from src.report_language import normalize_report_language
 from src.search_service import SearchService
-from src.analyzer import AnalysisResult, GeminiAnalyzer
+
+if TYPE_CHECKING:
+    from src.analyzer import GeminiAnalyzer
 
 
 logger = logging.getLogger(__name__)
@@ -207,6 +211,10 @@ def _persist_market_review_history(
             stock_name = "大盘复盘"
             operation_advice = "查看复盘"
             trend_prediction = "大盘复盘"
+
+        # Analyzer/LiteLLM is optional for HTTP process readiness. Import only
+        # when a market-review result is actually persisted.
+        from src.analyzer import AnalysisResult
 
         result = AnalysisResult(
             code=MARKET_REVIEW_HISTORY_CODE,
