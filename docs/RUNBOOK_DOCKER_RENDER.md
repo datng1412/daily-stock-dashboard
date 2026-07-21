@@ -11,6 +11,9 @@ Do not commit runtime secrets. Pass `MOZYFIN_API_KEY` through environment variab
 - The backend entry point is `python main.py --webui-only`.
 - The web UI binds to `0.0.0.0` in container mode.
 - The runtime port is read from `PORT`; when absent, it defaults to `8000`.
+- The final image runs as non-root user `dsa` (`1000:1000`) with `HOME=/home/dsa`.
+- `/home/dsa/.longbridge`, `/app/data/cache`, `/app/logs`, and `/app/reports` are created and owned during the image build; the entrypoint fails clearly if a runtime mount makes one unwritable.
+- Startup readiness uses the local, provider-independent `http://127.0.0.1:$PORT/api/health` endpoint and the same resolved port used by Uvicorn.
 - The Vite frontend is built inside the Docker image and copied to `static/`.
 - FastAPI serves `static/index.html` and `/assets/*` through the existing web UI flow.
 - Live Vietnam data uses Mozyfin. Fixture mode is local testing only.
@@ -22,8 +25,8 @@ Do not commit runtime secrets. Pass `MOZYFIN_API_KEY` through environment variab
 Run from the repository root:
 
 ```powershell
-cd D:\daily-dashboard\daily-stock-dashboard
-docker build -t vietnam-dashboard:local .
+cd D:\stock-dashboard
+docker build -f docker/Dockerfile -t vietnam-dashboard:local .
 ```
 
 ## Local Docker Run
@@ -138,7 +141,7 @@ Recommended settings:
 - Environment: Docker
 - Dockerfile path: `docker/Dockerfile`
 - Docker context: repository root
-- Health check path: `/api/v1/stocks/vn/watchlist/health`
+- Health check path: `/api/health`
 
 Required environment variables:
 
@@ -158,7 +161,7 @@ PORT=8000
 
 Render normally injects `PORT` automatically. Do not set `MOZYFIN_FIXTURE_DIR` on Render.
 
-Use `DATA_CACHE_DIR=/tmp/dsa-cache` for an ephemeral Render cache when no persistent disk is mounted. If a persistent disk is mounted at `/app/data`, use `DATA_CACHE_DIR=/app/data/cache`; the Docker entrypoint creates and repairs that directory before the app drops to the non-root runtime user when the platform permits the entrypoint to start as root.
+Use `DATA_CACHE_DIR=/tmp/dsa-cache` for an ephemeral Render cache when no persistent disk is mounted. If a persistent disk is mounted at `/app/data`, use `DATA_CACHE_DIR=/app/data/cache`. The final image starts as non-root `dsa`; any mounted host or persistent-disk path must therefore already permit UID/GID `1000:1000` to write. The entrypoint validates access but does not elevate privileges or rewrite mount ownership.
 
 No vnstock-specific environment variables are required for the KBS snapshot/trades endpoints. The KBS layer is optional and does not write to Mozyfin daily OHLCV, quote/foreign, intraday, overview, or detail caches.
 
