@@ -18,6 +18,8 @@ from time import perf_counter
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from data_provider.ssi_fastconnect_fetcher import SsiFastConnectFetcher
+from data_provider.ssi_provider_protocol import SsiRestProvider
+from data_provider.ssi_provider_router import create_ssi_rest_provider_router
 
 
 logger = logging.getLogger(__name__)
@@ -533,13 +535,25 @@ def _symbol_analytics(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 
 class VietnamForeignFlowService:
-    def __init__(self, fetcher: Optional[SsiFastConnectFetcher] = None):
+    def __init__(
+        self,
+        fetcher: Optional[SsiFastConnectFetcher] = None,
+        *,
+        rest_provider: Optional[SsiRestProvider] = None,
+    ):
         self._fetcher = fetcher
+        self._rest_provider = rest_provider
+        self._rest_provider_lock = RLock()
 
-    def _get_fetcher(self) -> SsiFastConnectFetcher:
-        if self._fetcher is None:
-            self._fetcher = SsiFastConnectFetcher()
-        return self._fetcher
+    def _get_rest_provider(self) -> SsiRestProvider:
+        if self._rest_provider is None:
+            with self._rest_provider_lock:
+                if self._rest_provider is None:
+                    self._rest_provider = create_ssi_rest_provider_router(v2_fetcher=self._fetcher)
+                    if self._fetcher is None:
+                        adapter = self._rest_provider.provider
+                        self._fetcher = getattr(adapter, "fetcher", None)
+        return self._rest_provider
 
     def get_symbol_history(
         self,
@@ -705,7 +719,7 @@ class VietnamForeignFlowService:
             for index, (start, end) in enumerate(request_ranges):
                 attempts = index + 1
                 _metric_add("provider_calls")
-                provider_result = self._get_fetcher().get_daily_stock_price(
+                provider_result = self._get_rest_provider().get_daily_stock_price(
                     ticker,
                     from_date=start.isoformat(),
                     to_date=end.isoformat(),
@@ -857,7 +871,7 @@ class VietnamForeignFlowBatchService:
         *,
         max_concurrency: int = BATCH_MAX_CONCURRENCY,
     ) -> None:
-        self._symbol_service = symbol_service or VietnamForeignFlowService(SsiFastConnectFetcher())
+        self._symbol_service = symbol_service or VietnamForeignFlowService()
         self._max_concurrency = max(1, min(int(max_concurrency), BATCH_MAX_CONCURRENCY))
 
     def get_batch(
@@ -1112,7 +1126,7 @@ class VietnamForeignFlowVn30Service:
         *,
         max_concurrency: int = BATCH_MAX_CONCURRENCY,
     ) -> None:
-        self._symbol_service = symbol_service or VietnamForeignFlowService(SsiFastConnectFetcher())
+        self._symbol_service = symbol_service or VietnamForeignFlowService()
         self._market_service = market_service
         self._max_concurrency = max(1, min(int(max_concurrency), BATCH_MAX_CONCURRENCY))
 

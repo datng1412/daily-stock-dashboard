@@ -165,6 +165,20 @@ def parse_env_choice(value: Optional[str], allowed: set[str], default: str, *, f
     return normalized
 
 
+def parse_ssi_fastconnect_rest_version(value: Optional[str]) -> str:
+    """Parse the explicit SSI REST route available in phase SSI-V3-B1."""
+    if value is None or not str(value).strip():
+        return "v2"
+    normalized = str(value).strip().lower()
+    if normalized == "v2":
+        return normalized
+    if normalized == "v3":
+        raise ValueError("SSI FastConnect V3 REST adapter is not implemented in phase B1")
+    raise ValueError(
+        f"SSI_FASTCONNECT_REST_VERSION={value!r} is unsupported; expected 'v2'"
+    )
+
+
 def parse_env_int(
     value: Optional[str],
     default: int,
@@ -651,6 +665,7 @@ class Config:
     stock_index_remote_update_enabled: bool = True
     data_cache_dir: Optional[str] = None
     ssi_fastconnect_enabled: bool = False
+    ssi_fastconnect_rest_version: str = "v2"
     ssi_fastconnect_base_url: str = "https://fc-data.ssi.com.vn/api/v2/Market"
     ssi_fastconnect_consumer_id: Optional[str] = None
     ssi_fastconnect_consumer_secret: Optional[str] = None
@@ -1882,6 +1897,9 @@ class Config:
                 else os.getenv('ALPHASIFT_INSTALL_SPEC', '').strip()
             ),
             ssi_fastconnect_enabled=parse_env_bool(os.getenv('SSI_FASTCONNECT_ENABLED'), default=False),
+            ssi_fastconnect_rest_version=parse_ssi_fastconnect_rest_version(
+                os.getenv('SSI_FASTCONNECT_REST_VERSION')
+            ),
             ssi_fastconnect_base_url=(
                 os.getenv('SSI_FASTCONNECT_BASE_URL')
                 or 'https://fc-data.ssi.com.vn/api/v2/Market'

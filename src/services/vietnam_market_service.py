@@ -34,6 +34,8 @@ from data_provider.ssi_fastconnect_fetcher import (
     DAILY_OHLC_RATE_LIMIT_COOLDOWN_REASON,
     SsiFastConnectFetcher,
 )
+from data_provider.ssi_provider_protocol import SsiRestProvider
+from data_provider.ssi_provider_router import create_ssi_rest_provider_router
 from data_provider.ssi_streaming_realtime import (
     SSI_STREAMING_REALTIME_DISABLED_REASON,
     normalize_trade_side,
@@ -724,6 +726,7 @@ class VietnamDashboardConfig:
     index_data_provider: str = VN_PROVIDER_SSI
     intraday_data_provider: str = VN_PROVIDER_SSI
     ssi_intraday_enabled: bool = True
+    ssi_fastconnect_rest_version: str = "v2"
     realtime_data_provider: str = VN_PROVIDER_SSI
     trade_tape_provider: str = VN_PROVIDER_SSI
     ssi_realtime_enabled: bool = True
@@ -746,6 +749,7 @@ def _default_dashboard_config() -> VietnamDashboardConfig:
         index_data_provider=getattr(app_config, "vn_index_data_provider", VN_PROVIDER_SSI),
         intraday_data_provider=getattr(app_config, "vn_intraday_data_provider", VN_PROVIDER_SSI),
         ssi_intraday_enabled=getattr(app_config, "ssi_fastconnect_intraday_enabled", True),
+        ssi_fastconnect_rest_version=getattr(app_config, "ssi_fastconnect_rest_version", "v2"),
         realtime_data_provider=getattr(app_config, "vn_realtime_data_provider", VN_PROVIDER_SSI),
         trade_tape_provider=getattr(app_config, "vn_trade_tape_provider", VN_PROVIDER_SSI),
         ssi_realtime_enabled=getattr(app_config, "ssi_fastconnect_realtime_enabled", True),
@@ -3497,6 +3501,7 @@ class VietnamMarketService:
         manager: Optional[DataFetcherManager] = None,
         config: Optional[VietnamDashboardConfig] = None,
         ssi_fetcher: Optional[SsiFastConnectFetcher] = None,
+        ssi_rest_provider: Optional[SsiRestProvider] = None,
         corporate_actions_provider: Optional[CorporateActionsProvider] = None,
     ):
         self.config = config or _default_dashboard_config()
@@ -3507,6 +3512,8 @@ class VietnamMarketService:
         else:
             self.manager = None
         self._ssi_fetcher = ssi_fetcher
+        self._ssi_rest_provider = ssi_rest_provider
+        self._ssi_rest_provider_injected = ssi_rest_provider is not None
         self._corporate_actions_provider = corporate_actions_provider
 
     def _get_ssi_fetcher(self) -> SsiFastConnectFetcher:
@@ -3529,6 +3536,19 @@ class VietnamMarketService:
             else:
                 self._ssi_fetcher = SsiFastConnectFetcher()
         return self._ssi_fetcher
+
+    def _get_ssi_rest_provider(self) -> SsiRestProvider:
+        if self._ssi_rest_provider is not None and not self._ssi_rest_provider_injected:
+            adapter = getattr(self._ssi_rest_provider, "provider", None)
+            routed_fetcher = getattr(adapter, "fetcher", None)
+            if self._ssi_fetcher is not None and routed_fetcher is not self._ssi_fetcher:
+                self._ssi_rest_provider = None
+        if self._ssi_rest_provider is None:
+            self._ssi_rest_provider = create_ssi_rest_provider_router(
+                version=self.config.ssi_fastconnect_rest_version,
+                v2_fetcher=self._get_ssi_fetcher(),
+            )
+        return self._ssi_rest_provider
 
     def _get_corporate_actions_provider(self) -> CorporateActionsProvider:
         if self._corporate_actions_provider is not None:
@@ -3583,7 +3603,7 @@ class VietnamMarketService:
         return pd.DataFrame(records).sort_values("date").reset_index(drop=True)
 
     def _load_ssi_daily_ohlcv(self, symbol: str, limit: int) -> Tuple[pd.DataFrame, str]:
-        payload = self._get_ssi_fetcher().get_daily_ohlcv(symbol, limit=limit)
+        payload = self._get_ssi_rest_provider().get_daily_ohlcv(symbol, limit=limit)
         if payload.get("status") != "ok":
             raise RuntimeError(self._safe_provider_reason(payload))
         rows = payload.get("rows") or []
@@ -3810,7 +3830,7 @@ class VietnamMarketService:
 
         to_date = datetime.now(VN_TIMEZONE).date()
         from_date = to_date - timedelta(days=7)
-        payload = self._get_ssi_fetcher().get_intraday_ohlcv(
+        payload = self._get_ssi_rest_provider().get_intraday_ohlcv(
             symbol,
             from_date=from_date.isoformat(),
             to_date=to_date.isoformat(),
@@ -5004,7 +5024,7 @@ class VietnamMarketService:
             "normalized_row_count": 0,
             "selected_latest_row_date": None,
         }
-        payload = self._get_ssi_fetcher().get_daily_stock_price(
+        payload = self._get_ssi_rest_provider().get_daily_stock_price(
             symbol,
             market=get_vn_exchange(symbol),
             from_date=from_date.isoformat(),
@@ -5343,9 +5363,9 @@ class VietnamMarketService:
     def _load_ssi_symbol_metadata(self, symbol: str) -> Dict[str, Any]:
         normalized_symbol = vn_ticker(symbol)
         market = get_vn_exchange(normalized_symbol)
-        fetcher = self._get_ssi_fetcher()
+        provider = self._get_ssi_rest_provider()
 
-        details_payload = fetcher.get_securities_details(symbol=normalized_symbol, market=market)
+        details_payload = provider.get_security_metadata(symbol=normalized_symbol, market=market)
         details_rows = details_payload.get("rows") if isinstance(details_payload, dict) else None
         details_row_count = len(details_rows) if isinstance(details_rows, list) else 0
         attempted_endpoints = ["SecuritiesDetails"]
@@ -5363,7 +5383,7 @@ class VietnamMarketService:
                 },
             )
 
-        securities_payload = fetcher.get_securities(market=market)
+        securities_payload = provider.get_securities(market=market)
         attempted_endpoints.append("Securities")
         securities_rows = securities_payload.get("rows") if isinstance(securities_payload, dict) else None
         securities_row_count = len(securities_rows) if isinstance(securities_rows, list) else 0
@@ -5688,7 +5708,10 @@ class VietnamMarketService:
         session_state = "completed" if cache_policy == "completed" else vietnam_intraday_session_state(_utc_now())
         started = time.perf_counter()
         try:
-            provider_result = self._get_ssi_fetcher().get_completed_intraday_1m(normalized_ticker, trading_date)
+            provider_result = self._get_ssi_rest_provider().get_completed_intraday_1m(
+                normalized_ticker,
+                trading_date,
+            )
         except Exception as exc:
             latency_ms = int((time.perf_counter() - started) * 1000)
             event = observe_intraday_provider_fetch(
@@ -6217,7 +6240,7 @@ class VietnamMarketService:
             }
 
         refresh_kwargs = {"force_refresh": True} if force_refresh else {}
-        payload = self._get_ssi_fetcher().get_daily_index(
+        payload = self._get_ssi_rest_provider().get_daily_index(
             provider_index,
             from_date=from_date,
             to_date=to_date,
@@ -6639,7 +6662,7 @@ class VietnamMarketService:
         """Return strict SSI index identifiers for index-aware dashboard work."""
         normalized_market = str(market or "").strip().upper() or None
         refresh_kwargs = {"force_refresh": True} if force_refresh else {}
-        payload = self._get_ssi_fetcher().get_index_list(normalized_market, **refresh_kwargs)
+        payload = self._get_ssi_rest_provider().get_index_list(normalized_market, **refresh_kwargs)
         provider_rows = payload.get("rows") if isinstance(payload, dict) else None
         diagnostics = {
             "endpoint": "IndexList",
@@ -6714,8 +6737,8 @@ class VietnamMarketService:
             "index_list_status": None,
             "index_list_rows": 0,
         }
-        fetcher = self._get_ssi_fetcher()
-        get_index_list = getattr(fetcher, "get_index_list", None)
+        provider = self._get_ssi_rest_provider()
+        get_index_list = getattr(provider, "get_index_list", None)
         if not callable(get_index_list):
             diagnostics["index_list_status"] = "unavailable"
             diagnostics["index_list_reason"] = "SSI IndexList method unavailable."
@@ -6834,7 +6857,7 @@ class VietnamMarketService:
             "index_components_attempted": True,
         }
         refresh_kwargs = {"force_refresh": True} if force_refresh else {}
-        payload = self._get_ssi_fetcher().get_index_components(
+        payload = self._get_ssi_rest_provider().get_index_components(
             normalized_index,
             market=normalized_market,
             **refresh_kwargs,
