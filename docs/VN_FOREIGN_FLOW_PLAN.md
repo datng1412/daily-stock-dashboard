@@ -6,7 +6,7 @@ Status: Phase 4.12E-3 implements deterministic, on-demand single-symbol analytic
 
 > SSI-V3-B0 keeps those rules and freezes foreign flow as the last REST cutover group: existing analytics are reused, V2 remains primary through B3/B4, shadow inputs are version-isolated, and V3 needs separate unit, finality, pagination, zero/missing, and net-rule acceptance before B5 ownership.
 
-> SSI-V3-B2 adds no V3 securities-summary or foreign-flow implementation. Even when the disabled V3 foundation is explicitly selected for its supported securities/OHLC/index capabilities, DailyStockPrice and every foreign-flow input remain explicitly routed to V2 by ownership, not fallback. Existing cache, single-flight, bounded lookback, normalization, analytics, VN30 aggregation, units, null/zero rules, source metadata, and public APIs are unchanged. B3 may add offline summary normalization only; production ownership still requires later parity/finality/unit gates.
+> SSI-V3-B3 now adds offline-only V3 `securitiesSummary` and foreign-flow normalization. It retains the four official unscaled gross foreign fields omitted by the pinned high-level SDK model, preserves null versus zero, and derives volume/value net independently only when each gross pair is complete. Symbol history and same-shape index normalization are `implemented_disabled`; units, finality, credentials, entitlement, and live parity remain unverified. DailyStockPrice and every public history/API/analytics/VN30 input remain explicitly routed to V2 by ownership, not fallback. Existing cache, single-flight, bounded lookback, analytics, VN30 aggregation, source metadata, and APIs are unchanged; no live request, shadow traffic, or cutover occurred.
 
 Phase: 4.12-PLAN
 

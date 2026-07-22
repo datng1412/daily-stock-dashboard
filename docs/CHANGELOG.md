@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [improvement] Add offline-only SSI V3 securities-summary and foreign-flow normalization with unscaled gross fields, complete-pair net derivation, null/zero preservation, and explicit V2 production ownership.
+- [test] Cover SSI V3 summary SDK signatures, public REST request/envelope behavior, exact numeric normalization, pagination guards, lifecycle reuse, error sanitization, and V2-pinned foreign-flow routes with deterministic fakes.
+- [documentation] Record SSI-V3-B3 as implemented-disabled, retain V2 DailyStockPrice and foreign-flow ownership, and defer live parity, units, finality, shadow traffic, and cutover to later gates.
 - [improvement] Add a disabled-by-default SSI FastConnect V3 REST adapter foundation with pinned `ssi-sdk==3.0.5`, dedicated configuration, lazy shared lifecycle, bounded securities/OHLC/index normalization, explicit V2-pinned ownership, and no automatic fallback.
 - [test] Cover SSI V3 dependency/signature guards, configuration redaction, import/startup safety, concurrent lifecycle ownership, request and pagination contracts, response/error normalization, cache-version isolation, and V2-pinned routing entirely with offline fakes.
 - [documentation] Record the SSI-V3-B2 offline foundation, continued V2 production/realtime ownership, unresolved V3 credential/live parity, and SSI-V3-B3 boundary.

@@ -739,13 +739,15 @@ Errors normalize internally to `configuration_error`, `authentication_failed`, `
 
 Deterministic coverage is in `tests/test_ssi_v3_adapter.py` and `tests/test_ssi_provider_routing.py`. It uses SDK-shaped fakes only and proves import/thread safety, lazy concurrent lifecycle ownership, request/date/page construction, normalization, null/zero handling, bounds, error mapping, provider-version cache isolation, explicit V2-pinned ownership, and no fallback. No live V2 or V3 request or credential test ran in B2.
 
-#### SSI-V3-B3 — Securities Summary and Foreign Flow
+#### SSI-V3-B3 — Securities Summary and Foreign Flow — complete offline
 
-Goal: normalize V3 securities summary and gross foreign buy/sell value/volume into the existing provider-independent daily/foreign-flow rows while retaining V2 as production owner.
+B3 adds direct-adapter normalization for `GET /api/v3/data/securitiesSummary` while production routing remains disabled. Symbol and index filters are mutually exclusive, dates are emitted as `YYYY/MM/DD`, paging starts at one, requested page size is bounded to 1,000, and traversal remains capped at 20 pages and 5,000 rows. Symbol history and the same-shape index normalization are implemented; index scope is `implemented_disabled` and is not used by VN30 production aggregation.
 
-Allowed scope: V3 summary request/normalizer and offline fixtures/tests. Preserve analytics, net rules, cache policy, APIs, UI, and `latest_price` ownership.
+The inspected `ssi-sdk==3.0.5` public methods are `get_securities_summary(symbol)`, `get_securities_summary_historical(symbol, from_date, to_date)`, `get_securities_summary_by_index(index)`, and `get_securities_summary_by_index_historical(index, from_date, to_date)`. Those high-level methods do not expose page/size, and their public `SecuritiesSummary` model omits the official raw `totalForeignBuy`, `totalForeignSell`, `totalForeignBuyValue`, and `totalForeignSellValue` fields. B3 therefore reuses the existing authenticated `Auth.rest_client.get(...)` transport and the same lazy Auth/Data lifecycle. It accesses no private SDK method, token state, or manually constructed authorization header and creates no second client, retry layer, or cache.
 
-Acceptance: date/pagination/null/zero/finite-number behavior passes; direct net is not invented; units/finality remain unknown until evidence; legacy source metadata has a truthful additive provider/version diagnostic; no production cutover.
+Raw summary rows normalize to the provider-neutral daily-summary contract using `symbol`, ISO `date`, OHLC, `matched_volume` from `totalMatch`, `matched_value` from `totalMatchValue`, and the four unscaled gross foreign fields. `foreign_net_volume` and `foreign_net_value` are derived independently as buy minus sell only when both corresponding gross values are usable. Missing remains null, explicit zero remains zero, empty optional numeric strings remain null, booleans/non-finite/non-integral integer inputs fail as malformed, and integral strings are parsed without a float round-trip. Any similarly named provider net field is ignored. Duplicate symbol/date rows use the last provider row, then results are sorted by date and symbol as the existing V2 daily-summary path expects.
+
+This is normalization evidence only. Gross volume/value units, value scale, daily finality, corrections, credentials, entitlement, and V2/V3 live parity remain unverified. Production `DailyStockPrice`, symbol history, public foreign-flow endpoints, analytics inputs, and VN30 aggregation inputs remain explicitly V2-owned. Existing service cache/single-flight, analytics, public schemas, UI, `latest_price`, startup, realtime, and error-triggered no-fallback behavior are unchanged. No live request, credential test, shadow traffic, or production cutover occurred.
 
 #### SSI-V3-B4 — Bounded Shadow Comparison
 
@@ -786,8 +788,9 @@ Remove V2 only after all required REST capabilities, all required streaming capa
 | B2 | `requirements.txt`, Docker install path | Implemented | Pins `ssi-sdk==3.0.5` beside V2; the existing image installs `requirements.txt` | None | None | import/version/Docker-path guards | V2 dependency retained |
 | B2 | `data_provider/ssi_v3_adapter.py` | Implemented | Disabled lazy Auth/Data/request/normalization/lifecycle foundation | Adapter only | None | mocked auth/request/normalization/close | Not selected under V2 |
 | B2 | provider models/protocol/router | Implemented | Adds compatible diagnostics/methods and explicit B2-supported versus V2-pinned routing | None | None | supported/pinned/error/no-fallback routing | Global V2 |
-| B3 | V3 fetcher/provider models | No summary/foreign normalizer | Add securities-summary and foreign gross fields | Reuse existing analytics | No field removal/change | null/zero/unit/finality fixtures | V2 stays primary |
-| B3 | API schemas only if needed | Literal legacy source metadata | Prefer no change; optional actual-provider/version diagnostic only if required | None | Additive optional only | compatibility snapshots | V2 values unchanged |
+| B3 | V3 adapter/provider models | Implemented disabled | Raw public-transport summary extraction plus normalized gross/derived foreign fields | Existing analytics untouched | None | offline summary/null/zero/paging/routing tests | V2 stays primary |
+| B3 | provider router diagnostics | Implemented | Marks summary/history/analytics/VN30 foreign inputs `implemented_disabled` with V2 production ownership | None | None | explicit V2-owner/no-fallback tests | Global V2 |
+| B3 | API schemas | Unchanged | No source field or diagnostic exposed publicly | None | None | existing compatibility regressions | V2 values unchanged |
 | B4 | proposed `src/services/ssi_v3_shadow_service.py` | Does not exist | Bounded sampling/comparison/metrics | None | No result exposure | bounds, cancellation, isolation, non-exposure | Disable shadow/global V2 |
 | B4 | provider router/cache helpers/observability | Production-only requests | Add shadow namespace and sanitized counters | None | Optional diagnostics only | key/rate/fan-out tests | Shadow off |
 | B5 | provider factory/router manifest | V2 primary | Activate accepted capability entries | Existing business logic unchanged | Stable | per-capability regression/rollback | global/per-capability explicit route |
@@ -840,8 +843,8 @@ Runtime acceptance must verify that optional SSI availability never blocks FastA
 | Which exact official `ssi-sdk` version is pinned? | Dependency/lifecycle | `ssi-sdk==3.0.5` inspected and pinned in B2 | Reinspect before any future upgrade; do not drift silently | Resolved for B2 | `resolved_offline` |
 | What are V3 foreign volume/value units? | Foreign flow | Field names documented only | Blocks normalized unit labels/net comparison | Before B4 foreign sample | `blocks_cutover` |
 | When is V3 summary foreign flow final/corrected? | Foreign flow | No accepted live evidence | Blocks completed-session ownership | Before B5 foreign cutover | `blocks_cutover` |
-| How are explicit zero and missing represented? | Summary/foreign/OHLC | Examples use strings; no paired live rows | Blocks null/zero normalizer acceptance | B3/B4 | `blocks_cutover` |
-| What are summary page limits and stable ordering? | Summary/foreign | One-based paging/default 10 documented | Need full bounded history traversal | B2/B3 | `blocks_shadow` |
+| How are explicit zero and missing represented? | Summary/foreign/OHLC | B3 preserves raw null/missing separately from explicit zero offline; no paired live rows | Live representation/parity still blocks cutover | B4 | `blocks_cutover` |
+| What are summary page limits and stable ordering? | Summary/foreign | Official one-based paging/default 10; B3 explicitly requests at most 1,000 with 20-page/5,000-row guards | Live page behavior/order still needs bounded evidence | B4 | `blocks_shadow` |
 | Does V3 OHLC expose forming current-session bars and corrections? | Current intraday | Common endpoint documented, runtime semantics absent | Keep current-session on V2 | Before any current-session cutover | `blocks_cutover` |
 | What are membership effective-time semantics? | Index components/VN30 | Current index filter documented only | Cannot establish historical/current boundary | B4 index gate | `blocks_cutover` |
 | Are component weights available and what do they mean? | Index components/VN30 | Not in documented securities row | Weight remains null; aggregation stays unweighted/current | Before weighted product or V2 exit | `blocks_V2_removal` |
@@ -856,8 +859,8 @@ Runtime acceptance must verify that optional SSI availability never blocks FastA
 
 ### Explicit exclusions
 
-Phase B2 implements only the pinned SDK dependency, separate V3 REST settings, disabled adapter, explicit capability routing, minimal provider-version service cache isolation, offline tests, and documentation described above. It implements no credential values or alias, live provider request, production enablement, shadow mode, public API/schema, frontend, securities summary, foreign-flow V3 input, production IndexComponents cutover, current-session intraday cutover, stream, trading, database, Redis, scheduler, worker, Docker, Render, or startup change. It does not confirm V3 credentials, entitlement, parity, units, finality, production readiness, or permission to remove V2.
+Phase B3 adds only direct, offline V3 securities-summary and foreign-flow normalization plus internal ownership diagnostics. It implements no credential values or alias, live provider request, production summary/foreign routing, shadow mode, public API/schema, frontend, service/cache/analytics/VN30 change, production IndexComponents cutover, current-session intraday cutover, stream, trading, database, Redis, scheduler, worker, Docker, Render, or startup change. It does not confirm V3 credentials, entitlement, parity, units, finality, production readiness, or permission to remove V2.
 
 ### Next implementation phase
 
-**SSI-V3-B3 — Securities Summary and Foreign-Flow Normalization** is the next implementation phase. It may add only offline V3 summary/foreign normalization while V2 remains production owner. Any live acceptance, shadow traffic, or production cutover still requires a separately authorized later gate.
+**SSI-V3-B4 — Default-Off Bounded Shadow Comparison** is the next proposed phase. Infrastructure may remain disabled by default, but any live V3 authentication or shadow execution still requires separate authorization and valid V3 access. B3 authorizes neither live traffic nor cutover.
