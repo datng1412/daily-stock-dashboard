@@ -6,7 +6,7 @@ Status: Phase 4.12E-3 implements deterministic, on-demand single-symbol analytic
 
 > SSI-V3-B0 keeps those rules and freezes foreign flow as the last REST cutover group: existing analytics are reused, V2 remains primary through B3/B4, shadow inputs are version-isolated, and V3 needs separate unit, finality, pagination, zero/missing, and net-rule acceptance before B5 ownership.
 
-> SSI-V3-B1 routes the existing DailyStockPrice call through a provider-neutral V2 adapter without changing the foreign-flow cache, single-flight, bounded lookback attempts, normalization, rolling analytics, VN30 aggregation, units, null/zero rules, source metadata, or public API. The adapter returns the same V2 dictionary and adds no provider call or fallback; V3 selection is unavailable.
+> SSI-V3-B2 adds no V3 securities-summary or foreign-flow implementation. Even when the disabled V3 foundation is explicitly selected for its supported securities/OHLC/index capabilities, DailyStockPrice and every foreign-flow input remain explicitly routed to V2 by ownership, not fallback. Existing cache, single-flight, bounded lookback, normalization, analytics, VN30 aggregation, units, null/zero rules, source metadata, and public APIs are unchanged. B3 may add offline summary normalization only; production ownership still requires later parity/finality/unit gates.
 
 Phase: 4.12-PLAN
 

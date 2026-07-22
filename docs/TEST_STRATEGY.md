@@ -10,7 +10,11 @@ This strategy defines the expected validation for VN dashboard documentation, AP
 
 ## SSI-V3-B1 provider-routing validation
 
-`tests/test_ssi_provider_routing.py` proves structural protocol conformance, exact one-call V2 delegation across all current REST capabilities, argument/date/page preservation, shared fetcher reuse, idempotent close, unchanged missing/zero/empty/source dictionaries, case-normalized V2 defaults, explicit `v3`/unknown rejection, no error-triggered fallback, import safety, and absence of V3 SDK/URL/credential names in B1 production modules. Existing fetcher, market, intraday, index, foreign-flow, cache/single-flight, startup/readiness, lifecycle, and offline realtime suites provide service parity. Normal pytest makes no SSI calls. B2/B3 must add mocked V3 request/auth/pagination/date/null-zero/error/lifecycle normalization while V3 stays disabled; B4/B5 remain separately gated.
+`tests/test_ssi_provider_routing.py` proves structural protocol conformance, exact one-call V2 delegation, argument/date/page preservation, shared fetcher reuse, idempotent close, unchanged missing/zero/empty/source dictionaries, case-normalized V2 defaults, explicit unknown-version rejection, and no error-triggered fallback. Existing fetcher, market, intraday, index, foreign-flow, cache/single-flight, startup/readiness, lifecycle, and offline realtime suites provide default-V2 parity. Normal pytest makes no SSI calls.
+
+## SSI-V3-B2 disabled-adapter validation
+
+`tests/test_ssi_v3_adapter.py` uses SDK-shaped fakes only. It verifies the `ssi-sdk==3.0.5` dependency/namespace/Python requirement and inspected signatures; disabled and secret-safe configuration; import/startup thread/network safety; one lock-protected lazy Auth/Data lifecycle; one authentication per lifecycle; retry after clean initialization failure; close order/idempotence; request/date/timeframe/page construction; one-based 1,000-row pages with 20-page/5,000-row guards; security/OHLC/index normalization; null/zero/non-finite/malformed handling; normalized errors and safe rate metadata; explicit supported versus V2-pinned routing; provider-version service-cache isolation; no V3-to-V2 fallback; no streaming/trading/OTP/private-key/foreign-flow/production-membership integration; and the existing Docker `pip install -r requirements.txt` path. B2 performs no live authentication or provider request. B3/B4/B5 remain separately gated.
 
 ## Required Backend Tests
 

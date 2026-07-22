@@ -1,20 +1,20 @@
 # SSI FastConnect V3 Migration Architecture and Gate
 
-Status: Phase SSI-V3-B1 is implemented. Provider-neutral REST contracts, a delegating V2 adapter, and explicit V2-default routing are active; production remains on FastConnect V2 and no V3 adapter, dependency, request, shadow traffic, realtime migration, public API, or frontend change is implemented.
+Status: Phase SSI-V3-B2 is implemented offline. The official `ssi-sdk==3.0.5` dependency, separate V3 configuration, and a lazy disabled-by-default REST adapter now exist for the bounded B2 capability set. FastConnect V2 remains the default and deployed production REST/realtime provider; no V3 live request, shadow traffic, production cutover, public API change, or frontend change occurred.
 
 ## Current migration gate
 
-FastConnect V3 migration architecture and implementation phases are documented. SSI FastConnect V2 remains the sole production REST and realtime provider. The prior SSI-V3-A1 result remains outcome D for the exact credential-field mapping tested; it does not invalidate the completed V2-only B1 abstraction, but it blocks V3 authentication, shadow traffic, and capability cutover until SSI resolves V3 activation and identifier/key mapping.
+FastConnect V3 migration architecture and implementation phases are documented. SSI FastConnect V2 remains the sole deployed production REST and realtime provider. The prior SSI-V3-A1 result remains outcome D for the exact credential-field mapping tested; B2 did not retest it. It continues to block live V3 acceptance, shadow traffic, and capability cutover until SSI resolves V3 activation and identifier/key mapping.
 
-SSI-V3-B1 introduced only provider-neutral contracts, a V2 adapter, and explicit V2-default REST routing. Missing, empty, `v2`, and case-normalized `V2` select V2; `v3` fails explicitly because no B1 V3 adapter exists, and other values fail configuration. Runtime V2 errors propagate without another-provider fallback. SSI-V3-B2 is the next disabled-by-default foundation phase; it must not route production or make live calls without a separately authorized gate.
+SSI-V3-B2 retains missing, empty, `v2`, and case-normalized `V2` as V2. Explicit `v3` is accepted only when `SSI_V3_REST_ENABLED=true` and all three dedicated V3 credential names are populated. In that opt-in configuration, only B2-supported capabilities select V3; explicitly V2-pinned capabilities continue to select V2 by ownership, not fallback. Any V3 authentication, timeout, malformed-response, rate-limit, or provider failure remains a V3 failure and never invokes V2. Unknown versions fail configuration.
 
 ## Decision
 
 **Primary outcome: D — EXISTING CREDENTIALS REJECTED BY V3.**
 
-The repository has an installed V2 `ssi-fc-data` 2.2.2 dependency and V2-only production configuration. The official Python V3 package is `ssi-sdk` with the `ssi_sdk` namespace and documented version `3.0.5`; it was inspected from official documentation/package metadata and was not installed locally. On 2026-07-21, the audit mapped the existing `SSI_FASTCONNECT_CONSUMER_ID` and `SSI_FASTCONNECT_CONSUMER_SECRET` values in memory to the documented V3 raw REST `apiKey` and `apiSecret` fields. The single authorized `POST /api/v3/auth/token` sequence returned HTTP 401 in 1,388 ms. It produced no access token, refresh token, expiry field, or rate-limit header.
+The repository retains the V2 `ssi-fc-data` 2.2.2 dependency and now also pins the official `ssi-sdk==3.0.5` package with the `ssi_sdk` namespace. Package metadata requires Python 3.10 or newer and points to the official SSI repository; B2 inspected it locally on Python 3.13.1. This dependency does not enable V3. On 2026-07-21, the earlier audit mapped the existing `SSI_FASTCONNECT_CONSUMER_ID` and `SSI_FASTCONNECT_CONSUMER_SECRET` values in memory to the documented V3 raw REST `apiKey` and `apiSecret` fields. The single authorized `POST /api/v3/auth/token` sequence returned HTTP 401 in 1,388 ms. It produced no access token, refresh token, expiry field, or rate-limit header.
 
-This result is an explicit V3 rejection of the tested current-value/raw-field mapping, not a network failure and not proof that V2 credentials have stopped working. No market-data, index, file, or WebSocket parity request followed. Only a future A or B outcome may open V3 authentication, shadow, or cutover work. Outcome D keeps V2 unchanged and requires SSI to confirm V3 account activation and the exact mapping of application/client identifier, API key, and API secret before another live attempt. The V2-only B1 contract/adapter phase may proceed without V3 access.
+This result is an explicit V3 rejection of the tested current-value/raw-field mapping, not a network failure and not proof that V2 credentials have stopped working. No market-data, index, file, or WebSocket parity request followed. Outcome D keeps V2 production ownership unchanged and requires SSI to confirm V3 account activation and the exact mapping of application/client identifier, API key, and API secret before another live attempt. B2 uses only dedicated V3 names and deterministic SDK fakes; it neither aliases V2 credentials nor changes that live gate.
 
 ## SSI customer notice and lifecycle
 
@@ -714,13 +714,30 @@ Implemented files are `ssi_provider_models.py`, `ssi_provider_protocol.py`, `ssi
 
 Deterministic evidence is in `tests/test_ssi_provider_routing.py` plus the existing fetcher, market, foreign-flow, index, cache/single-flight, startup, and offline realtime suites. The router exposes secret-free internal diagnostics (`capability`, selected provider/version, routing reason, `fallback_used=false`) but adds nothing to public API payloads.
 
-#### SSI-V3-B2 — V3 REST Adapter Foundation
+#### SSI-V3-B2 — V3 REST Adapter Foundation — complete offline
 
-Goal: after SSI resolves credentials, reverify and pin official `ssi-sdk`; add V3 configuration and Auth/Data lifecycle; implement disabled securities, exact-symbol basics, daily OHLC, completed historical intraday, index list/summary, rate metadata, and optional market-file/interval capability stubs only where officially documented.
+Implemented scope: pinned official `ssi-sdk==3.0.5`; separate secret-safe V3 configuration; lazy lock-protected `Auth`/`Data` lifecycle; disabled securities-by-board, exact-symbol basic information, securities-by-index normalization, daily OHLC, completed historical 1-minute OHLC, index list, and index summary; bounded pagination; normalized errors and routing diagnostics. No market-file, securities-summary, foreign-flow, current-session intraday, production IndexComponents, streaming, or trading capability was added.
 
-Allowed scope: official dependency/config, disabled V3 adapter, mocked request/normalization/auth/lifecycle tests. No production routing, shadow mode, public payload change, frontend change, foreign-flow cutover, or streaming implementation.
+The synchronous SDK is used because the provider protocol and current services are synchronous and already execute provider work outside the FastAPI event loop. Construction and imports are pure. The first explicitly selected supported V3 call creates one shared `Auth` and `Data` lifecycle under a lock and calls `Auth.authenticate()` without OTP. The SDK remains responsible for token refresh; StockClock stores no token. Close is idempotent: a close-capable data fake/future public client is closed before `Auth`, while the pinned SDK's `Data` has no close method and `Auth` owns the shared transport.
 
-Acceptance: deterministic mocked contracts; finite timeout/retry/rate handling; idempotent close; no startup/pre-bind external I/O; V2 remains primary; V3 is disabled without explicit valid configuration.
+Configuration is `SSI_V3_REST_ENABLED=false`, `SSI_V3_CLIENT_ID`, `SSI_V3_API_KEY`, `SSI_V3_API_SECRET`, `SSI_V3_API_URL`, `SSI_V3_REQUEST_TIMEOUT`, `SSI_V3_MAX_RETRIES`, `SSI_V3_RETRY_DELAY`, and `SSI_V3_RATE_LIMIT_PER_SECOND`. V2 credentials are never reused. Missing V3 configuration is ignored while V2 is selected; explicit V3 selection fails with variable names only when disabled or incomplete. The documented full V3 API URL is normalized to the SDK transport root because the pinned SDK endpoint constants already contain `/api/v3`.
+
+The inspected synchronous signatures used by the adapter are:
+
+- `Config(client_id='', api_url='https://api.ssi.com.vn', streaming_url='wss://stream.ssi.com.vn/ws/v3', api_key='', api_secret='', private_key='', timeout=60, max_retries=5, retry_delay=2, rate_limit_per_second=10, log_level='INFO', proxy=None)`.
+- `Auth(config: Config | None = None, **kwargs)` and `TokenManager.authenticate(otp: str | None = None) -> Token`; B2 supplies no OTP.
+- `Data(auth: Auth)`.
+- `get_securities_info_by_board(board)`, `get_securities_info(symbol)`, and `get_securities_info_by_index(index)`.
+- `get_ohlc_1day_historical(symbol, from_date, to_date, page=1, size=1000)` and `get_ohlc_1minute_historical(symbol, from_date, to_date, page=1, size=1000)`.
+- `get_indexes()` and `get_indexes_by_board(board)`.
+
+The official index-summary REST contract requires `board` and permits optional `index` and `tradingDate`, while the pinned SDK's high-level summary helpers cannot express the combined query. The adapter therefore uses the public authenticated `Auth.rest_client.get('/api/v3/data/indexSummary', params=...)` path for that one capability rather than a private SDK implementation detail.
+
+Pagination is one-based with a requested page size capped at 1,000, at most 20 pages, and at most 5,000 normalized rows. Empty/short pages stop traversal, repeated pages fail safely, and provider order is preserved. Missing values remain null and explicit zero remains zero when the public SDK result preserves that distinction; non-finite numerics and malformed dates are rejected. The SDK's model parsing may itself collapse some absent raw numeric fields to zero before the adapter receives them, so raw missing-versus-zero parity remains a live B4 acceptance question.
+
+Errors normalize internally to `configuration_error`, `authentication_failed`, `entitlement_unavailable`, `request_timeout`, `network_error`, `rate_limited`, `provider_unavailable`, `malformed_response`, `validation_error`, or `internal_error`. Rate-limit `retry_after` is retained when the public exception exposes it. Limit, remaining, and reset stay null because the public SDK result does not expose response headers; no private transport inspection was added.
+
+Deterministic coverage is in `tests/test_ssi_v3_adapter.py` and `tests/test_ssi_provider_routing.py`. It uses SDK-shaped fakes only and proves import/thread safety, lazy concurrent lifecycle ownership, request/date/page construction, normalization, null/zero handling, bounds, error mapping, provider-version cache isolation, explicit V2-pinned ownership, and no fallback. No live V2 or V3 request or credential test ran in B2.
 
 #### SSI-V3-B3 — Securities Summary and Foreign Flow
 
@@ -761,15 +778,14 @@ Remove V2 only after all required REST capabilities, all required streaming capa
 | B1 | `data_provider/ssi_provider_models.py` | Implemented | Typed provider-neutral normalized rows/results | Codifies existing values only | None | Type/fixture contract | Shared by V2 route after rollback |
 | B1 | `data_provider/ssi_provider_protocol.py` | Implemented | REST structural `Protocol`; no streams/trading | None | None | Conformance/fakes | Stable interface for V2 |
 | B1 | `data_provider/ssi_v2_adapter.py` | Implemented | Delegates to current fetcher without renormalizing | None | None | Golden V2 behavior | Primary rollback adapter |
-| B1 | `data_provider/ssi_provider_router.py` | Implemented | Parses selector and routes every B1 REST capability to V2 | Selection only | None | default/v2/v3/unknown/no-fallback | Global `v2` owner |
+| B1/B2 | `data_provider/ssi_provider_router.py` | Implemented | Defaults to V2; selects the disabled B2 V3 adapter only for its explicit capability set; keeps pinned capabilities on V2 | Selection only | None | default/v2/v3/unknown/pinned/no-fallback | Global `v2` owner |
 | B1 | `data_provider/ssi_fastconnect_fetcher.py` | Concrete V2 REST + stream cache facade | Prefer no behavioral change; only compatibility hooks if proven necessary | None | None | Existing fetcher suite | Remains source of truth |
-| B1 | `src/config.py`, `src/core/config_registry.py`, `.env.example` | V2 configuration | Add only REST selector, default V2 | None | None | Parsing/error tests | Missing/`v2` restore V2 |
+| B1/B2 | `src/config.py`, `src/core/config_registry.py`, `.env.example` | Implemented V2 selector and separate V3 REST settings | V3 remains disabled and env-only; secret values are excluded from repr | None | None | Parsing/error/redaction tests | Missing/`v2` restore V2 |
 | B1 | `src/services/vietnam_market_service.py` | Direct lazy V2 construction | Inject neutral router; preserve method outputs | None | None | Existing market regressions | Router selects V2 |
 | B1 | `src/services/vietnam_foreign_flow_service.py` | Direct V2 construction and domain calculations | Inject neutral router; retain calculations/cache | None | None | Existing foreign-flow/VN30 regressions | Router selects V2 |
-| B2 | `requirements.txt`, Docker install path | Installs V2 package | Pin official V3 package after revalidation; retain V2 | None | None | import/package smoke | V2 dependency retained |
-| B2 | `data_provider/ssi_fastconnect_v3_fetcher.py` | Does not exist | Disabled V3 Auth/Data/request/normalization/lifecycle | Adapter only | None | mocked auth/request/normalization/close | Not selected under V2 |
-| B2 | configuration modules and `.env.example` | No V3 names | Add documented V3 REST names, secret-safe validation | None | None | presence/validation/redaction | V2 ignores V3 values |
-| B2 | provider models/router | V2-only capability map | Register disabled V3 candidates and versioned diagnostics | None | None | unsupported/disabled routing | Global V2 |
+| B2 | `requirements.txt`, Docker install path | Implemented | Pins `ssi-sdk==3.0.5` beside V2; the existing image installs `requirements.txt` | None | None | import/version/Docker-path guards | V2 dependency retained |
+| B2 | `data_provider/ssi_v3_adapter.py` | Implemented | Disabled lazy Auth/Data/request/normalization/lifecycle foundation | Adapter only | None | mocked auth/request/normalization/close | Not selected under V2 |
+| B2 | provider models/protocol/router | Implemented | Adds compatible diagnostics/methods and explicit B2-supported versus V2-pinned routing | None | None | supported/pinned/error/no-fallback routing | Global V2 |
 | B3 | V3 fetcher/provider models | No summary/foreign normalizer | Add securities-summary and foreign gross fields | Reuse existing analytics | No field removal/change | null/zero/unit/finality fixtures | V2 stays primary |
 | B3 | API schemas only if needed | Literal legacy source metadata | Prefer no change; optional actual-provider/version diagnostic only if required | None | Additive optional only | compatibility snapshots | V2 values unchanged |
 | B4 | proposed `src/services/ssi_v3_shadow_service.py` | Does not exist | Bounded sampling/comparison/metrics | None | No result exposure | bounds, cancellation, isolation, non-exposure | Disable shadow/global V2 |
@@ -807,7 +823,7 @@ Every retained V2 row requires a test that proves the router selects V2 intentio
 
 Live checks occur only in separately authorized phase gates, never normal pytest or B0:
 
-- B2 foundation: one authentication sequence; one provider-derived securities query; one exact-symbol OHLC query; one index query; one summary query; sanitized rate-header observation; no unrestricted market request.
+- Post-B2 live acceptance: one authentication sequence; one provider-derived securities query; one exact-symbol OHLC query; one index query; one summary query; sanitized rate-header observation; no unrestricted market request.
 - B4 shadow: bounded approved symbols/indexes/date ranges/pages/concurrency/timeouts; no unsafe retry; V2 response ownership; no raw payload persistence or frontend exposure.
 - B5 cutover: provider/version diagnostics, provider-independent health/startup, isolated caches, one bounded request per activated capability, public contract checks, and rollback drill.
 - C streaming: one scoped topic family at a time during an eligible market window, plus reconnect/resubscribe and after-hours last-known semantics.
@@ -818,10 +834,10 @@ Runtime acceptance must verify that optional SSI availability never blocks FastA
 
 | Question | Impacted capability | Current evidence | Implementation impact | Resolve by | Blocker level |
 | --- | --- | --- | --- | --- | --- |
-| What is the authoritative V3 `client_id` source? | Auth/SDK | SDK config documents it; raw token endpoint does not | Cannot construct approved SDK config | Before B2 auth acceptance | `blocks_foundation` |
+| What is the authoritative V3 `client_id` source? | Auth/SDK | SDK config documents it; raw token endpoint does not | Offline configuration exists, but live values remain unapproved | Before post-B2 auth acceptance | `blocks_shadow` |
 | Do V2 identifier/secret values map to V3 keys? | Auth | Exact two-field mapping returned 401 | Separate V3 secrets remain required/unresolved | Before B2 live gate | `blocks_shadow` |
 | Is this account entitled/activated for V3? | All V3 | Prior 401 proves rejection, not cause | No V3 traffic can be accepted | Before B4 | `blocks_shadow` |
-| Which exact official `ssi-sdk` version is pinned? | Dependency/lifecycle | 3.0.5 was previously documented; package may evolve | Reinspect metadata/API and pin in B2 | B2 implementation review | `blocks_foundation` |
+| Which exact official `ssi-sdk` version is pinned? | Dependency/lifecycle | `ssi-sdk==3.0.5` inspected and pinned in B2 | Reinspect before any future upgrade; do not drift silently | Resolved for B2 | `resolved_offline` |
 | What are V3 foreign volume/value units? | Foreign flow | Field names documented only | Blocks normalized unit labels/net comparison | Before B4 foreign sample | `blocks_cutover` |
 | When is V3 summary foreign flow final/corrected? | Foreign flow | No accepted live evidence | Blocks completed-session ownership | Before B5 foreign cutover | `blocks_cutover` |
 | How are explicit zero and missing represented? | Summary/foreign/OHLC | Examples use strings; no paired live rows | Blocks null/zero normalizer acceptance | B3/B4 | `blocks_cutover` |
@@ -840,8 +856,8 @@ Runtime acceptance must verify that optional SSI availability never blocks FastA
 
 ### Explicit exclusions
 
-Phase B1 implements only the provider-neutral models/protocol, delegating V2 adapter, V2-default router, selector parsing, narrow service wiring, tests, and documentation described above. It implements no V3 SDK, credentials, adapter, request, cache, shadow mode, public API/schema, frontend, analytics, index aggregation, stream, trading, database, Redis, scheduler, worker, Docker, Render, or startup change. It does not confirm V3 credentials, parity, units, finality, production readiness, or permission to remove V2.
+Phase B2 implements only the pinned SDK dependency, separate V3 REST settings, disabled adapter, explicit capability routing, minimal provider-version service cache isolation, offline tests, and documentation described above. It implements no credential values or alias, live provider request, production enablement, shadow mode, public API/schema, frontend, securities summary, foreign-flow V3 input, production IndexComponents cutover, current-session intraday cutover, stream, trading, database, Redis, scheduler, worker, Docker, Render, or startup change. It does not confirm V3 credentials, entitlement, parity, units, finality, production readiness, or permission to remove V2.
 
 ### Next implementation phase
 
-**SSI-V3-B2 — V3 REST Adapter Foundation, disabled by default** is next. It remains gated by the open questions above, must add no production routing or shadow traffic, and requires separate authorization before any live provider call.
+**SSI-V3-B3 — Securities Summary and Foreign-Flow Normalization** is the next implementation phase. It may add only offline V3 summary/foreign normalization while V2 remains production owner. Any live acceptance, shadow traffic, or production cutover still requires a separately authorized later gate.

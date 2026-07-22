@@ -52,7 +52,7 @@ Phase SSI-V3-A1 is audit-only. The SSI customer notice supplied to this project 
 
 Phase SSI-V3-CONTRACT-DIFF adds a documentation-only URL/parameter table to that migration document. It confirms that all compared URLs change, while REST methods remain POST for auth and GET for market data. Important name changes are `market`/`exchange` → `board`, `fromDate`/`toDate` → `from`/`to`, `indexId`/`indexCode` → `index`, and IntradayOhlc `resolution` → common V3 OHLC `timeFrame`. V3 retains `pageIndex`/`pageSize` only for summary/OHLC candidates, with a documented default size of 10 rather than the V2 model's 100. This comparison makes no credential, entitlement, unit, finality, runtime, or data-parity claim.
 
-Phase SSI-V3-B1 implements the frozen V2-only foundation: normalized `TypedDict` rows/results, a structural REST `Protocol`, a thin adapter that delegates to the unchanged `SsiFastConnectFetcher`, and one central V2-default router used by market and foreign-flow REST paths. Missing/empty/`v2` selects V2; `v3` is rejected as not implemented and unknown values are configuration errors. The router exposes internal secret-free selection diagnostics with `fallback_used=false`, adds no cache/single-flight/provider call, and does not change public payloads. Realtime remains on the existing V2 fetcher and streaming lifecycle. No V3 dependency, credentials, request, cache, shadow traffic, or fallback was added. The complete contract and parity matrix are in `docs/SSI_FASTCONNECT_V3_MIGRATION.md`.
+Phase SSI-V3-B2 adds the pinned official `ssi-sdk==3.0.5` and a disabled-by-default synchronous V3 REST adapter for securities by board/symbol/index, daily OHLC, completed historical 1-minute OHLC, index list, and index summary. The adapter imports and authenticates lazily, shares one lock-protected `Auth`/`Data` lifecycle, stores no token, closes idempotently, and uses one-based bounded pagination (page size 1,000; 20 pages; 5,000 rows). Missing/empty/`v2` still selects V2. Explicit `v3` requires the enable flag and complete dedicated V3 settings; supported capabilities then select V3, while DailyStockPrice/foreign flow, extended SecuritiesDetails, current-session intraday, production IndexComponents, and realtime remain explicitly V2-owned. V3 errors never fall back to V2. B2 used deterministic fakes only: no V3 credential was tested, no live call or shadow traffic ran, and no public API/frontend/startup behavior changed. The complete contract and parity matrix are in `docs/SSI_FASTCONNECT_V3_MIGRATION.md`.
 
 ## Provider roles
 
@@ -444,6 +444,7 @@ SSI is disabled by default.
 
 ```env
 SSI_FASTCONNECT_ENABLED=false
+SSI_FASTCONNECT_REST_VERSION=v2
 SSI_FASTCONNECT_BASE_URL=https://fc-data.ssi.com.vn/api/v2/Market
 SSI_FASTCONNECT_CONSUMER_ID=
 SSI_FASTCONNECT_CONSUMER_SECRET=
@@ -465,6 +466,18 @@ SSI_STREAMING_REALTIME_RECONNECT_INITIAL_DELAY_SECONDS=2
 SSI_STREAMING_REALTIME_RECONNECT_MAX_DELAY_SECONDS=30
 SSI_STREAMING_REALTIME_RECONNECT_MAX_ATTEMPTS=0
 
+# Disabled offline V3 REST foundation. Dedicated V3 values are never aliased
+# from V2 and are required only when version=v3 and enabled=true.
+SSI_V3_REST_ENABLED=false
+SSI_V3_CLIENT_ID=
+SSI_V3_API_KEY=
+SSI_V3_API_SECRET=
+SSI_V3_API_URL=https://api.ssi.com.vn/api/v3
+SSI_V3_REQUEST_TIMEOUT=10
+SSI_V3_MAX_RETRIES=2
+SSI_V3_RETRY_DELAY=1
+SSI_V3_RATE_LIMIT_PER_SECOND=5
+
 VN_DAILY_DATA_PROVIDER=ssi
 VN_CHART_DATA_PROVIDER=ssi
 VN_DAILY_STOCK_PRICE_PROVIDER=ssi
@@ -483,7 +496,7 @@ VN_ALLOW_LEGACY_KBS_PROVIDER=false
 
 Keep the base URL configurable because SSI documentation may reference another versioned path such as `/v2.0/Market`.
 
-Credentials must only come from local environment variables or a secret manager. Never commit real values.
+Credentials must only come from local environment variables or a secret manager. Never commit real values. V3 configuration is env-only and hidden from the web configuration registry; selecting V3 while disabled or incomplete fails with setting names only. V3 initialization never runs during import, FastAPI startup, or health checks.
 
 The provider variables are intentionally strict for supported VN REST market data. Public env parsing accepts `ssi` for daily, chart, DailyStockPrice, and index provider values; invalid values fall back to `ssi`. `VN_PROVIDER_COMPARISON_ENABLED` remains `false`, and no provider comparison endpoint or card is exposed in this phase.
 

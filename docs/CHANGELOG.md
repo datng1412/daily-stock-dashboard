@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [improvement] Add a disabled-by-default SSI FastConnect V3 REST adapter foundation with pinned `ssi-sdk==3.0.5`, dedicated configuration, lazy shared lifecycle, bounded securities/OHLC/index normalization, explicit V2-pinned ownership, and no automatic fallback.
+- [test] Cover SSI V3 dependency/signature guards, configuration redaction, import/startup safety, concurrent lifecycle ownership, request and pagination contracts, response/error normalization, cache-version isolation, and V2-pinned routing entirely with offline fakes.
+- [documentation] Record the SSI-V3-B2 offline foundation, continued V2 production/realtime ownership, unresolved V3 credential/live parity, and SSI-V3-B3 boundary.
 - [improvement] Add provider-neutral SSI REST contracts, a delegating FastConnect V2 adapter, and explicit V2-default routing with hard V3/unknown rejection and no automatic fallback.
 - [test] Prove SSI V2 adapter delegation, selector behavior, null/zero/source parity, shared lifecycle, import safety, and unchanged market, foreign-flow, startup, and offline realtime behavior.
 - [documentation] Freeze the SSI FastConnect V3 capability-by-capability migration architecture, V2-default routing, normalized contracts, shadow isolation, cutover gates, rollback, and B1-B5/C/D implementation sequence without runtime changes.
