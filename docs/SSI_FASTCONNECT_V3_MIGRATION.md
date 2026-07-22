@@ -1,12 +1,12 @@
 # SSI FastConnect V3 Migration Architecture and Gate
 
-Status: Phase SSI-V3-B0 freezes the implementation plan. Production remains on FastConnect V2; no V3 adapter, dependency, routing, shadow traffic, or frontend change is implemented.
+Status: Phase SSI-V3-B1 is implemented. Provider-neutral REST contracts, a delegating V2 adapter, and explicit V2-default routing are active; production remains on FastConnect V2 and no V3 adapter, dependency, request, shadow traffic, realtime migration, public API, or frontend change is implemented.
 
 ## Current migration gate
 
-FastConnect V3 migration architecture and implementation phases are documented. SSI FastConnect V2 remains the production provider. The prior SSI-V3-A1 result remains outcome D for the exact credential-field mapping tested; it does not block the V2-only B1 abstraction phase, but it blocks V3 authentication, shadow traffic, and capability cutover until SSI resolves V3 activation and identifier/key mapping.
+FastConnect V3 migration architecture and implementation phases are documented. SSI FastConnect V2 remains the sole production REST and realtime provider. The prior SSI-V3-A1 result remains outcome D for the exact credential-field mapping tested; it does not invalidate the completed V2-only B1 abstraction, but it blocks V3 authentication, shadow traffic, and capability cutover until SSI resolves V3 activation and identifier/key mapping.
 
-SSI-V3-B1 is the next implementation phase. It introduces only provider-neutral contracts, a V2 adapter, and explicit V2-default REST routing. B1 adds no V3 dependency or traffic.
+SSI-V3-B1 introduced only provider-neutral contracts, a V2 adapter, and explicit V2-default REST routing. Missing, empty, `v2`, and case-normalized `V2` select V2; `v3` fails explicitly because no B1 V3 adapter exists, and other values fail configuration. Runtime V2 errors propagate without another-provider fallback. SSI-V3-B2 is the next disabled-by-default foundation phase; it must not route production or make live calls without a separately authorized gate.
 
 ## Decision
 
@@ -388,21 +388,21 @@ The portal documents `Config -> Auth -> Data / Trading / Stream`, market-data RE
 14. Future shadow traffic is disabled by default, bounded, cancellable where practical, and rate-limit-aware.
 15. Trading, accounts, orders, transfers, and portfolio actions are outside this migration.
 
-### Target architecture
+### B1 architecture
 
 The narrowest design consistent with current code is a structural `Protocol`, not an abstract base class. The repository already uses `Protocol` for SSI streaming and corporate-action providers, and current services are constructor-injectable. A protocol avoids inheritance and lets deterministic fakes and the existing fetcher satisfy the contract without changing runtime representation.
 
 ```text
 data_provider/
   ssi_fastconnect_fetcher.py       # existing V2 implementation, retained
-  ssi_provider_models.py           # future normalized TypedDict/value contracts
-  ssi_provider_protocol.py         # future REST-only structural Protocol
-  ssi_v2_adapter.py                # future delegating wrapper; no behavior rewrite
+  ssi_provider_models.py           # normalized TypedDict/value contracts
+  ssi_provider_protocol.py         # REST-only structural Protocol
+  ssi_v2_adapter.py                # delegating wrapper; no behavior rewrite
+  ssi_provider_router.py           # V2-default selector + central capability router
   ssi_fastconnect_v3_fetcher.py    # future disabled V3 REST adapter
-  ssi_provider_factory.py          # future selector + central capability router
 
 services
-  -> receive one provider-neutral capability router
+  -> resolve one provider-neutral capability router lazily
   -> keep business calculations, public schemas, and state semantics
 
 V2 streaming lifecycle
@@ -424,31 +424,31 @@ Responsibilities are frozen as follows:
 
 ### Provider routing decision
 
-Use central capability routing in `ssi_provider_factory.py`, then inject the router into market and foreign-flow services. Per-service version branching is rejected because it would duplicate hybrid rules, cache identity, diagnostics, and no-fallback enforcement.
+Use central capability routing in `ssi_provider_router.py`, then inject or lazily resolve the router in market and foreign-flow services. Per-service version branching is rejected because it would duplicate hybrid rules, cache identity, diagnostics, and no-fallback enforcement.
 
 | Option | Benefit | Cost/risk | Decision |
 | --- | --- | --- | --- |
 | Central capability router | One manifest for intentional V2 retention, one no-fallback boundary, consistent cache/version diagnostics | Adds one small routing module and injection seam | **Recommended** |
 | Provider injection/version branching per service | Keeps each service locally explicit | Duplicates hybrid decisions across market, metadata, index, and foreign-flow paths; easier to drift or fall back accidentally | Rejected for version selection; services still receive the central router by injection |
 
-Planned selector:
+B1 selector:
 
 ```text
 SSI_FASTCONNECT_REST_VERSION=v2|v3
 ```
 
-| Value | Planned behavior |
+| Value | B1 behavior |
 | --- | --- |
 | Missing or empty | Preserve current V2 production behavior |
 | `v2` | Route every REST capability to V2 |
-| `v3` | Route only capability-router entries that have passed their V3 gate to V3; explicitly retained entries stay V2 |
+| `v3` | Configuration error: `SSI FastConnect V3 REST adapter is not implemented in phase B1` |
 | Unknown | Fail configuration validation with a clear secret-free message before provider work |
 
 The router chooses a provider before execution. `v3 -> error -> v2` is forbidden. B1 does not introduce per-capability environment overrides. B5 may add one bounded V3 capability allow-list only if operations needs independent rollback without deployment; until then, the accepted-capability manifest is versioned in the router and global `v2` is the guaranteed rollback. `SSI_FASTCONNECT_REST_VERSION` never controls streaming.
 
 ### Planned configuration contract
 
-These names are documentation only and must not be added to `.env.example`, Render, Docker, or configuration code before their implementation phase.
+`SSI_FASTCONNECT_REST_VERSION` is implemented in B1 and documented in `.env.example`. The V3 names below remain documentation only and must not be added to `.env.example`, Render, Docker, or configuration code before B2.
 
 | Name | Classification | Planned use | Resolution requirement |
 | --- | --- | --- | --- |
@@ -687,13 +687,32 @@ B1 uses global rollback only. If B5 proves operational need for independent roll
 
 ### Frozen implementation phases
 
-#### SSI-V3-B1 — Provider Contract and V2 Adapter
+#### SSI-V3-B1 — Provider Contract and V2 Adapter — complete
 
 Goal: introduce provider-neutral normalized type contracts and REST `Protocol`; wrap the current V2 fetcher; centralize explicit provider selection defaulting to V2; inject it into existing services.
 
 Allowed scope: protocol/models, delegating V2 adapter, factory/router, V2-default configuration parsing, focused tests, and documentation. No V3 package, V3 configuration, V3 request, shadow execution, public schema, frontend, or stream change.
 
 Acceptance: all existing V2 tests pass; representative normalized/public payloads are unchanged; missing/empty selector means V2; explicit `v2` means V2; unknown means configuration error; no automatic fallback exists; default/rollback behavior is deterministic.
+
+Implemented files are `ssi_provider_models.py`, `ssi_provider_protocol.py`, `ssi_v2_adapter.py`, and `ssi_provider_router.py`. The adapter returns the existing fetcher dictionaries directly and adds no cache, single-flight, retry, normalization, or provider call. Market and foreign-flow services reuse the same lazy V2 fetcher instance through the router. Streaming continues to call the existing fetcher directly.
+
+##### B1 behavior-parity evidence
+
+| Capability | Old call path | New call path | Provider calls before | Provider calls after | Output parity | Cache parity | Error parity | Lifecycle parity |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Securities | Service -> V2 fetcher | Service -> router -> V2 adapter -> same fetcher | 1 | 1 | Same dictionary | Same fetcher cache | Same exception/result | Same fetcher instance |
+| SecuritiesDetails | Service -> V2 fetcher | Service -> router -> V2 adapter metadata capability -> same fetcher | 1, then optional Securities call | 1, then same optional Securities call | Same dictionary and SSI-only metadata fallback | Same fetcher/service cache | Same exception/result | Same fetcher instance |
+| DailyOhlc | Service -> V2 fetcher | Service -> router -> V2 adapter -> same fetcher | 1 | 1 | Same dictionary; `latest_price` remains DailyOhlc | Same fetcher and service caches | Same exception/result/cooldown | Same token/session owner |
+| IntradayOhlc | Service -> V2 fetcher | Service -> router -> V2 adapter -> same fetcher | 1 | 1 | Same compact/completed-session rows | Same fetcher and chart caches | Same exception/result/cooldown | Same fetcher instance |
+| DailyStockPrice | Service -> V2 fetcher | Service -> router -> V2 adapter -> same fetcher | 1 per bounded attempt | 1 per bounded attempt | Same summary/foreign fields, including null versus zero | Same fetcher and service caches | Same exception/result | Same token/session owner |
+| IndexList | Service -> V2 fetcher | Service -> router -> V2 adapter -> same fetcher | 1 | 1 | Same rows/order | Same fetcher/service cache | Same exception/result | Same fetcher instance |
+| DailyIndex | Service -> V2 fetcher | Service -> router -> V2 adapter -> same fetcher | 1 | 1 | Same rows/order | Same fetcher/service cache | Same exception/result | Same fetcher instance |
+| IndexComponents | Service -> V2 fetcher | Service -> router -> V2 adapter -> same fetcher | 1 | 1 | Same symbols/order | Same fetcher and negative/service caches | Same exception/result | Same fetcher instance |
+| Foreign-flow service | Service -> V2 DailyStockPrice | Service -> router -> V2 adapter -> same DailyStockPrice | Existing bounded attempts | Same bounded attempts | Same history, analytics, units, and null/zero rules | Existing service single-flight/cache unchanged | Existing stale/error policy unchanged | One lazy V2 fetcher per service |
+| VN30 aggregation | IndexComponents + foreign-flow services | Same services through V2 router | Existing bounded membership/symbol calls | Same bounded membership/symbol calls | Same current-membership aggregate | Existing membership/history caches unchanged | Per-row/service errors unchanged | No new client or worker |
+
+Deterministic evidence is in `tests/test_ssi_provider_routing.py` plus the existing fetcher, market, foreign-flow, index, cache/single-flight, startup, and offline realtime suites. The router exposes secret-free internal diagnostics (`capability`, selected provider/version, routing reason, `fallback_used=false`) but adds nothing to public API payloads.
 
 #### SSI-V3-B2 — V3 REST Adapter Foundation
 
@@ -739,10 +758,10 @@ Remove V2 only after all required REST capabilities, all required streaming capa
 
 | Phase | File | Current responsibility | Planned change | Business logic impact | Public API impact | Tests | Rollback impact |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| B1 | `data_provider/ssi_provider_models.py` | Does not exist | Typed provider-neutral normalized rows/results | Codifies existing values only | None | Type/fixture contract | Shared by V2 route after rollback |
-| B1 | `data_provider/ssi_provider_protocol.py` | Does not exist | REST structural `Protocol`; no streams/trading | None | None | Conformance/fakes | Stable interface for V2 |
-| B1 | `data_provider/ssi_v2_adapter.py` | Does not exist | Delegate to current fetcher without renormalizing | None | None | Golden V2 behavior | Primary rollback adapter |
-| B1 | `data_provider/ssi_provider_factory.py` | Does not exist | Parse selector and central capability routing | Selection only | None | default/v2/unknown/no-fallback | Global `v2` owner |
+| B1 | `data_provider/ssi_provider_models.py` | Implemented | Typed provider-neutral normalized rows/results | Codifies existing values only | None | Type/fixture contract | Shared by V2 route after rollback |
+| B1 | `data_provider/ssi_provider_protocol.py` | Implemented | REST structural `Protocol`; no streams/trading | None | None | Conformance/fakes | Stable interface for V2 |
+| B1 | `data_provider/ssi_v2_adapter.py` | Implemented | Delegates to current fetcher without renormalizing | None | None | Golden V2 behavior | Primary rollback adapter |
+| B1 | `data_provider/ssi_provider_router.py` | Implemented | Parses selector and routes every B1 REST capability to V2 | Selection only | None | default/v2/v3/unknown/no-fallback | Global `v2` owner |
 | B1 | `data_provider/ssi_fastconnect_fetcher.py` | Concrete V2 REST + stream cache facade | Prefer no behavioral change; only compatibility hooks if proven necessary | None | None | Existing fetcher suite | Remains source of truth |
 | B1 | `src/config.py`, `src/core/config_registry.py`, `.env.example` | V2 configuration | Add only REST selector, default V2 | None | None | Parsing/error tests | Missing/`v2` restore V2 |
 | B1 | `src/services/vietnam_market_service.py` | Direct lazy V2 construction | Inject neutral router; preserve method outputs | None | None | Existing market regressions | Router selects V2 |
@@ -821,8 +840,8 @@ Runtime acceptance must verify that optional SSI availability never blocks FastA
 
 ### Explicit exclusions
 
-This freeze implements no provider protocol, adapter, factory, SDK, configuration, traffic, shadow mode, public API/schema, frontend, analytics, index aggregation, stream, trading, database, Redis, scheduler, worker, Docker, Render, startup, credential, or environment change. It does not confirm V3 credentials, parity, units, finality, production readiness, or permission to remove V2.
+Phase B1 implements only the provider-neutral models/protocol, delegating V2 adapter, V2-default router, selector parsing, narrow service wiring, tests, and documentation described above. It implements no V3 SDK, credentials, adapter, request, cache, shadow mode, public API/schema, frontend, analytics, index aggregation, stream, trading, database, Redis, scheduler, worker, Docker, Render, or startup change. It does not confirm V3 credentials, parity, units, finality, production readiness, or permission to remove V2.
 
 ### Next implementation phase
 
-**SSI-V3-B1 — Provider Contract and V2 Adapter** is next. It must preserve V2 as default and production, add no V3 dependency or traffic, keep all public behavior stable, and enforce no automatic fallback. B2 and later remain gated by the open questions above.
+**SSI-V3-B2 — V3 REST Adapter Foundation, disabled by default** is next. It remains gated by the open questions above, must add no production routing or shadow traffic, and requires separate authorization before any live provider call.

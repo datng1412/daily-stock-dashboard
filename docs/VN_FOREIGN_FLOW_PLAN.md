@@ -6,6 +6,8 @@ Status: Phase 4.12E-3 implements deterministic, on-demand single-symbol analytic
 
 > SSI-V3-B0 keeps those rules and freezes foreign flow as the last REST cutover group: existing analytics are reused, V2 remains primary through B3/B4, shadow inputs are version-isolated, and V3 needs separate unit, finality, pagination, zero/missing, and net-rule acceptance before B5 ownership.
 
+> SSI-V3-B1 routes the existing DailyStockPrice call through a provider-neutral V2 adapter without changing the foreign-flow cache, single-flight, bounded lookback attempts, normalization, rolling analytics, VN30 aggregation, units, null/zero rules, source metadata, or public API. The adapter returns the same V2 dictionary and adds no provider call or fallback; V3 selection is unavailable.
+
 Phase: 4.12-PLAN
 
 Repository evidence reviewed: 2026-07-17

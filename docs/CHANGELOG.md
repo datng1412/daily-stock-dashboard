@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [improvement] Add provider-neutral SSI REST contracts, a delegating FastConnect V2 adapter, and explicit V2-default routing with hard V3/unknown rejection and no automatic fallback.
+- [test] Prove SSI V2 adapter delegation, selector behavior, null/zero/source parity, shared lifecycle, import safety, and unchanged market, foreign-flow, startup, and offline realtime behavior.
 - [documentation] Freeze the SSI FastConnect V3 capability-by-capability migration architecture, V2-default routing, normalized contracts, shadow isolation, cutover gates, rollback, and B1-B5/C/D implementation sequence without runtime changes.
 - [fix] Remove the optional LiteLLM import and metadata downloads from FastAPI pre-bind startup, and add bounded lifecycle-stage diagnostics through socket readiness.
 - [fix] Run the Render Docker image as non-root `dsa` with an owned writable home, validate required runtime directories, and use the resolved Render port for both FastAPI binding and real loopback HTTP readiness checks.
