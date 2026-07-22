@@ -55,6 +55,7 @@ class IntradayOhlcvRow(TypedDict, total=False):
 
 
 class DailySecuritySummaryRow(TypedDict, total=False):
+    symbol: Optional[str]
     date: Optional[str]
     reference_price: Optional[float]
     ceiling_price: Optional[float]
@@ -77,6 +78,7 @@ class DailySecuritySummaryRow(TypedDict, total=False):
     foreign_sell_value: Optional[float]
     foreign_net_value: Optional[float]
     source: str
+    source_version: str
 
 
 # Foreign-flow services intentionally reuse the daily summary contract.  This
@@ -133,6 +135,9 @@ class ProviderDiagnostics(TypedDict, total=False):
     routing_reason: str
     v2_pinned: bool
     fallback_used: bool
+    implementation_status: str
+    production_owner: str
+    v3_implementation_available: bool
 
 
 class ProviderResult(TypedDict, total=False):

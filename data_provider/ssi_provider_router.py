@@ -30,12 +30,25 @@ V3_SUPPORTED_B2 = frozenset(
     }
 )
 
+V3_IMPLEMENTED_DISABLED_B3 = frozenset(
+    {
+        "daily_security_summary",
+        "foreign_flow",
+        "foreign_flow_history",
+        "foreign_flow_analytics_input",
+        "vn30_foreign_flow_input",
+    }
+)
+
 V2_PINNED = frozenset(
     {
         "security_extended_metadata",
         "current_session_intraday",
         "daily_security_summary",
         "foreign_flow",
+        "foreign_flow_history",
+        "foreign_flow_analytics_input",
+        "vn30_foreign_flow_input",
         "daily_index_series",
         "index_membership_production",
         "realtime",
@@ -121,10 +134,15 @@ class SsiRestProviderRouter:
             assert self._v3_provider is not None
             return self._v3_provider, False, "explicit_v3_b2_capability"
         if capability in V2_PINNED:
-            return self._v2_provider, self._selected_version == "v3", "explicit_v2_capability_pin"
+            reason = (
+                "v3_implemented_disabled_v2_production_owner"
+                if capability in V3_IMPLEMENTED_DISABLED_B3
+                else "explicit_v2_capability_pin"
+            )
+            return self._v2_provider, self._selected_version == "v3", reason
         if self._selected_version == "v2":
             return self._v2_provider, False, "configured_v2"
-        raise ValueError(f"SSI REST capability {capability!r} is unsupported for V3 phase B2")
+        raise ValueError(f"SSI REST capability {capability!r} is unsupported for V3 phase B3")
 
     def routing_diagnostics(self, capability: Optional[str] = None) -> ProviderDiagnostics:
         if capability is None:
@@ -141,7 +159,7 @@ class SsiRestProviderRouter:
         normalized = capability or "unspecified"
         provider, v2_pinned, reason = self._route(normalized)
         selected_version = "v2" if provider is self._v2_provider else "v3"
-        return {
+        diagnostics: ProviderDiagnostics = {
             "capability": capability,
             "requested_rest_version": self._selected_version,
             "selected_provider": (
@@ -152,6 +170,15 @@ class SsiRestProviderRouter:
             "v2_pinned": v2_pinned,
             "fallback_used": False,
         }
+        if normalized in V3_IMPLEMENTED_DISABLED_B3:
+            diagnostics.update(
+                {
+                    "implementation_status": "implemented_disabled",
+                    "production_owner": "ssi_fastconnect_v2",
+                    "v3_implementation_available": True,
+                }
+            )
+        return diagnostics
 
     def get_securities(self, market: Optional[str] = None) -> ProviderResult:
         provider, _, _ = self._route("securities_by_board")

@@ -814,7 +814,7 @@ def test_v2_adapter_remains_default_and_structural_router_contract_holds() -> No
     assert v2.calls == ["get_daily_ohlcv"]
 
 
-def test_static_scope_guards_keep_v3_out_of_streaming_trading_and_foreign_flow() -> None:
+def test_static_scope_guards_keep_v3_out_of_streaming_trading_and_production_foreign_flow() -> None:
     streaming_files = [
         ROOT / "data_provider" / "ssi_streaming_realtime.py",
         ROOT / "src" / "services" / "ssi_streaming_realtime_lifecycle.py",
@@ -825,7 +825,8 @@ def test_static_scope_guards_keep_v3_out_of_streaming_trading_and_foreign_flow()
     assert "Trading(" not in adapter_text
     assert "request_otp" not in adapter_text
     assert "private_key=" not in adapter_text
-    assert "securities_summary" not in adapter_text.lower()
+    assert "SSI_V3_SECURITIES_SUMMARY_PATH" in adapter_text
+    assert "totalForeignBuy" in adapter_text
 
     foreign_text = (ROOT / "src" / "services" / "vietnam_foreign_flow_service.py").read_text(
         encoding="utf-8"

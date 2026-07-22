@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-import math
+from decimal import Decimal, InvalidOperation
 from threading import RLock
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 from zoneinfo import ZoneInfo
@@ -24,6 +24,7 @@ SSI_V3_DEFAULT_API_URL = "https://api.ssi.com.vn/api/v3"
 SSI_V3_PAGE_SIZE = 1000
 SSI_V3_MAX_PAGES = 20
 SSI_V3_MAX_ROWS = 5000
+SSI_V3_SECURITIES_SUMMARY_PATH = "/api/v3/data/securitiesSummary"
 _VN_TIMEZONE = ZoneInfo("Asia/Ho_Chi_Minh")
 _VALID_BOARDS = {"HOSE", "HNX", "UPCOM"}
 
@@ -152,19 +153,21 @@ def _enum_text(value: Any) -> Optional[str]:
 
 
 def _number(value: Any, *, integer: bool = False) -> Optional[Any]:
-    if value is None or value == "" or isinstance(value, bool):
+    if value is None or value == "":
         return None
+    if isinstance(value, bool):
+        raise SsiV3MalformedResponse("boolean provider field is not numeric")
     try:
-        parsed = float(value)
-    except (TypeError, ValueError) as exc:
+        parsed = Decimal(str(value).strip())
+    except (InvalidOperation, TypeError, ValueError) as exc:
         raise SsiV3MalformedResponse("non-numeric provider field") from exc
-    if not math.isfinite(parsed):
+    if not parsed.is_finite():
         raise SsiV3MalformedResponse("non-finite provider field")
     if integer:
-        if not parsed.is_integer():
+        if parsed != parsed.to_integral_value():
             raise SsiV3MalformedResponse("non-integral provider field")
         return int(parsed)
-    return parsed
+    return float(parsed)
 
 
 def _parse_date_value(value: Any) -> str:
@@ -237,8 +240,14 @@ def _sdk_board(value: str) -> Any:
     return Board(value)
 
 
-def _ok_result(rows: List[Dict[str, Any]], *, pages_used: int = 1) -> ProviderResult:
-    return {
+def _ok_result(
+    rows: List[Dict[str, Any]],
+    *,
+    pages_used: int = 1,
+    duplicate_date_count: int = 0,
+    diagnostics: Optional[Dict[str, Any]] = None,
+) -> ProviderResult:
+    result: ProviderResult = {
         "status": "ok",
         "source": SSI_V3_SOURCE,
         "rows": rows,
@@ -246,7 +255,11 @@ def _ok_result(rows: List[Dict[str, Any]], *, pages_used: int = 1) -> ProviderRe
         "cached": False,
         "fetched_at": datetime.now().astimezone().isoformat(),
         "pages_used": pages_used,
+        "duplicate_date_count": duplicate_date_count,
     }
+    if diagnostics is not None:
+        result["diagnostics"] = diagnostics
+    return result
 
 
 def _error_result(capability: str, exc: BaseException) -> ProviderResult:
@@ -463,6 +476,184 @@ class SsiFastConnectV3Adapter:
             "source": SSI_V3_SOURCE,
         }
 
+    @staticmethod
+    def _summary_page(payload: Any) -> Tuple[List[Mapping[str, Any]], Optional[int]]:
+        """Extract the documented V3 summary envelope without SDK model loss.
+
+        ``ssi-sdk==3.0.5`` exposes the official authenticated REST transport,
+        while its ``SecuritiesSummary`` model currently omits the four foreign
+        gross fields.  B3 therefore reads only the documented ``data`` envelope
+        from that public transport and keeps the raw dictionaries inside this
+        adapter.
+        """
+
+        if isinstance(payload, Mapping):
+            if "data" not in payload:
+                raise SsiV3MalformedResponse("securities summary data envelope is missing")
+            data = payload["data"]
+            pages_count_raw = payload.get("pagesCount")
+        elif hasattr(payload, "data"):
+            data = getattr(payload, "data")
+            pages_count_raw = getattr(payload, "pages_count", None)
+            if pages_count_raw is None:
+                pages_count_raw = getattr(payload, "pagesCount", None)
+        else:
+            raise SsiV3MalformedResponse("expected securities summary data envelope")
+        if not isinstance(data, list):
+            raise SsiV3MalformedResponse("securities summary data must be a list")
+        if any(not isinstance(item, Mapping) for item in data):
+            raise SsiV3MalformedResponse("securities summary row must be an object")
+        pages_count = _number(pages_count_raw, integer=True)
+        if pages_count is not None and pages_count < 0:
+            raise SsiV3MalformedResponse("securities summary pagesCount is negative")
+        return data, pages_count
+
+    @staticmethod
+    def _summary_row(
+        item: Mapping[str, Any],
+        *,
+        expected_symbol: Optional[str],
+    ) -> Dict[str, Any]:
+        symbol = _optional_text(_value(item, "symbol"))
+        if not symbol:
+            raise SsiV3MalformedResponse("securities summary symbol is missing")
+        symbol = symbol.upper()
+        if expected_symbol is not None and symbol != expected_symbol:
+            raise SsiV3MalformedResponse("securities summary symbol does not match request")
+
+        foreign_buy_volume = _number(
+            _value(item, "totalForeignBuy"), integer=True
+        )
+        foreign_sell_volume = _number(
+            _value(item, "totalForeignSell"), integer=True
+        )
+        foreign_buy_value = _number(_value(item, "totalForeignBuyValue"))
+        foreign_sell_value = _number(_value(item, "totalForeignSellValue"))
+        foreign_net_volume = (
+            foreign_buy_volume - foreign_sell_volume
+            if foreign_buy_volume is not None and foreign_sell_volume is not None
+            else None
+        )
+        foreign_net_value = (
+            foreign_buy_value - foreign_sell_value
+            if foreign_buy_value is not None and foreign_sell_value is not None
+            else None
+        )
+        return {
+            "symbol": symbol,
+            "date": _parse_date_value(_value(item, "tradingDate")),
+            "reference_price": None,
+            "ceiling_price": None,
+            "floor_price": None,
+            "open": _number(_value(item, "open")),
+            "high": _number(_value(item, "high")),
+            "low": _number(_value(item, "low")),
+            "close": _number(_value(item, "close")),
+            "adjusted_close": None,
+            "matched_volume": _number(_value(item, "totalMatch"), integer=True),
+            "matched_value": _number(_value(item, "totalMatchValue")),
+            "put_through_volume": None,
+            "put_through_value": None,
+            "total_volume": None,
+            "total_value": None,
+            "foreign_buy_volume": foreign_buy_volume,
+            "foreign_sell_volume": foreign_sell_volume,
+            "foreign_net_volume": foreign_net_volume,
+            "foreign_buy_value": foreign_buy_value,
+            "foreign_sell_value": foreign_sell_value,
+            "foreign_net_value": foreign_net_value,
+            "_foreign_net_volume_source": (
+                "derived" if foreign_net_volume is not None else None
+            ),
+            "_foreign_net_value_source": (
+                "derived" if foreign_net_value is not None else None
+            ),
+            "source": SSI_V3_SOURCE,
+            "source_version": "v3",
+        }
+
+    def _paged_summary(
+        self,
+        auth: Any,
+        *,
+        symbol: Optional[str],
+        index: Optional[str],
+        from_value: str,
+        to_value: str,
+        page_index: int,
+        page_size: int,
+        limit: int,
+    ) -> ProviderResult:
+        effective_page_size = min(page_size, limit)
+        normalized_rows: List[Dict[str, Any]] = []
+        previous_fingerprint: Optional[Tuple[str, ...]] = None
+        pages_used = 0
+        current_page = page_index
+        for _ in range(SSI_V3_MAX_PAGES):
+            if current_page > SSI_V3_MAX_PAGES:
+                raise SsiV3PaginationGuard("maximum page bound exceeded")
+            params: Dict[str, Any] = {
+                "from": from_value,
+                "to": to_value,
+                "pageIndex": current_page,
+                "pageSize": effective_page_size,
+            }
+            if symbol is not None:
+                params["symbol"] = symbol
+            else:
+                assert index is not None
+                params["index"] = index
+            payload = auth.rest_client.get(
+                SSI_V3_SECURITIES_SUMMARY_PATH,
+                params=params,
+            )
+            page_rows, pages_count = self._summary_page(payload)
+            pages_used += 1
+            if not page_rows:
+                break
+            fingerprint = tuple(repr(item) for item in page_rows)
+            if fingerprint == previous_fingerprint:
+                raise SsiV3PaginationGuard("repeated securities summary page")
+            previous_fingerprint = fingerprint
+            normalized_rows.extend(
+                self._summary_row(item, expected_symbol=symbol) for item in page_rows
+            )
+            if len(normalized_rows) > SSI_V3_MAX_ROWS:
+                raise SsiV3PaginationGuard("maximum row bound exceeded")
+            if len(normalized_rows) >= limit:
+                break
+            if pages_count is not None and pages_count > 0 and current_page >= pages_count:
+                break
+            if len(page_rows) < effective_page_size:
+                break
+            current_page += 1
+        else:
+            raise SsiV3PaginationGuard("maximum page bound exceeded")
+
+        key_names = ("date",) if symbol is not None else ("symbol", "date")
+        deduped: Dict[Tuple[Any, ...], Dict[str, Any]] = {}
+        for row in normalized_rows:
+            deduped[tuple(row[name] for name in key_names)] = row
+        duplicate_count = len(normalized_rows) - len(deduped)
+        rows = sorted(
+            deduped.values(),
+            key=lambda row: (row["date"], row["symbol"]),
+        )
+        if len(rows) > limit:
+            rows = rows[-limit:]
+        return _ok_result(
+            rows,
+            pages_used=pages_used,
+            duplicate_date_count=duplicate_count,
+            diagnostics={
+                "capability": "securities_summary",
+                "source_version": "v3",
+                "implementation_status": "implemented_disabled",
+                "units_verified": False,
+                "finality_verified": False,
+            },
+        )
+
     def _normalize_list(self, payload: Any, mapper: Callable[[Any], Dict[str, Any]]) -> List[Dict[str, Any]]:
         if not isinstance(payload, list):
             raise SsiV3MalformedResponse("expected SDK list response")
@@ -638,6 +829,95 @@ class SsiFastConnectV3Adapter:
 
         return self._run("completed_historical_intraday_ohlcv", operation)
 
+    def get_securities_summary(
+        self,
+        *,
+        symbol: Optional[str] = None,
+        index: Optional[str] = None,
+        from_date: Optional[str] = None,
+        to_date: Optional[str] = None,
+        page_index: int = 1,
+        page_size: int = SSI_V3_PAGE_SIZE,
+        limit: int = 260,
+    ) -> ProviderResult:
+        """Normalize the official V3 summary contract for direct offline tests.
+
+        Production routing remains pinned to the V2 ``DailyStockPrice`` owner.
+        This direct adapter method intentionally supports exactly one symbol or
+        index and performs no market-wide fan-out, caching, or fallback.
+        """
+
+        try:
+            filters = [
+                value for value in (symbol, index) if str(value or "").strip()
+            ]
+            if len(filters) != 1:
+                raise ValueError("exactly one of symbol or index is required")
+            normalized_symbol = str(symbol).strip().upper() if symbol else None
+            normalized_index = str(index).strip().upper() if index else None
+            if isinstance(page_index, bool) or not isinstance(page_index, int):
+                raise ValueError("page_index must be an integer")
+            if page_index < 1 or page_index > SSI_V3_MAX_PAGES:
+                raise ValueError(
+                    f"page_index must be between 1 and {SSI_V3_MAX_PAGES}"
+                )
+            if isinstance(page_size, bool) or not isinstance(page_size, int):
+                raise ValueError("page_size must be an integer")
+            if page_size < 1 or page_size > SSI_V3_PAGE_SIZE:
+                raise ValueError(
+                    f"page_size must be between 1 and {SSI_V3_PAGE_SIZE}"
+                )
+            if isinstance(limit, bool) or not isinstance(limit, int):
+                raise ValueError("limit must be an integer")
+            if limit < 1 or limit > SSI_V3_MAX_ROWS:
+                raise ValueError(f"limit must be between 1 and {SSI_V3_MAX_ROWS}")
+
+            today = datetime.now(_VN_TIMEZONE).date().isoformat()
+            if from_date is None and to_date is None:
+                start_value = end_value = _provider_date(today, intraday=False)
+            else:
+                end_value = _provider_date(to_date or today, intraday=False)
+                start_value = _provider_date(from_date or to_date, intraday=False)
+            if start_value > end_value:
+                raise ValueError("from_date must not be after to_date")
+        except Exception as exc:
+            return _error_result("securities_summary", exc)
+
+        def operation(auth: Any, _data: Any) -> ProviderResult:
+            return self._paged_summary(
+                auth,
+                symbol=normalized_symbol,
+                index=normalized_index,
+                from_value=start_value,
+                to_value=end_value,
+                page_index=page_index,
+                page_size=page_size,
+                limit=limit,
+            )
+
+        return self._run("securities_summary", operation)
+
+    def get_securities_summary_by_index(
+        self,
+        index_code: str,
+        *,
+        from_date: Optional[str] = None,
+        to_date: Optional[str] = None,
+        page_index: int = 1,
+        page_size: int = SSI_V3_PAGE_SIZE,
+        limit: int = 260,
+    ) -> ProviderResult:
+        """Expose index normalization as implemented-disabled adapter scope."""
+
+        return self.get_securities_summary(
+            index=index_code,
+            from_date=from_date,
+            to_date=to_date,
+            page_index=page_index,
+            page_size=page_size,
+            limit=limit,
+        )
+
     def get_index_list(
         self,
         market: Optional[str] = None,
@@ -730,8 +1010,13 @@ class SsiFastConnectV3Adapter:
         to_date: Optional[str] = None,
         limit: int = 260,
     ) -> ProviderResult:
-        del symbol, market, from_date, to_date, limit
-        return self._unsupported("daily_security_summary")
+        del market
+        return self.get_securities_summary(
+            symbol=symbol,
+            from_date=from_date,
+            to_date=to_date,
+            limit=limit,
+        )
 
     def get_daily_index(
         self,
@@ -754,14 +1039,31 @@ class SsiFastConnectV3Adapter:
         return self._unsupported("index_membership_production")
 
     def routing_diagnostics(self, capability: Optional[str] = None) -> ProviderDiagnostics:
+        summary_capabilities = {
+            "daily_security_summary",
+            "foreign_flow",
+            "securities_summary",
+        }
+        implemented_disabled = capability in summary_capabilities
         return {
             "capability": capability,
             "requested_rest_version": "v3",
             "selected_provider": "ssi_fastconnect_v3",
             "selected_version": "v3",
-            "routing_reason": "explicit_v3_b2_capability",
+            "routing_reason": "direct_v3_adapter_capability",
             "v2_pinned": False,
             "fallback_used": False,
+            "implementation_status": (
+                "implemented_disabled"
+                if implemented_disabled
+                else "implemented"
+            ),
+            "production_owner": (
+                "ssi_fastconnect_v2"
+                if implemented_disabled
+                else "ssi_fastconnect_v3"
+            ),
+            "v3_implementation_available": implemented_disabled,
         }
 
     def close(self) -> None:
