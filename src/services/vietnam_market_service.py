@@ -12,7 +12,7 @@ import re
 import statistics
 import time
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from threading import Lock, RLock
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
@@ -337,8 +337,12 @@ def _iso(value: Optional[datetime]) -> Optional[str]:
     return value.isoformat() if value else None
 
 
-def _intraday_chart_cache_key(ticker: str, trading_date: str) -> Tuple[Any, ...]:
-    return (
+def _intraday_chart_cache_key(
+    ticker: str,
+    trading_date: str,
+    provider_version: str = "v2",
+) -> Tuple[Any, ...]:
+    key = (
         "intraday_chart",
         "ssi_fastconnect",
         "IntradayOhlc",
@@ -350,6 +354,9 @@ def _intraday_chart_cache_key(ticker: str, trading_date: str) -> Tuple[Any, ...]
         "page_size",
         VN_INTRADAY_CHART_PAGE_SIZE,
     )
+    if str(provider_version or "v2").strip().lower() == "v3":
+        return (*key, "provider_version", "v3")
+    return key
 
 
 def _intraday_chart_entry_kind(entry: _IntradayChartCacheEntry) -> str:
@@ -727,6 +734,15 @@ class VietnamDashboardConfig:
     intraday_data_provider: str = VN_PROVIDER_SSI
     ssi_intraday_enabled: bool = True
     ssi_fastconnect_rest_version: str = "v2"
+    ssi_v3_rest_enabled: bool = False
+    ssi_v3_client_id: Optional[str] = field(default=None, repr=False)
+    ssi_v3_api_key: Optional[str] = field(default=None, repr=False)
+    ssi_v3_api_secret: Optional[str] = field(default=None, repr=False)
+    ssi_v3_api_url: str = "https://api.ssi.com.vn/api/v3"
+    ssi_v3_request_timeout: int = 10
+    ssi_v3_max_retries: int = 2
+    ssi_v3_retry_delay: float = 1.0
+    ssi_v3_rate_limit_per_second: int = 5
     realtime_data_provider: str = VN_PROVIDER_SSI
     trade_tape_provider: str = VN_PROVIDER_SSI
     ssi_realtime_enabled: bool = True
@@ -750,6 +766,19 @@ def _default_dashboard_config() -> VietnamDashboardConfig:
         intraday_data_provider=getattr(app_config, "vn_intraday_data_provider", VN_PROVIDER_SSI),
         ssi_intraday_enabled=getattr(app_config, "ssi_fastconnect_intraday_enabled", True),
         ssi_fastconnect_rest_version=getattr(app_config, "ssi_fastconnect_rest_version", "v2"),
+        ssi_v3_rest_enabled=getattr(app_config, "ssi_v3_rest_enabled", False),
+        ssi_v3_client_id=getattr(app_config, "ssi_v3_client_id", None),
+        ssi_v3_api_key=getattr(app_config, "ssi_v3_api_key", None),
+        ssi_v3_api_secret=getattr(app_config, "ssi_v3_api_secret", None),
+        ssi_v3_api_url=getattr(
+            app_config, "ssi_v3_api_url", "https://api.ssi.com.vn/api/v3"
+        ),
+        ssi_v3_request_timeout=getattr(app_config, "ssi_v3_request_timeout", 10),
+        ssi_v3_max_retries=getattr(app_config, "ssi_v3_max_retries", 2),
+        ssi_v3_retry_delay=getattr(app_config, "ssi_v3_retry_delay", 1.0),
+        ssi_v3_rate_limit_per_second=getattr(
+            app_config, "ssi_v3_rate_limit_per_second", 5
+        ),
         realtime_data_provider=getattr(app_config, "vn_realtime_data_provider", VN_PROVIDER_SSI),
         trade_tape_provider=getattr(app_config, "vn_trade_tape_provider", VN_PROVIDER_SSI),
         ssi_realtime_enabled=getattr(app_config, "ssi_fastconnect_realtime_enabled", True),
@@ -3379,11 +3408,21 @@ def normalize_completed_intraday_chart_rows(
     rejected_rows = 0
     for occurrence, raw in enumerate(raw_rows):
         lower = {str(key).lower(): value for key, value in raw.items()}
+        normalized_datetime = lower.get("date_time") or lower.get("datetime")
         try:
-            original_datetime = datetime.strptime(
-                f"{str(lower.get('tradingdate') or '').strip()} {str(lower.get('time') or '').strip()}",
-                "%d/%m/%Y %H:%M:%S",
-            ).replace(tzinfo=VN_TIMEZONE)
+            if normalized_datetime:
+                original_datetime = datetime.fromisoformat(
+                    str(normalized_datetime).strip().replace("Z", "+00:00")
+                )
+                if original_datetime.tzinfo is None:
+                    original_datetime = original_datetime.replace(tzinfo=VN_TIMEZONE)
+                else:
+                    original_datetime = original_datetime.astimezone(VN_TIMEZONE)
+            else:
+                original_datetime = datetime.strptime(
+                    f"{str(lower.get('tradingdate') or '').strip()} {str(lower.get('time') or '').strip()}",
+                    "%d/%m/%Y %H:%M:%S",
+                ).replace(tzinfo=VN_TIMEZONE)
         except (TypeError, ValueError):
             rejected_rows += 1
             continue
@@ -3547,6 +3586,7 @@ class VietnamMarketService:
             self._ssi_rest_provider = create_ssi_rest_provider_router(
                 version=self.config.ssi_fastconnect_rest_version,
                 v2_fetcher=self._get_ssi_fetcher(),
+                config=self.config,
             )
         return self._ssi_rest_provider
 
@@ -3621,6 +3661,8 @@ class VietnamMarketService:
         params: Dict[str, Any] = {"timeframe": "1d", "limit": limit, "days": days}
         if provider == VN_PROVIDER_SSI:
             params["provider"] = VN_PROVIDER_SSI
+            if self.config.ssi_fastconnect_rest_version == "v3":
+                params["provider_version"] = "v3"
         return _cache_key("ohlcv", symbol, **params)
 
     def _build_daily_ohlcv_loader(
@@ -5437,7 +5479,11 @@ class VietnamMarketService:
         )
 
     def _ssi_symbol_metadata(self, symbol: str, force_refresh: bool = False) -> Dict[str, Any]:
-        key = _cache_key("symbol_metadata", symbol, provider=VN_PROVIDER_SSI, market=get_vn_exchange(symbol))
+        metadata_key_params: Dict[str, Any] = {
+            "provider": VN_PROVIDER_SSI,
+            "market": get_vn_exchange(symbol),
+        }
+        key = _cache_key("symbol_metadata", symbol, **metadata_key_params)
         try:
             result = _read_cache(
                 key,
@@ -5630,7 +5676,16 @@ class VietnamMarketService:
 
         cache_policy = "current" if requested_date == current_vietnam_date else "completed"
         observe_intraday_request(cache_policy, force_refresh=force_refresh)
-        key = _intraday_chart_cache_key(normalized_ticker, trading_date)
+        cache_provider_version = (
+            "v3"
+            if self.config.ssi_fastconnect_rest_version == "v3" and cache_policy == "completed"
+            else "v2"
+        )
+        key = _intraday_chart_cache_key(
+            normalized_ticker,
+            trading_date,
+            cache_provider_version,
+        )
         now = _utc_now()
         observed_entry = _get_intraday_chart_cache_entry(key)
         if observed_entry is not None and observed_entry.policy != cache_policy:

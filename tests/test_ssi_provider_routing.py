@@ -83,9 +83,9 @@ def test_selector_defaults_or_normalizes_to_v2(value: Optional[str]) -> None:
     assert parse_ssi_fastconnect_rest_version(value) == "v2"
 
 
-def test_selector_rejects_v3_as_not_implemented() -> None:
-    with pytest.raises(ValueError, match="V3 REST adapter is not implemented in phase B1"):
-        parse_ssi_fastconnect_rest_version("v3")
+def test_selector_accepts_explicit_v3_for_the_disabled_b2_adapter() -> None:
+    assert parse_ssi_fastconnect_rest_version("v3") == "v3"
+    assert parse_ssi_fastconnect_rest_version(" V3 ") == "v3"
 
 
 @pytest.mark.parametrize("value", ["v1", "future", "ssi"])
@@ -101,9 +101,11 @@ def test_router_defaults_to_v2_and_exposes_no_fallback_diagnostics() -> None:
     assert router.selected_version == "v2"
     assert router.routing_diagnostics("daily_ohlcv") == {
         "capability": "daily_ohlcv",
-        "selected_provider": "ssi_fastconnect",
+        "requested_rest_version": "v2",
+        "selected_provider": "ssi_fastconnect_v2",
         "selected_version": "v2",
         "routing_reason": "configured_v2",
+        "v2_pinned": False,
         "fallback_used": False,
     }
 
@@ -315,15 +317,14 @@ def test_provider_module_imports_do_not_start_threads_or_make_requests(monkeypat
         importlib.reload(importlib.import_module(module_name))
 
 
-def test_b1_production_modules_contain_no_v3_sdk_url_or_credentials() -> None:
+def test_v2_and_streaming_modules_do_not_import_v3_sdk_or_credentials() -> None:
     root = Path(__file__).resolve().parents[1]
     production_files = (
         root / "data_provider" / "ssi_provider_models.py",
         root / "data_provider" / "ssi_provider_protocol.py",
         root / "data_provider" / "ssi_v2_adapter.py",
-        root / "data_provider" / "ssi_provider_router.py",
-        root / "src" / "services" / "vietnam_market_service.py",
-        root / "src" / "services" / "vietnam_foreign_flow_service.py",
+        root / "data_provider" / "ssi_streaming_realtime.py",
+        root / "src" / "services" / "ssi_streaming_realtime_lifecycle.py",
     )
     forbidden = ("ssi_sdk", "ssi-sdk", "/api/v3", "SSI_V3_CLIENT_ID", "SSI_V3_API_KEY", "SSI_V3_API_SECRET")
     combined = "\n".join(path.read_text(encoding="utf-8") for path in production_files)

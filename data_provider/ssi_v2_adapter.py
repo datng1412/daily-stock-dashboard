@@ -28,6 +28,19 @@ class SsiFastConnectV2Adapter:
     ) -> ProviderResult:
         return self._fetcher.get_securities_details(symbol=symbol, market=market)
 
+    def get_security_basic_info(self, symbol: str) -> ProviderResult:
+        return self._fetcher.get_securities_details(symbol=symbol, market=None)
+
+    def get_securities_by_index(self, index_code: str) -> ProviderResult:
+        return {
+            "status": "unavailable",
+            "source": "SSI",
+            "reason": "V2 securities-by-index normalization is not exposed by this adapter.",
+            "failure_class": "unsupported_capability",
+            "rows": [],
+            "count": 0,
+        }
+
     def get_daily_ohlcv(
         self,
         symbol: str,
@@ -109,6 +122,21 @@ class SsiFastConnectV2Adapter:
             kwargs["force_refresh"] = True
         return self._fetcher.get_daily_index(index_code, **kwargs)
 
+    def get_index_summary(
+        self,
+        board: str,
+        index_code: Optional[str] = None,
+        trading_date: Optional[str] = None,
+    ) -> ProviderResult:
+        return {
+            "status": "unavailable",
+            "source": "SSI",
+            "reason": "V2 index summary requires the existing DailyIndex route.",
+            "failure_class": "unsupported_capability",
+            "rows": [],
+            "count": 0,
+        }
+
     def get_index_components(
         self,
         index_code: str,
@@ -123,9 +151,11 @@ class SsiFastConnectV2Adapter:
     def routing_diagnostics(self, capability: Optional[str] = None) -> ProviderDiagnostics:
         return {
             "capability": capability,
+            "requested_rest_version": "v2",
             "selected_provider": "ssi_fastconnect",
             "selected_version": "v2",
             "routing_reason": "delegating_v2_adapter",
+            "v2_pinned": False,
             "fallback_used": False,
         }
 

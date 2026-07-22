@@ -127,9 +127,11 @@ class IndexMembershipRow(TypedDict, total=False):
 
 class ProviderDiagnostics(TypedDict, total=False):
     capability: Optional[str]
+    requested_rest_version: str
     selected_provider: str
     selected_version: str
     routing_reason: str
+    v2_pinned: bool
     fallback_used: bool
 
 
@@ -146,4 +148,4 @@ class ProviderResult(TypedDict, total=False):
     failure_class: Optional[str]
     pages_used: int
     duplicate_date_count: int
-
+    diagnostics: Dict[str, Any]

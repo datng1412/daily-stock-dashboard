@@ -24,6 +24,10 @@ class SsiRestProvider(Protocol):
         market: Optional[str] = None,
     ) -> ProviderResult: ...
 
+    def get_security_basic_info(self, symbol: str) -> ProviderResult: ...
+
+    def get_securities_by_index(self, index_code: str) -> ProviderResult: ...
+
     def get_daily_ohlcv(
         self,
         symbol: str,
@@ -68,6 +72,13 @@ class SsiRestProvider(Protocol):
         force_refresh: bool = False,
     ) -> ProviderResult: ...
 
+    def get_index_summary(
+        self,
+        board: str,
+        index_code: Optional[str] = None,
+        trading_date: Optional[str] = None,
+    ) -> ProviderResult: ...
+
     def get_index_components(
         self,
         index_code: str,
@@ -78,4 +89,3 @@ class SsiRestProvider(Protocol):
     def routing_diagnostics(self, capability: Optional[str] = None) -> ProviderDiagnostics: ...
 
     def close(self) -> None: ...
-
