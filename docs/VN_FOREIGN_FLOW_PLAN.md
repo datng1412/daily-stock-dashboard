@@ -4,6 +4,8 @@ Status: Phase 4.12E-3 implements deterministic, on-demand single-symbol analytic
 
 > SSI-V3-A1 migration note: V3 `securitiesSummary` documents foreign buy/sell totals and values, but the existing-key raw V3 auth mapping received HTTP 401, so no V3 data parity request ran. Shares/VND units, completed-session finality, direct-net precedence, and multi-symbol replacement remain unverified. V2 DailyStockPrice remains the only foreign-flow runtime source under outcome D. See `docs/SSI_FASTCONNECT_V3_MIGRATION.md`.
 
+> SSI-V3-B0 keeps those rules and freezes foreign flow as the last REST cutover group: existing analytics are reused, V2 remains primary through B3/B4, shadow inputs are version-isolated, and V3 needs separate unit, finality, pagination, zero/missing, and net-rule acceptance before B5 ownership.
+
 Phase: 4.12-PLAN
 
 Repository evidence reviewed: 2026-07-17

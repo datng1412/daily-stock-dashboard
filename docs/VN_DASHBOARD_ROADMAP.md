@@ -74,6 +74,8 @@ This roadmap is the source of truth for Vietnam dashboard provider ownership. SS
 
 Phase SSI-V3-A1 records a future FastConnect migration gate only: official V3 API/SDK contracts were mapped, then one authorized existing-key request received HTTP 401 when current V2 values were supplied as V3 raw `apiKey`/`apiSecret`. Outcome D keeps V2 unchanged while SSI resolves V3 activation and identifier/key mapping. The customer notice records V2 maintenance through 30/06/2027 and V3 replacement from 01/07/2027. No V3 adapter, traffic, automatic fallback, or dashboard behavior is authorized before a later A/B gate. See `docs/SSI_FASTCONNECT_V3_MIGRATION.md`.
 
+Phase SSI-V3-B0 now freezes that later implementation sequence without opening V3 traffic. B1 introduces only provider-neutral REST contracts, a delegating V2 adapter, and explicit V2-default routing. B2-B5 then separate disabled V3 foundation, foreign-flow normalization, bounded shadow evidence, and capability-specific REST cutover; realtime is a separate future C phase. Public APIs/frontend states stay stable, caches remain version-isolated, V2 retention is explicit, and rollback is configuration-driven with no automatic fallback.
+
 ### Current provider ownership
 
 | Capability or data domain | Owner | Current implementation state | Dashboard rule |

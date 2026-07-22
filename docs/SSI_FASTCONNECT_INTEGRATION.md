@@ -52,6 +52,8 @@ Phase SSI-V3-A1 is audit-only. The SSI customer notice supplied to this project 
 
 Phase SSI-V3-CONTRACT-DIFF adds a documentation-only URL/parameter table to that migration document. It confirms that all compared URLs change, while REST methods remain POST for auth and GET for market data. Important name changes are `market`/`exchange` → `board`, `fromDate`/`toDate` → `from`/`to`, `indexId`/`indexCode` → `index`, and IntradayOhlc `resolution` → common V3 OHLC `timeFrame`. V3 retains `pageIndex`/`pageSize` only for summary/OHLC candidates, with a documented default size of 10 rather than the V2 model's 100. This comparison makes no credential, entitlement, unit, finality, runtime, or data-parity claim.
 
+Phase SSI-V3-B0 freezes a documentation-only migration architecture: a provider-neutral REST `Protocol`, delegating V2 adapter, disabled future V3 adapter, and central capability router defaulting to V2. Migration is capability-specific, caches and single-flight are provider-version isolated, V3 shadow work is bounded/default-off, and no V3 error may trigger V2 fallback. Realtime remains V2 through REST phases B1-B5. B1 is next and may add only the contract/V2 wrapper/selector—no V3 dependency or traffic. The complete contract is in `docs/SSI_FASTCONNECT_V3_MIGRATION.md`.
+
 ## Provider roles
 
 SSI FastConnect is the preferred future official market-data provider for:

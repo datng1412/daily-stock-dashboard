@@ -16,6 +16,8 @@ FastConnect V3 is a future migration candidate only. Phase SSI-V3-A1 records out
 
 Phase SSI-V3-CONTRACT-DIFF documents URL, HTTP-method, request-name, paging, date-format, and main response-name changes only. It does not change capability status or claim semantic parity. The complete comparison is in `docs/SSI_FASTCONNECT_V3_MIGRATION.md`.
 
+Phase SSI-V3-B0 freezes the migration plan without changing this capability evidence: V2 stays production; each REST capability has its own V3 gate and V2 exit criterion; streaming stays V2 until a separate future phase; foreign-flow analytics and VN30 aggregation reuse normalized inputs; missing and zero remain distinct; and automatic V3-to-V2 fallback is forbidden. SSI-V3-B1 is the next V2-only implementation phase.
+
 Phase 4.11C implements the verified completed-session slice of `IntradayOhlc`, and Phase 4.11D-2 extends the same fixed `resolution=1`, page 1, size 1,000 request to Today with delayed polling and typed freshness metadata. This is SSI-authoritative 1-minute chart data, not realtime. 5m/15m/30m/1h, aggregation, additional pages, HNX/UPCOM proof, and official volume-unit documentation remain unverified/deferred.
 
 ## Status Vocabulary

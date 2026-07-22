@@ -1,6 +1,12 @@
-# SSI FastConnect V3 Capability and Migration Gate
+# SSI FastConnect V3 Migration Architecture and Gate
 
-Status: Phase SSI-V3-A1 complete as an existing-key compatibility and change-impact audit. Production remains on FastConnect V2.
+Status: Phase SSI-V3-B0 freezes the implementation plan. Production remains on FastConnect V2; no V3 adapter, dependency, routing, shadow traffic, or frontend change is implemented.
+
+## Current migration gate
+
+FastConnect V3 migration architecture and implementation phases are documented. SSI FastConnect V2 remains the production provider. The prior SSI-V3-A1 result remains outcome D for the exact credential-field mapping tested; it does not block the V2-only B1 abstraction phase, but it blocks V3 authentication, shadow traffic, and capability cutover until SSI resolves V3 activation and identifier/key mapping.
+
+SSI-V3-B1 is the next implementation phase. It introduces only provider-neutral contracts, a V2 adapter, and explicit V2-default REST routing. B1 adds no V3 dependency or traffic.
 
 ## Decision
 
@@ -8,7 +14,7 @@ Status: Phase SSI-V3-A1 complete as an existing-key compatibility and change-imp
 
 The repository has an installed V2 `ssi-fc-data` 2.2.2 dependency and V2-only production configuration. The official Python V3 package is `ssi-sdk` with the `ssi_sdk` namespace and documented version `3.0.5`; it was inspected from official documentation/package metadata and was not installed locally. On 2026-07-21, the audit mapped the existing `SSI_FASTCONNECT_CONSUMER_ID` and `SSI_FASTCONNECT_CONSUMER_SECRET` values in memory to the documented V3 raw REST `apiKey` and `apiSecret` fields. The single authorized `POST /api/v3/auth/token` sequence returned HTTP 401 in 1,388 ms. It produced no access token, refresh token, expiry field, or rate-limit header.
 
-This result is an explicit V3 rejection of the tested current-value/raw-field mapping, not a network failure and not proof that V2 credentials have stopped working. No market-data, index, file, or WebSocket parity request followed. Only a future A or B outcome may open SSI-V3-B. Outcome D keeps V2 unchanged and requires SSI to confirm V3 account activation and the exact mapping of application/client identifier, API key, and API secret before another live attempt.
+This result is an explicit V3 rejection of the tested current-value/raw-field mapping, not a network failure and not proof that V2 credentials have stopped working. No market-data, index, file, or WebSocket parity request followed. Only a future A or B outcome may open V3 authentication, shadow, or cutover work. Outcome D keeps V2 unchanged and requires SSI to confirm V3 account activation and the exact mapping of application/client identifier, API key, and API secret before another live attempt. The V2-only B1 contract/adapter phase may proceed without V3 access.
 
 ## SSI customer notice and lifecycle
 
@@ -273,11 +279,11 @@ The documented cash-market candidates are the scoped trade, quote, and room topi
 | Rate-limit contract | Verified | Header names documented. |
 | Pagination | Verified | One-based history paging documented. |
 | Side-by-side operation | Blocked | Feasible only after SSI resolves V3 activation/credential mapping and a later A/B gate opens shadow work. |
-| Migration adapter viability | Blocked | Outcome D forbids adapter implementation; authentication and contract parity must be established first. |
+| V3 adapter/live viability | Blocked | Outcome D forbids V3 authentication, shadow, and cutover work; authentication and contract parity must be established first. The V2-only B1 adapter is permitted. |
 
 ## Proposed migration architecture — not implemented
 
-Phase SSI-V3-B may propose a provider-neutral internal surface only after outcome A or B. The design target is a small fact-preserving interface, not a V2/V3 automatic fallback:
+Phase SSI-V3-B0 now freezes this provider-neutral internal surface, and the V2-only B1 implementation may proceed under outcome D. V3 adapter authentication, shadow, and cutover work still require the relevant open gates. The design target is a small fact-preserving interface, not a V2/V3 automatic fallback:
 
 ```text
 security_master_page(board | index | symbol)
@@ -286,10 +292,9 @@ daily_ohlcv(symbol, date_range, page)
 daily_foreign_flow(symbol, date_range, page)
 index_catalog()
 index_membership(index_code)
-realtime_snapshot(symbol)  # cache read only; lifecycle owns the stream
 ```
 
-Each result would carry provider/version, request identity, source timestamp, paging/freshness, units, finality, and explicit missing/error state. V2 stays primary. V3 could only run in a separate, bounded shadow path with no product response ownership and no fallback. Compare raw normalized values, never formatted strings:
+The B1 protocol is REST-only; realtime cache reads remain on the existing V2 streaming boundary until SSI-V3-C. Each REST result would carry provider/version, request identity, source timestamp, paging/freshness, units, finality, and explicit missing/error state. V2 stays primary. V3 could only run in a separate, bounded shadow path with no product response ownership and no fallback. Compare raw normalized values, never formatted strings:
 
 - symbol and market/index identity;
 - trading date; open/high/low/close; volume;
@@ -301,13 +306,523 @@ No full historical parity, broad WebSocket topic, database persistence, schedule
 
 ## SSI account/credential follow-up
 
-The recommended next phase is a narrow **SSI V3 account and credential-contract resolution**, not adapter implementation:
+SSI V3 account and credential-contract resolution is a parallel prerequisite for B2 live acceptance and all B4/B5 work. It is not required for the V2-only B1 contract and adapter:
 
 1. Ask SSI to confirm whether the current account is V3-enabled and whether V2 `ConsumerID` is the V3 `apiKey`, the SDK `client_id`, both, or neither. Do not request or rotate a key speculatively.
 2. Confirm the exact data-only V3 API key/secret mapping and whether a separate client identifier is assigned.
 3. After SSI provides a concrete correction/activation, authorize one new bounded auth evidence phase; do not retry the rejected mapping unchanged.
 4. Only after auth succeeds, use one provider-derived symbol for the bounded securities/history/index comparisons.
 5. Resolve streaming separately because official SDK documentation requires OTP for Stream and the documented stream URLs differ.
-6. Re-evaluate the migration gate. Do not begin SSI-V3-B unless the result becomes A or B.
+6. Re-evaluate the migration gate. Do not begin V3 authentication, shadow traffic, or capability cutover unless the result becomes A or B; B1 remains V2-only.
 
 No credential, token, header, raw provider payload, SDK archive, historical file, or live audit artifact was committed by SSI-V3-A1.
+
+## SSI-V3-B0 implementation contract freeze
+
+### Purpose
+
+This section freezes how StockClock may implement the V2-to-V3 migration. It is a plan, not authorization to install, authenticate, send V3 traffic, or change a public response. Earlier sections retain the official wire-contract comparison and the SSI-V3-A1 evidence boundary.
+
+### Current production baseline and V2 call graph
+
+The production dependency remains official `ssi-fc-data` from the `python-fcdata` tag `v2.2.2`, imported through `ssi_fc_data`. Docker installs it from `requirements.txt`; no V3 package is installed. Current production configuration is V2-only: `SSI_FASTCONNECT_BASE_URL`, `SSI_FASTCONNECT_CONSUMER_ID`, and `SSI_FASTCONNECT_CONSUMER_SECRET` feed `SsiFastConnectFetcher`.
+
+```text
+FastAPI /api/v1/stocks/vn/* routes
+  -> VietnamMarketService / VietnamCompanyResearchService
+  |    -> lazy SsiFastConnectFetcher
+  |         -> AccessToken
+  |         -> DailyOhlc / IntradayOhlc / DailyStockPrice
+  |         -> Securities / SecuritiesDetails
+  |         -> IndexList / DailyIndex / IndexComponents
+  |         -> V2 streaming-manager cache reads
+  -> VietnamForeignFlowService / Batch / Vn30
+       -> SsiFastConnectFetcher.get_daily_stock_price
+       -> normalized daily rows
+       -> rolling windows, rankings, coverage, VN30 aggregation
+
+FastAPI lifespan
+  -> schedules the existing V2 SSI streaming manager in the background
+  -> shutdown owns cancellation and best-effort stream cleanup
+```
+
+| Current path | Importance | Production role | Migration treatment |
+| --- | --- | --- | --- |
+| V2 token and DailyOhlc | Production-critical | Canonical daily OHLCV and `latest_price` | V2 until daily OHLC gate passes |
+| DailyStockPrice | Production-critical for foreign-flow workspace; production-important elsewhere | Reference/limits, matched/put-through fields, daily foreign flow | V2 until field, unit, null/zero, pagination, and finality gates pass |
+| Securities / SecuritiesDetails | Production-important | Symbol identity and partial metadata | Board/basic identity may migrate first; extended metadata stays V2 |
+| IndexList / DailyIndex / IndexComponents | Production-important | Index identifiers, optional summaries, current VN30 membership | Separate gates; membership stays V2 until effective-time parity |
+| IntradayOhlc | Optional product capability | Completed/current-session delayed 1m chart data | Completed history may shadow; current-session stays V2 |
+| X, X-TRADE, X-QUOTE, R, F, MI streaming | Optional and non-fatal | Quote, trades, order book, room, status, market pulse | V2 throughout REST migration; future SSI-V3-C only |
+| Cache, single-flight, analytics, API schemas, frontend | Production-critical business policy | Stability, truthful states, calculations, presentation | Reuse behind provider-neutral inputs |
+| V3 audit script and tests | Audit-only | Contract inventory and bounded evidence | Never treated as production routing |
+| V3 market file / extra intervals | Unused | No current public product owner | Optional future capability only after a separate gate |
+
+### Official V3 contract baseline
+
+Only these official authorities inform this plan:
+
+- [SSI Developer Portal](https://developers.ssi.com.vn/)
+- [V3 API reference](https://developers.ssi.com.vn/docs/api-reference)
+- [V3 SDK overview](https://developers.ssi.com.vn/docs/sdk/overview)
+- [Official SSI V3 tutorials](https://github.com/SSI-Securities-Inc/ssi-fastconnect-v3-tutorials)
+- [Official Python package metadata](https://pypi.org/project/ssi-sdk/)
+
+The portal documents `Config -> Auth -> Data / Trading / Stream`, market-data REST without OTP, and OTP for trading and streaming. It documents the `ssi-sdk` package and `ssi_sdk` namespace, but B2 must recheck and pin an exact version at implementation time. The current documented endpoint candidates are the URL/parameter table above. Similar names establish candidates only, not units, completeness, finality, or parity.
+
+### Frozen migration principles
+
+1. V2 remains production until the specific capability's V3 acceptance gate passes.
+2. Cutover is capability-specific, never an all-at-once provider replacement.
+3. Existing StockClock APIs and frontend payload/state semantics remain stable.
+4. Business logic consumes normalized provider-independent rows.
+5. V2/V3 request objects and response envelopes stay inside their adapters.
+6. A V3 error never triggers an automatic V2 request or response substitution.
+7. Any intentional V2 ownership under V3 mode is declared by capability and observable.
+8. Rollback is configuration-driven; global V2 rollback is always available.
+9. REST and streaming migrations are separate projects.
+10. Realtime remains V2 through B1-B5.
+11. Foreign-flow analytics and VN30 aggregation are reused when normalized inputs remain stable.
+12. Missing stays `null`; explicit provider zero stays zero.
+13. Similar field names never prove unit, finality, or semantic parity.
+14. Future shadow traffic is disabled by default, bounded, cancellable where practical, and rate-limit-aware.
+15. Trading, accounts, orders, transfers, and portfolio actions are outside this migration.
+
+### Target architecture
+
+The narrowest design consistent with current code is a structural `Protocol`, not an abstract base class. The repository already uses `Protocol` for SSI streaming and corporate-action providers, and current services are constructor-injectable. A protocol avoids inheritance and lets deterministic fakes and the existing fetcher satisfy the contract without changing runtime representation.
+
+```text
+data_provider/
+  ssi_fastconnect_fetcher.py       # existing V2 implementation, retained
+  ssi_provider_models.py           # future normalized TypedDict/value contracts
+  ssi_provider_protocol.py         # future REST-only structural Protocol
+  ssi_v2_adapter.py                # future delegating wrapper; no behavior rewrite
+  ssi_fastconnect_v3_fetcher.py    # future disabled V3 REST adapter
+  ssi_provider_factory.py          # future selector + central capability router
+
+services
+  -> receive one provider-neutral capability router
+  -> keep business calculations, public schemas, and state semantics
+
+V2 streaming lifecycle
+  -> remains separate and unchanged through B1-B5
+```
+
+Responsibilities are frozen as follows:
+
+| Layer | Responsibility |
+| --- | --- |
+| Normalized models | Provider-independent identity, dates/times, numerics, null/zero, source/version, completeness/finality |
+| REST protocol | Only capabilities consumed by current services; no streaming or trading methods |
+| V2 adapter | Delegate to `SsiFastConnectFetcher`; preserve returned normalized values and errors exactly |
+| V3 adapter | Construct V3 requests, own Auth/Data clients and close lifecycle, normalize V3 responses; disabled until configured |
+| Capability router | Resolve the declared provider before a call; never catch a V3 error and invoke V2 |
+| Cache owner | Provider adapter owns raw/provider cache; services own business/public cache; both keys include provider version |
+| Shadow comparator | Separate bounded observer; V2 response remains authoritative and V3 never writes production cache |
+| Service/API | Business rules, public status semantics, response schemas, and frontend contract |
+
+### Provider routing decision
+
+Use central capability routing in `ssi_provider_factory.py`, then inject the router into market and foreign-flow services. Per-service version branching is rejected because it would duplicate hybrid rules, cache identity, diagnostics, and no-fallback enforcement.
+
+| Option | Benefit | Cost/risk | Decision |
+| --- | --- | --- | --- |
+| Central capability router | One manifest for intentional V2 retention, one no-fallback boundary, consistent cache/version diagnostics | Adds one small routing module and injection seam | **Recommended** |
+| Provider injection/version branching per service | Keeps each service locally explicit | Duplicates hybrid decisions across market, metadata, index, and foreign-flow paths; easier to drift or fall back accidentally | Rejected for version selection; services still receive the central router by injection |
+
+Planned selector:
+
+```text
+SSI_FASTCONNECT_REST_VERSION=v2|v3
+```
+
+| Value | Planned behavior |
+| --- | --- |
+| Missing or empty | Preserve current V2 production behavior |
+| `v2` | Route every REST capability to V2 |
+| `v3` | Route only capability-router entries that have passed their V3 gate to V3; explicitly retained entries stay V2 |
+| Unknown | Fail configuration validation with a clear secret-free message before provider work |
+
+The router chooses a provider before execution. `v3 -> error -> v2` is forbidden. B1 does not introduce per-capability environment overrides. B5 may add one bounded V3 capability allow-list only if operations needs independent rollback without deployment; until then, the accepted-capability manifest is versioned in the router and global `v2` is the guaranteed rollback. `SSI_FASTCONNECT_REST_VERSION` never controls streaming.
+
+### Planned configuration contract
+
+These names are documentation only and must not be added to `.env.example`, Render, Docker, or configuration code before their implementation phase.
+
+| Name | Classification | Planned use | Resolution requirement |
+| --- | --- | --- | --- |
+| `SSI_FASTCONNECT_REST_VERSION` | Non-secret; default `v2` | Explicit REST selector | B1; unknown values are errors |
+| `SSI_V3_CLIENT_ID` | Secret-adjacent identifier | Official SDK `Config.client_id` | Authoritative source/mapping unresolved; blocks B2 auth acceptance |
+| `SSI_V3_API_KEY` | Secret | V3 REST/SDK market-data authentication | Must be SSI-issued/confirmed |
+| `SSI_V3_API_SECRET` | Secret | V3 REST/SDK market-data authentication | Must be SSI-issued/confirmed |
+| `SSI_V3_API_URL` | Defaultable non-secret | V3 REST base URL | Default only from official contract |
+| `SSI_V3_REQUEST_TIMEOUT` | Defaultable non-secret | Finite REST timeout | B2 deterministic bounds |
+| `SSI_V3_MAX_RETRIES` | Defaultable non-secret | Contract-safe retry ceiling | Must exclude auth/validation/non-retryable errors |
+| `SSI_V3_RETRY_DELAY` | Defaultable non-secret | Bounded backoff | Coordinate with rate-limit headers |
+| `SSI_V3_RATE_LIMIT_PER_SECOND` | Defaultable non-secret | Local upper bound | Must not exceed official entitlement; exact limit unresolved |
+| `SSI_V3_PRIVATE_KEY` | Secret, trading-oriented | SDK signing only if an approved future scope proves it necessary | Not required by the documented raw market-data token request; out of current scope |
+| `SSI_V3_OTP` | Ephemeral secret, trading/streaming | Future trading or streaming authentication | Never required or stored for B1-B5 REST market data |
+| `SSI_V3_STREAMING_URL` | Non-secret | Future SSI-V3-C only | Authoritative URL remains unresolved |
+
+Do not alias V2 names to V3 in code. If SSI later confirms identical underlying values, deployment may point the separate V2 and V3 secret names at the same secret-manager object; logs, docs, and diagnostics still expose names/presence only. V2 access tokens are never reused as V3 tokens.
+
+### Public contract freeze
+
+Provider migration occurs behind existing public contracts. The following `/api/v1/stocks/vn` routes, methods, query/body names, bounds, response schemas, error/status behavior, and cache headers remain compatible:
+
+- `GET /watchlist/health?tickers=`
+- `GET /watchlist?tickers=&force_refresh=&include_intraday=&intraday_timeframe=&intraday_limit=`
+- `GET /company/{ticker}?force_refresh=`
+- `GET /chart?symbol=&range=`
+- `GET /index-list?market=&force_refresh=`
+- `GET /intraday-chart/health`
+- `GET /intraday-chart?ticker=&interval=&date=&force_refresh=`
+- `GET /company-news?ticker=`; this non-SSI provider route is unaffected
+- `GET /daily-index?index_codes=&from_date=&to_date=&limit=&force_refresh=`
+- `GET /market-index-pulse?index_codes=`; remains V2 streaming-cache owned
+- `GET /index-components?index_code=&market=&force_refresh=` including the hidden compatibility alias `index`
+- `GET /foreign-flow/symbol/{ticker}?limit=&from_date=&to_date=&force_refresh=`
+- `POST /foreign-flow/batch`
+- `GET /foreign-flow/vn30?top_n=&force_refresh=`
+- `GET /observability`
+- `GET /corporate-actions?tickers=&months_back=`; unaffected external-provider contract
+- `GET /realtime?tickers=` and `GET /realtime/trades?symbol=&limit=`; remain V2 streaming-cache owned
+
+Their current Pydantic contracts remain `VietnamWatchlistHealthResponse`, `VietnamWatchlistResponse`, `VietnamCompanyResearchResponse`, `VietnamChartResponse`, `VietnamIndexListResponse`, `VietnamIntradayChartHealthResponse`, `VietnamIntradayChartResponse`, `VietnamCompanyNewsResponse`, `VietnamDailyIndexResponse`, `VietnamMarketIndexPulseResponse`, `VietnamIndexComponentsResponse`, `VietnamForeignFlowSymbolHistoryResponse`, `VietnamForeignFlowBatchRequest`/`VietnamForeignFlowBatchResponse`, `VietnamVn30ForeignFlowResponse`, `VietnamObservabilityResponse`, `VietnamCorporateActionsResponse`, `VietnamRealtimeResponse`, and `VietnamRealtimeTradesResponse`.
+
+The frontend routes `/vietnam`, `/vietnam/company/:ticker`, and `/foreign-flow`, their controls, number formatting, loading/empty/partial/stale/unavailable states, and request ownership do not branch by provider version.
+
+Public invariants:
+
+- `latest_price` continues to use the normalized daily OHLC close; no summary or stream source overwrites it.
+- Existing `source`, `actual_source`, `latest_price_source`, `source_endpoint`, cache-status, freshness, coverage, and error classifications retain their compatibility meaning.
+- Missing object data remains `null`; missing list data remains `[]`; explicit zero is never converted to missing.
+- Optional intraday/realtime/stream failures do not make valid daily rows fail.
+- Any provider/version diagnostic is optional, additive, backward compatible, documented, and excluded from UI branching.
+- Existing legacy endpoint labels such as `DailyStockPrice` remain compatibility fields. Before a V3 cutover, B3/B5 must add a truthful optional actual-provider/version diagnostic rather than silently relabel or misrepresent the upstream endpoint.
+
+### Normalized provider models
+
+Dates use ISO `YYYY-MM-DD` after normalization. Intraday timestamps use timezone-aware ISO 8601 with `Asia/Ho_Chi_Minh` semantics. Decimal/float conversion must reject non-finite values; counts and volumes use integers when provider precision permits. Every result carries `source=SSI`, `source_version=v2|v3`, and bounded provider diagnostics outside public domain values.
+
+| Model | Required normalized fields | Optional fields | Validity, null, zero, and finality rules |
+| --- | --- | --- | --- |
+| Security row | `symbol`, `source`, `source_version` | `board`, VI/EN names, lot size, listed shares, dates, ICB fields, instrument type | Uppercase unique symbol; unknown optional metadata is null; no inferred instrument type |
+| Exact-symbol metadata | `symbol`, `source`, `source_version`, `status` | board, names, profile fields, listed shares, security attributes | Exact symbol match required; partial fields stay null; provider empty is not a fabricated row |
+| Daily OHLCV | `symbol`, `trading_date`, OHLC, `source`, `source_version` | volume, value, completeness/finality | Ordered unique sessions; finite numerics; zero preserved; canonical close only after row validation |
+| Intraday OHLCV | `symbol`, `timestamp`, `timeframe`, OHLC, `source`, `source_version` | volume, value, raw timestamp, finality | Vietnam-time bucket semantics proven per timeframe; gaps remain gaps; current/completed finality explicit |
+| Daily securities summary | `symbol`, `trading_date`, `source`, `source_version` | close/average, match/deal totals, reference/limits, foreign totals/room, completeness | No field substitution by name similarity; each missing optional field is null; zero preserved |
+| Foreign-flow row | `trading_date`, `symbol`, gross buy/sell volume/value, net volume/value, `source`, `source_version` | finality, correction/completeness metadata | Direct net only when semantics are documented; otherwise derive only when both gross sides are usable; missing side makes derived net null |
+| Index definition | `index_code`, `source`, `source_version` | index name, board | Provider identifier preserved; aliases require explicit mapping |
+| Index summary | `index_code`, `trading_date`, `source`, `source_version` | value, change/percent, trade volume/value, breadth, proprietary totals, finality | Same identifier/date validation; missing breadth stays null; no OHLC synthesis |
+| Index membership | `index_code`, `symbol`, `source`, `source_version` | board, weight, effective from/to | Uppercase unique symbols; mismatched outer index rejected; weight/effective time null until documented |
+| Provider diagnostics/error | `provider`, `provider_version`, `capability`, `status` | error category, HTTP/provider code, retryable, duration, paging, rate-limit metadata, cache state | Secret-safe and bounded; no token/header/raw payload; diagnostics never replace domain nulls |
+
+Foreign-flow minimum contract is therefore:
+
+```text
+trading_date, symbol,
+foreign_buy_volume, foreign_sell_volume,
+foreign_buy_value, foreign_sell_value,
+foreign_net_volume, foreign_net_value,
+source, source_version
+```
+
+The V2 direct-net precedence remains until a V3 direct-net field is officially documented and accepted. V3 gross-side derivation may be accepted only after units, zero/missing, date, correction, and finality gates pass.
+
+### Capability migration matrix
+
+Each row has exactly one primary category. “First implementation” means B1/B2 ownership, not production V3 acceptance.
+
+| Capability | Primary category | Current StockClock use | Current V2 implementation | V3 candidate | Normalized contract | Planned provider in first implementation | Migration phase | Validation gate | V2 exit criterion | Rollback behavior | Open risks |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Authentication/token | `IMPLEMENT_V3_DISABLED` | Required for all SSI REST calls | `get_access_token`, cached V2 token | `/auth/token`, refresh lifecycle, SDK `Auth` | Provider auth result/error only; tokens private | V2 production; V3 client disabled | B2, B4 | SSI-confirmed IDs; auth, refresh, expiry, error and rate handling | V3 auth accepted under bounded shadow and operational token lifecycle proven | Global selector `v2` | Prior field mapping returned 401; SDK `client_id` unresolved |
+| Securities by board | `MIGRATE_TO_V3_FIRST` | Symbol universe/basic identity | `get_securities(market)` | `securitiesByBoard?board=` | Security row | V2 | B2, B4, B5 | Coverage, identity, duplicates, board and type-null behavior | Bounded board parity and missing-row classification pass | Route capability to V2 or global `v2` | No paging documented; type authority absent |
+| Exact-symbol basic information | `DUAL_RUN_FOR_PARITY` | Metadata fallback and profile basics | Securities/SecuritiesDetails lookup | `securitiesByBoard?symbol=` | Exact-symbol metadata | V2 | B2, B4, B5 | Exact identity and every consumed basic field compared | Candidate supplies accepted basic subset without fabricated extended fields | Route capability to V2 | Candidate is not full SecuritiesDetails parity |
+| SecuritiesDetails extended metadata | `KEEP_V2_TEMPORARILY` | Optional profile/listing enrichment | `get_securities_details` | No direct documented equivalent | Exact-symbol metadata | V2 | B5 or later | Field-by-field authoritative replacement | Every consumed field mapped or truthfully null with product approval | Remain explicitly V2 | Extended fields and instrument type unresolved |
+| Daily OHLC | `DUAL_RUN_FOR_PARITY` | Canonical D1 chart and `latest_price` | `get_daily_ohlcv` / DailyOhlc | `/data/ohlc?timeFrame=1d` | Daily OHLCV | V2 | B2, B4, B5 | Same symbol/date, ordering, paging, OHLC, volume/value, finality | Completed-session parity and unchanged downstream indicators | Route daily OHLC to V2/global `v2` | Units, corrections, paging defaults, finality |
+| Completed-session intraday OHLC | `DUAL_RUN_FOR_PARITY` | Completed-date 1m charts | fixed V2 IntradayOhlc request | `/data/ohlc?timeFrame=1m` | Intraday OHLCV | V2 | B2, B4, B5 | Timestamp, timezone, minute bucket, gaps, volume, completed finality | Same-session normalized bar parity | Route completed intraday to V2 | One-year limit, timestamp and volume semantics |
+| Current-session intraday OHLC | `KEEP_V2_TEMPORARILY` | Delayed Today 1m chart | V2 IntradayOhlc with freshness scheduling | V3 OHLC or stream, unresolved | Intraday OHLCV plus current finality | V2 | B5 later | Active-session newest-bar, delay, correction and close reconciliation | Market-hours and post-close acceptance proves source/finality | Remain V2 | Snapshot versus forming bar behavior unknown |
+| DailyStockPrice/securities summary | `DUAL_RUN_FOR_PARITY` | Reference/limits, matched/deal totals, daily enrichment | `get_daily_stock_price` | `/data/securitiesSummary` | Daily securities summary | V2 | B3, B4, B5 | All consumed fields, pagination, null/zero, units, finality | Accepted replacement for each public field or explicit retained V2 split | Route summary to V2 | V3 omits documented V2 reference/limit names |
+| Foreign buy/sell value | `KEEP_V2_TEMPORARILY` | Historical/value analytics and rankings | DailyStockPrice gross/direct net values | securitiesSummary gross foreign values | Foreign-flow row | V2 | B3, B4, B5 last | Same date/symbol, VND unit, zero/missing, finality, corrections | Units/finality and deterministic net rule proven | Remain V2/global `v2` | Unit and direct-net semantics unproven |
+| Foreign buy/sell volume | `KEEP_V2_TEMPORARILY` | Historical/volume analytics and rankings | DailyStockPrice gross/direct net volumes | securitiesSummary gross foreign totals | Foreign-flow row | V2 | B3, B4, B5 last | Same date/symbol, share unit, zero/missing, finality, pagination | Units/finality and deterministic net rule proven | Remain V2/global `v2` | Unit and lot/share semantics unproven |
+| Foreign-flow analytics | `REUSE_UNCHANGED` | 5/20/60 windows, streak/reversal, breadth, concentration, rankings | Service calculations over normalized rows | Same calculations over accepted rows | Foreign-flow rows to analytics outputs | Existing business logic | B1, B3, B5 | Existing deterministic analytics tests on V2 and V3 fixtures | No V2-specific input remains after foreign-flow gate | Input route rollback only | Legacy `source_endpoint` compatibility metadata |
+| Index list | `MIGRATE_TO_V3_LATER` | Resolve official index identifiers | `get_index_list` | `/data/indexList` | Index definition | V2 | B2, B4, B5 | Board/code/name coverage and aliases | Accepted identifier set and error behavior | Route index list to V2 | Identifier coverage not live-proven |
+| Index summary | `DUAL_RUN_FOR_PARITY` | Optional daily index context | `get_daily_index` | `/data/indexSummary` | Index summary | V2 | B2, B4, B5 | Index/date/value, volume/value, breadth, finality | Same-index/date normalized parity for consumed fields | Route summary to V2 | Single-date versus range contract; missing OHLC fields |
+| Index components/current membership | `KEEP_V2_TEMPORARILY` | VN30 membership and filter source | `get_index_components(indexCode)` | `securitiesByBoard?index=` | Index membership | V2 | B2 candidate, B4, B5 | Symbol set/count, outer identity, board, weights, effective time | Current membership parity plus explicit effective-time treatment | Remain V2 | No historical/effective-date or weight contract |
+| VN30 aggregation | `REUSE_BUSINESS_LOGIC_WITH_ADAPTER` | Coverage-aware foreign-flow aggregate | Current SSI membership + normalized DailyStockPrice histories | Same logic over accepted inputs | Membership + foreign-flow rows | Existing business logic on V2 | B1, B5 | Existing aggregate tests and input-provider diagnostics | Both membership and foreign-flow inputs accepted, or explicit hybrid remains | Roll back either input capability | Mixed provider/date/source observability |
+| Realtime quote | `KEEP_V2_TEMPORARILY` | Optional latest streaming snapshot | V2 SignalR `X` cache | V3 quote topics | Future stream snapshot contract | V2 streaming | SSI-V3-C | Auth, topic, timestamp, snapshot/delta, freshness, reconnect | Market-hours shadow and after-hours persistence accepted | V2 stream selector in future C | Endpoint/OTP/topic semantics |
+| Realtime trade | `KEEP_V2_TEMPORARILY` | Optional bounded trade tape | V2 `X-TRADE` buffer | V3 trade topic | Future trade event contract | V2 streaming | SSI-V3-C | Side, sequence, dedupe, timestamp, reconnect continuity | Bounded tape parity and recovery proof | V2 stream selector | Side and sequence semantics |
+| Order book | `KEEP_V2_TEMPORARILY` | Optional ladder | V2 `X-QUOTE` cache | V3 quote/order-book topic | Future ladder snapshot/delta | V2 streaming | SSI-V3-C | Depth, snapshot/delta, sequence and recovery | Full ladder reconstruction/reconnect accepted | V2 stream selector | Topic may be delta-based |
+| Foreign room | `KEEP_V2_TEMPORARILY` | Optional live room context | V2 `R` cache | V3 room topic/model | Future room snapshot | V2 streaming | SSI-V3-C | Units, null/zero, session reset, after-hours | One-symbol live and persisted-state acceptance | V2 stream selector | Not daily foreign-flow authority |
+| Session/status | `INCONCLUSIVE` | Optional market/session context | V2 `F` cache | No direct V3 equivalent proven | Future session/status contract | V2 streaming | SSI-V3-C or later | Official replacement and code mapping | Official or accepted derived source replaces all consumed status semantics | Keep V2 | Direct replacement absent |
+| Market/index stream | `KEEP_V2_TEMPORARILY` | Optional MI pulse | V2 `MI` cache | V3 market topics | Future market/index event | V2 streaming | SSI-V3-C | Index identity, units, sequence, freshness, reconnect | Bounded index shadow and after-hours proof | V2 stream selector | Topic/field semantics unproven |
+| Historical market file | `V3_NEW_OPTIONAL_CAPABILITY` | Not used | None | `/data/file` temporary link | New bounded file manifest, not existing rows | None | B2 foundation; separate product gate | Entitlement, expiry, size, content, download safety, units | Not a V2 exit dependency | Disable capability | Async preparation, temporary URL, no public owner |
+| Additional candle intervals | `V3_NEW_OPTIONAL_CAPABILITY` | Not used; UI supports D1/verified 1m only | None beyond existing V2 paths | V3 `3m/5m/15m/30m/1h` | Intraday OHLCV per accepted timeframe | None | B2 foundation; later product gate | Bucket/time/volume semantics per interval | Not a V2 exit dependency | Disable interval | No UI/product contract or aggregation proof |
+| Rate-limit metadata | `IMPLEMENT_V3_DISABLED` | Diagnostics and provider pacing | V2 internal cooldown/delay | V3 rate headers and SDK limiter | Provider diagnostics | V2 policy; disabled V3 capture | B2, B4 | Header parsing, reset units, concurrency and retry budget | V3 route observes safe budget without storms | Route to V2 | Entitlement-specific limits unknown |
+| Cache and single-flight | `REUSE_BUSINESS_LOGIC_WITH_ADAPTER` | Provider/service caching and coalescing | V2 fetcher cache plus service keys | Version-isolated V3/shadow keys | Provider-version request identity | Existing V2 | B1, B4 | Collision, negative/stale, poison, and fan-out tests | Provider-version isolation proven in shadow | Global `v2`; V3 cache ignored | Existing keys do not uniformly encode version |
+| Public API/frontend contract | `REUSE_UNCHANGED` | All VN product routes and UI states | Pydantic schemas + TS normalization/rendering | Same public contract | Existing schemas | Unchanged | B1-B5 | API snapshots/regressions; frontend only if shared schema changes | All accepted capabilities remain contract-compatible | Global `v2` | Endpoint-specific legacy source literals |
+| Provider lifecycle/shutdown | `REUSE_BUSINESS_LOGIC_WITH_ADAPTER` | Lazy REST clients; background V2 stream cleanup | `requests.Session`, token cache, FastAPI stream lifespan | V3 Auth/Data context managers | Provider-neutral `close()` ownership | V2 | B1, B2 | Idempotent close, no pre-bind I/O, startup independence | V3 REST client closes cleanly and never blocks health | Select V2/restart | SDK sync/async ownership and refresh threads |
+| Source/version diagnostics | `REUSE_BUSINESS_LOGIC_WITH_ADAPTER` | Truthful source/cache/error observability | SSI endpoint labels and counters | Add internal `provider_version` | Provider diagnostics | Existing V2 labels | B1, B2, B4 | Additive, optional, secret-safe, no frontend branch | V3 calls are distinguishable without breaking payloads | Global `v2` | Compatibility labels versus actual endpoint |
+| V2 REST dependency/request layer | `REMOVE_AFTER_V3_CUTOVER` | Supplies all current V2 REST and stream models | `ssi-fc-data` 2.2.2 and V2 imports/config | Replaced only after full acceptance | Not a domain row | Retained | SSI-V3-D | All required REST and future stream gates plus rollback window | No required capability, audit, or rollback depends on V2 | Revert retirement release during window | V2 package also owns current streaming transport |
+
+Category index:
+
+- `REUSE_UNCHANGED`: foreign-flow analytics; public API/frontend contract.
+- `REUSE_BUSINESS_LOGIC_WITH_ADAPTER`: VN30 aggregation; cache/single-flight; provider lifecycle/shutdown; source/version diagnostics.
+- `IMPLEMENT_V3_DISABLED`: authentication/token; rate-limit metadata.
+- `DUAL_RUN_FOR_PARITY`: exact-symbol basic information; daily OHLC; completed intraday; DailyStockPrice summary; index summary.
+- `MIGRATE_TO_V3_FIRST`: securities by board.
+- `MIGRATE_TO_V3_LATER`: index list.
+- `KEEP_V2_TEMPORARILY`: extended metadata; current-session intraday; foreign value/volume; components; quote; trade; order book; room; market/index stream.
+- `V3_NEW_OPTIONAL_CAPABILITY`: historical market file; additional candle intervals.
+- `REMOVE_AFTER_V3_CUTOVER`: V2 REST dependency/request layer.
+- `INCONCLUSIVE`: session/status replacement.
+
+### Cache and single-flight isolation
+
+Provider identity is part of every future cache and in-flight key. A normalized key is:
+
+```text
+(provider_version, capability, normalized identity,
+ date/time range, timeframe, page identity, normalization contract version)
+```
+
+Rules:
+
+- V2 and V3 positive, negative, stale, token, and rate-limit entries never collide.
+- Shadow V3 writes only a shadow namespace and never overwrites V2 production cache.
+- V3 failures cannot poison, evict, extend, or mark stale a V2 entry; the inverse also applies.
+- Single-flight coalescing includes provider version and shadow/production mode.
+- Shadow is not launched by each waiter; one bounded owner may compare one normalized request.
+- `force_refresh` applies only to the explicitly routed provider; it never means “try the other version.”
+- Service-level business cache keys must add provider/version when results may differ; compatibility caches that contain only provider-neutral derived values must retain source/version metadata in the cached payload.
+- Switching back to V2 ignores V3 cache entries. Process restart is the conservative rollback default; no cross-version cache purge is required for correctness.
+
+### Error normalization
+
+Provider adapters normalize errors before services classify public availability. A configured V3 capability returns an explicit V3 unavailable/error state; it does not silently return V2 data.
+
+| Category | Retryable | Public behavior | Cache impact | Shadow behavior | Log level | V2 routing/rollback |
+| --- | --- | --- | --- | --- | --- | --- |
+| `configuration_error` | No | Clear unavailable/configuration state; health remains provider-independent | No provider cache write | Skip and count configuration failure | Error at activation, then bounded | Explicit V2 route is allowed only by configuration; rollback required if capability was cut over |
+| `authentication_failed` | No until credentials change | Capability unavailable | No domain cache; invalidate only V3 token state | Stop sample; no retry | Warning/error, secret-safe | Retained V2 capability may stay routed; cut-over capability triggers rollback decision |
+| `entitlement_unavailable` | No until entitlement changes | Capability unavailable | Provider-specific negative cache may be bounded | Stop capability sample | Warning | Explicit V2 retention allowed; no automatic fallback |
+| `rate_limited` | Yes after documented reset | Unavailable or provider-specific stale state under existing public policy | V3 cooldown/negative entry only | Stop sample; respect reset/budget | Warning, deduplicated | Repeated production limits trigger rollback review |
+| `request_timeout` | Yes only within bounded policy | Unavailable; existing valid provider-specific stale data may remain truthful | Never overwrite positive cache | Record timeout; no retry storm | Warning | Rollback after threshold/incident policy, not per-request fallback |
+| `network_error` | Yes only within bounded policy | Unavailable/stale by existing contract | Provider-specific negative state | Record and stop bounded sample | Warning | Operational rollback if cut over |
+| `provider_unavailable` | Policy-dependent | Unavailable/stale | Provider-specific only | Record sanitized code | Warning | Explicit route remains; rollback by config if needed |
+| `malformed_response` | No | Unavailable/incomplete, never partial fabricated values | Do not cache as positive | Preserve structural diff only | Error | Cutover blocked or rolled back |
+| `unsupported_capability` | No | Explicit unavailable/not supported | Optional long provider-specific negative cache | Do not sample repeatedly | Info/warning | Capability must remain V2 or absent |
+| `incomplete_data` | No automatic retry | Partial/unavailable using current schema rules | Never replace complete positive data | Compare missing-field set | Warning | Cutover gate fails; V2 remains explicitly routed |
+| `validation_error` | No | Existing 4xx/request-validation behavior | No provider call/cache mutation | Not sampled | Info | Not a provider fallback condition |
+| `internal_error` | No automatic retry | Sanitized unavailable/500 per current boundary | No cross-provider mutation | Stop sample | Error with stack server-side | Rollback if introduced by cutover |
+
+No category authorizes implicit V2 fallback. “V2 may remain explicitly routed” means the capability router selected V2 before the request because the migration manifest says so.
+
+### Bounded shadow comparison
+
+Future B4 shadow mode is default-off and V2-response-owned. Planned names, not yet configuration:
+
+```text
+SSI_V3_SHADOW_ENABLED=false
+SSI_V3_SHADOW_SAMPLE_RATE
+SSI_V3_SHADOW_MAX_CONCURRENCY
+SSI_V3_SHADOW_TIMEOUT
+SSI_V3_SHADOW_CAPABILITIES
+```
+
+Frozen behavior:
+
+1. Route and execute the normal V2 request first; it remains the only public response source.
+2. Sample only an approved capability/request identity and provider-derived symbol/index.
+3. Execute V3 in a separate timeout, concurrency, cache, single-flight, and rate-budget namespace.
+4. Bound symbols, indexes, pages, date range, and total calls; prohibit full-market fan-out.
+5. Compare normalized values, not provider envelopes or formatted UI strings.
+6. Never persist raw payloads, tokens, headers, URLs containing credentials, or full response bodies.
+7. Emit bounded counters/distributions and field-presence differences; cancel with the owning request where practical.
+8. Do not retry authentication, entitlement, validation, or malformed-response failures; do not create retry storms for transient failures.
+
+Comparison categories are identity; trading date; OHLCV; foreign buy/sell volume/value; null versus zero; index membership symbol set/count; effective timestamps; provider error category; duration; pagination; and rate-limit observation. Exact equality is required for identity/date/null/zero/member-set checks. Numeric tolerances are **not frozen** without paired evidence: B4 must record absolute/relative differences first, then a later review may approve a field-specific tolerance based on documented unit/rounding/finality behavior.
+
+Acceptance thresholds are evidence-derived, not invented. Before B4 traffic, each capability must define its expected sample size, allowable missing rows, timing budget, and whether equality or an approved tolerance applies. No aggregate “parity score” can conceal a required-field failure.
+
+### Capability cutover gates
+
+| Gate | Required evidence before V3 ownership |
+| --- | --- |
+| Securities | Board query succeeds; symbol identity/coverage understood; duplicates/missing rows classified; board and instrument-type unknowns remain honest; cache behavior proven |
+| Exact symbol | Exact match stable; every consumed basic field mapped; unsupported extended fields remain null or explicitly V2-owned |
+| Daily OHLC | Same symbol/date range; date/order/paging proven; OHLC, volume, value and missing sessions checked; completed-session finality proven; indicators consume unchanged rows |
+| Completed intraday | Timezone, bucket, cadence, ordering, gaps, volume and completed-session finality proven for `1m` independently |
+| Daily summary | Every public enrichment field mapped or retained on V2; paging, date, null/zero, units, finality and corrections proven |
+| Foreign flow | Gross buy/sell volume/value, units, direct/derived net, zero/missing, date, pagination, finality and corrections proven; existing analytics regressions pass |
+| Index list/summary | Identifier/board mapping, date/value/volume/breadth fields, missing behavior and finality proven |
+| Index membership | Exact index, current member symbols/count, effective time and optional weights handled; no hardcoded VN30 data |
+| Realtime, future C only | Authoritative URL/auth/topic; heartbeat/reconnect/resubscribe; snapshot/delta; sequence/dedupe; quote/trade/book/room/status/index normalization; bounded market-hours shadow |
+
+Capabilities fail independently. A passing daily OHLC gate does not approve DailyStockPrice, foreign flow, components, current-session bars, or streaming.
+
+### Configuration-only rollback
+
+Global rollback is always:
+
+```text
+SSI_FASTCONNECT_REST_VERSION=v2
+```
+
+Rollback triggers include authentication/entitlement regression, malformed or incomplete rows, unit/finality breach, rate-budget breach, cache collision, lifecycle leak, public-contract regression, or unexplained parity drift above the capability's accepted policy.
+
+Procedure:
+
+1. Change the selector to `v2` in the secret/configuration manager; do not change credential values.
+2. Restart the process so provider instances, tokens, and in-flight work are recreated deterministically.
+3. V3 cache entries remain isolated and ignored; do not copy them into V2 keys.
+4. Verify health remains independent, provider/version diagnostics say V2, and one bounded route per affected capability returns the established V2 contract.
+5. Confirm no V3 request counters advance after restart and existing V2 cache/status semantics resume.
+6. Record the incident and block that capability's V3 manifest entry until a new gate passes.
+
+B1 uses global rollback only. If B5 proves operational need for independent rollback, add one allow-list of accepted V3 capabilities rather than many environment variables. Removing one capability from that allow-list and restarting is the per-capability rollback. The router still selects once before a request and never falls back on error.
+
+### Frozen implementation phases
+
+#### SSI-V3-B1 — Provider Contract and V2 Adapter
+
+Goal: introduce provider-neutral normalized type contracts and REST `Protocol`; wrap the current V2 fetcher; centralize explicit provider selection defaulting to V2; inject it into existing services.
+
+Allowed scope: protocol/models, delegating V2 adapter, factory/router, V2-default configuration parsing, focused tests, and documentation. No V3 package, V3 configuration, V3 request, shadow execution, public schema, frontend, or stream change.
+
+Acceptance: all existing V2 tests pass; representative normalized/public payloads are unchanged; missing/empty selector means V2; explicit `v2` means V2; unknown means configuration error; no automatic fallback exists; default/rollback behavior is deterministic.
+
+#### SSI-V3-B2 — V3 REST Adapter Foundation
+
+Goal: after SSI resolves credentials, reverify and pin official `ssi-sdk`; add V3 configuration and Auth/Data lifecycle; implement disabled securities, exact-symbol basics, daily OHLC, completed historical intraday, index list/summary, rate metadata, and optional market-file/interval capability stubs only where officially documented.
+
+Allowed scope: official dependency/config, disabled V3 adapter, mocked request/normalization/auth/lifecycle tests. No production routing, shadow mode, public payload change, frontend change, foreign-flow cutover, or streaming implementation.
+
+Acceptance: deterministic mocked contracts; finite timeout/retry/rate handling; idempotent close; no startup/pre-bind external I/O; V2 remains primary; V3 is disabled without explicit valid configuration.
+
+#### SSI-V3-B3 — Securities Summary and Foreign Flow
+
+Goal: normalize V3 securities summary and gross foreign buy/sell value/volume into the existing provider-independent daily/foreign-flow rows while retaining V2 as production owner.
+
+Allowed scope: V3 summary request/normalizer and offline fixtures/tests. Preserve analytics, net rules, cache policy, APIs, UI, and `latest_price` ownership.
+
+Acceptance: date/pagination/null/zero/finite-number behavior passes; direct net is not invented; units/finality remain unknown until evidence; legacy source metadata has a truthful additive provider/version diagnostic; no production cutover.
+
+#### SSI-V3-B4 — Bounded Shadow Comparison
+
+Goal: execute selected V3 REST capabilities as an observer while V2 remains the response source; collect sanitized normalized comparisons and rate/timing evidence.
+
+Allowed scope: default-off sampler, bounds, isolated cache/single-flight, metrics, cancellation, fixtures/tests, and an explicit bounded live acceptance procedure after authorization.
+
+Acceptance: no V3 result reaches public payload; no raw payload persistence; no hidden fallback; concurrency/date/symbol/page/rate budgets enforced; comparisons identify field-level evidence sufficient for a cutover decision.
+
+#### SSI-V3-B5 — REST Capability Cutover
+
+Goal: activate only accepted V3 capabilities independently, retain documented V2-only paths, preserve public behavior, and prove rollback.
+
+Cutover order: securities/basic identity; daily OHLC; completed intraday; index list/summary; current membership only after its gate; DailyStockPrice/foreign flow last. Current-session and extended metadata remain V2 unless separately accepted.
+
+Acceptance: capability-specific gate passes; diagnostics identify actual provider/version; caches are isolated; global and any justified per-capability rollback drills pass; no error-triggered fallback; existing backend and affected frontend contract checks pass.
+
+#### SSI-V3-C — Realtime/WebSocket Migration
+
+Separate future project: build a V3 stream adapter and selector; retain V2 SignalR until V3 quote, trade, book, room, status, and market/index contexts pass independent shadow gates. Resolve authoritative URL, OTP/auth, topics, snapshot/delta, heartbeat, reconnect, resubscribe, sequence, dedupe, after-hours, and persisted-state semantics. No B1-B5 REST selector controls this phase.
+
+#### SSI-V3-D — V2 Retirement
+
+Remove V2 only after all required REST capabilities, all required streaming capabilities, production monitoring, rollback drills, and a defined rollback window pass. Retirement includes the V2 package, request models, adapters, credentials aliases, cache/error branches, stream transport, tests, and docs only when nothing production-critical or rollback-related still depends on them.
+
+### File-level implementation map
+
+| Phase | File | Current responsibility | Planned change | Business logic impact | Public API impact | Tests | Rollback impact |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| B1 | `data_provider/ssi_provider_models.py` | Does not exist | Typed provider-neutral normalized rows/results | Codifies existing values only | None | Type/fixture contract | Shared by V2 route after rollback |
+| B1 | `data_provider/ssi_provider_protocol.py` | Does not exist | REST structural `Protocol`; no streams/trading | None | None | Conformance/fakes | Stable interface for V2 |
+| B1 | `data_provider/ssi_v2_adapter.py` | Does not exist | Delegate to current fetcher without renormalizing | None | None | Golden V2 behavior | Primary rollback adapter |
+| B1 | `data_provider/ssi_provider_factory.py` | Does not exist | Parse selector and central capability routing | Selection only | None | default/v2/unknown/no-fallback | Global `v2` owner |
+| B1 | `data_provider/ssi_fastconnect_fetcher.py` | Concrete V2 REST + stream cache facade | Prefer no behavioral change; only compatibility hooks if proven necessary | None | None | Existing fetcher suite | Remains source of truth |
+| B1 | `src/config.py`, `src/core/config_registry.py`, `.env.example` | V2 configuration | Add only REST selector, default V2 | None | None | Parsing/error tests | Missing/`v2` restore V2 |
+| B1 | `src/services/vietnam_market_service.py` | Direct lazy V2 construction | Inject neutral router; preserve method outputs | None | None | Existing market regressions | Router selects V2 |
+| B1 | `src/services/vietnam_foreign_flow_service.py` | Direct V2 construction and domain calculations | Inject neutral router; retain calculations/cache | None | None | Existing foreign-flow/VN30 regressions | Router selects V2 |
+| B2 | `requirements.txt`, Docker install path | Installs V2 package | Pin official V3 package after revalidation; retain V2 | None | None | import/package smoke | V2 dependency retained |
+| B2 | `data_provider/ssi_fastconnect_v3_fetcher.py` | Does not exist | Disabled V3 Auth/Data/request/normalization/lifecycle | Adapter only | None | mocked auth/request/normalization/close | Not selected under V2 |
+| B2 | configuration modules and `.env.example` | No V3 names | Add documented V3 REST names, secret-safe validation | None | None | presence/validation/redaction | V2 ignores V3 values |
+| B2 | provider models/router | V2-only capability map | Register disabled V3 candidates and versioned diagnostics | None | None | unsupported/disabled routing | Global V2 |
+| B3 | V3 fetcher/provider models | No summary/foreign normalizer | Add securities-summary and foreign gross fields | Reuse existing analytics | No field removal/change | null/zero/unit/finality fixtures | V2 stays primary |
+| B3 | API schemas only if needed | Literal legacy source metadata | Prefer no change; optional actual-provider/version diagnostic only if required | None | Additive optional only | compatibility snapshots | V2 values unchanged |
+| B4 | proposed `src/services/ssi_v3_shadow_service.py` | Does not exist | Bounded sampling/comparison/metrics | None | No result exposure | bounds, cancellation, isolation, non-exposure | Disable shadow/global V2 |
+| B4 | provider router/cache helpers/observability | Production-only requests | Add shadow namespace and sanitized counters | None | Optional diagnostics only | key/rate/fan-out tests | Shadow off |
+| B5 | provider factory/router manifest | V2 primary | Activate accepted capability entries | Existing business logic unchanged | Stable | per-capability regression/rollback | global/per-capability explicit route |
+| B5 | market/foreign-flow services | Consume router | Only changes required for truthful provider/version metadata | None | Optional additive diagnostics | API snapshots and domain regressions | V2 route |
+| C | `data_provider/ssi_streaming_realtime.py` and lifecycle modules | V2 SignalR manager/cache | Separate V3 adapter/selector after REST acceptance | Preserve cache product semantics | Stable stream-backed APIs | lifecycle/reconnect/parity | V2 stream selector |
+| D | requirements, V2 fetcher/adapter/config/tests/docs | V2 runtime and rollback | Remove after all exits/window | None intended | Stable | full suite and retirement audit | Last release before removal |
+
+Expected unchanged through B0-B4: frontend production files; public API route and schema fields except an explicitly approved optional diagnostic; foreign-flow analytics formulas; VN30 aggregation formulas; Vietnam number-formatting utilities; non-SSI providers; `main.py`, `api/app.py`, Docker/Render entrypoint and startup/readiness code; database, Redis, scheduler, and worker architecture.
+
+### Test strategy by phase
+
+Normal pytest remains offline and deterministic.
+
+1. Provider protocol/model contract tests.
+2. V2 adapter golden behavior-preservation tests.
+3. Selector default, `v2`, `v3`, unknown, hybrid manifest, and no-fallback tests.
+4. V3 request construction and response-envelope tests.
+5. V3 authentication, refresh, expiry, redaction, retry classification, and lifecycle tests.
+6. Pagination and ordering tests, including V3 default-size differences.
+7. Date/time/timezone/bucket normalization tests.
+8. Finite numeric and null-versus-explicit-zero tests.
+9. Foreign-flow direct-net/derived-net/no-partial-derivation tests.
+10. Provider-version cache, negative/stale, force-refresh, and single-flight isolation tests.
+11. Shadow sampling, concurrency, timeout, cancellation, rate budget, and no-public-exposure tests.
+12. Error taxonomy and unsupported-capability tests.
+13. Idempotent client close and no-startup-I/O tests.
+14. Existing `test_ssi_fastconnect_fetcher.py`, Vietnam market, intraday, index, foreign-flow, VN30, API, and observability regressions.
+15. Frontend tests/build only if a later phase touches shared schema/type normalization; no provider-specific UI tests or branches.
+
+Every retained V2 row requires a test that proves the router selects V2 intentionally under V3 mode. Every cut-over row requires a test that a V3 error remains a V3 error and does not invoke the V2 fake.
+
+### Future runtime acceptance
+
+Live checks occur only in separately authorized phase gates, never normal pytest or B0:
+
+- B2 foundation: one authentication sequence; one provider-derived securities query; one exact-symbol OHLC query; one index query; one summary query; sanitized rate-header observation; no unrestricted market request.
+- B4 shadow: bounded approved symbols/indexes/date ranges/pages/concurrency/timeouts; no unsafe retry; V2 response ownership; no raw payload persistence or frontend exposure.
+- B5 cutover: provider/version diagnostics, provider-independent health/startup, isolated caches, one bounded request per activated capability, public contract checks, and rollback drill.
+- C streaming: one scoped topic family at a time during an eligible market window, plus reconnect/resubscribe and after-hours last-known semantics.
+
+Runtime acceptance must verify that optional SSI availability never blocks FastAPI pre-bind startup or `/api/health`. This plan adds no live command and authorizes no provider call.
+
+### Open questions register
+
+| Question | Impacted capability | Current evidence | Implementation impact | Resolve by | Blocker level |
+| --- | --- | --- | --- | --- | --- |
+| What is the authoritative V3 `client_id` source? | Auth/SDK | SDK config documents it; raw token endpoint does not | Cannot construct approved SDK config | Before B2 auth acceptance | `blocks_foundation` |
+| Do V2 identifier/secret values map to V3 keys? | Auth | Exact two-field mapping returned 401 | Separate V3 secrets remain required/unresolved | Before B2 live gate | `blocks_shadow` |
+| Is this account entitled/activated for V3? | All V3 | Prior 401 proves rejection, not cause | No V3 traffic can be accepted | Before B4 | `blocks_shadow` |
+| Which exact official `ssi-sdk` version is pinned? | Dependency/lifecycle | 3.0.5 was previously documented; package may evolve | Reinspect metadata/API and pin in B2 | B2 implementation review | `blocks_foundation` |
+| What are V3 foreign volume/value units? | Foreign flow | Field names documented only | Blocks normalized unit labels/net comparison | Before B4 foreign sample | `blocks_cutover` |
+| When is V3 summary foreign flow final/corrected? | Foreign flow | No accepted live evidence | Blocks completed-session ownership | Before B5 foreign cutover | `blocks_cutover` |
+| How are explicit zero and missing represented? | Summary/foreign/OHLC | Examples use strings; no paired live rows | Blocks null/zero normalizer acceptance | B3/B4 | `blocks_cutover` |
+| What are summary page limits and stable ordering? | Summary/foreign | One-based paging/default 10 documented | Need full bounded history traversal | B2/B3 | `blocks_shadow` |
+| Does V3 OHLC expose forming current-session bars and corrections? | Current intraday | Common endpoint documented, runtime semantics absent | Keep current-session on V2 | Before any current-session cutover | `blocks_cutover` |
+| What are membership effective-time semantics? | Index components/VN30 | Current index filter documented only | Cannot establish historical/current boundary | B4 index gate | `blocks_cutover` |
+| Are component weights available and what do they mean? | Index components/VN30 | Not in documented securities row | Weight remains null; aggregation stays unweighted/current | Before weighted product or V2 exit | `blocks_V2_removal` |
+| What field authoritatively classifies instrument type? | Securities/HOSE | V2 and V3 documented rows do not prove it | No common-stock authority claim | Before universe/type product | `blocks_V2_removal` |
+| How are consumed SecuritiesDetails fields replaced? | Extended metadata | No direct V3 endpoint documented | Explicit hybrid V2 ownership required | Before V2 retirement | `blocks_V2_removal` |
+| What are account-specific V3 REST rate limits/reset units? | All REST | Header names documented, values not observed | Bounds/retry budget provisional | Before B4 | `blocks_shadow` |
+| Which V3 WebSocket URL is authoritative? | Streaming | Portal/SDK/tutorial evidence differs | No stream connection configuration | SSI-V3-C | `blocks_V2_removal` |
+| What are exact stream topics and snapshot/delta semantics? | Quote/trade/book/room/index | Families documented; runtime parity absent | Cannot normalize/reconstruct state | SSI-V3-C | `blocks_V2_removal` |
+| How do reconnect and resubscription preserve sequence/snapshots? | Streaming lifecycle | Tutorials describe reconnect; StockClock parity absent | Requires separate manager acceptance | SSI-V3-C | `blocks_V2_removal` |
+| What replaces V2 `F` session/status? | Session/status | No direct V3 equivalent proven | Keep V2 or define approved derived contract | SSI-V3-C or later | `blocks_V2_removal` |
+| Can legacy endpoint-specific public source literals remain truthful? | Source diagnostics/API | Current fields include `DailyStockPrice` literals | Add optional actual provider/version diagnostics before cutover | B3/B5 | `blocks_cutover` |
+
+### Explicit exclusions
+
+This freeze implements no provider protocol, adapter, factory, SDK, configuration, traffic, shadow mode, public API/schema, frontend, analytics, index aggregation, stream, trading, database, Redis, scheduler, worker, Docker, Render, startup, credential, or environment change. It does not confirm V3 credentials, parity, units, finality, production readiness, or permission to remove V2.
+
+### Next implementation phase
+
+**SSI-V3-B1 — Provider Contract and V2 Adapter** is next. It must preserve V2 as default and production, add no V3 dependency or traffic, keep all public behavior stable, and enforce no automatic fallback. B2 and later remain gated by the open questions above.
