@@ -2901,7 +2901,6 @@ class Config:
                 missing_v3_fields = [
                     name
                     for name, value in (
-                        ("SSI_V3_CLIENT_ID", self.ssi_v3_client_id),
                         ("SSI_V3_API_KEY", self.ssi_v3_api_key),
                         ("SSI_V3_API_SECRET", self.ssi_v3_api_secret),
                     )
@@ -2914,7 +2913,7 @@ class Config:
                             "SSI FastConnect V3 REST configuration is incomplete: "
                             + ", ".join(missing_v3_fields)
                         ),
-                        field="SSI_V3_CLIENT_ID",
+                        field=missing_v3_fields[0],
                     ))
 
         # --- LLM availability ---

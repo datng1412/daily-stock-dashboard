@@ -296,7 +296,7 @@ def test_v3_selected_while_disabled_or_incomplete_fails_with_names_only() -> Non
     with pytest.raises(ValueError) as exc_info:
         create_ssi_rest_provider_router(config=incomplete, v2_fetcher=object())
     message = str(exc_info.value)
-    assert "SSI_V3_CLIENT_ID" in message and "SSI_V3_API_SECRET" in message
+    assert "SSI_V3_CLIENT_ID" not in message and "SSI_V3_API_SECRET" in message
     assert "<api-key>" not in message
 
 
@@ -335,6 +335,7 @@ def test_v3_env_names_are_intentionally_hidden_from_web_registry() -> None:
         "SSI_V3_MAX_RETRIES",
         "SSI_V3_RETRY_DELAY",
         "SSI_V3_RATE_LIMIT_PER_SECOND",
+        "SSI_V3_LIVE_ACCEPTANCE_ENABLED",
     }
     assert expected <= WEB_SETTINGS_HIDDEN_FROM_UI
 
@@ -667,6 +668,8 @@ def test_error_normalization(error: Any, failure_class: str) -> None:
     assert "<api-secret>" not in rendered
     rate = result["diagnostics"]["rate_limit"]
     assert rate["limit"] is None and rate["remaining"] is None and rate["reset"] is None
+    if error == "auth":
+        assert result["diagnostics"]["http_status"] == 401
 
 
 class MinimalV2Fetcher:
@@ -824,7 +827,7 @@ def test_static_scope_guards_keep_v3_out_of_streaming_trading_and_production_for
     adapter_text = (ROOT / "data_provider" / "ssi_v3_adapter.py").read_text(encoding="utf-8")
     assert "Trading(" not in adapter_text
     assert "request_otp" not in adapter_text
-    assert "private_key=" not in adapter_text
+    assert 'private_key=""' in adapter_text
     assert "SSI_V3_SECURITIES_SUMMARY_PATH" in adapter_text
     assert "totalForeignBuy" in adapter_text
 

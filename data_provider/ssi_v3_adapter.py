@@ -74,7 +74,6 @@ class SsiV3RestSettings:
     def missing_required_names(self) -> Tuple[str, ...]:
         missing: List[str] = []
         for name, value in (
-            ("SSI_V3_CLIENT_ID", self.client_id),
             ("SSI_V3_API_KEY", self.api_key),
             ("SSI_V3_API_SECRET", self.api_secret),
         ):
@@ -116,6 +115,7 @@ def _default_auth_factory(settings: SsiV3RestSettings) -> Any:
         client_id=settings.client_id or "",
         api_key=settings.api_key or "",
         api_secret=settings.api_secret or "",
+        private_key="",
         api_url=settings.sdk_api_url,
         timeout=settings.request_timeout,
         max_retries=settings.max_retries,
@@ -297,6 +297,7 @@ def _error_result(capability: str, exc: BaseException) -> ProviderResult:
         "internal_error": "SSI V3 request failed internally.",
     }
     retry_after = getattr(exc, "retry_after", None)
+    safe_status_code = status_code if isinstance(status_code, int) else None
     return {
         "status": "unavailable",
         "source": SSI_V3_SOURCE,
@@ -309,6 +310,7 @@ def _error_result(capability: str, exc: BaseException) -> ProviderResult:
         "diagnostics": {
             "capability": capability,
             "exception_class": type(exc).__name__,
+            "http_status": safe_status_code,
             "rate_limit": {
                 "limit": None,
                 "remaining": None,
@@ -377,6 +379,26 @@ class SsiFastConnectV3Adapter:
             return operation(auth, data)
         except Exception as exc:
             return _error_result(capability, exc)
+
+    def initialize_rest_access(self) -> ProviderResult:
+        """Authenticate once and create the shared REST data client.
+
+        This is intended for explicit, bounded diagnostics that need to
+        distinguish authentication from later data operations. It returns only
+        the normalized provider envelope and never exposes a token or client.
+        """
+
+        try:
+            self._ensure_clients()
+        except Exception as exc:
+            return _error_result("authentication", exc)
+        return _ok_result(
+            [],
+            diagnostics={
+                "capability": "authentication",
+                "client_id_supplied": bool(self._settings.client_id),
+            },
+        )
 
     @staticmethod
     def _security_row(item: Any) -> Dict[str, Any]:

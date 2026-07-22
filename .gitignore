@@ -99,6 +99,7 @@ run.sh
 
 verify_*.py
 !scripts/verify_ssi_streaming_realtime.py
+!scripts/verify_ssi_v3_rest_access.py
 
 # ignore Claude workspace artifacts, but keep shared repo skills versioned
 .claude/*
