@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [fix] Treat SSI V3 Client ID as optional for Market Data REST while retaining dedicated API key/secret requirements and no V2 credential alias.
+- [test] Add a double-guarded, zero-retry SSI V3 REST acceptance tool plus offline credential, call-budget, outcome, lifecycle, and redaction coverage.
+- [documentation] Record SSI-V3-B3.1 live outcome G/NOT_RUN, continued V2 ownership, and unresolved V3 access, units, finality, and parity.
+
 - [improvement] Add offline-only SSI V3 securities-summary and foreign-flow normalization with unscaled gross fields, complete-pair net derivation, null/zero preservation, and explicit V2 production ownership.
 - [test] Cover SSI V3 summary SDK signatures, public REST request/envelope behavior, exact numeric normalization, pagination guards, lifecycle reuse, error sanitization, and V2-pinned foreign-flow routes with deterministic fakes.
 - [documentation] Record SSI-V3-B3 as implemented-disabled, retain V2 DailyStockPrice and foreign-flow ownership, and defer live parity, units, finality, shadow traffic, and cutover to later gates.

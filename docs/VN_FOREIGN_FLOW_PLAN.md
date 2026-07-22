@@ -8,6 +8,8 @@ Status: Phase 4.12E-3 implements deterministic, on-demand single-symbol analytic
 
 > SSI-V3-B3 now adds offline-only V3 `securitiesSummary` and foreign-flow normalization. It retains the four official unscaled gross foreign fields omitted by the pinned high-level SDK model, preserves null versus zero, and derives volume/value net independently only when each gross pair is complete. Symbol history and same-shape index normalization are `implemented_disabled`; units, finality, credentials, entitlement, and live parity remain unverified. DailyStockPrice and every public history/API/analytics/VN30 input remain explicitly routed to V2 by ownership, not fallback. Existing cache, single-flight, bounded lookback, analytics, VN30 aggregation, source metadata, and APIs are unchanged; no live request, shadow traffic, or cutover occurred.
 
+> SSI-V3-B3.1 corrects the Market Data REST credential contract so Client ID is optional and dedicated API key/secret remain required. The guarded 2026-07-22 acceptance was G/NOT_RUN because the REST selector remained V2 and the environment guard was disabled; no authentication, summary, or other data call ran. Units, finality, entitlement, and live parity remain unresolved, and V2 DailyStockPrice remains the only production foreign-flow source with no fallback or shadow execution.
+
 Phase: 4.12-PLAN
 
 Repository evidence reviewed: 2026-07-17

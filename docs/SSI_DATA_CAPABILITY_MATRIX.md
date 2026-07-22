@@ -20,6 +20,8 @@ Phase SSI-V3-B2 implements an offline, disabled-by-default V3 REST adapter found
 
 Phase SSI-V3-B3 implements V3 `securitiesSummary` and foreign-flow normalization only as a directly tested, production-disabled adapter capability. It maps official unscaled gross buy/sell volume/value fields, derives each net only from its complete gross pair, and preserves missing separately from explicit zero. Index-shaped normalization is also implemented-disabled. Units, finality, entitlement, and live parity remain unresolved; the matrix's production evidence and ownership do not change. V2 DailyStockPrice remains the sole owner for public symbol history, analytics, and VN30 inputs, with no fallback or shadow execution.
 
+Phase SSI-V3-B3.1 corrects the Market Data REST credential gate: the official token body and installed `ssi-sdk==3.0.5` require API key/secret and allow an empty Client ID; private key and OTP are not used. The guarded live diagnostic returned G/NOT_RUN on 2026-07-22 because the REST selector remained V2 and its environment guard was disabled, so no authentication or data operation ran and no live capability status changed. V2 ownership, units/finality uncertainty, and no-fallback policy remain unchanged.
+
 Phase 4.11C implements the verified completed-session slice of `IntradayOhlc`, and Phase 4.11D-2 extends the same fixed `resolution=1`, page 1, size 1,000 request to Today with delayed polling and typed freshness metadata. This is SSI-authoritative 1-minute chart data, not realtime. 5m/15m/30m/1h, aggregation, additional pages, HNX/UPCOM proof, and official volume-unit documentation remain unverified/deferred.
 
 ## Status Vocabulary

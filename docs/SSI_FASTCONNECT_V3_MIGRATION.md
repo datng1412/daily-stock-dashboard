@@ -453,7 +453,7 @@ The router chooses a provider before execution. `v3 -> error -> v2` is forbidden
 | Name | Classification | Planned use | Resolution requirement |
 | --- | --- | --- | --- |
 | `SSI_FASTCONNECT_REST_VERSION` | Non-secret; default `v2` | Explicit REST selector | B1; unknown values are errors |
-| `SSI_V3_CLIENT_ID` | Secret-adjacent identifier | Official SDK `Config.client_id` | Authoritative source/mapping unresolved; blocks B2 auth acceptance |
+| `SSI_V3_CLIENT_ID` | Optional secret-adjacent identifier | Official SDK `Config.client_id`; not included in the Market Data REST token body | Leave empty unless SSI provisions it for another approved scope; it does not block Market Data REST authentication |
 | `SSI_V3_API_KEY` | Secret | V3 REST/SDK market-data authentication | Must be SSI-issued/confirmed |
 | `SSI_V3_API_SECRET` | Secret | V3 REST/SDK market-data authentication | Must be SSI-issued/confirmed |
 | `SSI_V3_API_URL` | Defaultable non-secret | V3 REST base URL | Default only from official contract |
@@ -720,7 +720,7 @@ Implemented scope: pinned official `ssi-sdk==3.0.5`; separate secret-safe V3 con
 
 The synchronous SDK is used because the provider protocol and current services are synchronous and already execute provider work outside the FastAPI event loop. Construction and imports are pure. The first explicitly selected supported V3 call creates one shared `Auth` and `Data` lifecycle under a lock and calls `Auth.authenticate()` without OTP. The SDK remains responsible for token refresh; StockClock stores no token. Close is idempotent: a close-capable data fake/future public client is closed before `Auth`, while the pinned SDK's `Data` has no close method and `Auth` owns the shared transport.
 
-Configuration is `SSI_V3_REST_ENABLED=false`, `SSI_V3_CLIENT_ID`, `SSI_V3_API_KEY`, `SSI_V3_API_SECRET`, `SSI_V3_API_URL`, `SSI_V3_REQUEST_TIMEOUT`, `SSI_V3_MAX_RETRIES`, `SSI_V3_RETRY_DELAY`, and `SSI_V3_RATE_LIMIT_PER_SECOND`. V2 credentials are never reused. Missing V3 configuration is ignored while V2 is selected; explicit V3 selection fails with variable names only when disabled or incomplete. The documented full V3 API URL is normalized to the SDK transport root because the pinned SDK endpoint constants already contain `/api/v3`.
+Configuration is `SSI_V3_REST_ENABLED=false`, optional `SSI_V3_CLIENT_ID`, required `SSI_V3_API_KEY` and `SSI_V3_API_SECRET`, `SSI_V3_API_URL`, `SSI_V3_REQUEST_TIMEOUT`, `SSI_V3_MAX_RETRIES`, `SSI_V3_RETRY_DELAY`, and `SSI_V3_RATE_LIMIT_PER_SECOND`. V2 credentials are never reused. Missing V3 configuration is ignored while V2 is selected; explicit V3 selection fails with variable names only when disabled or when API key/secret are incomplete. The documented full V3 API URL is normalized to the SDK transport root because the pinned SDK endpoint constants already contain `/api/v3`.
 
 The inspected synchronous signatures used by the adapter are:
 
@@ -748,6 +748,16 @@ The inspected `ssi-sdk==3.0.5` public methods are `get_securities_summary(symbol
 Raw summary rows normalize to the provider-neutral daily-summary contract using `symbol`, ISO `date`, OHLC, `matched_volume` from `totalMatch`, `matched_value` from `totalMatchValue`, and the four unscaled gross foreign fields. `foreign_net_volume` and `foreign_net_value` are derived independently as buy minus sell only when both corresponding gross values are usable. Missing remains null, explicit zero remains zero, empty optional numeric strings remain null, booleans/non-finite/non-integral integer inputs fail as malformed, and integral strings are parsed without a float round-trip. Any similarly named provider net field is ignored. Duplicate symbol/date rows use the last provider row, then results are sorted by date and symbol as the existing V2 daily-summary path expects.
 
 This is normalization evidence only. Gross volume/value units, value scale, daily finality, corrections, credentials, entitlement, and V2/V3 live parity remain unverified. Production `DailyStockPrice`, symbol history, public foreign-flow endpoints, analytics inputs, and VN30 aggregation inputs remain explicitly V2-owned. Existing service cache/single-flight, analytics, public schemas, UI, `latest_price`, startup, realtime, and error-triggered no-fallback behavior are unchanged. No live request, credential test, shadow traffic, or production cutover occurred.
+
+#### SSI-V3-B3.1 — REST Credential Repair and Bounded Live Acceptance — implementation complete, live outcome G
+
+The official [auth-token contract](https://developers.ssi.com.vn/docs/api-reference/auth-token) requires `apiKey` and `apiSecret`; `otp` is optional. Inspection of installed `ssi-sdk==3.0.5` confirms that `TokenManager.authenticate(otp=None)` builds the same two-field body, while `Config.client_id` and `Config.private_key` both default to empty strings. Client ID is therefore optional for this Market Data REST scope only. This does not claim that Client ID is optional for trading, streaming, or another SSI product.
+
+B3.1 removes `SSI_V3_CLIENT_ID` from V3 REST completeness checks. The adapter still passes a separately configured Client ID when present, otherwise passes `client_id=""`; it always passes `private_key=""` and calls `authenticate()` without OTP. `SSI_V3_API_KEY` and `SSI_V3_API_SECRET` remain dedicated required secrets. No V2 identifier/secret alias exists, and the prior A1 HTTP 401 result remains valid evidence only for the rejected V2-to-V3 value mapping.
+
+`scripts/verify_ssi_v3_rest_access.py` is a terminal-only diagnostic. Its default is zero-network outcome G (`NOT_RUN`). Live execution requires both `--live` and `SSI_V3_LIVE_ACCEPTANCE_ENABLED=true`, in addition to `SSI_FASTCONNECT_REST_VERSION=v3`, `SSI_V3_REST_ENABLED=true`, and present API key/secret. A permitted run creates one Auth/Data lifecycle with at most one authentication attempt, a 10-second timeout cap, zero retries, and exactly four bounded data operations: FPT securities, prior-day-ended 14-calendar-day FPT daily OHLC, same-window FPT securities summary, and HOSE index list. Authentication failure stops before data calls. Output contains only guard presence, outcome, latency, safe HTTP status/exception class, row/schema/date counts, and aggregate foreign-field presence; it never prints credentials, tokens, headers, raw rows, or provider bodies.
+
+The 2026-07-22 local preflight and deterministic suite passed, but the live environment guard was disabled and the REST selector remained V2. The diagnostic therefore returned outcome G with zero authentication and zero data operations. A Client ID was configured by presence, so this run also did not prove no-Client-ID authentication. Credentials, entitlement, units, finality, and live V2/V3 parity remain unresolved. V2 remains the default and sole production owner for DailyStockPrice, foreign flow, IndexComponents, current-session behavior, and realtime; no fallback, shadow traffic, or cutover was added.
 
 #### SSI-V3-B4 — Bounded Shadow Comparison
 
@@ -826,7 +836,7 @@ Every retained V2 row requires a test that proves the router selects V2 intentio
 
 Live checks occur only in separately authorized phase gates, never normal pytest or B0:
 
-- Post-B2 live acceptance: one authentication sequence; one provider-derived securities query; one exact-symbol OHLC query; one index query; one summary query; sanitized rate-header observation; no unrestricted market request.
+- B3.1 live acceptance: run `python scripts/verify_ssi_v3_rest_access.py --live` only with the V3 REST selector and separate environment guard enabled; one authentication lifecycle and four bounded data operations; no V2 call, fallback, raw payload, or unrestricted market request. The latest result is G/NOT_RUN because the selector remained V2 and the guard was disabled.
 - B4 shadow: bounded approved symbols/indexes/date ranges/pages/concurrency/timeouts; no unsafe retry; V2 response ownership; no raw payload persistence or frontend exposure.
 - B5 cutover: provider/version diagnostics, provider-independent health/startup, isolated caches, one bounded request per activated capability, public contract checks, and rollback drill.
 - C streaming: one scoped topic family at a time during an eligible market window, plus reconnect/resubscribe and after-hours last-known semantics.
@@ -837,9 +847,9 @@ Runtime acceptance must verify that optional SSI availability never blocks FastA
 
 | Question | Impacted capability | Current evidence | Implementation impact | Resolve by | Blocker level |
 | --- | --- | --- | --- | --- | --- |
-| What is the authoritative V3 `client_id` source? | Auth/SDK | SDK config documents it; raw token endpoint does not | Offline configuration exists, but live values remain unapproved | Before post-B2 auth acceptance | `blocks_shadow` |
-| Do V2 identifier/secret values map to V3 keys? | Auth | Exact two-field mapping returned 401 | Separate V3 secrets remain required/unresolved | Before B2 live gate | `blocks_shadow` |
-| Is this account entitled/activated for V3? | All V3 | Prior 401 proves rejection, not cause | No V3 traffic can be accepted | Before B4 | `blocks_shadow` |
+| Is V3 `client_id` required for Market Data REST? | Auth/SDK | Official token contract and installed SDK build the token body from API key/secret only; Client ID defaults empty | Resolved as optional for Market Data REST only; other SSI scopes remain separate | B3.1 | `resolved_offline` |
+| Do V2 identifier/secret values map to V3 keys? | Auth | Exact two-field mapping returned 401 | Never alias V2 values; use only dedicated V3 key/secret | Resolved policy in B3.1 | `resolved_no_alias` |
+| Is this account entitled/activated for V3? | All V3 | Prior 401 proves rejection of the old mapping; B3.1 live check was not run | No V3 traffic can be accepted | Repeat B3.1 with all guards | `blocks_shadow` |
 | Which exact official `ssi-sdk` version is pinned? | Dependency/lifecycle | `ssi-sdk==3.0.5` inspected and pinned in B2 | Reinspect before any future upgrade; do not drift silently | Resolved for B2 | `resolved_offline` |
 | What are V3 foreign volume/value units? | Foreign flow | Field names documented only | Blocks normalized unit labels/net comparison | Before B4 foreign sample | `blocks_cutover` |
 | When is V3 summary foreign flow final/corrected? | Foreign flow | No accepted live evidence | Blocks completed-session ownership | Before B5 foreign cutover | `blocks_cutover` |
@@ -863,4 +873,4 @@ Phase B3 adds only direct, offline V3 securities-summary and foreign-flow normal
 
 ### Next implementation phase
 
-**SSI-V3-B4 — Default-Off Bounded Shadow Comparison** is the next proposed phase. Infrastructure may remain disabled by default, but any live V3 authentication or shadow execution still requires separate authorization and valid V3 access. B3 authorizes neither live traffic nor cutover.
+**SSI-V3-B4 — Default-Off Bounded Shadow Comparison** remains the next proposed implementation, but outcome G keeps it blocked. First repeat the B3.1 bounded acceptance with explicit authorization, `SSI_FASTCONNECT_REST_VERSION=v3`, and the separate live guard. Do not begin shadow execution or cutover from the current result.
