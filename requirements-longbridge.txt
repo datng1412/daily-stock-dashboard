@@ -1,0 +1,6 @@
+# Optional legacy Longbridge US/HK fallback.
+#
+# This SDK is not required for FastAPI startup, health, or Vietnam market
+# routes and is intentionally excluded from the production Docker image.
+-r requirements.txt
+longbridge==4.2.2

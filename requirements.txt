@@ -16,11 +16,12 @@ tushare>=1.4.0              # Priority 2: 挖地兔 Pro API
 pytdx>=1.72                 # Priority 2: 通达信行情服务器
 baostock>=0.8.0             # Priority 3: 证券宝数据
 yfinance>=0.2.0             # Priority 4: Yahoo Finance (Fallback)
-longbridge==0.2.75           # Priority 5: Py3.11 Bookworm 可解析版本；OAuth 路径运行时检测 SDK 能力
+# Longbridge is a credential-gated legacy US/HK fallback. It is intentionally
+# omitted from the production image; install requirements-longbridge.txt only
+# when that optional integration is explicitly used.
 tickflow>=0.1.0            # TickFlow official SDK (Issue #632, market review enhancement)
 vnstock==4.0.4             # Optional Vietnam KBS snapshot/trades runtime provider (lazy import)
-ssi-fc-data @ git+https://github.com/SSI-Securities-Corporation/python-fcdata.git@v2.2.2  # SSI FastConnect FC Data REST/streaming client for VN market data
-ssi-sdk==3.0.5             # Official SSI FastConnect V3 SDK; REST adapter remains disabled by default
+ssi-sdk==3.0.5             # Official SSI FastConnect V3 Market Data REST/WebSocket SDK
 
 #飞书
 lark-oapi>=1.0.0             # 飞书API
