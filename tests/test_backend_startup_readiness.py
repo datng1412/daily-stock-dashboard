@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import signal
 import subprocess
 import sys
 import threading
@@ -82,6 +83,40 @@ def test_normal_launcher_starts_expected_app_once_and_waits_for_readiness(monkey
     )
     assert main.stop_api_server(thread) is True
     assert not thread.is_alive()
+
+
+def test_process_termination_wait_handles_sigterm_and_restores_handlers(monkeypatch):
+    installed = {}
+    restored = []
+    previous = object()
+
+    class ImmediateSignalEvent:
+        def __init__(self):
+            self.triggered = False
+
+        def wait(self, timeout):
+            assert timeout == 0.25
+            if not self.triggered:
+                self.triggered = True
+                installed[signal.SIGTERM](signal.SIGTERM, None)
+            return self.triggered
+
+        def set(self):
+            self.triggered = True
+
+    monkeypatch.setattr(main.threading, "Event", ImmediateSignalEvent)
+    monkeypatch.setattr(main.signal, "getsignal", lambda _signal: previous)
+
+    def install(process_signal, handler):
+        if handler is previous:
+            restored.append(process_signal)
+        else:
+            installed[process_signal] = handler
+
+    monkeypatch.setattr(main.signal, "signal", install)
+
+    assert main.wait_for_process_termination(poll_seconds=0.25) == "SIGTERM"
+    assert set(restored) == {signal.SIGINT, signal.SIGTERM}
 
 
 def test_normal_launcher_propagates_background_startup_failure(monkeypatch):
@@ -243,6 +278,34 @@ def test_cold_app_import_completes_without_loading_optional_litellm():
         check=True,
     )
     assert result.stdout.splitlines() == ["False"]
+
+
+def test_cold_app_import_does_not_require_optional_longbridge_sdk():
+    environment = os.environ.copy()
+    environment["ENV_FILE"] = os.fspath(
+        Path(__file__).resolve().parents[1] / ".tmp" / "test-no-env"
+    )
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys; "
+                "sys.modules['longbridge'] = None; "
+                "sys.modules['longbridge.openapi'] = None; "
+                "import api.app; "
+                "import data_provider; "
+                "print('ok')"
+            ),
+        ],
+        cwd=os.fspath(Path(__file__).resolve().parents[1]),
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=True,
+    )
+    assert result.stdout.splitlines() == ["ok"]
 
 
 def test_required_system_config_initializer_failure_is_named(monkeypatch, tmp_path):

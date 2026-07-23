@@ -60,13 +60,9 @@ class FakeStreamClient:
 
 def _config(**overrides):
     values = {
-        "ssi_fastconnect_enabled": True,
-        "ssi_fastconnect_base_url": "https://fc-data.ssi.com.vn/api/v2/Market",
-        "ssi_fastconnect_consumer_id": "test-consumer",
-        "ssi_fastconnect_consumer_secret": "test-secret",
-        "ssi_fastconnect_timeout_seconds": 1,
-        "ssi_fastconnect_cache_ttl_seconds": 0,
-        "ssi_fastconnect_token_ttl_seconds": 900,
+        "ssi_v3_rest_enabled": True,
+        "ssi_v3_api_key": "test-api-key",
+        "ssi_v3_api_secret": "test-api-secret",
         "ssi_fastconnect_realtime_enabled": True,
         "ssi_streaming_realtime_enabled": True,
         "ssi_streaming_realtime_cache_ttl_seconds": 15,
@@ -85,15 +81,14 @@ def _config(**overrides):
 
 def _x_trade(symbol: str = "FPT", price: str = "130.5"):
     return {
-        "DataType": "X-TRADE",
-        "Content": {
-            "RType": "X-TRADE",
-            "TradingDate": "25/06/2026",
-            "Time": "10:01:02",
-            "Symbol": symbol,
-            "LastPrice": price,
-            "LastVol": "1000",
-            "TotalVol": "123456",
+        "topic": f"trade.{symbol}",
+        "data": {
+            "s": symbol,
+            "p": price,
+            "q": "1000",
+            "v": "123456",
+            "t": "2026-06-25T10:01:02+07:00",
+            "si": "B",
         },
     }
 
@@ -175,18 +170,10 @@ def test_bootstrap_rejects_unsafe_symbols_and_starts_no_space_channels():
     assert client.channels == [
         "X:FPT",
         "X-QUOTE:FPT",
-        "R:FPT",
         "X-TRADE:FPT",
-        "F:FPT",
         "X:HPG",
         "X-QUOTE:HPG",
-        "R:HPG",
         "X-TRADE:HPG",
-        "F:HPG",
-        "MI:VNINDEX",
-        "MI:VN30",
-        "MI:HNX",
-        "MI:UPCOM",
     ]
     assert "ALL" in status["bootstrap_rejected_symbols"]
     assert "$BAD" in status["bootstrap_rejected_symbols"]
@@ -194,7 +181,7 @@ def test_bootstrap_rejects_unsafe_symbols_and_starts_no_space_channels():
     assert is_ssi_streaming_realtime_monitor_running() is True
 
 
-def test_bootstrap_respects_explicit_old_space_channel_override():
+def test_v3_bootstrap_normalizes_legacy_space_channel_override():
     client = FakeStreamClient()
 
     bootstrap_ssi_streaming_realtime(
@@ -203,15 +190,9 @@ def test_bootstrap_respects_explicit_old_space_channel_override():
     )
 
     assert client.channels == [
-        "X: FPT",
+        "X:FPT",
         "X-QUOTE:FPT",
-        "R:FPT",
         "X-TRADE:FPT",
-        "F:FPT",
-        "MI:VNINDEX",
-        "MI:VN30",
-        "MI:HNX",
-        "MI:UPCOM",
     ]
 
 
@@ -221,13 +202,7 @@ def test_service_reads_backend_lifecycle_cache_without_dynamic_subscription():
     assert client.channels == [
         "X:FPT",
         "X-QUOTE:FPT",
-        "R:FPT",
         "X-TRADE:FPT",
-        "F:FPT",
-        "MI:VNINDEX",
-        "MI:VN30",
-        "MI:HNX",
-        "MI:UPCOM",
     ]
 
     client.on_message(_x_trade(price="131.5"))
@@ -241,17 +216,11 @@ def test_service_reads_backend_lifecycle_cache_without_dynamic_subscription():
     assert payload["cache"]["response_cache_status"] == "bypassed"
     assert payload["cache"]["streaming_cache_status"] == "hit"
     assert payload["streaming_status"] == "cache_hit"
-    assert payload["runtime_status"] == "running"
+    assert payload["manager_state"] == "running"
     assert client.channels == [
         "X:FPT",
         "X-QUOTE:FPT",
-        "R:FPT",
         "X-TRADE:FPT",
-        "F:FPT",
-        "MI:VNINDEX",
-        "MI:VN30",
-        "MI:HNX",
-        "MI:UPCOM",
     ]
 
     client.on_message(_x_trade(price="132.5"))
@@ -265,13 +234,7 @@ def test_service_reads_backend_lifecycle_cache_without_dynamic_subscription():
     assert client.channels == [
         "X:FPT",
         "X-QUOTE:FPT",
-        "R:FPT",
         "X-TRADE:FPT",
-        "F:FPT",
-        "MI:VNINDEX",
-        "MI:VN30",
-        "MI:HNX",
-        "MI:UPCOM",
     ]
 
 

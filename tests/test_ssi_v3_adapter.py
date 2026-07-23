@@ -25,14 +25,13 @@ from data_provider.ssi_provider_router import (
     close_shared_ssi_v3_adapter,
     create_ssi_rest_provider_router,
 )
-from data_provider.ssi_v2_adapter import SsiFastConnectV2Adapter
 from data_provider.ssi_v3_adapter import (
     SSI_V3_MAX_ROWS,
     SSI_V3_SOURCE,
     SsiFastConnectV3Adapter,
     SsiV3RestSettings,
 )
-from src.config import Config, parse_ssi_fastconnect_rest_version
+from src.config import Config
 from src.services.vietnam_market_service import (
     VietnamDashboardConfig,
     VietnamMarketService,
@@ -215,7 +214,7 @@ def test_pinned_sdk_dependency_namespace_python_and_docker_contract() -> None:
     package = metadata.metadata("ssi-sdk")
 
     assert "ssi-sdk==3.0.5" in requirements
-    assert "ssi-fc-data" in requirements and "v2.2.2" in requirements
+    assert "ssi-fc-data" not in requirements
     assert metadata.version("ssi-sdk") == "3.0.5"
     assert package["Requires-Python"] == ">=3.10"
     assert "SSI-Securities-Inc" in " ".join(package.get_all("Project-URL") or [])
@@ -260,7 +259,6 @@ def test_v3_environment_configuration_is_parsed_without_exposing_secrets(
     _mock_setup_env: Any,
 ) -> None:
     env = {
-        "SSI_FASTCONNECT_REST_VERSION": "v3",
         "SSI_V3_REST_ENABLED": "true",
         "SSI_V3_CLIENT_ID": "<client-id>",
         "SSI_V3_API_KEY": "<api-key>",
@@ -274,7 +272,7 @@ def test_v3_environment_configuration_is_parsed_without_exposing_secrets(
     with patch.dict(os.environ, env, clear=True):
         config = Config._load_from_env()
 
-    assert config.ssi_fastconnect_rest_version == "v3"
+    assert not hasattr(config, "ssi_fastconnect_rest_version")
     assert config.ssi_v3_rest_enabled is True
     assert config.ssi_v3_api_url == "https://api.ssi.com.vn/api/v3"
     assert config.ssi_v3_request_timeout == 12
@@ -288,35 +286,39 @@ def test_v3_environment_configuration_is_parsed_without_exposing_secrets(
 
 
 def test_v3_selected_while_disabled_or_incomplete_fails_with_names_only() -> None:
-    disabled = Config(ssi_fastconnect_rest_version="v3", ssi_v3_rest_enabled=False)
+    disabled = Config(ssi_v3_rest_enabled=False)
     with pytest.raises(ValueError, match="SSI_V3_REST_ENABLED=true"):
-        create_ssi_rest_provider_router(config=disabled, v2_fetcher=object())
+        create_ssi_rest_provider_router(config=disabled)
 
     incomplete = Config(
-        ssi_fastconnect_rest_version="v3",
         ssi_v3_rest_enabled=True,
         ssi_v3_client_id=None,
         ssi_v3_api_key="<api-key>",
         ssi_v3_api_secret=None,
     )
     with pytest.raises(ValueError) as exc_info:
-        create_ssi_rest_provider_router(config=incomplete, v2_fetcher=object())
+        create_ssi_rest_provider_router(config=incomplete)
     message = str(exc_info.value)
     assert "SSI_V3_CLIENT_ID" not in message and "SSI_V3_API_SECRET" in message
     assert "<api-key>" not in message
 
 
-def test_v2_selection_never_requires_v3_configuration() -> None:
-    router = create_ssi_rest_provider_router(version="v2", v2_fetcher=MinimalV2Fetcher())
-    assert router.selected_version == "v2"
-    assert parse_ssi_fastconnect_rest_version(None) == "v2"
-    with pytest.raises(ValueError, match="unsupported"):
-        parse_ssi_fastconnect_rest_version("future")
+def test_global_provider_selector_and_v2_factory_input_are_removed() -> None:
+    signature = inspect.signature(create_ssi_rest_provider_router)
+    assert "version" not in signature.parameters
+    assert "v2_fetcher" not in signature.parameters
+
+
+def test_v2_runtime_modules_are_absent_after_atomic_cutover() -> None:
+    retired_runtime_paths = (
+        ROOT / "data_provider" / "ssi_fastconnect_fetcher.py",
+        ROOT / "data_provider" / "ssi_v2_adapter.py",
+    )
+    assert all(not path.exists() for path in retired_runtime_paths)
 
 
 def test_config_validation_lists_v3_names_without_values() -> None:
     config = Config(
-        ssi_fastconnect_rest_version="v3",
         ssi_v3_rest_enabled=True,
         ssi_v3_client_id="<client-id>",
         ssi_v3_api_key=None,
@@ -348,23 +350,18 @@ def test_v3_env_names_are_intentionally_hidden_from_web_registry() -> None:
 
 def test_market_service_passes_dedicated_v3_settings_to_router() -> None:
     config = VietnamDashboardConfig(
-        ssi_fastconnect_rest_version="v3",
         ssi_v3_rest_enabled=True,
         ssi_v3_client_id="<client-id>",
         ssi_v3_api_key="<api-key>",
         ssi_v3_api_secret="<api-secret>",
     )
-    service = VietnamMarketService(
-        config=config,
-        ssi_fetcher=MinimalV2Fetcher(),  # type: ignore[arg-type]
-    )
+    service = VietnamMarketService(config=config)
     try:
         router = service._get_ssi_rest_provider()
         current_router_type = importlib.import_module(
             "data_provider.ssi_provider_router"
         ).SsiRestProviderRouter
         assert isinstance(router, current_router_type)
-        assert router.v2_provider is None
         assert isinstance(router.v3_provider, SsiFastConnectV3Adapter)
         assert router.v3_provider.initialized is False
         assert router.v3_provider.settings.client_id == "<client-id>"
@@ -718,46 +715,6 @@ def test_error_normalization(error: Any, failure_class: str) -> None:
         assert result["diagnostics"]["http_status"] == 401
 
 
-class MinimalV2Fetcher:
-    def __init__(self) -> None:
-        self.calls: List[str] = []
-        self.close_calls = 0
-
-    def _result(self, name: str) -> Dict[str, Any]:
-        self.calls.append(name)
-        return {"status": "ok", "source": "SSI", "rows": [], "count": 0}
-
-    def get_securities(self, **kwargs: Any) -> Dict[str, Any]:
-        return self._result("get_securities")
-
-    def get_securities_details(self, **kwargs: Any) -> Dict[str, Any]:
-        return self._result("get_securities_details")
-
-    def get_daily_ohlcv(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
-        return self._result("get_daily_ohlcv")
-
-    def get_intraday_ohlcv(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
-        return self._result("get_intraday_ohlcv")
-
-    def get_completed_intraday_1m(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
-        return self._result("get_completed_intraday_1m")
-
-    def get_daily_stock_price(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
-        return self._result("get_daily_stock_price")
-
-    def get_index_list(self, **kwargs: Any) -> Dict[str, Any]:
-        return self._result("get_index_list")
-
-    def get_daily_index(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
-        return self._result("get_daily_index")
-
-    def get_index_components(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
-        return self._result("get_index_components")
-
-    def close(self) -> None:
-        self.close_calls += 1
-
-
 class StubV3Provider:
     def __init__(self, result: Optional[Dict[str, Any]] = None) -> None:
         self.calls: List[str] = []
@@ -809,7 +766,6 @@ class StubV3Provider:
 
 def v3_config() -> Config:
     return Config(
-        ssi_fastconnect_rest_version="v3",
         ssi_v3_rest_enabled=True,
         ssi_v3_client_id="<client-id>",
         ssi_v3_api_key="<api-key>",
@@ -818,13 +774,10 @@ def v3_config() -> Config:
 
 
 def test_router_routes_all_retained_product_capabilities_to_v3_without_fallback() -> None:
-    v2 = MinimalV2Fetcher()
     v3 = StubV3Provider()
     router = create_ssi_rest_provider_router(
-        config=v3_config(), v2_fetcher=v2, v3_provider=v3  # type: ignore[arg-type]
+        config=v3_config(), v3_provider=v3  # type: ignore[arg-type]
     )
-
-    assert router.v2_provider is None
 
     router.get_daily_ohlcv("FPT")
     router.get_daily_stock_price("FPT")
@@ -839,49 +792,41 @@ def test_router_routes_all_retained_product_capabilities_to_v3_without_fallback(
         "get_index_components",
         "get_daily_index",
     ]
-    assert v2.calls == []
     supported = router.routing_diagnostics("daily_ohlcv")
     summary = router.routing_diagnostics("foreign_flow")
     assert supported["selected_version"] == "v3" and supported["fallback_used"] is False
-    assert summary["selected_version"] == "v3" and summary["v2_pinned"] is False
+    assert summary["selected_version"] == "v3" and summary["fallback_used"] is False
 
 
 def test_v3_failure_never_invokes_v2() -> None:
-    v2 = MinimalV2Fetcher()
     failure = {"status": "unavailable", "source": SSI_V3_SOURCE, "failure_class": "request_timeout", "rows": []}
     v3 = StubV3Provider(failure)
     router = create_ssi_rest_provider_router(
-        config=v3_config(), v2_fetcher=v2, v3_provider=v3  # type: ignore[arg-type]
+        config=v3_config(), v3_provider=v3  # type: ignore[arg-type]
     )
 
     assert router.get_daily_ohlcv("FPT") is failure
     assert v3.calls == ["get_daily_ohlcv"]
-    assert v2.calls == []
 
 
 def test_current_session_completed_method_routes_to_v3() -> None:
-    v2 = MinimalV2Fetcher()
     v3 = StubV3Provider()
     router = create_ssi_rest_provider_router(
-        config=v3_config(), v2_fetcher=v2, v3_provider=v3  # type: ignore[arg-type]
+        config=v3_config(), v3_provider=v3  # type: ignore[arg-type]
     )
 
     today = datetime.now(ZoneInfo("Asia/Ho_Chi_Minh")).strftime("%Y-%m-%d")
     router.get_completed_intraday_1m("FPT", today)
 
-    assert v2.calls == []
     assert v3.calls == ["get_completed_intraday_1m"]
 
 
-def test_v2_adapter_remains_default_and_structural_router_contract_holds() -> None:
-    v2 = MinimalV2Fetcher()
-    router = create_ssi_rest_provider_router(version="", v2_fetcher=v2)
-    current_v2_type = importlib.import_module(
-        "data_provider.ssi_v2_adapter"
-    ).SsiFastConnectV2Adapter
-    assert isinstance(router.provider, current_v2_type)
-    router.get_daily_ohlcv("FPT")
-    assert v2.calls == ["get_daily_ohlcv"]
+def test_router_source_has_no_v2_adapter_construction() -> None:
+    router_text = (ROOT / "data_provider" / "ssi_provider_router.py").read_text(
+        encoding="utf-8"
+    )
+    assert "ssi_v2_adapter" not in router_text
+    assert "SsiFastConnectFetcher" not in router_text
 
 
 def test_static_scope_guards_keep_v3_out_of_trading_and_preserve_no_fallback_router() -> None:
@@ -938,21 +883,13 @@ def test_v3_sdk_import_is_scoped_to_adapter_tests_and_dependency_references() ->
     ]
 
 
-def test_provider_version_namespaces_only_v3_service_cache_keys() -> None:
-    v2_intraday_key = _intraday_chart_cache_key("FPT", "2026-07-21")
+def test_service_cache_keys_are_always_v3_namespaced() -> None:
+    default_intraday_key = _intraday_chart_cache_key("FPT", "2026-07-21")
     v3_intraday_key = _intraday_chart_cache_key("FPT", "2026-07-21", "v3")
-    v2_service = VietnamMarketService(
-        config=VietnamDashboardConfig(ssi_fastconnect_rest_version="v2")
-    )
-    v3_service = VietnamMarketService(
-        config=VietnamDashboardConfig(ssi_fastconnect_rest_version="v3")
-    )
+    service = VietnamMarketService(config=VietnamDashboardConfig())
 
-    assert v3_intraday_key == (*v2_intraday_key, "provider_version", "v3")
-    assert "provider_version" not in v2_service._daily_ohlcv_cache_key(
-        "FPT", "ssi", limit=260, days=90
-    )
-    assert ("provider_version", "v3") in v3_service._daily_ohlcv_cache_key(
+    assert v3_intraday_key == default_intraday_key
+    assert ("provider_version", "v3") in service._daily_ohlcv_cache_key(
         "FPT", "ssi", limit=260, days=90
     )
 

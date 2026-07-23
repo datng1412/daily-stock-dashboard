@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from data_provider.ssi_fastconnect_fetcher import REALTIME_STREAMING_NOT_IMPLEMENTED_REASON
 from src.services.vietnam_market_service import (
     VietnamDashboardConfig,
     VietnamMarketService,
     build_vietnam_data_quality_summary,
     clear_vietnam_cache,
 )
+
+REALTIME_STREAMING_NOT_IMPLEMENTED_REASON = "SSI realtime stream unavailable."
 
 
 class ExplodingManager:
@@ -225,6 +226,9 @@ class FakeSsiFetcher:
     def get_securities_details(self, **kwargs):
         symbol = kwargs.get("symbol") or "FPT"
         return {"status": "ok", "source": "SSI", "rows": [{"symbol": symbol, "exchange": "HOSE", "market": "HOSE", "source": "SSI"}]}
+
+    def get_security_metadata(self, symbol=None, market=None):
+        return self.get_securities_details(symbol=symbol, market=market)
 
     def get_securities(self, **kwargs):
         return self.get_securities_details(symbol="FPT")

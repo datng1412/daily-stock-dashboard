@@ -103,6 +103,9 @@ class FakeSsiFetcher:
         self.details_calls += 1
         return self.details_payload
 
+    def get_security_metadata(self, symbol=None, market=None):
+        return self.get_securities_details(symbol=symbol, market=market)
+
     def get_securities(self, **kwargs):
         self.securities_calls += 1
         return self.securities_payload

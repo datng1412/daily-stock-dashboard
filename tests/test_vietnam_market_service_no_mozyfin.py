@@ -204,7 +204,12 @@ class FakeSsiFetcher:
             "count": 2,
         }
 
-    def get_index_components(self, index_code: str, market=None):
+    def get_index_components(
+        self,
+        index_code: str,
+        market=None,
+        force_refresh: bool = False,
+    ):
         return {
             "status": "ok",
             "source": "SSI",

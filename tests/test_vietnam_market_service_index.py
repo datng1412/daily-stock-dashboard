@@ -382,7 +382,9 @@ def test_index_list_unavailable_does_not_block_explicit_index_components_success
     assert payload["status"] == "ok"
     assert payload["rows"][0]["symbol"] == "FPT"
     assert fetcher.index_list_calls == []
-    assert fetcher.components_calls == [{"index_code": "VN30", "market": "HOSE"}]
+    assert fetcher.components_calls == [
+        {"index_code": "VN30", "market": "HOSE", "force_refresh": False}
+    ]
     assert payload["diagnostics"]["index_list_status"] == "not_required"
     assert payload["diagnostics"]["resolution_status"] == "direct"
 

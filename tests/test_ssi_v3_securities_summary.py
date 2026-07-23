@@ -472,16 +472,12 @@ class RecordingProvider:
         self.calls.append("close")
 
 
-def test_router_assigns_all_foreign_flow_owners_to_v3_when_v3_is_selected() -> None:
-    v2 = RecordingProvider("SSI FastConnect V2")
+def test_router_assigns_all_foreign_flow_owners_to_sole_v3_provider() -> None:
     v3 = RecordingProvider(SSI_V3_SOURCE)
-    router = SsiRestProviderRouter(
-        v2, selected_version="v3", v3_provider=v3  # type: ignore[arg-type]
-    )
+    router = SsiRestProviderRouter(v3)  # type: ignore[arg-type]
 
     result = router.get_daily_stock_price("FPT")
     assert result["source"] == SSI_V3_SOURCE
-    assert v2.calls == []
     assert v3.calls == ["get_daily_stock_price"]
     for capability in (
         "daily_security_summary",
@@ -492,5 +488,5 @@ def test_router_assigns_all_foreign_flow_owners_to_v3_when_v3_is_selected() -> N
     ):
         diagnostics = router.routing_diagnostics(capability)
         assert diagnostics["selected_version"] == "v3"
-        assert diagnostics["v2_pinned"] is False
+        assert diagnostics["routing_reason"] == "sole_v3_product_capability"
         assert diagnostics["fallback_used"] is False

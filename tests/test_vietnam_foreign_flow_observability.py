@@ -21,7 +21,10 @@ def test_broad_observability_exposes_typed_zero_state_without_provider_work(monk
     def fail_provider(*args, **kwargs):
         raise AssertionError("observability must not construct or call an SSI provider")
 
-    monkeypatch.setattr("data_provider.ssi_fastconnect_fetcher.SsiFastConnectFetcher.get_daily_stock_price", fail_provider)
+    monkeypatch.setattr(
+        "src.services.vietnam_foreign_flow_service.create_ssi_rest_provider_router",
+        fail_provider,
+    )
     app = FastAPI()
     app.include_router(stocks.router, prefix="/api/v1/stocks")
     with TestClient(app) as client:

@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from data_provider.ssi_fastconnect_fetcher import DAILY_OHLC_RATE_LIMIT_COOLDOWN_REASON
 from src.services.vietnam_company_research_service import VietnamCompanyResearchService
 from src.services.vietnam_market_service import (
+    DAILY_OHLC_RATE_LIMIT_COOLDOWN_REASON,
     VietnamDashboardConfig,
     VietnamMarketService,
     clear_vietnam_cache,

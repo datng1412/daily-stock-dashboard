@@ -39,10 +39,9 @@ class FakeObservableClient:
 
 def _config():
     return SimpleNamespace(
-        ssi_fastconnect_enabled=True,
-        ssi_fastconnect_base_url="https://example.test/api/v2/Market",
-        ssi_fastconnect_consumer_id="placeholder",
-        ssi_fastconnect_consumer_secret="placeholder",
+        ssi_v3_rest_enabled=True,
+        ssi_v3_api_key="placeholder",
+        ssi_v3_api_secret="placeholder",
         ssi_fastconnect_realtime_enabled=True,
         ssi_fastconnect_trade_tape_enabled=True,
         ssi_fastconnect_intraday_enabled=True,

@@ -6,7 +6,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api.app import create_app
-from data_provider.ssi_fastconnect_fetcher import SsiFastConnectFetcher
 from src.services import vietnam_market_service as service_module
 from src.services.vietnam_market_service import (
     VietnamMarketService,
@@ -38,35 +37,6 @@ class FakeCompletedIntradayFetcher:
     def get_completed_intraday_1m(self, symbol: str, trading_date: str):
         self.calls.append((symbol, trading_date))
         return self.payload
-
-
-def test_fetcher_uses_one_fixed_completed_session_request(monkeypatch):
-    fetcher = SsiFastConnectFetcher(enabled=True, intraday_enabled=True, consumer_id="x", consumer_secret="y")
-    calls = []
-
-    def fake_request(endpoint, params):
-        calls.append((endpoint, params))
-        return {"data": {"totalRecord": 0, "items": []}}
-
-    monkeypatch.setattr(fetcher, "_request", fake_request)
-    result = fetcher.get_completed_intraday_1m("FPT", "2026-06-24")
-
-    assert result["status"] == "ok"
-    assert result["rows"] == []
-    assert calls == [
-        (
-            "IntradayOhlc",
-            {
-                "symbol": "FPT",
-                "fromDate": "24/06/2026",
-                "toDate": "24/06/2026",
-                "pageIndex": 1,
-                "pageSize": 1000,
-                "ascending": True,
-                "resolution": 1,
-            },
-        )
-    ]
 
 
 def test_normalizer_uses_vietnam_time_keeps_gaps_and_deduplicates_latest_raw_timestamp():

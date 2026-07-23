@@ -469,7 +469,10 @@ def test_vietnam_date_rollover_uses_a_new_provider_key_and_never_recovers_old_to
     keys = list(service_module._VN_INTRADAY_CHART_CACHE)
     assert {key[5] for key in keys} == {"2026-07-16", "2026-07-17"}
     assert all(key[1:3] == ("ssi_fastconnect", "IntradayOhlc") for key in keys)
-    assert all(key[-2:] == ("page_size", 1000) for key in keys)
+    assert all(
+        key[-4:] == ("page_size", 1000, "provider_version", "v3")
+        for key in keys
+    )
 
 
 def test_structured_provider_log_is_one_per_actual_fetch_and_sanitized(monkeypatch, caplog):

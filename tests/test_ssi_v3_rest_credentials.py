@@ -59,14 +59,13 @@ def test_v3_selection_accepts_empty_client_id_but_not_missing_key_or_secret(
 
 @patch("src.config.setup_env")
 @patch.object(Config, "_parse_litellm_yaml", return_value=[])
-def test_v2_credentials_are_never_aliased_to_v3(
+def test_removed_v2_credentials_are_ignored(
     _mock_parse_yaml: object,
     _mock_setup_env: object,
 ) -> None:
     with patch.dict(
         os.environ,
         {
-            "SSI_FASTCONNECT_REST_VERSION": "v2",
             "SSI_FASTCONNECT_CONSUMER_ID": "<v2-id>",
             "SSI_FASTCONNECT_CONSUMER_SECRET": "<v2-secret>",
         },
@@ -74,8 +73,8 @@ def test_v2_credentials_are_never_aliased_to_v3(
     ):
         loaded = Config._load_from_env()
 
-    assert loaded.ssi_fastconnect_consumer_id == "<v2-id>"
-    assert loaded.ssi_fastconnect_consumer_secret == "<v2-secret>"
+    assert not hasattr(loaded, "ssi_fastconnect_consumer_id")
+    assert not hasattr(loaded, "ssi_fastconnect_consumer_secret")
     assert loaded.ssi_v3_client_id is None
     assert loaded.ssi_v3_api_key is None
     assert loaded.ssi_v3_api_secret is None
@@ -102,7 +101,6 @@ def test_auth_factory_passes_empty_optional_sdk_fields_without_otp() -> None:
 
 def test_structured_config_validation_treats_client_id_as_optional() -> None:
     config = Config(
-        ssi_fastconnect_rest_version="v3",
         ssi_v3_rest_enabled=True,
         ssi_v3_client_id=None,
         ssi_v3_api_key="<api-key>",

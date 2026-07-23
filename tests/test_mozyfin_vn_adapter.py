@@ -147,7 +147,14 @@ class _StubSsiFetcher:
         self.index_list_args = []
         self.index_components_args = []
 
-    def get_daily_ohlcv(self, symbol, from_date=None, to_date=None, limit=260):
+    def get_daily_ohlcv(
+        self,
+        symbol,
+        from_date=None,
+        to_date=None,
+        limit=260,
+        force_refresh=False,
+    ):
         self.daily_ohlcv_calls += 1
         return self.daily_ohlcv
 
@@ -196,7 +203,17 @@ class _StubSsiFetcher:
         self.securities_details_args.append({"symbol": symbol, "market": market})
         return self.securities_details
 
-    def get_intraday_ohlcv(self, symbol, timeframe="1h", limit=8):
+    def get_security_metadata(self, symbol=None, market=None):
+        return self.get_securities_details(symbol=symbol, market=market)
+
+    def get_intraday_ohlcv(
+        self,
+        symbol,
+        from_date=None,
+        to_date=None,
+        limit=8,
+        interval=None,
+    ):
         return {"status": "unavailable", "source": "SSI", "reason": "SSI IntradayOhlc disabled in test stub", "rows": []}
 
     def get_realtime_snapshot(self, symbols):
