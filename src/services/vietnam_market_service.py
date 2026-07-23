@@ -30,12 +30,11 @@ from data_provider.corporate_actions_provider import (
     normalize_provider_status,
     sanitize_corporate_actions_text,
 )
-from data_provider.ssi_fastconnect_fetcher import (
-    DAILY_OHLC_RATE_LIMIT_COOLDOWN_REASON,
-    SsiFastConnectFetcher,
-)
 from data_provider.ssi_provider_protocol import SsiRestProvider
-from data_provider.ssi_provider_router import create_ssi_rest_provider_router
+from data_provider.ssi_provider_router import (
+    SsiRestProviderRouter,
+    create_ssi_rest_provider_router,
+)
 from data_provider.ssi_streaming_realtime import (
     SSI_STREAMING_REALTIME_DISABLED_REASON,
     normalize_trade_side,
@@ -128,6 +127,7 @@ VN_PROVIDER_SSI = "ssi"
 VN_PROVIDER_NONE = "none"
 VN_SOURCE_MOZYFIN = "Mozyfin"
 VN_SOURCE_SSI = "SSI"
+DAILY_OHLC_RATE_LIMIT_COOLDOWN_REASON = "SSI DailyOhlc rate-limit cooldown active."
 SSI_DAILY_OHLC_SOURCE = "SSI DailyOhlc"
 SSI_DAILY_STOCK_PRICE_SOURCE = "SSI DailyStockPrice"
 SSI_SECURITIES_SOURCE = "SSI Securities"
@@ -340,7 +340,7 @@ def _iso(value: Optional[datetime]) -> Optional[str]:
 def _intraday_chart_cache_key(
     ticker: str,
     trading_date: str,
-    provider_version: str = "v2",
+    provider_version: str = "v3",
 ) -> Tuple[Any, ...]:
     key = (
         "intraday_chart",
@@ -354,9 +354,7 @@ def _intraday_chart_cache_key(
         "page_size",
         VN_INTRADAY_CHART_PAGE_SIZE,
     )
-    if str(provider_version or "v2").strip().lower() == "v3":
-        return (*key, "provider_version", "v3")
-    return key
+    return (*key, "provider_version", "v3")
 
 
 def _intraday_chart_entry_kind(entry: _IntradayChartCacheEntry) -> str:
@@ -733,7 +731,6 @@ class VietnamDashboardConfig:
     index_data_provider: str = VN_PROVIDER_SSI
     intraday_data_provider: str = VN_PROVIDER_SSI
     ssi_intraday_enabled: bool = True
-    ssi_fastconnect_rest_version: str = "v2"
     ssi_v3_rest_enabled: bool = False
     ssi_v3_client_id: Optional[str] = field(default=None, repr=False)
     ssi_v3_api_key: Optional[str] = field(default=None, repr=False)
@@ -765,7 +762,6 @@ def _default_dashboard_config() -> VietnamDashboardConfig:
         index_data_provider=getattr(app_config, "vn_index_data_provider", VN_PROVIDER_SSI),
         intraday_data_provider=getattr(app_config, "vn_intraday_data_provider", VN_PROVIDER_SSI),
         ssi_intraday_enabled=getattr(app_config, "ssi_fastconnect_intraday_enabled", True),
-        ssi_fastconnect_rest_version=getattr(app_config, "ssi_fastconnect_rest_version", "v2"),
         ssi_v3_rest_enabled=getattr(app_config, "ssi_v3_rest_enabled", False),
         ssi_v3_client_id=getattr(app_config, "ssi_v3_client_id", None),
         ssi_v3_api_key=getattr(app_config, "ssi_v3_api_key", None),
@@ -3539,7 +3535,7 @@ class VietnamMarketService:
         self,
         manager: Optional[DataFetcherManager] = None,
         config: Optional[VietnamDashboardConfig] = None,
-        ssi_fetcher: Optional[SsiFastConnectFetcher] = None,
+        ssi_fetcher: Optional[Any] = None,
         ssi_rest_provider: Optional[SsiRestProvider] = None,
         corporate_actions_provider: Optional[CorporateActionsProvider] = None,
     ):
@@ -3551,6 +3547,7 @@ class VietnamMarketService:
         else:
             self.manager = None
         self._ssi_fetcher = ssi_fetcher
+        self._ssi_fetcher_injected = ssi_fetcher is not None
         self._ssi_rest_provider = ssi_rest_provider
         self._ssi_rest_provider_injected = ssi_rest_provider is not None
         self._corporate_actions_provider = corporate_actions_provider
@@ -3566,46 +3563,37 @@ class VietnamMarketService:
                 streaming_realtime_manager = get_existing_ssi_streaming_realtime_manager()
             except Exception:  # noqa: BLE001 - lifecycle state is best-effort.
                 streaming_realtime_manager = None
-            if self.config.ssi_fastconnect_rest_version == "v3":
-                from data_provider.ssi_v3_streaming import (
-                    SsiStreamingRealtimeReader,
-                    build_v3_streaming_realtime_manager,
-                )
+            from data_provider.ssi_v3_streaming import (
+                SsiStreamingRealtimeReader,
+                build_v3_streaming_realtime_manager,
+            )
 
-                if streaming_realtime_manager is None:
-                    streaming_realtime_manager = build_v3_streaming_realtime_manager(
-                        self.config
-                    )
-                self._ssi_fetcher = SsiStreamingRealtimeReader(
-                    streaming_realtime_manager
+            if streaming_realtime_manager is None:
+                streaming_realtime_manager = build_v3_streaming_realtime_manager(
+                    self.config
                 )
-            elif streaming_realtime_manager is not None:
-                self._ssi_fetcher = SsiFastConnectFetcher(
-                    realtime_enabled=self.config.ssi_realtime_enabled,
-                    streaming_realtime_enabled=self.config.ssi_streaming_realtime_enabled,
-                    streaming_realtime_manager=streaming_realtime_manager,
-                )
-            else:
-                self._ssi_fetcher = SsiFastConnectFetcher()
+            self._ssi_fetcher = SsiStreamingRealtimeReader(
+                streaming_realtime_manager
+            )
         return self._ssi_fetcher
 
     def _get_ssi_rest_provider(self) -> SsiRestProvider:
-        if self._ssi_rest_provider is not None and not self._ssi_rest_provider_injected:
-            adapter = getattr(self._ssi_rest_provider, "provider", None)
-            routed_fetcher = getattr(adapter, "fetcher", None)
-            if self._ssi_fetcher is not None and routed_fetcher is not self._ssi_fetcher:
-                self._ssi_rest_provider = None
+        if (
+            self._ssi_fetcher_injected
+            and isinstance(self._ssi_rest_provider, SsiRestProviderRouter)
+            and self._ssi_rest_provider.provider is not self._ssi_fetcher
+        ):
+            # Tests and bounded diagnostics may replace an injected provider
+            # after construction. Keep the provider-neutral router aligned
+            # with that explicit injection without affecting production V3.
+            self._ssi_rest_provider = None
         if self._ssi_rest_provider is None:
-            v2_fetcher = (
-                self._get_ssi_fetcher()
-                if self.config.ssi_fastconnect_rest_version == "v2"
-                else None
-            )
-            self._ssi_rest_provider = create_ssi_rest_provider_router(
-                version=self.config.ssi_fastconnect_rest_version,
-                v2_fetcher=v2_fetcher,
-                config=self.config,
-            )
+            if self._ssi_fetcher_injected:
+                self._ssi_rest_provider = SsiRestProviderRouter(self._ssi_fetcher)
+            else:
+                self._ssi_rest_provider = create_ssi_rest_provider_router(
+                    config=self.config,
+                )
         return self._ssi_rest_provider
 
     def _get_corporate_actions_provider(self) -> CorporateActionsProvider:
@@ -3679,8 +3667,7 @@ class VietnamMarketService:
         params: Dict[str, Any] = {"timeframe": "1d", "limit": limit, "days": days}
         if provider == VN_PROVIDER_SSI:
             params["provider"] = VN_PROVIDER_SSI
-            if self.config.ssi_fastconnect_rest_version == "v3":
-                params["provider_version"] = "v3"
+            params["provider_version"] = "v3"
         return _cache_key("ohlcv", symbol, **params)
 
     def _build_daily_ohlcv_loader(
@@ -5694,11 +5681,7 @@ class VietnamMarketService:
 
         cache_policy = "current" if requested_date == current_vietnam_date else "completed"
         observe_intraday_request(cache_policy, force_refresh=force_refresh)
-        cache_provider_version = (
-            "v3"
-            if self.config.ssi_fastconnect_rest_version == "v3" and cache_policy == "completed"
-            else "v2"
-        )
+        cache_provider_version = "v3"
         key = _intraday_chart_cache_key(
             normalized_ticker,
             trading_date,

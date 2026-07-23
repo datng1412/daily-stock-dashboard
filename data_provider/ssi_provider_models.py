@@ -147,7 +147,6 @@ class ProviderDiagnostics(TypedDict, total=False):
     selected_provider: str
     selected_version: str
     routing_reason: str
-    v2_pinned: bool
     fallback_used: bool
     implementation_status: str
     production_owner: str

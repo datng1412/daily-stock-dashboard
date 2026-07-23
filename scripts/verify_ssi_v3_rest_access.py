@@ -80,9 +80,6 @@ def _base_report(*, requested_live: bool, config: Any, environment: Mapping[str,
     guards = {
         "cli_live": requested_live,
         "environment_live_acceptance": _env_enabled(environment.get(LIVE_GUARD_ENV)),
-        "rest_version_v3": str(
-            getattr(config, "ssi_fastconnect_rest_version", "") or ""
-        ).strip().lower() == "v3",
         "v3_rest_enabled": bool(getattr(config, "ssi_v3_rest_enabled", False)),
         "api_key_present": bool(_text(getattr(config, "ssi_v3_api_key", None))),
         "api_secret_present": bool(_text(getattr(config, "ssi_v3_api_secret", None))),

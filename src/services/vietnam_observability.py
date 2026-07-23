@@ -218,7 +218,7 @@ def vietnam_observability_snapshot() -> Dict[str, Any]:
             kbs["status"] = "ok" if kbs["enabled"] else "disabled"
             kbs["reason"] = None if kbs["enabled"] else "KBS legacy provider is disabled for normal VN dashboard runtime."
             ssi_core = deepcopy(_STATE["ssi_core"])
-            ssi_core_enabled = bool(getattr(config, "ssi_fastconnect_enabled", False))
+            ssi_core_enabled = bool(getattr(config, "ssi_v3_rest_enabled", False))
             ssi_core["enabled"] = ssi_core_enabled
             if ssi_core_enabled:
                 ssi_core["status"] = "ok"

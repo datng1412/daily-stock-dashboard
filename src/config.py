@@ -165,18 +165,6 @@ def parse_env_choice(value: Optional[str], allowed: set[str], default: str, *, f
     return normalized
 
 
-def parse_ssi_fastconnect_rest_version(value: Optional[str]) -> str:
-    """Parse the explicit SSI REST route available from phase SSI-V3-B2."""
-    if value is None or not str(value).strip():
-        return "v2"
-    normalized = str(value).strip().lower()
-    if normalized in {"v2", "v3"}:
-        return normalized
-    raise ValueError(
-        f"SSI_FASTCONNECT_REST_VERSION={value!r} is unsupported; expected 'v2' or 'v3'"
-    )
-
-
 def parse_env_int(
     value: Optional[str],
     default: int,
@@ -662,14 +650,6 @@ class Config:
     longbridge_oauth_client_id: Optional[str] = None
     stock_index_remote_update_enabled: bool = True
     data_cache_dir: Optional[str] = None
-    ssi_fastconnect_enabled: bool = False
-    ssi_fastconnect_rest_version: str = "v2"
-    ssi_fastconnect_base_url: str = "https://fc-data.ssi.com.vn/api/v2/Market"
-    ssi_fastconnect_consumer_id: Optional[str] = None
-    ssi_fastconnect_consumer_secret: Optional[str] = None
-    ssi_fastconnect_timeout_seconds: int = 10
-    ssi_fastconnect_cache_ttl_seconds: int = 300
-    ssi_fastconnect_token_ttl_seconds: int = 900
     ssi_v3_rest_enabled: bool = False
     ssi_v3_client_id: Optional[str] = field(default=None, repr=False)
     ssi_v3_api_key: Optional[str] = field(default=None, repr=False)
@@ -1903,34 +1883,6 @@ class Config:
                 if os.getenv('ALPHASIFT_INSTALL_SPEC') is None
                 else os.getenv('ALPHASIFT_INSTALL_SPEC', '').strip()
             ),
-            ssi_fastconnect_enabled=parse_env_bool(os.getenv('SSI_FASTCONNECT_ENABLED'), default=False),
-            ssi_fastconnect_rest_version=parse_ssi_fastconnect_rest_version(
-                os.getenv('SSI_FASTCONNECT_REST_VERSION')
-            ),
-            ssi_fastconnect_base_url=(
-                os.getenv('SSI_FASTCONNECT_BASE_URL')
-                or 'https://fc-data.ssi.com.vn/api/v2/Market'
-            ).strip().rstrip('/'),
-            ssi_fastconnect_consumer_id=(os.getenv('SSI_FASTCONNECT_CONSUMER_ID') or '').strip() or None,
-            ssi_fastconnect_consumer_secret=(os.getenv('SSI_FASTCONNECT_CONSUMER_SECRET') or '').strip() or None,
-            ssi_fastconnect_timeout_seconds=parse_env_int(
-                os.getenv('SSI_FASTCONNECT_TIMEOUT_SECONDS'),
-                10,
-                field_name='SSI_FASTCONNECT_TIMEOUT_SECONDS',
-                minimum=1,
-            ),
-            ssi_fastconnect_cache_ttl_seconds=parse_env_int(
-                os.getenv('SSI_FASTCONNECT_CACHE_TTL_SECONDS'),
-                300,
-                field_name='SSI_FASTCONNECT_CACHE_TTL_SECONDS',
-                minimum=0,
-            ),
-            ssi_fastconnect_token_ttl_seconds=parse_env_int(
-                os.getenv('SSI_FASTCONNECT_TOKEN_TTL_SECONDS'),
-                900,
-                field_name='SSI_FASTCONNECT_TOKEN_TTL_SECONDS',
-                minimum=1,
-            ),
             ssi_v3_rest_enabled=parse_env_bool(
                 os.getenv('SSI_V3_REST_ENABLED'),
                 default=False,
@@ -2878,43 +2830,24 @@ class Config:
                 field="TUSHARE_TOKEN",
             ))
 
-        if self.ssi_fastconnect_enabled and (
-            not self.ssi_fastconnect_consumer_id
-            or not self.ssi_fastconnect_consumer_secret
-        ):
-            issues.append(ConfigIssue(
-                severity="warning",
-                message="SSI FastConnect is enabled but credentials are incomplete; SSI FC Data calls will remain unavailable.",
-                field="SSI_FASTCONNECT_CONSUMER_ID",
-            ))
-
-        if self.ssi_fastconnect_rest_version == "v3":
-            if not self.ssi_v3_rest_enabled:
+        if self.ssi_v3_rest_enabled:
+            missing_v3_fields = [
+                name
+                for name, value in (
+                    ("SSI_V3_API_KEY", self.ssi_v3_api_key),
+                    ("SSI_V3_API_SECRET", self.ssi_v3_api_secret),
+                )
+                if not value
+            ]
+            if missing_v3_fields:
                 issues.append(ConfigIssue(
                     severity="error",
                     message=(
-                        "SSI FastConnect V3 REST was selected but SSI_V3_REST_ENABLED is false."
+                        "SSI FastConnect V3 REST configuration is incomplete: "
+                        + ", ".join(missing_v3_fields)
                     ),
-                    field="SSI_V3_REST_ENABLED",
+                    field=missing_v3_fields[0],
                 ))
-            else:
-                missing_v3_fields = [
-                    name
-                    for name, value in (
-                        ("SSI_V3_API_KEY", self.ssi_v3_api_key),
-                        ("SSI_V3_API_SECRET", self.ssi_v3_api_secret),
-                    )
-                    if not value
-                ]
-                if missing_v3_fields:
-                    issues.append(ConfigIssue(
-                        severity="error",
-                        message=(
-                            "SSI FastConnect V3 REST configuration is incomplete: "
-                            + ", ".join(missing_v3_fields)
-                        ),
-                        field=missing_v3_fields[0],
-                    ))
 
         # --- LLM availability ---
         # llm_model_list is populated for YAML / channels / managed legacy keys.

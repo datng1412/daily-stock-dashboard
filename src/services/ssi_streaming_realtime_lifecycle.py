@@ -14,7 +14,6 @@ import threading
 from collections.abc import Iterable
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from data_provider.ssi_fastconnect_fetcher import SsiFastConnectFetcher
 from data_provider.ssi_streaming_realtime import (
     SsiRealtimeStreamClient,
     SsiStreamingRealtimeManager,
@@ -102,18 +101,12 @@ def _new_manager(
     config: Any,
     client_factory: Optional[Callable[[], SsiRealtimeStreamClient]] = None,
 ) -> SsiStreamingRealtimeManager:
-    if str(getattr(config, "ssi_fastconnect_rest_version", "v2")).strip().lower() == "v3":
-        from data_provider.ssi_v3_streaming import build_v3_streaming_realtime_manager
+    from data_provider.ssi_v3_streaming import build_v3_streaming_realtime_manager
 
-        return build_v3_streaming_realtime_manager(
-            config,
-            client_factory=client_factory,
-        )
-    fetcher = SsiFastConnectFetcher(
-        config=config,
-        streaming_realtime_client_factory=client_factory,
+    return build_v3_streaming_realtime_manager(
+        config,
+        client_factory=client_factory,
     )
-    return fetcher.streaming_realtime_manager
 
 
 def run_ssi_streaming_realtime_monitor_tick() -> Dict[str, Any]:

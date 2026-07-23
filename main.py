@@ -49,7 +49,9 @@ import importlib
 import json
 import logging
 import re
+import signal
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -772,6 +774,40 @@ def stop_api_server(thread: Optional[Any]) -> bool:
     return not thread.is_alive()
 
 
+def wait_for_process_termination(poll_seconds: float = 1.0) -> str:
+    """Block until SIGINT/SIGTERM while preserving bounded server shutdown."""
+    requested = threading.Event()
+    reason = {"value": "keyboard_interrupt"}
+    previous_handlers: Dict[Any, Any] = {}
+
+    def request_shutdown(signum: int, _frame: Any) -> None:
+        reason["value"] = signal.Signals(signum).name
+        requested.set()
+
+    for signal_name in ("SIGINT", "SIGTERM"):
+        process_signal = getattr(signal, signal_name, None)
+        if process_signal is None:
+            continue
+        try:
+            previous_handlers[process_signal] = signal.getsignal(process_signal)
+            signal.signal(process_signal, request_shutdown)
+        except (OSError, RuntimeError, ValueError):
+            previous_handlers.pop(process_signal, None)
+
+    try:
+        while not requested.wait(timeout=poll_seconds):
+            pass
+    except KeyboardInterrupt:
+        reason["value"] = "keyboard_interrupt"
+    finally:
+        for process_signal, previous_handler in previous_handlers.items():
+            try:
+                signal.signal(process_signal, previous_handler)
+            except (OSError, RuntimeError, ValueError):
+                pass
+    return reason["value"]
+
+
 def _load_fastapi_app() -> Any:
     return importlib.import_module("api.app").app
 
@@ -1062,10 +1098,8 @@ def main() -> int:
         logger.info(f"API docs: http://{args.host}:{args.port}/docs")
         logger.info("Press Ctrl+C to exit...")
         try:
-            while True:
-                time.sleep(1)
-        except KeyboardInterrupt:
-            logger.info("\nInterrupted by user, exiting")
+            termination_reason = wait_for_process_termination()
+            logger.info("Process termination requested: %s", termination_reason)
         finally:
             if not stop_api_server(api_server_thread):
                 logger.warning("FastAPI server thread did not stop within the shutdown grace period")
@@ -1186,11 +1220,8 @@ def main() -> int:
         keep_running = start_serve and not (args.schedule or config.schedule_enabled)
         if keep_running:
             logger.info("API service is running; press Ctrl+C to exit...")
-            try:
-                while True:
-                    time.sleep(1)
-            except KeyboardInterrupt:
-                pass
+            termination_reason = wait_for_process_termination()
+            logger.info("Process termination requested: %s", termination_reason)
 
         return 0
 

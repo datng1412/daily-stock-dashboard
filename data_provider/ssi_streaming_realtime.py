@@ -8,9 +8,6 @@ connections.
 
 from __future__ import annotations
 
-import contextlib
-import importlib
-import io
 import logging
 import random
 import re
@@ -18,7 +15,6 @@ import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from types import SimpleNamespace
 from typing import Any, Callable, Dict, Iterable, List, Optional, Protocol, Sequence, Tuple
 
 from data_provider.ssi_streaming_snapshot_store import SNAPSHOT_SCHEMA_VERSION, SsiStreamingSnapshotStore
@@ -34,8 +30,6 @@ SSI_STREAMING_REALTIME_CACHE_STALE_REASON = "SSI streaming realtime cache stale.
 SSI_STREAMING_REALTIME_MANAGER_ERROR_REASON = "SSI streaming realtime manager errored."
 SSI_STREAMING_REALTIME_LIVE_ADAPTER_DISABLED_REASON = "SSI streaming realtime live adapter not enabled."
 SSI_STREAMING_REALTIME_ALL_CHANNEL_FORBIDDEN_REASON = "SSI streaming realtime refuses ALL channel subscriptions."
-SSI_STREAMING_REALTIME_CONFIG_INCOMPLETE_REASON = "SSI streaming realtime configuration incomplete."
-SSI_STREAMING_REALTIME_PACKAGE_UNAVAILABLE_REASON = "SSI streaming realtime package unavailable."
 SSI_STREAMING_REALTIME_BOOTSTRAP_EMPTY_REASON = "SSI streaming realtime bootstrap symbols empty."
 
 MANAGER_DISABLED = "disabled"
@@ -183,196 +177,6 @@ class SsiRealtimeStreamClient(Protocol):
 
     def stop(self) -> None:
         """Stop streaming idempotently."""
-
-
-class DisabledOfficialSsiRealtimeStreamClient:
-    """Deferred official-client wrapper.
-
-    The installed official `ssi-fc-data` client currently needs a safety wrapper
-    before live use because its negotiation path can print auth headers and its
-    close path does not match the available transport stop method. This sentinel
-    keeps the mockable interface explicit without instantiating the official
-    client.
-    """
-
-    def start(
-        self,
-        on_message: Callable[[Any], None],
-        on_error: Callable[[Any], None],
-        channels: Sequence[str],
-        *,
-        on_open: Optional[Callable[[str], None]] = None,
-        on_close: Optional[Callable[[str], None]] = None,
-        on_subscription_error: Optional[Callable[[str, Any], None]] = None,
-    ) -> None:
-        raise RuntimeError(SSI_STREAMING_REALTIME_LIVE_ADAPTER_DISABLED_REASON)
-
-    def stop(self) -> None:
-        return None
-
-
-def _trailing_slash(value: str) -> str:
-    text = str(value or "").strip()
-    return text.rstrip("/") + "/" if text else ""
-
-
-def _official_rest_root(base_url: str) -> str:
-    text = str(base_url or "").strip().rstrip("/")
-    suffix = "/api/v2/Market"
-    if text.lower().endswith(suffix.lower()):
-        text = text[: -len(suffix)]
-    return _trailing_slash(text)
-
-
-class OfficialSsiRealtimeStreamClient:
-    """Lazy, secret-safe wrapper around the official SSI FC Data stream client.
-
-    The official package is imported only when `start` is called. Its
-    negotiation path prints headers, so stdout is redirected only for the
-    official start call and discarded.
-    """
-
-    def __init__(
-        self,
-        *,
-        consumer_id: Optional[str],
-        consumer_secret: Optional[str],
-        base_url: str,
-        stream_url: str = DEFAULT_STREAMING_REALTIME_STREAM_URL,
-        auth_type: str = "Bearer",
-        import_module: Callable[[str], Any] = importlib.import_module,
-    ) -> None:
-        self.consumer_id = (consumer_id or "").strip()
-        self.consumer_secret = (consumer_secret or "").strip()
-        self.base_url = _official_rest_root(base_url)
-        self.stream_url = _trailing_slash(stream_url or DEFAULT_STREAMING_REALTIME_STREAM_URL)
-        self.auth_type = (auth_type or "Bearer").strip() or "Bearer"
-        self._import_module = import_module
-        self._streams: List[Any] = []
-        self._lock = threading.RLock()
-
-    def start(
-        self,
-        on_message: Callable[[Any], None],
-        on_error: Callable[[Any], None],
-        channels: Sequence[str],
-        *,
-        on_open: Optional[Callable[[str], None]] = None,
-        on_close: Optional[Callable[[str], None]] = None,
-        on_subscription_error: Optional[Callable[[str, Any], None]] = None,
-    ) -> None:
-        if not self.consumer_id or not self.consumer_secret or not self.base_url or not self.stream_url:
-            raise RuntimeError(SSI_STREAMING_REALTIME_CONFIG_INCOMPLETE_REASON)
-        safe_channels = [str(channel or "").strip() for channel in channels or [] if str(channel or "").strip()]
-        if not safe_channels:
-            raise RuntimeError("At least one streaming channel is required.")
-        if any(re.search(r":\s*ALL\b", channel, flags=re.IGNORECASE) for channel in safe_channels):
-            raise RuntimeError(SSI_STREAMING_REALTIME_ALL_CHANNEL_FORBIDDEN_REASON)
-
-        try:
-            client_module = self._import_module("ssi_fc_data.fc_md_client")
-            stream_module = self._import_module("ssi_fc_data.fc_md_stream")
-        except Exception as exc:
-            raise RuntimeError(SSI_STREAMING_REALTIME_PACKAGE_UNAVAILABLE_REASON) from exc
-
-        config = SimpleNamespace(
-            auth_type=self.auth_type,
-            consumerID=self.consumer_id,
-            consumerSecret=self.consumer_secret,
-            url=self.base_url,
-            stream_url=self.stream_url,
-        )
-        started_streams: List[Any] = []
-        failures: List[Exception] = []
-        try:
-            # MarketDataClient acquires and caches the access token during
-            # construction. Share it across the channel-specific stream
-            # transports so one generation does not request a token once per
-            # subscription.
-            client = client_module.MarketDataClient(config)
-        except Exception as exc:
-            if on_subscription_error is not None:
-                for channel in safe_channels:
-                    on_subscription_error(channel, exc)
-            raise
-        for channel in safe_channels:
-            stream: Any = None
-            try:
-                try:
-                    stream = stream_module.MarketDataStream(
-                        config,
-                        client,
-                        on_close=(lambda selected=channel: on_close(selected)) if on_close else None,
-                        on_open=(lambda selected=channel: on_open(selected)) if on_open else None,
-                    )
-                except TypeError:
-                    # Older/fake SDK surfaces may not expose lifecycle constructor callbacks.
-                    stream = stream_module.MarketDataStream(config, client)
-                with contextlib.redirect_stdout(io.StringIO()):
-                    stream.start(on_message, on_error, channel)
-                if on_open is not None:
-                    self._attach_open_callback(stream, lambda selected=channel: on_open(selected))
-                started_streams.append(stream)
-            except Exception as exc:
-                if stream is not None:
-                    with contextlib.suppress(Exception):
-                        self._stop_stream(stream)
-                failures.append(exc)
-                if on_subscription_error is not None:
-                    on_subscription_error(channel, exc)
-        if not started_streams and failures:
-            raise failures[0]
-        with self._lock:
-            self._streams.extend(started_streams)
-
-    def stop(self) -> None:
-        with self._lock:
-            streams = list(self._streams)
-            self._streams.clear()
-        first_error: Optional[Exception] = None
-        for stream in streams:
-            try:
-                self._stop_stream(stream)
-            except Exception as exc:  # pragma: no cover - defensive path
-                if first_error is None:
-                    first_error = exc
-        if first_error is not None:
-            raise first_error
-
-    @staticmethod
-    def _stop_stream(stream: Any) -> None:
-        connection = getattr(stream, "connection", None)
-        transport = getattr(connection, "_Connection__transport", None)
-        if transport is not None and callable(getattr(transport, "stop", None)):
-            transport.stop()
-            return
-        if connection is not None and callable(getattr(connection, "close", None)):
-            try:
-                connection.close()
-            except AttributeError:
-                return
-
-    @staticmethod
-    def _attach_open_callback(stream: Any, callback: Callable[[], None]) -> None:
-        """Chain lifecycle evidence after the SDK-owned SwitchChannels callback.
-
-        SSI's SDK replaces its constructor-time open callback with the channel
-        switch callback during ``start``. Chaining through the connection's
-        callback API preserves that subscription behavior without modifying the
-        installed package.
-        """
-        connection = getattr(stream, "connection", None)
-        transport = getattr(connection, "_Connection__transport", None)
-        existing = getattr(transport, "_on_open", None)
-        registrar = getattr(connection, "on_open_callback", None)
-        if not callable(registrar) or not callable(existing):
-            return
-
-        def combined() -> None:
-            existing()
-            callback()
-
-        registrar(combined)
 
 
 @dataclass(frozen=True)

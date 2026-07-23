@@ -95,11 +95,9 @@ class SsiV3RestSettings:
 
 
 def validate_v3_selection(settings: SsiV3RestSettings) -> None:
-    """Reject disabled or incomplete explicit V3 selection without values."""
+    """Reject disabled or incomplete V3 configuration without exposing values."""
     if not settings.enabled:
-        raise ValueError(
-            "SSI_FASTCONNECT_REST_VERSION=v3 requires SSI_V3_REST_ENABLED=true"
-        )
+        raise ValueError("SSI V3 REST requires SSI_V3_REST_ENABLED=true")
     if settings.missing_required_names:
         raise ValueError(
             "SSI V3 REST configuration missing: "
@@ -1087,17 +1085,6 @@ class SsiFastConnectV3Adapter:
 
         return self._run("index_summary", operation)
 
-    @staticmethod
-    def _unsupported(capability: str) -> ProviderResult:
-        return {
-            "status": "unavailable",
-            "source": SSI_V3_SOURCE,
-            "reason": f"{capability} remains explicitly owned by SSI FastConnect V2.",
-            "failure_class": "unsupported_capability",
-            "rows": [],
-            "count": 0,
-        }
-
     def get_security_metadata(
         self,
         symbol: Optional[str] = None,
@@ -1314,7 +1301,6 @@ class SsiFastConnectV3Adapter:
             "selected_provider": "ssi_fastconnect_v3",
             "selected_version": "v3",
             "routing_reason": "direct_v3_adapter_capability",
-            "v2_pinned": False,
             "fallback_used": False,
             "implementation_status": "implemented",
             "production_owner": "ssi_fastconnect_v3",

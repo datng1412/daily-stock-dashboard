@@ -17,9 +17,11 @@ from threading import RLock
 from time import perf_counter
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from data_provider.ssi_fastconnect_fetcher import SsiFastConnectFetcher
 from data_provider.ssi_provider_protocol import SsiRestProvider
-from data_provider.ssi_provider_router import create_ssi_rest_provider_router
+from data_provider.ssi_provider_router import (
+    SsiRestProviderRouter,
+    create_ssi_rest_provider_router,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -33,7 +35,7 @@ DEFAULT_LIMIT = 20
 MAX_ROWS = 120
 MAX_DATE_RANGE_DAYS = 168
 MAX_RECENT_LOOKBACK_DAYS = 200
-CACHE_VERSION = "v2"
+CACHE_VERSION = "v3"
 POSITIVE_CURRENT_TTL_SECONDS = 300
 POSITIVE_COMPLETED_TTL_SECONDS = 3_600
 EMPTY_TTL_SECONDS = 60
@@ -543,7 +545,7 @@ def _symbol_analytics(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
 class VietnamForeignFlowService:
     def __init__(
         self,
-        fetcher: Optional[SsiFastConnectFetcher] = None,
+        fetcher: Optional[Any] = None,
         *,
         rest_provider: Optional[SsiRestProvider] = None,
     ):
@@ -555,10 +557,10 @@ class VietnamForeignFlowService:
         if self._rest_provider is None:
             with self._rest_provider_lock:
                 if self._rest_provider is None:
-                    self._rest_provider = create_ssi_rest_provider_router(v2_fetcher=self._fetcher)
-                    if self._fetcher is None:
-                        adapter = self._rest_provider.provider
-                        self._fetcher = getattr(adapter, "fetcher", None)
+                    if self._fetcher is not None:
+                        self._rest_provider = SsiRestProviderRouter(self._fetcher)
+                    else:
+                        self._rest_provider = create_ssi_rest_provider_router()
         return self._rest_provider
 
     def get_symbol_history(

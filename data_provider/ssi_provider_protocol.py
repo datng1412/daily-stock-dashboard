@@ -11,9 +11,9 @@ from data_provider.ssi_provider_models import ProviderDiagnostics, ProviderResul
 class SsiRestProvider(Protocol):
     """Provider-neutral REST surface used by current Vietnam services.
 
-    Streaming and trading capabilities are intentionally excluded.  Method
-    signatures remain synchronous because current services call the V2 REST
-    fetcher synchronously (or place those calls in their existing executors).
+    Streaming and trading capabilities are intentionally excluded. Method
+    signatures remain synchronous because current services call the V3 REST
+    adapter synchronously or place those calls in their existing executors.
     """
 
     def get_securities(self, market: Optional[str] = None) -> ProviderResult: ...
