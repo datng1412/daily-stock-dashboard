@@ -1,8 +1,57 @@
 # SSI FastConnect V3 Migration Architecture and Gate
 
-Status: Phase SSI-V3-M1-R1 resolved StockClock's operational foreign-value unit and finality policy, but the atomic production cutover remains blocked on runtime acceptance. FastConnect V2 remains the sole production REST/realtime owner; the V3 implementation remains default-disabled and has no automatic V2 fallback.
+Status: Phase SSI-V3-M1-R2 completed the atomic production cutover. SSI FastConnect V3 is the sole production REST/realtime implementation; V2 runtime code, dependency, credentials, selector, fallback paths, and obsolete diagnostics/tests have been removed.
 
-## SSI-V3-M1-R1 foreign contract resolution (2026-07-23)
+## SSI-V3-M1-R2 atomic production cutover (2026-07-23)
+
+Outcome: `V3_CUTOVER_COMPLETE`.
+
+This section is the current source of truth. Earlier V2-default and cutover-blocked sections below are retained only as historical migration evidence.
+
+### Regression baseline
+
+The same credential-free command was run against the M1/R1 worktree and a temporary detached worktree at base commit `9414a3af952c80560ed5edfb777b94c93baa8de4`:
+
+```powershell
+$env:ENV_FILE="D:\stock-dashboard\.tmp\r2-no-env"
+python -m pytest tests -q -p no:cacheprovider
+```
+
+| Tree | Collected | Passed | Skipped | Failed | Classification |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Original base | 3,513 | 3,419 | 4 | 90 | Baseline |
+| M1/R1 before cutover | 3,535 | 3,464 | 4 | 67 | Every failure also failed at base for a materially equivalent reason |
+| Final V3-only tree | 3,147 | 3,076 | 4 | 67 | Same pre-existing failure set; obsolete V2-only tests removed |
+
+`PRE_EXISTING_BASELINE=67`, `M1_REGRESSION=0`, and `FLAKY_UNRESOLVED=0` for mandatory runtime paths. The final 67 failures remain in unrelated configuration/message-language, legacy Mozyfin, logging, scheduler, storage, stock-index, and WebUI-fixture areas. This is not described as a complete test pass.
+
+### Dependency and production-image decision
+
+Longbridge is `OPTIONAL_LAZY`: it is used only by credential-gated legacy US/HK paths and is not reachable from FastAPI startup, health, or core Vietnam routes. The unavailable Linux/Python 3.11 pin `longbridge==0.2.75` was removed from production requirements. Optional local installation is isolated in `requirements-longbridge.txt` at the officially available compatible version `4.2.2`; startup tests prove the application imports without the module.
+
+The real `docker/Dockerfile` built `stockclock-v3-r2:2fee9019-final` without credentials. The final image contains Python 3.11.15 and `ssi-sdk==3.0.5`; `ssi-fc-data` and Longbridge are absent. Active V3 adapter, streaming, router, Vietnam service, and FastAPI modules import successfully.
+
+Two credential-free starts returned `/api/health` HTTP 200 in 3.876s and 3.718s. SIGTERM shutdown completed in 1.772s and 1.601s with exit code 0. No pre-bind provider-auth marker was observed. An opt-in credential-at-runtime start returned health 200 in 4.969s, completed a bounded V3 index request with `status=ok` in 0.484s, exposed no credential value in logs, and exited cleanly. Its five-second realtime cache sample was empty; no tick was fabricated.
+
+### Mandatory acceptance summary
+
+| Gate | Evidence | Result |
+| --- | --- | --- |
+| V3 REST | One auth lifecycle and four bounded FPT/HOSE operations; 24 prior bounded symbol/index operations retained | Passed |
+| Daily/foreign contract | HOSE scale 1; HNX/UPCOM scale 1,000; gross-pair net only; returned-session-rank finality | Passed |
+| Metadata, intraday, indexes, membership | Deterministic suites plus bounded FPT/SSI/VCB/SHS/ACV and VNINDEX/VN30/HNXINDEX/HNX30 evidence | Passed |
+| V3 streaming | Same-session bounded FPT run: 15 messages, 8 parsed rows, quote/order-book/trade/tape rows; deterministic heartbeat/reconnect/resubscribe/generation/dedup tests | Passed |
+| Startup/health/shutdown | Final Python 3.11 image, repeated credential-free lifecycle, opt-in V3 lifecycle | Passed |
+| Public API/cache/error behavior | Retained Vietnam/API suites and provider-neutral schemas | Passed |
+| V2 isolation | No production V2 construction/import, credentials, selector, dependency, or automatic fallback | Passed |
+
+### Production configuration and rollback
+
+V3 remains safely optional at process startup: missing or disabled V3 configuration yields explicit unavailable states and never blocks health. Runtime data access requires `SSI_V3_REST_ENABLED=true`, `SSI_V3_API_KEY`, and `SSI_V3_API_SECRET`; `SSI_V3_CLIENT_ID` is optional. Streaming remains separately controlled by `SSI_STREAMING_REALTIME_ENABLED` and its bounded bootstrap-symbol configuration.
+
+Rollback is an image/release rollback to the last known V2-only revision. Do not restore the removed selector, run V2 and V3 together, or add capability-specific fallback. No database migration or raw provider payload must be rolled back.
+
+## Historical: SSI-V3-M1-R1 foreign contract resolution (2026-07-23)
 
 Outcome: `V3_CUTOVER_BLOCKED_RUNTIME`.
 

@@ -1,6 +1,6 @@
 # Vietnam Dashboard Runbook
 
-Last updated: 2026-06-23
+Last updated: 2026-07-23
 
 ## Goal
 
@@ -17,8 +17,7 @@ $env:PYTHONUTF8 = "1"
 $env:MARKET = "VN"
 $env:STOCK_LIST = "FPT,VPB,MSB,SCS,ACV,ACB"
 
-$env:SSI_FASTCONNECT_ENABLED = "true"
-$env:SSI_FASTCONNECT_BASE_URL = "https://fc-data.ssi.com.vn/api/v2/Market"
+$env:SSI_V3_REST_ENABLED = "true"
 $env:VN_DAILY_DATA_PROVIDER = "ssi"
 $env:VN_CHART_DATA_PROVIDER = "ssi"
 $env:VN_DAILY_STOCK_PRICE_PROVIDER = "ssi"
@@ -33,8 +32,8 @@ $env:VN_ALLOW_LEGACY_MOZYFIN_PROVIDER = "false"
 $env:KBS_ENABLED = "false"
 $env:VN_ALLOW_LEGACY_KBS_PROVIDER = "false"
 
-# Set SSI_FASTCONNECT_CONSUMER_ID and SSI_FASTCONNECT_CONSUMER_SECRET
-# from a local secret source only. Do not echo them.
+# Set SSI_V3_API_KEY and SSI_V3_API_SECRET from a local secret source only.
+# SSI_V3_CLIENT_ID is optional. Do not echo any credential.
 
 python main.py --serve-only --host 127.0.0.1 --port 8000
 ```
@@ -67,27 +66,22 @@ news_status.status: disabled
 
 ## Safe SSI Smoke
 
-Run the smoke script when local SSI credentials are configured. It prints safe status/count/key information only.
+Run the guarded V3 REST acceptance when local SSI credentials are configured. It prints only sanitized status/count/timing information.
 
 ```powershell
-python scripts\ssi_fastconnect_smoke.py
+$env:SSI_V3_LIVE_ACCEPTANCE_ENABLED = "true"
+python scripts\verify_ssi_v3_rest_access.py --live
 ```
 
 Expected high-level result in a healthy SSI environment:
 
 ```text
-SSI enabled: true
-AccessToken: OK
-DailyOhlc FPT rows: around 250
-DailyStockPrice FPT rows: around 250
-DailyIndex VN30 rows: around 250
+outcome: REST_ACCESS_CONFIRMED
+authentication: ok
+operations: 4
 ```
 
-Use probe mode only for endpoint diagnostics. It must not print tokens, credentials, auth headers, or full provider bodies.
-
-```powershell
-python scripts\ssi_fastconnect_smoke.py --probe
-```
+The guard defaults to zero network. It must not print tokens, credentials, auth headers, or provider rows/bodies.
 
 ## VN Dashboard Contract Smoke
 
@@ -310,14 +304,15 @@ Docker and Render should use SSI environment variables and must not require Mozy
 Required secret values:
 
 ```text
-SSI_FASTCONNECT_CONSUMER_ID=<set in secret env>
-SSI_FASTCONNECT_CONSUMER_SECRET=<set in secret env>
+SSI_V3_API_KEY=<set in secret env>
+SSI_V3_API_SECRET=<set in secret env>
+SSI_V3_CLIENT_ID=<optional secret env>
 ```
 
 Required non-secret provider defaults:
 
 ```text
-SSI_FASTCONNECT_ENABLED=true
+SSI_V3_REST_ENABLED=true
 SSI_STREAMING_REALTIME_ENABLED=true
 SSI_STREAMING_REALTIME_BOOTSTRAP_SYMBOLS=FPT
 SSI_STREAMING_REALTIME_CHANNEL_TEMPLATE=X:{symbol}

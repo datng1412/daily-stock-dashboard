@@ -1,6 +1,15 @@
 ﻿# VN Dashboard Roadmap
 
-## Phase SSI-V3-M1-R1 - Foreign contract resolved, runtime cutover blocked (2026-07-23)
+## Phase SSI-V3-M1-R2 - Atomic V3 production cutover complete (2026-07-23)
+
+- Classified all 67 retained full-suite failures as pre-existing baseline failures. The base worktree had 90 failures; M1/R1 reduced that set by 23. Final V3-only validation finished with 3,076 passed, 4 skipped, and the same 67 failures; mandatory changed areas are green and migration regressions are zero.
+- Classified Longbridge as optional/lazy. It is excluded from production and available only through `requirements-longbridge.txt`; FastAPI startup, health, and Vietnam routes do not import it.
+- Built the actual Python 3.11 production image with `ssi-sdk==3.0.5`, no `ssi-fc-data`, and no Longbridge. Repeated credential-free health checks returned 200 and both containers shut down with exit code 0.
+- Revalidated bounded V3 REST and same-session streaming evidence. The opt-in final container completed a real V3 index request; its short realtime sample was empty and was not relabeled as failure or fabricated.
+- Made V3 the sole SSI provider. Removed the V2 fetcher/adapter/official stream wrapper, V2 dependency and credentials, global selector, obsolete V2 scripts/tests, and all automatic/hybrid fallback paths.
+- Rollback is deployment of the prior V2-only image. Do not recreate a selector or mix V2 REST with V3 streaming.
+
+## Historical: Phase SSI-V3-M1-R1 - Foreign contract resolved, runtime cutover blocked (2026-07-23)
 
 - Proved StockClock operational foreign-value scales from V3 economic invariants: HOSE uses 1; HNX and UPCOM use 1,000. Every eligible foreign buy/sell row was plausible only at its accepted scale; matched values independently used scale 1.
 - Repeated the same 20-session range twice for FPT/SSI/VCB/SHS/ACV. T-1 and older gross fields were stable, with no duplicate dates or incomplete gross pairs.
@@ -2528,11 +2537,12 @@ npm.cmd run build
 cd ..\..
 ```
 
-SSI smoke checks:
+SSI V3 access checks:
 
 ```powershell
-python scripts\ssi_fastconnect_smoke.py
-python scripts\ssi_fastconnect_smoke.py --probe
+python scripts\verify_ssi_v3_rest_access.py
+# Bounded live access requires the explicit environment guard as well:
+python scripts\verify_ssi_v3_rest_access.py --live
 ```
 
 Manual browser validation:

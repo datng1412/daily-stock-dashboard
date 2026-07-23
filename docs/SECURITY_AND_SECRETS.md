@@ -8,8 +8,9 @@ VN dashboard work touches authenticated SSI FastConnect data. Documentation, dia
 
 SSI credentials must come from environment variables or a secret manager only:
 
-- `SSI_FASTCONNECT_CONSUMER_ID`
-- `SSI_FASTCONNECT_CONSUMER_SECRET`
+- `SSI_V3_API_KEY`
+- `SSI_V3_API_SECRET`
+- `SSI_V3_CLIENT_ID` when supplied
 
 Never print, commit, copy into docs, or include in test fixtures:
 
@@ -60,8 +61,9 @@ SSI intraday stale. latest_intraday_date=2026-06-15 daily_price_date=2026-06-22.
 Use placeholders:
 
 ```text
-SSI_FASTCONNECT_CONSUMER_ID=<set in secret env>
-SSI_FASTCONNECT_CONSUMER_SECRET=<set in secret env>
+SSI_V3_API_KEY=<set in secret env>
+SSI_V3_API_SECRET=<set in secret env>
+SSI_V3_CLIENT_ID=<optional secret env>
 Authorization=<redacted>
 access_token=<redacted>
 ```

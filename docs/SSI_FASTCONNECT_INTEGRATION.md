@@ -1,6 +1,16 @@
 # SSI FastConnect Integration
 
-## SSI-V3-M1-R1 operational status (2026-07-23)
+## SSI-V3-M1-R2 production status (2026-07-23)
+
+SSI FastConnect V3 is now the sole production REST and realtime implementation. Production uses `ssi-sdk==3.0.5`; the V2 `ssi-fc-data` package, V2 fetcher/adapter/stream wrapper, Consumer ID/Secret configuration, global REST selector, fallback paths, and obsolete V2 diagnostics/tests are removed.
+
+FastAPI startup remains provider-lazy and non-blocking. Missing V3 configuration returns explicit unavailable provider states without blocking `/api/health`. Required REST variables are `SSI_V3_REST_ENABLED=true`, `SSI_V3_API_KEY`, and `SSI_V3_API_SECRET`; `SSI_V3_CLIENT_ID` is optional. Streaming is separately opt-in and uses a bounded bootstrap list.
+
+The final Python 3.11 image passed repeated credential-free bind/health/shutdown tests and a bounded credential-at-runtime V3 request. The retained V3 manager owns one connection, heartbeat, reconnect/backoff, resubscription, generation safety, bounded deduplication, TTL caches, stale/after-hours states, and idempotent shutdown. A release rollback must restore the prior V2-only image; hybrid V2/V3 runtime and automatic fallback remain forbidden.
+
+All V2-specific sections and commands below this production status are historical evidence unless they explicitly describe the current V3 adapter. Deleted V2 diagnostic scripts must not be used as current runbook commands.
+
+## Historical: SSI-V3-M1-R1 operational status (2026-07-23)
 
 The V3 opt-in now has complete retained REST and streaming implementations: raw `securitiesSummary` daily/foreign fields, matched-trading daily candles, exact metadata, current/completed one-minute OHLC, index identity/membership/latest summary, and one-connection `trade.*`/`quote.*` streaming. V3 startup is background/non-blocking; the stream adapter owns the connection heartbeat, while the shared manager owns reconnect/backoff, resubscription, generation rejection, thread-safe TTL caches, snapshot persistence boundaries, and idempotent shutdown. No token or raw provider row is persisted.
 
@@ -35,10 +45,10 @@ Phase 4.11C uses a separate process-local LRU capped at 500 entries. Successful 
 * SSI realtime REST endpoint discovery concluded that no supported FastConnect realtime snapshot endpoint is identified in this repository.
 * SSI streaming realtime parser coverage for buffered `X`, `X-QUOTE`, `X-TRADE`, `F`, `R`, and `MI` messages.
 * Config-disabled SSI streaming manager/cache skeleton for future background runtime work.
-* Official `ssi-fc-data` Python client adapter behind the disabled streaming runtime flag.
+* Official `ssi-sdk==3.0.5` V3 REST/WebSocket adapter with lazy initialization.
 * FastAPI startup bootstrap for SSI streaming realtime when explicitly enabled and given a small bootstrap symbol list.
 * Realtime endpoint response-cache bypass and frontend quote polling tuned for the process-local streaming cache.
-* Docker/Render runtime dependencies must install official SSI `python-fcdata` tag `v2.2.2`; otherwise enabled streaming starts as `package_unavailable` and the frontend polling API can only return optional unavailable realtime snapshots.
+* Docker/Render install only the official V3 `ssi-sdk==3.0.5`; `ssi-fc-data` is not part of the production image.
 * SSI `X-QUOTE:{symbol}` order-book backend/API support as a separate optional watchlist context.
 * SSI `R:{symbol}` foreign-room backend/API support as a separate optional watchlist context.
 * SSI `MI:{index_code}` market-index pulse backend/API support as a separate optional index context.

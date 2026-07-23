@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [improvement] Complete the atomic SSI FastConnect V3 production cutover and remove V2 runtime, credentials, selector, dependency, and fallback paths.
+- [fix] Make SIGTERM shutdown deterministic for the production FastAPI container and keep provider initialization behind HTTP readiness.
+- [chore] Move optional Longbridge support out of the production dependency graph into `requirements-longbridge.txt`.
+- [test] Certify the final Python 3.11 V3-only image, classify the 67 retained failures as pre-existing baseline failures, and remove obsolete V2-only diagnostics and tests.
+- [documentation] Record V3-only production configuration, acceptance evidence, historical V2 references, and image-level rollback procedure.
 - [improvement] Normalize SSI V3 foreign values once by proven equity-board domain: HOSE scale 1 and HNX/UPCOM scale 1,000, with explicit shares/VND metadata and null-preserving gross-pair net derivation.
 - [fix] Classify SSI V3 foreign-flow finality by returned trading-session rank so weekends and holidays cannot prematurely finalize the latest completed provider session.
 - [test] Record two-read foreign-flow stability evidence and complete regression results while keeping production on V2 until the mandatory production-image runtime gate passes.

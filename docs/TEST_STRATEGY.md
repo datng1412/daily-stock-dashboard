@@ -4,9 +4,22 @@
 
 This strategy defines the expected validation for VN dashboard documentation, API contracts, and UI states. It is scoped to SSI-first VN dashboard work and should be referenced before data-quality, contract, progressive workspace, live-section, provider, and packaging tasks.
 
-## SSI-V3-A1 migration-gate validation
+## SSI-V3-M1-R2 V3-only production validation
 
-`tests/test_audit_ssi_fastconnect_v3_capability.py` is offline-only. It proves audit import safety; existing V2-name-to-V3-field mapping; value/token redaction; auth success, explicit rejection, and network classification; V2/V3 inventory; one-decision-per-capability mapping; mandatory exit criteria for retained V2 paths; null/zero/unit conservatism; index comparison; bounded WebSocket planning; atomic sanitized output; the 512 KiB output bound; and exact A-F decisions. It never authenticates with SSI or imports/installs the V3 SDK. A separate `--mode change-impact --allow-live` command may perform exactly one raw V3 auth sequence with current values retained in memory only. On 2026-07-21 that sequence returned HTTP 401 and outcome D; no parity call or retry followed.
+The production gate is V3-only. Required deterministic coverage is `tests/test_ssi_v3_adapter.py`, `tests/test_ssi_v3_rest_credentials.py`, `tests/test_ssi_v3_live_acceptance.py`, `tests/test_ssi_v3_securities_summary.py`, `tests/test_ssi_v3_foreign_policy.py`, `tests/test_ssi_v3_streaming.py`, `tests/test_ssi_provider_routing.py`, `tests/test_ssi_streaming_realtime_lifecycle.py`, and `tests/test_backend_startup_readiness.py`, plus affected Vietnam service/API suites. Tests must prove no V2 construction/import/fallback, no V2 dependency or credentials, lazy provider startup, public-contract compatibility, and clean shutdown.
+
+The complete credential-free regression command is:
+
+```powershell
+$env:ENV_FILE="D:\stock-dashboard\.tmp\r2-no-env"
+python -m pytest tests -q -p no:cacheprovider
+```
+
+The M1-R2 final result is 3,076 passed, 4 skipped, and 67 pre-existing baseline failures. Changed-area failures, migration regressions, and mandatory runtime flaky failures are zero. The real `docker/Dockerfile` must also build and prove Python 3.11.x, `ssi-sdk==3.0.5`, absent `ssi-fc-data`, credential-free health, bounded opt-in V3 access, and clean repeated SIGTERM shutdown.
+
+## Historical: SSI-V3-A1 migration-gate validation
+
+The former audit-only V2/V3 comparison tests and scripts were retired after atomic cutover. Their conclusions remain historical in `docs/SSI_FASTCONNECT_V3_MIGRATION.md`.
 
 ## SSI-V3-B1 provider-routing validation
 
@@ -35,14 +48,14 @@ Run these before a Phase 0/1/2/3 runtime milestone commit:
 ```powershell
 python -m pytest tests/test_vietnam_observability.py -q
 python -m pytest tests/test_vietnam_market_service_no_mozyfin.py -q
-python -m pytest tests/test_ssi_fastconnect_fetcher.py -q
-python -m pytest tests/test_audit_ssi_fastconnect_v3_capability.py -q
+python -m pytest tests/test_ssi_v3_adapter.py tests/test_ssi_v3_securities_summary.py -q
+python -m pytest tests/test_ssi_v3_foreign_policy.py tests/test_ssi_provider_routing.py -q
 python -m pytest tests/test_vietnam_market_service_realtime.py -q
 python -m pytest tests/test_vietnam_market_service_intraday.py -q
 python -m pytest tests/test_vietnam_intraday_chart.py -q
-python -m pytest tests/test_ssi_streaming_realtime.py -q
+python -m pytest tests/test_ssi_v3_streaming.py -q
 python -m pytest tests/test_ssi_streaming_realtime_lifecycle.py -q
-python -m pytest tests/test_verify_ssi_streaming_realtime_script.py -q
+python -m pytest tests/test_backend_startup_readiness.py tests/test_docker_entrypoint.py -q
 ```
 
 Phase 4.11C frontend coverage must run the stocks API client test, Lightweight Charts data/component tests, ShortTermZones primitive test, and `VietnamDashboardPage.test.tsx`. It verifies numeric Unix-second 1m bars, Vietnam-time tooltip output, explicit completed-date ownership, no request without a date, stale-response rejection, active-timeframe indicators, `Daily S/R`, and no request on indicator/S/R/expand interactions. Deterministic tests must never call live SSI.
@@ -58,7 +71,7 @@ Expected protection:
 - News is disabled until a separate provider exists.
 - SSI realtime unavailable returns `realtime_snapshot = null`.
 - SSI streaming realtime stays disabled by default, does not instantiate or import the official client when disabled, never starts on import, and reads only from a running manager plus fresh cache.
-- SSI official streaming adapter tests use mocked official modules, suppress header-like output, reject `X: ALL`, and fail closed when streaming config or `ssi_fc_data` is unavailable.
+- SSI V3 streaming adapter tests use SDK-shaped fakes, reject unsupported topics/full-market subscriptions, and fail closed with sanitized errors.
 - SSI backend lifecycle bootstrap tests use mocked stream clients, require `SSI_STREAMING_REALTIME_BOOTSTRAP_SYMBOLS` before startup, reject unsafe bootstrap symbols, verify no-space symbol channels, stop idempotently, and prove the realtime endpoint/service reads the process-local cache without dynamic request subscriptions.
 - SSI streaming runtime hardening tests use fake clocks and mocked clients to cover idle detection, `running_idle` diagnostics without daily-data invalidation, diagnostic-only idle reconnect behavior when no backend market-hours utility exists, reconnect scheduling after start failure, bounded/capped backoff, `SSI_STREAMING_REALTIME_RECONNECT_MAX_ATTEMPTS` semantics, stop-before-reconnect, duplicate-stream prevention, lifecycle monitor ownership, clean shutdown, and no revival after shutdown begins.
 - Phase 4.8R-Live validation is session-dependent: after-hours proof must confirm market-closed/after-hours-stale classification, stable subscriptions, no reconnect loop, and preserved last-known data; lifecycle tests must also cover shutdown while client start is in progress so a late client cannot revive the manager. Active-window proof of advancing health counters and one debounced live reconnect remains a separate scheduled validation.
