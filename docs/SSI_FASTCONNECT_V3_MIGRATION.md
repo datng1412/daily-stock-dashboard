@@ -1,6 +1,143 @@
 # SSI FastConnect V3 Migration Architecture and Gate
 
-Status: Phase SSI-V3-B2 is implemented offline. The official `ssi-sdk==3.0.5` dependency, separate V3 configuration, and a lazy disabled-by-default REST adapter now exist for the bounded B2 capability set. FastConnect V2 remains the default and deployed production REST/realtime provider; no V3 live request, shadow traffic, production cutover, public API change, or frontend change occurred.
+Status: Phase SSI-V3-M1-R1 resolved StockClock's operational foreign-value unit and finality policy, but the atomic production cutover remains blocked on runtime acceptance. FastConnect V2 remains the sole production REST/realtime owner; the V3 implementation remains default-disabled and has no automatic V2 fallback.
+
+## SSI-V3-M1-R1 foreign contract resolution (2026-07-23)
+
+Outcome: `V3_CUTOVER_BLOCKED_RUNTIME`.
+
+The data-contract blocker from M1 is resolved through bounded V3 economic-invariant evidence. This is a StockClock-validated operational contract, not a claim that SSI's public contract guarantees exchange units or daily finality.
+
+### Foreign-value evidence
+
+One V3 authentication lifecycle performed ten summary operations: two reads each for FPT, SSI, VCB, SHS, and ACV over the latest 20 completed available sessions ending 2026-07-22. No V2 reference operation was possible because V2 reference credentials were absent. No raw payload, provider row, token, header, or credential was printed or persisted.
+
+The invariant compared `scaled(value) / volume` with each session's low/high range using a 5% rounding tolerance. Only the named candidates 1, 1,000, and 1,000,000 were tested.
+
+| Domain | Symbols | Foreign buy result | Foreign sell result | Accepted VND scale | Confidence |
+| --- | --- | --- | --- | --- | --- |
+| HOSE equity | FPT, SSI, VCB | 60/60 plausible at 1; competing scales 0/60 | 60/60 plausible at 1; competing scales 0/60 | 1 | PROVEN |
+| HNX equity | SHS | 20/20 plausible at 1,000; competing scales 0/20 | 20/20 plausible at 1,000; competing scales 0/20 | 1,000 | PROVEN |
+| UPCOM equity | ACV | 20/20 plausible at 1,000; competing scales 0/20 | 19/19 plausible at 1,000; competing scales 0/19 | 1,000 | PROVEN |
+
+Matched value independently resolved to scale 1 for all 100 eligible rows, confirming that the foreign-value conversion is domain-specific rather than a global price/value adjustment. Deal value was supporting evidence only: 33/37 HOSE and 10/12 HNX rows were range-plausible at scale 1, while the four sampled UPCOM deal rows did not fit the continuous matched range. Those deal outliers do not alter matched or foreign scaling and are not used to prove a foreign-value unit.
+
+### Operational finality
+
+Both bounded reads had identical row identities and foreign gross fields for the latest returned session and all older sessions. Duplicate dates and incomplete foreign volume/value pairs were zero.
+
+StockClock therefore applies this conservative returned-session policy:
+
+- A current-date row is provisional.
+- The latest distinct provider session before the current Vietnam date is provisional, regardless of weekends or holidays.
+- Older returned sessions are completed-history candidates after repeated-read stability.
+- Completed analytics exclude rows tagged provisional.
+- Provider-guaranteed finality remains false because V3 supplies neither a revision identifier nor a daily-final flag.
+
+The adapter derives rank from distinct returned trading dates, not calendar weekdays. This avoids prematurely finalizing a row across weekends or exchange holidays. Public normalization retains the source board, `shares`, `VND`, the board-specific scale/domain, the operational finality state, and the explicit `foreign_provider_finality_guaranteed=false` boundary.
+
+### Product decision and validation
+
+Per-symbol volume/value history, watchlist rankings, and current-membership VN30 volume/value aggregation remain retained. All three equity domains are normalized to VND at one adapter boundary, so cross-exchange value comparison no longer depends on an unknown raw provider scale. Null remains null, zero remains zero, and net is derived only from a complete gross pair.
+
+The changed-area gate passed 342 tests. The complete `tests/` run collected 3,535 tests and finished with 3,464 passed, 4 skipped, and 67 failures. All SSI V3, provider-routing, streaming, startup-readiness, Vietnam foreign-flow, and Vietnam market-service tests passed. The 67 failures are in pre-existing environment/configuration, legacy Mozyfin, logging, storage, and WebUI fixture areas; the V3 environment keys are already registered and were not among the configuration-registry mismatch list.
+
+The literal repository-wide pytest command still cannot traverse the inaccessible `.pytest_cache`; targeting `tests/` provides the complete deterministic test-tree result. The required Python 3.11 production-image build/startup gate was not rerun after an unrelated legacy dependency was explicitly removed from this SSI task's scope. Because atomic cutover requires that image gate, production remains entirely V2. No hybrid route, V2 removal, credential removal, dependency cutover, staging, commit, or push occurred.
+
+## SSI-V3-M1 product-driven implementation (2026-07-23)
+
+This section records the preceding M1 implementation state. The M1-R1 section above supersedes its foreign-contract blocker and validation status. Older B2/B3 sections remain historical migration evidence and must not be read as the current adapter capability list.
+
+### Outcome and hard gate
+
+Outcome: `V3_IMPLEMENTATION_READY_CUTOVER_BLOCKED`.
+
+- The V3 REST adapter now covers the retained product capabilities without invoking V2 when V3 is explicitly selected.
+- The V3 stream adapter owns one authenticated WebSocket connection and only subscribes to retained `trade.*` and `quote.*` topics. The existing manager continues to own generation safety, bounded reconnect/backoff, resubscription, caches, stale states, and shutdown.
+- Production remains entirely on V2 because the foreign-flow value-unit/finality gate failed. Consequently, `ssi-fc-data`, V2 credentials, V2 code, and V2 configuration are intentionally not removed in this phase.
+- Rollback is to remove the M1 V3 adapter/router/stream changes or keep `SSI_FASTCONNECT_REST_VERSION` unset/`v2`; no data migration or persisted raw provider payload exists.
+
+### Product requirement inventory
+
+| Capability/field | Backend consumer | Frontend consumer | Analytics consumer | Current behavior | Classification | Decision rationale |
+| --- | --- | --- | --- | --- | --- | --- |
+| Symbol and exchange/board identity | Metadata, watchlist, company research, index services | Watchlist and company pages | Universe grouping | Required identity | MANDATORY | Removing it breaks symbol routing and visible metadata. |
+| Daily date/OHLC | Market service and chart API | Daily chart, watchlist, company research | TA and latest completed close | V2 DailyOhlc | MANDATORY | V3 `securitiesSummary` provides the active matched-trading candle contract. |
+| Daily matched volume/value | Chart and daily-summary services | Chart liquidity and company statistics | Liquidity/TA inputs | V2 daily rows | MANDATORY | V3 maps `totalMatch`/`totalMatchValue`; it does not invent total-market totals. |
+| Reference/ceiling/floor/adjusted close | Company/watchlist enrichment and price-color helpers | Nullable metrics | Optional comparisons | Visible when supplied | OPTIONAL_NULLABLE | Existing rendering remains correct when null; V3 summary does not supply them. |
+| Deal volume/value | Daily-summary service | Company statistics | None found | Visible enrichment | OPTIONAL_NULLABLE | Recovered from raw `totalDeal`/`totalDealValue`; null remains distinct from zero. |
+| Average/change/change percentage | Daily-summary normalization | No required current widget | None found | Enrichment | OPTIONAL_NULLABLE | Retained provider-neutrally from raw V3 fields. |
+| Foreign buy/sell volume/value and derived net | Foreign-flow history/batch/VN30 services | Dashboard and `/foreign-flow` | 5/20/60-session and VN30 analytics | Active | MANDATORY | Gross fields come from raw V3; net is derived only from complete gross pairs. |
+| Remaining/total foreign room | Company/live diagnostics only; no active frontend room consumer | No active consumer found | None found | Optional diagnostics | OPTIONAL_NULLABLE | Raw fields are retained without making them a cutover condition. |
+| Historical 1-minute OHLC | Intraday chart service | Active 1-minute chart | None beyond chart normalization | Active | MANDATORY | V3 historical OHLC passed ordering/dedup/session validation. |
+| Current-session delayed 1-minute OHLC | Intraday chart service | Today view and polling | None | Active | MANDATORY | V3 current-session one-minute endpoint passed bounded live sampling. |
+| Index list | Index identifier resolver | Indirect coverage UI | Index services | Active | MANDATORY | V3 index list returned the required identifiers. |
+| VN30/HNX30 membership | Index component and VN30 services | VN30 coverage/foreign-flow views | VN30 aggregation | Active | MANDATORY | V3 securities-by-index returned 30 unique members for each index. |
+| Index weight/effective dates | No active consumer found | None | None | Not required | OPTIONAL_NULLABLE | Securities-by-index does not need to manufacture absent weight/date fields. |
+| Latest VNINDEX/VN30 coverage | Daily-index service | `IndexContextPanel` and diagnostics | None | Active; frontend selects latest row | MANDATORY | Correct V3 request is index-only, not board+index; all four sampled indexes passed. |
+| Historical daily-index series | Route can accept range but frontend requests latest coverage only | No series chart found | None found | Extra V2 capability | REMOVABLE from V3 contract | V3 contract returns latest or one explicitly selected session; no active product consumer needs a range. |
+| Realtime last trade | Shared stream cache/API | Watchlist/company realtime price | No daily-close replacement | Active | MANDATORY | V3 `trade.*` produces normalized snapshot and tape rows. |
+| Realtime trade tape | Trade cache/API | Visible trade tape | None | Active | MANDATORY | Content/timestamp bounded dedup is used when sequence is absent. |
+| Realtime order book | Quote cache | Visible bid/ask ladders | None | Active | MANDATORY | V3 `quote.*` supports array and scalar `bpN`/`bqN`/`apN`/`aqN` shapes. |
+| Session-status stream | Diagnostics only | No active frontend consumer found | None | V2 `F` stream | REMOVABLE from V3 contract | It does not justify retaining or implementing a V3 topic. |
+| Foreign-room stream | Optional service payload | No active frontend consumer found | None | V2 `R` stream | REMOVABLE from V3 contract | Daily raw summary remains the retained foreign-room enrichment path. |
+| Market-index pulse stream | Public backend route | No frontend call found | None | V2 `MI` stream | REMOVABLE from V3 contract | Latest index coverage remains REST-owned. |
+| Put-through/odd-lot/interval topics | No production consumer found | None | None | Not subscribed by V3 | REMOVABLE | Future-only provider topics are excluded. |
+| Extended issuer/security-type/sector fields | Metadata response enrichment | Nullable display | None | V2 enrichment | OPTIONAL_NULLABLE | Exact-symbol V3 metadata keeps proven fields; missing enrichments stay null. |
+
+No retained item remains `UNRESOLVED` at the consumer-usage level. The foreign-flow field is mandatory; its cross-exchange value unit/finality is an unresolved acceptance property, not unresolved usage.
+
+### Final provider-neutral V3 contract
+
+| Product capability | Required output fields | V3 source | Transformation | Nullability | Freshness/finality rule |
+| --- | --- | --- | --- | --- | --- |
+| Symbol metadata | symbol, exchange; optional names/industry/lot/listed fields | Securities exact symbol/board | Lower-camel SDK model to provider-neutral row | Enrichment nullable | Reference metadata; no raw payload persistence. |
+| Daily candle | date, OHLC, volume, value | Authenticated raw `securitiesSummary` | `volume=totalMatch`; `value=totalMatchValue`; chronological date dedup | OHLC/value follow provider nulls | Completed-session rows; latest completed close remains canonical. |
+| Daily summary/foreign flow | matched/deal/gross foreign values, optional room/average/change | Authenticated raw `securitiesSummary` | Explicit raw extraction; net only when both gross values exist | Optional fields nullable; zero preserved | Source is SSI V3; provider-native value units remain the cutover gate. |
+| Historical/current intraday | timestamp, OHLC, volume | V3 one-minute OHLC methods | Vietnam-time normalization, timestamp sort/dedup, latest bounded rows | Value not added publicly | Current rows provisional; completed rows cache as completed sessions. |
+| Index identity | index code/name/board | V3 index list | Provider-neutral identity row | Name/board nullable | Reference data. |
+| Index membership | index code, symbol, board | V3 securities-by-index | Deterministic symbol dedup/sort | Weight/effective date absent | Current membership only. |
+| Latest index coverage | date, value, change, change percentage and optional activity/breadth | V3 index summary | Index-only request; one latest/selected row | Enrichment nullable | Current provider summary; not a historical series substitute. |
+| Realtime trade/tape | symbol, time, price, last quantity, optional side/sequence | V3 `trade.*` | One event yields snapshot and tape rows; bounded content dedup | Sequence and cumulative fields nullable | Existing TTL/stale cache contract; never replaces daily close. |
+| Realtime order book | symbol, time, bid/ask levels | V3 `quote.*` | Arrays or scalar levels to common ladder | Either side may be empty | Existing order-book TTL/stale contract. |
+
+### Renamed, raw, and derived fields
+
+| Provider-neutral field | Raw V3 field | Rule |
+| --- | --- | --- |
+| `date` | `tradingDate` | Normalize to `YYYY-MM-DD`. |
+| `matched_volume` / daily `volume` | `totalMatch` | Integer, null-preserving. |
+| `matched_value` / daily `value` | `totalMatchValue` | Numeric, no scaling. |
+| `put_through_volume`, `put_through_value` | `totalDeal`, `totalDealValue` | Raw-transport recovery; never added to matched totals. |
+| `foreign_buy_*`, `foreign_sell_*` | `totalForeignBuy*`, `totalForeignSell*` | Raw-transport recovery; no hidden scaling. |
+| `remaining_foreign_room`, `total_foreign_room` | `remainForeignRoom`, `totalForeignRoom` | Raw-transport recovery; nullable. |
+| `average_price`, `price_change`, `price_change_pct` | `average`, `priceChange`, `priceChangePercentage` | Raw-transport recovery; nullable. |
+| `foreign_net_volume`, `foreign_net_value` | none | Derived only as buy minus sell when both gross fields are non-null. |
+| bid/ask ladders | `bids`/`asks` or `bpN`/`bqN`/`apN`/`aqN` | Normalize directly; invalid numbers are discarded, not converted to zero. |
+
+### Live acceptance evidence
+
+- One shared authentication lifecycle performed 24 bounded REST operations: authentication; exact metadata, 20-session daily candles, and 20-session summaries for FPT/SSI/VCB/SHS/ACV; FPT historical intraday; index list; VN30/HNX30 membership; and current VNINDEX/VN30/HNXINDEX/HNX30 summaries. Every operation returned `ok`.
+- Daily rows were chronological and contained the required fields. Each symbol returned 20 complete matched and gross-foreign rows.
+- VN30 and HNX30 each returned 30 unique symbols.
+- Historical FPT returned 226 unique chronological bars after the adapter ordering fix. A final live recheck of the patched current-session path returned 18 unique chronological FPT bars.
+- Two bounded WebSocket acceptance connections were used. The first proved non-blocking startup (1 ms), quote events, one transport, and idempotent shutdown. The second waited specifically for active data and observed seven quote messages and three trade messages, normalized to seven order-book rows, three tape rows, and three snapshot rows, with no error class.
+- No credential, token, authorization header, complete raw row, or raw payload was printed or persisted.
+
+Deterministic validation passed all 621 affected SSI, Vietnam service/API, analytics, intraday, and startup tests. The literal full-suite command was blocked by the repository's inaccessible `.pytest_cache`; an equivalent cache-disabled run reached 61% before the 120-second bound and exposed pre-existing configuration-registry/message failures unrelated to M1. Credential-free Python 3.11 container compilation passed for every changed Python file. The full repository image build was not completed in M1 because of an unrelated legacy dependency outside the SSI migration implementation. No frontend file changed, so no frontend build was required for M1.
+
+### Historical M1 blocker and R1 resolution
+
+M1 originally withheld production ownership pending the following work:
+
+1. Establish an official or accepted exchange-specific unit/finality rule for `totalForeignBuyValue` and `totalForeignSellValue` on HOSE, HNX, and UPCOM.
+2. Update the active API/frontend contract so it does not label unknown provider-native values as VND or compare cross-exchange values unless that rule proves the comparison valid.
+3. Re-run the bounded foreign-flow acceptance separately for the three exchanges, the full backend suite, frontend build if the contract changes, and Python 3.11 Docker verification.
+4. Only then switch production to V3 and remove V2 code, dependency, credentials, cache namespaces, tests, and migration flags in one atomic phase.
+
+R1 completed items 1 and 2 and the affected/full deterministic test runs in item 3. The production image portion of item 3 remains unverified, so item 4 is intentionally not performed.
+
+## Historical migration evidence (superseded implementation status)
 
 ## Current migration gate
 

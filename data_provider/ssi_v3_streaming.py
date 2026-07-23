@@ -1,0 +1,414 @@
+"""SSI FastConnect V3 streaming transport and provider-neutral normalization.
+
+The module is import-safe: official SDK imports, authentication, threads, and
+network connections are deferred until ``OfficialSsiV3RealtimeStreamClient``
+is started by the FastAPI lifecycle.
+"""
+
+from __future__ import annotations
+
+import threading
+import time
+from decimal import Decimal, InvalidOperation
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence
+
+from data_provider.ssi_streaming_realtime import (
+    DEFAULT_ORDER_BOOK_TTL_SECONDS,
+    DEFAULT_STREAMING_REALTIME_CACHE_TTL_SECONDS,
+    DEFAULT_STREAMING_REALTIME_IDLE_TIMEOUT_SECONDS,
+    DEFAULT_STREAMING_REALTIME_RECONNECT_INITIAL_DELAY_SECONDS,
+    DEFAULT_STREAMING_REALTIME_RECONNECT_MAX_DELAY_SECONDS,
+    DEFAULT_TRADE_TAPE_BUFFER_SIZE,
+    DEFAULT_TRADE_TAPE_TTL_SECONDS,
+    OrderBookCache,
+    RealtimeSnapshotCache,
+    SsiRealtimeStreamClient,
+    SsiStreamingRealtimeManager,
+    TradeTapeEventCache,
+)
+from data_provider.ssi_v3_adapter import SsiV3RestSettings, _default_auth_factory
+
+
+V3_DATA_CHANNEL = "DATA"
+V3_HEARTBEAT_CHANNEL = "HEARTBEAT"
+V3_HEARTBEAT_INTERVAL_SECONDS = 30.0
+
+
+def _optional_number(value: Any, *, integer: bool = False) -> Optional[Any]:
+    if value in (None, "") or isinstance(value, bool):
+        return None
+    try:
+        parsed = Decimal(str(value).replace(",", "").strip())
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+    if not parsed.is_finite():
+        return None
+    if integer:
+        if parsed != parsed.to_integral_value():
+            return None
+        return int(parsed)
+    return float(parsed)
+
+
+def _symbol(value: Any) -> Optional[str]:
+    text = str(value or "").strip().upper()
+    return text or None
+
+
+def _levels(data: Mapping[str, Any], side: str) -> List[Dict[str, Any]]:
+    plural = "bids" if side == "bid" else "asks"
+    raw_levels = data.get(plural)
+    rows: List[Dict[str, Any]] = []
+    if isinstance(raw_levels, list):
+        for position, raw in enumerate(raw_levels[:10], start=1):
+            if isinstance(raw, Mapping):
+                price = _optional_number(raw.get("price", raw.get("p")))
+                volume = _optional_number(raw.get("volume", raw.get("q")))
+                level = _optional_number(raw.get("level"), integer=True) or position
+            elif isinstance(raw, (list, tuple)) and len(raw) >= 2:
+                price = _optional_number(raw[0])
+                volume = _optional_number(raw[1])
+                level = position
+            else:
+                continue
+            if price is None or volume is None:
+                continue
+            rows.append({"level": level, "price": price, "volume": volume})
+        return rows
+
+    prefix = "b" if side == "bid" else "a"
+    for level in range(1, 11):
+        price = _optional_number(data.get(f"{prefix}p{level}"))
+        volume = _optional_number(data.get(f"{prefix}q{level}"))
+        if price is None or volume is None:
+            continue
+        rows.append({"level": level, "price": price, "volume": volume})
+    return rows
+
+
+def normalize_v3_streaming_messages(
+    messages: List[Any],
+    requested_symbols: List[str],
+) -> List[Dict[str, Any]]:
+    """Normalize retained raw V3 ``trade.*`` and ``quote.*`` messages."""
+
+    allowed = {_symbol(value) for value in requested_symbols}
+    rows: List[Dict[str, Any]] = []
+    for message in messages or []:
+        if not isinstance(message, Mapping):
+            continue
+        topic = str(message.get("topic") or "").strip().lower()
+        raw_data = message.get("data")
+        payloads = raw_data if isinstance(raw_data, list) else [raw_data]
+        for data in payloads:
+            if not isinstance(data, Mapping):
+                continue
+            symbol = _symbol(data.get("s") or data.get("symbol"))
+            if not symbol or symbol not in allowed:
+                continue
+            timestamp = str(data.get("t") or data.get("time") or "").strip() or None
+            if topic.startswith("trade."):
+                price = _optional_number(data.get("p"))
+                last_volume = _optional_number(data.get("q"), integer=True)
+                if price is None or last_volume is None or not timestamp:
+                    continue
+                base = {
+                    "ticker": symbol,
+                    "symbol": symbol,
+                    "price": price,
+                    "realtime_price": price,
+                    "snapshot_price": price,
+                    "last_volume": last_volume,
+                    "volume": _optional_number(data.get("v"), integer=True),
+                    "side_if_available": data.get("si"),
+                    "sequence_if_available": data.get("sequence") or data.get("seq"),
+                    "stream_timestamp": timestamp,
+                    "time": timestamp,
+                    "has_last_trade": True,
+                    "source": "SSI FastConnect V3 WebSocket",
+                }
+                rows.append(
+                    {**base, "stream_data_type": "X-TRADE", "r_type": "X-TRADE"}
+                )
+                rows.append({**base, "stream_data_type": "X", "r_type": "X"})
+            elif topic.startswith("quote."):
+                bids = _levels(data, "bid")
+                asks = _levels(data, "ask")
+                if not bids and not asks:
+                    continue
+                rows.append(
+                    {
+                        "ticker": symbol,
+                        "symbol": symbol,
+                        "bids": bids,
+                        "asks": asks,
+                        "bid_levels": bids,
+                        "ask_levels": asks,
+                        "stream_timestamp": timestamp,
+                        "time": timestamp,
+                        "stream_data_type": "X-QUOTE",
+                        "r_type": "X-QUOTE",
+                        "source": "SSI FastConnect V3 WebSocket",
+                    }
+                )
+    return rows
+
+
+def _topic_for_channel(channel: str) -> Optional[str]:
+    prefix, separator, value = str(channel or "").strip().partition(":")
+    if not separator or not value:
+        return None
+    normalized_prefix = prefix.upper()
+    symbol = value.strip().upper()
+    if normalized_prefix in {"X", "X-TRADE"}:
+        return f"trade.{symbol}"
+    if normalized_prefix == "X-QUOTE":
+        return f"quote.{symbol}"
+    return None
+
+
+class OfficialSsiV3RealtimeStreamClient:
+    """Non-blocking one-connection wrapper over the official V3 transport."""
+
+    def __init__(
+        self,
+        settings: SsiV3RestSettings,
+        *,
+        auth_factory: Callable[[SsiV3RestSettings], Any] = _default_auth_factory,
+        websocket_factory: Optional[Callable[[Any], Any]] = None,
+        heartbeat_interval_seconds: float = V3_HEARTBEAT_INTERVAL_SECONDS,
+    ) -> None:
+        self._settings = settings
+        self._auth_factory = auth_factory
+        self._websocket_factory = websocket_factory or self._default_websocket_factory
+        self._heartbeat_interval_seconds = max(1.0, float(heartbeat_interval_seconds))
+        self._lock = threading.RLock()
+        self._stop_event = threading.Event()
+        self._thread: Optional[threading.Thread] = None
+        self._auth: Any = None
+        self._websocket: Any = None
+        self._closed_notified = False
+
+    @staticmethod
+    def _default_websocket_factory(auth: Any) -> Any:
+        from ssi_sdk.transport.websocket_client import WebSocketClient
+
+        websocket = WebSocketClient(auth.config)
+        token = getattr(getattr(auth, "token_manager", None), "access_token", None)
+        if token:
+            websocket.set_token(token)
+        return websocket
+
+    def start(
+        self,
+        on_message: Callable[[Any], None],
+        on_error: Callable[[Any], None],
+        channels: Sequence[str],
+        *,
+        on_open: Optional[Callable[[str], None]] = None,
+        on_close: Optional[Callable[[str], None]] = None,
+        on_subscription_error: Optional[Callable[[str, Any], None]] = None,
+    ) -> None:
+        safe_channels = list(dict.fromkeys(str(value or "").strip() for value in channels))
+        safe_channels = [value for value in safe_channels if value]
+        topics = list(dict.fromkeys(filter(None, (_topic_for_channel(value) for value in safe_channels))))
+        unsupported = [value for value in safe_channels if _topic_for_channel(value) is None]
+        if unsupported:
+            raise ValueError("V3 stream received a channel outside the retained product contract")
+        if not topics:
+            raise ValueError("At least one V3 streaming topic is required")
+        if not self._settings.enabled:
+            raise ValueError("SSI V3 streaming is disabled")
+        if self._settings.missing_required_names:
+            raise ValueError("SSI V3 streaming configuration incomplete")
+        with self._lock:
+            if self._thread is not None and self._thread.is_alive():
+                return
+            self._stop_event.clear()
+            self._closed_notified = False
+            self._thread = threading.Thread(
+                target=self._run,
+                args=(
+                    on_message,
+                    on_error,
+                    safe_channels,
+                    topics,
+                    on_open,
+                    on_close,
+                    on_subscription_error,
+                ),
+                name="ssi-v3-streaming-connect",
+                daemon=True,
+            )
+            self._thread.start()
+
+    def _run(
+        self,
+        on_message: Callable[[Any], None],
+        on_error: Callable[[Any], None],
+        channels: List[str],
+        topics: List[str],
+        on_open: Optional[Callable[[str], None]],
+        on_close: Optional[Callable[[str], None]],
+        on_subscription_error: Optional[Callable[[str, Any], None]],
+    ) -> None:
+        opened = False
+        try:
+            auth = self._auth_factory(self._settings)
+            with self._lock:
+                self._auth = auth
+            auth.authenticate()
+            if self._stop_event.is_set():
+                return
+            websocket = self._websocket_factory(auth)
+            with self._lock:
+                self._websocket = websocket
+            websocket.on(V3_DATA_CHANNEL, on_message)
+            websocket.connect()
+            if self._stop_event.is_set():
+                return
+            websocket.send(
+                {"method": "subscribe", "channel": V3_DATA_CHANNEL, "topics": topics}
+            )
+            opened = True
+            if on_open is not None:
+                for channel in channels:
+                    on_open(channel)
+            while not self._stop_event.wait(self._heartbeat_interval_seconds):
+                if not bool(getattr(websocket, "is_connected", False)):
+                    break
+                websocket.send(
+                    {"method": "ping_pong", "channel": V3_HEARTBEAT_CHANNEL, "topics": []}
+                )
+        except Exception as exc:  # noqa: BLE001 - converted by manager taxonomy.
+            if not self._stop_event.is_set():
+                if not opened and on_subscription_error is not None:
+                    for channel in channels:
+                        on_subscription_error(channel, exc)
+                on_error(exc)
+        finally:
+            if opened and not self._stop_event.is_set() and on_close is not None:
+                self._notify_close(on_close, channels[0])
+            self._close_resources()
+
+    def _notify_close(self, callback: Callable[[str], None], channel: str) -> None:
+        with self._lock:
+            if self._closed_notified:
+                return
+            self._closed_notified = True
+        callback(channel)
+
+    def _close_resources(self) -> None:
+        with self._lock:
+            websocket, auth = self._websocket, self._auth
+            self._websocket = None
+            self._auth = None
+        if websocket is not None:
+            try:
+                websocket.disconnect()
+            except Exception:
+                pass
+        if auth is not None:
+            close = getattr(auth, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:
+                    pass
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        self._close_resources()
+        with self._lock:
+            thread = self._thread
+            self._thread = None
+        if thread is not None and thread.is_alive() and thread is not threading.current_thread():
+            thread.join(timeout=2.0)
+
+
+def build_v3_streaming_realtime_manager(
+    config: Any,
+    *,
+    client_factory: Optional[Callable[[], SsiRealtimeStreamClient]] = None,
+) -> SsiStreamingRealtimeManager:
+    settings = SsiV3RestSettings.from_config(config)
+    factory = client_factory or (lambda: OfficialSsiV3RealtimeStreamClient(settings))
+    return SsiStreamingRealtimeManager(
+        enabled=bool(getattr(config, "ssi_streaming_realtime_enabled", False)),
+        cache=RealtimeSnapshotCache(
+            int(
+                getattr(
+                    config,
+                    "ssi_streaming_realtime_cache_ttl_seconds",
+                    DEFAULT_STREAMING_REALTIME_CACHE_TTL_SECONDS,
+                )
+            )
+        ),
+        order_book_cache=OrderBookCache(DEFAULT_ORDER_BOOK_TTL_SECONDS),
+        trade_tape_cache=TradeTapeEventCache(
+            int(getattr(config, "ssi_trade_tape_buffer_size", DEFAULT_TRADE_TAPE_BUFFER_SIZE)),
+            int(getattr(config, "ssi_trade_tape_ttl_seconds", DEFAULT_TRADE_TAPE_TTL_SECONDS)),
+        ),
+        parser=normalize_v3_streaming_messages,
+        client_factory=factory,
+        idle_timeout_seconds=int(
+            getattr(
+                config,
+                "ssi_streaming_realtime_idle_timeout_seconds",
+                DEFAULT_STREAMING_REALTIME_IDLE_TIMEOUT_SECONDS,
+            )
+        ),
+        reconnect_enabled=bool(
+            getattr(config, "ssi_streaming_realtime_reconnect_enabled", True)
+        ),
+        reconnect_initial_delay_seconds=int(
+            getattr(
+                config,
+                "ssi_streaming_realtime_reconnect_initial_delay_seconds",
+                DEFAULT_STREAMING_REALTIME_RECONNECT_INITIAL_DELAY_SECONDS,
+            )
+        ),
+        reconnect_max_delay_seconds=int(
+            getattr(
+                config,
+                "ssi_streaming_realtime_reconnect_max_delay_seconds",
+                DEFAULT_STREAMING_REALTIME_RECONNECT_MAX_DELAY_SECONDS,
+            )
+        ),
+        reconnect_max_attempts=int(
+            getattr(config, "ssi_streaming_realtime_reconnect_max_attempts", 0)
+        ),
+        order_book_enabled=True,
+        trade_tape_enabled=bool(
+            getattr(config, "ssi_fastconnect_trade_tape_enabled", True)
+        ),
+        foreign_room_enabled=False,
+        market_index_enabled=False,
+        market_index_codes=[],
+        session_status_enabled=False,
+    )
+
+
+class SsiStreamingRealtimeReader:
+    """Small cache-only facade used by V3 services without constructing V2."""
+
+    def __init__(self, manager: SsiStreamingRealtimeManager) -> None:
+        self.streaming_realtime_manager = manager
+
+    def get_realtime_snapshot(self, symbols: Iterable[str]) -> Dict[str, Any]:
+        return dict(self.streaming_realtime_manager.snapshot(symbols))
+
+    def get_trade_tape(self, symbol: str, limit: int = 50) -> Dict[str, Any]:
+        return dict(self.streaming_realtime_manager.trade_tape(symbol, limit))
+
+    def get_order_book(self, symbol: str) -> Dict[str, Any]:
+        return dict(self.streaming_realtime_manager.order_book(symbol))
+
+    def get_foreign_room(self, symbol: str) -> Dict[str, Any]:
+        return dict(self.streaming_realtime_manager.foreign_room(symbol))
+
+    def get_session_status(self, symbol: str) -> Dict[str, Any]:
+        return dict(self.streaming_realtime_manager.session_status(symbol))
+
+    def get_market_index_pulse(self, indexes: Iterable[str]) -> Dict[str, Any]:
+        return dict(self.streaming_realtime_manager.market_index_pulse(indexes))

@@ -88,6 +88,13 @@ def summary_row(**overrides: Any) -> Dict[str, Any]:
         "close": "101.0",
         "totalMatch": "1234",
         "totalMatchValue": "125000.5",
+        "totalDeal": "12",
+        "totalDealValue": "2400.5",
+        "remainForeignRoom": "789",
+        "totalForeignRoom": "1000",
+        "average": "100.75",
+        "priceChange": "1.25",
+        "priceChangePercentage": "1.26",
         "totalForeignBuy": "100",
         "totalForeignSell": "40",
         "totalForeignBuyValue": "1000.5",
@@ -136,7 +143,11 @@ def test_historical_symbol_request_uses_public_rest_transport_and_normalizes() -
     auth.rest_client.payload = {"data": [summary_row()], "pagesCount": 1}
 
     result = adapter.get_daily_stock_price(
-        " fpt ", from_date="2026-07-01", to_date="2026-07-21", limit=2
+        " fpt ",
+        market="HOSE",
+        from_date="2026-07-01",
+        to_date="2026-07-21",
+        limit=2,
     )
 
     assert auth.authenticate_calls == 1
@@ -148,7 +159,7 @@ def test_historical_symbol_request_uses_public_rest_transport_and_normalizes() -
                     "from": "2026/07/01",
                     "to": "2026/07/21",
                     "pageIndex": 1,
-                    "pageSize": 2,
+                    "pageSize": 4,
                     "symbol": "FPT",
                 }
             },
@@ -159,6 +170,13 @@ def test_historical_symbol_request_uses_public_rest_transport_and_normalizes() -
     assert row["date"] == "2026-07-21"
     assert row["matched_volume"] == 1234
     assert row["matched_value"] == 125000.5
+    assert row["put_through_volume"] == 12
+    assert row["put_through_value"] == 2400.5
+    assert row["remaining_foreign_room"] == 789
+    assert row["total_foreign_room"] == 1000
+    assert row["average_price"] == 100.75
+    assert row["price_change"] == 1.25
+    assert row["price_change_pct"] == 1.26
     assert row["foreign_buy_volume"] == 100
     assert row["foreign_sell_volume"] == 40
     assert row["foreign_net_volume"] == 60
@@ -168,11 +186,23 @@ def test_historical_symbol_request_uses_public_rest_transport_and_normalizes() -
     assert row["source"] == SSI_V3_SOURCE
     assert row["source_version"] == "v3"
     assert result["diagnostics"] == {
-        "capability": "securities_summary",
+        "capability": "daily_stock_price",
         "source_version": "v3",
-        "implementation_status": "implemented_disabled",
-        "units_verified": False,
+        "implementation_status": "implemented",
+        "units_verified": True,
         "finality_verified": False,
+        "operational_finality_policy_validated": True,
+        "provider_finality_verified": False,
+        "foreign_value_domain": "HOSE_EQUITY_VALUE",
+        "foreign_value_scale": 1,
+        "foreign_volume_unit": "shares",
+        "foreign_value_unit": "VND",
+        "foreign_value_scale_confidence": "PROVEN",
+        "foreign_finality_policy": "stockclock_completed_session_rank_operational",
+        "foreign_provider_finality_guaranteed": False,
+        "provisional_row_count": 1,
+        "provisional_rows_included": True,
+        "finality_contract": "stockclock_completed_session_rank_operational",
     }
 
 
@@ -198,7 +228,7 @@ def test_current_symbol_and_index_requests_are_bounded_and_index_is_direct_only(
     assert params["index"] == "VN30"
     assert "symbol" not in params
     assert result["rows"][0]["symbol"] == "VCB"
-    assert result["diagnostics"]["implementation_status"] == "implemented_disabled"
+    assert result["diagnostics"]["implementation_status"] == "implemented"
 
 
 @pytest.mark.parametrize(
@@ -442,7 +472,7 @@ class RecordingProvider:
         self.calls.append("close")
 
 
-def test_router_keeps_all_foreign_flow_owners_v2_when_v3_is_selected() -> None:
+def test_router_assigns_all_foreign_flow_owners_to_v3_when_v3_is_selected() -> None:
     v2 = RecordingProvider("SSI FastConnect V2")
     v3 = RecordingProvider(SSI_V3_SOURCE)
     router = SsiRestProviderRouter(
@@ -450,9 +480,9 @@ def test_router_keeps_all_foreign_flow_owners_v2_when_v3_is_selected() -> None:
     )
 
     result = router.get_daily_stock_price("FPT")
-    assert result["source"] == "SSI FastConnect V2"
-    assert v2.calls == ["get_daily_stock_price"]
-    assert v3.calls == []
+    assert result["source"] == SSI_V3_SOURCE
+    assert v2.calls == []
+    assert v3.calls == ["get_daily_stock_price"]
     for capability in (
         "daily_security_summary",
         "foreign_flow",
@@ -461,9 +491,6 @@ def test_router_keeps_all_foreign_flow_owners_v2_when_v3_is_selected() -> None:
         "vn30_foreign_flow_input",
     ):
         diagnostics = router.routing_diagnostics(capability)
-        assert diagnostics["selected_version"] == "v2"
-        assert diagnostics["v2_pinned"] is True
+        assert diagnostics["selected_version"] == "v3"
+        assert diagnostics["v2_pinned"] is False
         assert diagnostics["fallback_used"] is False
-        assert diagnostics["implementation_status"] == "implemented_disabled"
-        assert diagnostics["production_owner"] == "ssi_fastconnect_v2"
-        assert diagnostics["v3_implementation_available"] is True

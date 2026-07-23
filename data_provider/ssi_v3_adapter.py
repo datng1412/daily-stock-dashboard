@@ -17,6 +17,10 @@ from zoneinfo import ZoneInfo
 import httpx
 
 from data_provider.ssi_provider_models import ProviderDiagnostics, ProviderResult
+from data_provider.ssi_v3_foreign_policy import (
+    SSI_V3_FOREIGN_FINALITY_POLICY,
+    normalize_foreign_value_rows,
+)
 
 
 SSI_V3_SOURCE = "SSI FastConnect V3"
@@ -338,6 +342,7 @@ class SsiFastConnectV3Adapter:
         self._lifecycle_lock = RLock()
         self._auth: Any = None
         self._data: Any = None
+        self._symbol_board_cache: Dict[str, str] = {}
         self._closed = False
 
     @property
@@ -574,10 +579,19 @@ class SsiFastConnectV3Adapter:
             "adjusted_close": None,
             "matched_volume": _number(_value(item, "totalMatch"), integer=True),
             "matched_value": _number(_value(item, "totalMatchValue")),
-            "put_through_volume": None,
-            "put_through_value": None,
+            "put_through_volume": _number(_value(item, "totalDeal"), integer=True),
+            "put_through_value": _number(_value(item, "totalDealValue")),
+            "average_price": _number(_value(item, "average")),
+            "price_change": _number(_value(item, "priceChange")),
+            "price_change_pct": _number(_value(item, "priceChangePercentage")),
             "total_volume": None,
             "total_value": None,
+            "remaining_foreign_room": _number(
+                _value(item, "remainForeignRoom"), integer=True
+            ),
+            "total_foreign_room": _number(
+                _value(item, "totalForeignRoom"), integer=True
+            ),
             "foreign_buy_volume": foreign_buy_volume,
             "foreign_sell_volume": foreign_sell_volume,
             "foreign_net_volume": foreign_net_volume,
@@ -670,7 +684,7 @@ class SsiFastConnectV3Adapter:
             diagnostics={
                 "capability": "securities_summary",
                 "source_version": "v3",
-                "implementation_status": "implemented_disabled",
+                "implementation_status": "implemented",
                 "units_verified": False,
                 "finality_verified": False,
             },
@@ -719,13 +733,26 @@ class SsiFastConnectV3Adapter:
             if len(rows) > SSI_V3_MAX_ROWS:
                 raise SsiV3PaginationGuard("maximum row bound exceeded")
             if len(rows) >= safe_limit:
-                rows = rows[:safe_limit]
                 break
             if len(payload) < page_size:
                 break
         else:
             raise SsiV3PaginationGuard("maximum page bound exceeded")
-        return _ok_result(rows, pages_used=pages_used)
+        key_name = "timestamp" if intraday else "date"
+        deduped: Dict[Any, Dict[str, Any]] = {}
+        for row in rows:
+            deduped[row.get(key_name)] = row
+        normalized_rows = sorted(
+            deduped.values(),
+            key=lambda row: row.get(key_name) or 0,
+        )
+        if len(normalized_rows) > safe_limit:
+            normalized_rows = normalized_rows[-safe_limit:]
+        return _ok_result(
+            normalized_rows,
+            pages_used=pages_used,
+            duplicate_date_count=len(rows) - len(deduped),
+        )
 
     def get_securities(self, market: Optional[str] = None) -> ProviderResult:
         return self.get_securities_filtered(board=market)
@@ -776,7 +803,16 @@ class SsiFastConnectV3Adapter:
         return self._run("securities_filter", operation)
 
     def get_security_basic_info(self, symbol: str) -> ProviderResult:
-        return self.get_securities_filtered(symbol=symbol)
+        result = self.get_securities_filtered(symbol=symbol)
+        if result.get("status") == "ok":
+            for row in result.get("rows") or []:
+                if not isinstance(row, Mapping):
+                    continue
+                normalized_symbol = str(row.get("symbol") or "").strip().upper()
+                board = _enum_text(row.get("exchange") or row.get("market"))
+                if normalized_symbol and board in _VALID_BOARDS:
+                    self._symbol_board_cache[normalized_symbol] = board
+        return result
 
     def get_securities_by_index(self, index_code: str) -> ProviderResult:
         return self.get_securities_filtered(index=index_code)
@@ -790,7 +826,6 @@ class SsiFastConnectV3Adapter:
         force_refresh: bool = False,
     ) -> ProviderResult:
         del force_refresh
-
         try:
             normalized = str(symbol or "").strip().upper()
             if not normalized:
@@ -812,18 +847,43 @@ class SsiFastConnectV3Adapter:
         except Exception as exc:
             return _error_result("daily_ohlcv", exc)
 
-        def operation(_auth: Any, data: Any) -> ProviderResult:
-            return self._paged_ohlc(
-                data.market_data,
-                method_name="get_ohlc_1day_historical",
-                symbol=normalized,
-                from_value=start_value,
-                to_value=end_value,
-                limit=safe_limit,
-                intraday=False,
-            )
-
-        return self._run("daily_ohlcv", operation)
+        summary = self.get_securities_summary(
+            symbol=normalized,
+            from_date=start_value,
+            to_date=end_value,
+            limit=safe_limit,
+        )
+        if summary.get("status") != "ok":
+            return summary
+        candles = [
+            {
+                "date": row.get("date"),
+                "open": row.get("open"),
+                "high": row.get("high"),
+                "low": row.get("low"),
+                "close": row.get("close"),
+                "volume": row.get("matched_volume"),
+                "value": row.get("matched_value"),
+                "source": SSI_V3_SOURCE,
+            }
+            for row in summary.get("rows", [])
+            if isinstance(row, Mapping)
+        ]
+        result = dict(summary)
+        result.update(
+            {
+                "rows": candles,
+                "count": len(candles),
+                "diagnostics": {
+                    **dict(summary.get("diagnostics") or {}),
+                    "capability": "daily_ohlcv",
+                    "source_endpoint": "securitiesSummary",
+                    "volume_semantics": "matched_volume",
+                    "value_semantics": "matched_value",
+                },
+            }
+        )
+        return result
 
     def get_completed_intraday_1m(self, symbol: str, trading_date: str) -> ProviderResult:
         try:
@@ -833,12 +893,37 @@ class SsiFastConnectV3Adapter:
             from_value = _provider_date(trading_date, intraday=True)
             to_value = _provider_date(trading_date, intraday=True, end=True)
             requested_day = datetime.strptime(from_value, "%Y/%m/%d %H:%M:%S").date()
-            if requested_day >= datetime.now(_VN_TIMEZONE).date():
-                raise ValueError("V3 intraday foundation accepts completed sessions only")
+            today = datetime.now(_VN_TIMEZONE).date()
+            if requested_day > today:
+                raise ValueError("intraday date must not be in the future")
         except Exception as exc:
             return _error_result("completed_historical_intraday_ohlcv", exc)
 
         def operation(_auth: Any, data: Any) -> ProviderResult:
+            if requested_day == today:
+                payload = data.market_data.get_ohlc_1minute(normalized)
+                rows = self._normalize_list(
+                    payload,
+                    lambda item: self._ohlc_row(item, intraday=True, symbol=normalized),
+                )
+                selected = [
+                    row
+                    for row in rows
+                    if str(row.get("date_time") or "").startswith(requested_day.isoformat())
+                ]
+                deduped = {
+                    row.get("timestamp"): row
+                    for row in selected
+                    if row.get("timestamp") is not None
+                }
+                normalized_rows = sorted(
+                    deduped.values(), key=lambda row: row.get("timestamp") or 0
+                )
+                return _ok_result(
+                    normalized_rows[-SSI_V3_PAGE_SIZE:],
+                    pages_used=1,
+                    duplicate_date_count=len(selected) - len(deduped),
+                )
             return self._paged_ohlc(
                 data.market_data,
                 method_name="get_ohlc_1minute_historical",
@@ -849,7 +934,12 @@ class SsiFastConnectV3Adapter:
                 intraday=True,
             )
 
-        return self._run("completed_historical_intraday_ohlcv", operation)
+        capability = (
+            "current_session_intraday"
+            if requested_day == today
+            else "completed_historical_intraday_ohlcv"
+        )
+        return self._run(capability, operation)
 
     def get_securities_summary(
         self,
@@ -862,12 +952,7 @@ class SsiFastConnectV3Adapter:
         page_size: int = SSI_V3_PAGE_SIZE,
         limit: int = 260,
     ) -> ProviderResult:
-        """Normalize the official V3 summary contract for direct offline tests.
-
-        Production routing remains pinned to the V2 ``DailyStockPrice`` owner.
-        This direct adapter method intentionally supports exactly one symbol or
-        index and performs no market-wide fan-out, caching, or fallback.
-        """
+        """Normalize one symbol or index through authenticated raw V3 REST."""
 
         try:
             filters = [
@@ -929,7 +1014,7 @@ class SsiFastConnectV3Adapter:
         page_size: int = SSI_V3_PAGE_SIZE,
         limit: int = 260,
     ) -> ProviderResult:
-        """Expose index normalization as implemented-disabled adapter scope."""
+        """Expose direct index normalization without market-wide fan-out."""
 
         return self.get_securities_summary(
             index=index_code,
@@ -970,11 +1055,19 @@ class SsiFastConnectV3Adapter:
         trading_date: Optional[str] = None,
     ) -> ProviderResult:
         try:
-            normalized_board = _normalize_board(board)
-            normalized_index = str(index_code or "").strip().upper() or None
-            params: Dict[str, Any] = {"board": normalized_board}
-            if normalized_index:
-                params["index"] = normalized_index
+            normalized_index = str(index_code or board or "").strip().upper()
+            if not normalized_index:
+                raise ValueError("index_code is required")
+            normalized_board = {
+                "VNINDEX": "HOSE",
+                "VN30": "HOSE",
+                "HNXINDEX": "HNX",
+                "HNX": "HNX",
+                "HNX30": "HNX",
+                "UPCOMINDEX": "UPCOM",
+                "UPCOM": "UPCOM",
+            }.get(normalized_index)
+            params: Dict[str, Any] = {"index": normalized_index}
             if trading_date:
                 params["tradingDate"] = _provider_date(trading_date, intraday=False)
         except Exception as exc:
@@ -1010,8 +1103,14 @@ class SsiFastConnectV3Adapter:
         symbol: Optional[str] = None,
         market: Optional[str] = None,
     ) -> ProviderResult:
-        del symbol, market
-        return self._unsupported("security_extended_metadata")
+        if symbol:
+            return self.get_security_basic_info(symbol)
+        if market:
+            return self.get_securities(market=market)
+        return _error_result(
+            "security_metadata",
+            ValueError("symbol or market is required"),
+        )
 
     def get_intraday_ohlcv(
         self,
@@ -1021,8 +1120,27 @@ class SsiFastConnectV3Adapter:
         limit: int = 64,
         interval: Optional[str] = None,
     ) -> ProviderResult:
-        del symbol, from_date, to_date, limit, interval
-        return self._unsupported("current_session_intraday")
+        del from_date
+        try:
+            if isinstance(limit, bool):
+                raise ValueError("limit must be an integer")
+            safe_limit = int(limit)
+            if safe_limit < 1 or safe_limit > SSI_V3_MAX_ROWS:
+                raise ValueError(f"limit must be between 1 and {SSI_V3_MAX_ROWS}")
+        except (TypeError, ValueError) as exc:
+            return _error_result("current_session_intraday", exc)
+        if interval not in (None, "1m", "1min", "1minute"):
+            return _error_result(
+                "current_session_intraday",
+                ValueError("V3 product contract supports interval=1m only"),
+            )
+        selected_date = to_date or datetime.now(_VN_TIMEZONE).date().isoformat()
+        result = self.get_completed_intraday_1m(symbol, selected_date)
+        if result.get("status") == "ok" and len(result.get("rows") or []) > safe_limit:
+            result = dict(result)
+            result["rows"] = list(result.get("rows") or [])[-safe_limit:]
+            result["count"] = len(result["rows"])
+        return result
 
     def get_daily_stock_price(
         self,
@@ -1032,13 +1150,91 @@ class SsiFastConnectV3Adapter:
         to_date: Optional[str] = None,
         limit: int = 260,
     ) -> ProviderResult:
-        del market
-        return self.get_securities_summary(
-            symbol=symbol,
-            from_date=from_date,
-            to_date=to_date,
-            limit=limit,
+        try:
+            normalized_symbol = str(symbol or "").strip().upper()
+            if not normalized_symbol:
+                raise ValueError("symbol is required")
+            if isinstance(limit, bool):
+                raise ValueError("limit must be an integer")
+            safe_limit = int(limit)
+            if safe_limit < 1 or safe_limit > SSI_V3_MAX_ROWS:
+                raise ValueError(f"limit must be between 1 and {SSI_V3_MAX_ROWS}")
+            normalized_board = (
+                _normalize_board(market)
+                if market is not None and str(market).strip()
+                else self._symbol_board_cache.get(normalized_symbol)
+            )
+        except (TypeError, ValueError) as exc:
+            return _error_result("daily_stock_price", exc)
+
+        if normalized_board is None:
+            metadata = self.get_security_basic_info(normalized_symbol)
+            if metadata.get("status") != "ok":
+                return metadata
+            normalized_board = self._symbol_board_cache.get(normalized_symbol)
+            if normalized_board is None:
+                return _error_result(
+                    "daily_stock_price",
+                    SsiV3MalformedResponse(
+                        "exact-symbol metadata did not provide a supported board"
+                    ),
+                )
+
+        today = datetime.now(_VN_TIMEZONE).date()
+        effective_to = to_date or today.isoformat()
+        effective_from = from_date
+        if effective_from is None:
+            effective_end = datetime.strptime(
+                _provider_date(effective_to, intraday=False), "%Y/%m/%d"
+            ).date()
+            effective_from = (
+                effective_end - timedelta(days=max((safe_limit + 2) * 2, 365))
+            ).isoformat()
+        result = self.get_securities_summary(
+            symbol=normalized_symbol,
+            from_date=effective_from,
+            to_date=effective_to,
+            limit=min(SSI_V3_MAX_ROWS, safe_limit + 2),
         )
+        if result.get("status") != "ok":
+            return result
+        if int(result.get("duplicate_date_count") or 0) > 0:
+            return _error_result(
+                "daily_stock_price",
+                SsiV3MalformedResponse("duplicate securities-summary dates"),
+            )
+        try:
+            rows, policy_diagnostics = normalize_foreign_value_rows(
+                [
+                    row
+                    for row in result.get("rows") or []
+                    if isinstance(row, Mapping)
+                ],
+                board=normalized_board,
+                as_of=today,
+                include_provisional=True,
+                limit=safe_limit,
+            )
+        except ValueError as exc:
+            return _error_result("daily_stock_price", exc)
+        normalized_result = dict(result)
+        normalized_result.update(
+            {
+                "rows": rows,
+                "count": len(rows),
+                "diagnostics": {
+                    **dict(result.get("diagnostics") or {}),
+                    **policy_diagnostics,
+                    "capability": "daily_stock_price",
+                    "units_verified": True,
+                    "finality_verified": False,
+                    "operational_finality_policy_validated": True,
+                    "provider_finality_verified": False,
+                    "finality_contract": SSI_V3_FOREIGN_FINALITY_POLICY,
+                },
+            }
+        )
+        return normalized_result
 
     def get_daily_index(
         self,
@@ -1048,8 +1244,30 @@ class SsiFastConnectV3Adapter:
         limit: int = 260,
         force_refresh: bool = False,
     ) -> ProviderResult:
-        del index_code, from_date, to_date, limit, force_refresh
-        return self._unsupported("daily_index_series")
+        del force_refresh
+        try:
+            safe_limit = int(limit)
+            if safe_limit < 1 or safe_limit > SSI_V3_MAX_ROWS:
+                raise ValueError(f"limit must be between 1 and {SSI_V3_MAX_ROWS}")
+            normalized_index = str(index_code or "").strip().upper()
+            if not normalized_index:
+                raise ValueError("index_code is required")
+            selected_date = to_date or from_date
+        except Exception as exc:
+            return _error_result("daily_index", exc)
+        result = self.get_index_summary(
+            normalized_index,
+            index_code=normalized_index,
+            trading_date=selected_date,
+        )
+        if result.get("status") == "ok":
+            result = dict(result)
+            result["diagnostics"] = {
+                **dict(result.get("diagnostics") or {}),
+                "capability": "daily_index_latest",
+                "series_contract": "latest_or_selected_session",
+            }
+        return result
 
     def get_index_components(
         self,
@@ -1057,16 +1275,39 @@ class SsiFastConnectV3Adapter:
         market: Optional[str] = None,
         force_refresh: bool = False,
     ) -> ProviderResult:
-        del index_code, market, force_refresh
-        return self._unsupported("index_membership_production")
+        del force_refresh
+        normalized_index = str(index_code or "").strip().upper()
+        result = self.get_securities_by_index(normalized_index)
+        if result.get("status") != "ok":
+            return result
+        normalized_market = str(market or "").strip().upper() or None
+        deduped: Dict[str, Dict[str, Any]] = {}
+        for row in result.get("rows") or []:
+            if not isinstance(row, Mapping):
+                continue
+            symbol = str(row.get("symbol") or "").strip().upper()
+            exchange = _enum_text(row.get("exchange") or row.get("market"))
+            if not symbol or (normalized_market and exchange != normalized_market):
+                continue
+            deduped[symbol] = {
+                "index_code": normalized_index,
+                "symbol": symbol,
+                "exchange": exchange,
+                "market": exchange,
+                "weight": None,
+                "name": row.get("name") or row.get("name_en"),
+                "source": SSI_V3_SOURCE,
+            }
+        rows = [deduped[symbol] for symbol in sorted(deduped)]
+        return _ok_result(
+            rows,
+            diagnostics={
+                "capability": "index_membership",
+                "source_endpoint": "securities_by_index",
+            },
+        )
 
     def routing_diagnostics(self, capability: Optional[str] = None) -> ProviderDiagnostics:
-        summary_capabilities = {
-            "daily_security_summary",
-            "foreign_flow",
-            "securities_summary",
-        }
-        implemented_disabled = capability in summary_capabilities
         return {
             "capability": capability,
             "requested_rest_version": "v3",
@@ -1075,17 +1316,9 @@ class SsiFastConnectV3Adapter:
             "routing_reason": "direct_v3_adapter_capability",
             "v2_pinned": False,
             "fallback_used": False,
-            "implementation_status": (
-                "implemented_disabled"
-                if implemented_disabled
-                else "implemented"
-            ),
-            "production_owner": (
-                "ssi_fastconnect_v2"
-                if implemented_disabled
-                else "ssi_fastconnect_v3"
-            ),
-            "v3_implementation_available": implemented_disabled,
+            "implementation_status": "implemented",
+            "production_owner": "ssi_fastconnect_v3",
+            "v3_implementation_available": True,
         }
 
     def close(self) -> None:
@@ -1093,6 +1326,7 @@ class SsiFastConnectV3Adapter:
             if self._closed:
                 return
             self._closed = True
+            self._symbol_board_cache.clear()
             data, auth = self._data, self._auth
             self._data = None
             self._auth = None

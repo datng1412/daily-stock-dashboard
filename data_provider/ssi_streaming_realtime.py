@@ -739,10 +739,25 @@ class TradeTapeEventCache:
         self._time_func = time_func
         self._lock = threading.RLock()
         self._rows: Dict[str, List[CachedTradeTapeEvent]] = {}
+        self._dedup_keys: Dict[str, set[Tuple[Any, ...]]] = {}
 
     def clear(self) -> None:
         with self._lock:
             self._rows.clear()
+            self._dedup_keys.clear()
+
+    @staticmethod
+    def _dedup_key(trade: Dict[str, Any]) -> Tuple[Any, ...]:
+        sequence = trade.get("sequence_if_available") or trade.get("sequence")
+        if sequence not in (None, ""):
+            return ("sequence", str(sequence))
+        return (
+            "content",
+            str(trade.get("timestamp") or ""),
+            str(trade.get("price")),
+            str(trade.get("volume")),
+            str(trade.get("side_if_available") or trade.get("side") or ""),
+        )
 
     def put_rows(self, rows: Iterable[Dict[str, Any]]) -> int:
         now = float(self._time_func())
@@ -763,8 +778,14 @@ class TradeTapeEventCache:
                 trade["cached_at"] = _utc_iso_from_epoch(now)
                 trade["cache_ttl_seconds"] = self.ttl_seconds
                 events = self._rows.setdefault(symbol, [])
+                dedup_key = self._dedup_key(trade)
+                keys = self._dedup_keys.setdefault(symbol, set())
+                if dedup_key in keys:
+                    continue
                 events.insert(0, CachedTradeTapeEvent(symbol=symbol, trade=trade, received_at=now))
                 del events[self.max_rows_per_symbol :]
+                keys.clear()
+                keys.update(self._dedup_key(event.trade) for event in events)
                 written += 1
         return written
 

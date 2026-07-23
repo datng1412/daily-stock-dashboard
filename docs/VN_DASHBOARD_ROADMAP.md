@@ -1,5 +1,22 @@
 ﻿# VN Dashboard Roadmap
 
+## Phase SSI-V3-M1-R1 - Foreign contract resolved, runtime cutover blocked (2026-07-23)
+
+- Proved StockClock operational foreign-value scales from V3 economic invariants: HOSE uses 1; HNX and UPCOM use 1,000. Every eligible foreign buy/sell row was plausible only at its accepted scale; matched values independently used scale 1.
+- Repeated the same 20-session range twice for FPT/SSI/VCB/SHS/ACV. T-1 and older gross fields were stable, with no duplicate dates or incomplete gross pairs.
+- Finality now uses returned trading-session rank instead of weekday age: current and latest completed provider sessions are provisional; older sessions are completed-history candidates; provider-guaranteed finality remains false.
+- Retained per-symbol, watchlist, and VN30 foreign volume/value products with one board-specific VND normalization boundary. No fake value, null-to-zero conversion, cross-provider fallback, or frontend redesign was added.
+- Changed-area validation passed 342 tests. The full test tree completed with 3,464 passed, 4 skipped, and 67 pre-existing environment/legacy failures; all SSI V3 and Vietnam changed areas passed.
+- Atomic cutover remains blocked on the mandatory production-image/startup gate, which was not rerun after its unrelated legacy dependency was explicitly removed from this SSI task's scope. Production therefore remains entirely V2; V3 stays default-disabled with no automatic fallback or hybrid runtime.
+
+## Phase SSI-V3-M1 - V3 implementation ready, historical cutover block (2026-07-23)
+
+- Implemented the product-driven V3 REST contract for matched-trading daily candles, raw daily summary/foreign fields, exact metadata, current/completed one-minute history, index list, current membership, and latest index coverage.
+- Implemented one-connection V3 `trade.*`/`quote.*` streaming with non-blocking connect, heartbeat, existing bounded reconnect/resubscription/generation/cache lifecycle, scalar/array quote normalization, and content dedup when sequence is absent.
+- Live acceptance passed the requested symbol/index samples and active trade/quote topics. Production remains entirely V2 because the active foreign-flow UI/API assumes and compares VND values across HOSE, HNX, and UPCOM while the V3 exchange-specific value-unit/finality rule is not yet established.
+- Deterministic affected-surface validation passed 621 SSI, Vietnam service/API, analytics, intraday, and startup tests, and credential-free Python 3.11 container compilation passed for all changed Python files. The full backend run was inconclusive because the literal command could not read `.pytest_cache`; the cache-disabled run reached 61% before its time bound and exposed unrelated pre-existing config registry/message failures. The repository image gate was not completed because of an unrelated legacy dependency outside the SSI implementation. No frontend file changed.
+- Do not enable a partial V3 runtime. The next gate must resolve the foreign-value unit contract and repeat full backend, frontend (if changed), and Python 3.11 Docker acceptance before V2 removal.
+
 ## Purpose
 
 The Vietnam dashboard is a data-quality-first, source-aware stock inspection workspace. It should help users inspect price, volume, source coverage, unavailable states, and data freshness without turning the UI into trading advice.

@@ -18,40 +18,24 @@ from data_provider.ssi_v3_adapter import (
 from src.config import parse_ssi_fastconnect_rest_version
 
 
-V3_SUPPORTED_B2 = frozenset(
+V3_PRODUCT_CAPABILITIES = frozenset(
     {
         "securities_by_board",
         "security_basic_info",
+        "security_extended_metadata",
         "securities_by_index_normalization",
         "daily_ohlcv",
         "completed_historical_intraday_ohlcv",
-        "index_list",
-        "index_summary",
-    }
-)
-
-V3_IMPLEMENTED_DISABLED_B3 = frozenset(
-    {
-        "daily_security_summary",
-        "foreign_flow",
-        "foreign_flow_history",
-        "foreign_flow_analytics_input",
-        "vn30_foreign_flow_input",
-    }
-)
-
-V2_PINNED = frozenset(
-    {
-        "security_extended_metadata",
         "current_session_intraday",
         "daily_security_summary",
         "foreign_flow",
         "foreign_flow_history",
         "foreign_flow_analytics_input",
         "vn30_foreign_flow_input",
+        "index_list",
+        "index_summary",
         "daily_index_series",
         "index_membership_production",
-        "realtime",
     }
 )
 
@@ -100,7 +84,7 @@ class SsiRestProviderRouter:
 
     def __init__(
         self,
-        provider: SsiRestProvider,
+        provider: Optional[SsiRestProvider],
         *,
         selected_version: str = "v2",
         v3_provider: Optional[SsiRestProvider] = None,
@@ -110,6 +94,8 @@ class SsiRestProviderRouter:
         self._v3_provider = v3_provider
         if self._selected_version == "v3" and self._v3_provider is None:
             raise ValueError("SSI V3 provider is required when REST version v3 is selected")
+        if self._selected_version == "v2" and self._v2_provider is None:
+            raise ValueError("SSI V2 provider is required when REST version v2 is selected")
         self._closed = False
 
     @property
@@ -118,11 +104,13 @@ class SsiRestProviderRouter:
 
     @property
     def provider(self) -> SsiRestProvider:
-        """Compatibility alias for the production V2 adapter/fetcher owner."""
-        return self._v2_provider
+        """Compatibility alias for the selected provider owner."""
+        selected = self._v3_provider if self._selected_version == "v3" else self._v2_provider
+        assert selected is not None
+        return selected
 
     @property
-    def v2_provider(self) -> SsiRestProvider:
+    def v2_provider(self) -> Optional[SsiRestProvider]:
         return self._v2_provider
 
     @property
@@ -130,19 +118,13 @@ class SsiRestProviderRouter:
         return self._v3_provider
 
     def _route(self, capability: str) -> Tuple[SsiRestProvider, bool, str]:
-        if self._selected_version == "v3" and capability in V3_SUPPORTED_B2:
+        if self._selected_version == "v3" and capability in V3_PRODUCT_CAPABILITIES:
             assert self._v3_provider is not None
-            return self._v3_provider, False, "explicit_v3_b2_capability"
-        if capability in V2_PINNED:
-            reason = (
-                "v3_implemented_disabled_v2_production_owner"
-                if capability in V3_IMPLEMENTED_DISABLED_B3
-                else "explicit_v2_capability_pin"
-            )
-            return self._v2_provider, self._selected_version == "v3", reason
+            return self._v3_provider, False, "explicit_v3_product_capability"
         if self._selected_version == "v2":
+            assert self._v2_provider is not None
             return self._v2_provider, False, "configured_v2"
-        raise ValueError(f"SSI REST capability {capability!r} is unsupported for V3 phase B3")
+        raise ValueError(f"SSI REST capability {capability!r} is outside the V3 product contract")
 
     def routing_diagnostics(self, capability: Optional[str] = None) -> ProviderDiagnostics:
         if capability is None:
@@ -170,14 +152,6 @@ class SsiRestProviderRouter:
             "v2_pinned": v2_pinned,
             "fallback_used": False,
         }
-        if normalized in V3_IMPLEMENTED_DISABLED_B3:
-            diagnostics.update(
-                {
-                    "implementation_status": "implemented_disabled",
-                    "production_owner": "ssi_fastconnect_v2",
-                    "v3_implementation_available": True,
-                }
-            )
         return diagnostics
 
     def get_securities(self, market: Optional[str] = None) -> ProviderResult:
@@ -315,7 +289,8 @@ class SsiRestProviderRouter:
         if self._closed:
             return
         self._closed = True
-        self._v2_provider.close()
+        if self._v2_provider is not None:
+            self._v2_provider.close()
         if self._v3_provider is not None and self._v3_provider is not self._v2_provider:
             self._v3_provider.close()
 
@@ -350,11 +325,13 @@ def create_ssi_rest_provider_router(
         if v3_provider is None:
             v3_provider = _get_shared_v3_adapter(settings)
 
-    if v2_fetcher is None:
-        from data_provider.ssi_fastconnect_fetcher import SsiFastConnectFetcher
+    v2_adapter: Optional[SsiRestProvider] = None
+    if selected_version == "v2":
+        if v2_fetcher is None:
+            from data_provider.ssi_fastconnect_fetcher import SsiFastConnectFetcher
 
-        v2_fetcher = SsiFastConnectFetcher(config=config)
-    v2_adapter = SsiFastConnectV2Adapter(v2_fetcher)
+            v2_fetcher = SsiFastConnectFetcher(config=config)
+        v2_adapter = SsiFastConnectV2Adapter(v2_fetcher)
     return SsiRestProviderRouter(
         v2_adapter,
         selected_version=selected_version,

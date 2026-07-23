@@ -1,5 +1,15 @@
 # SSI FastConnect Integration
 
+## SSI-V3-M1-R1 operational status (2026-07-23)
+
+The V3 opt-in now has complete retained REST and streaming implementations: raw `securitiesSummary` daily/foreign fields, matched-trading daily candles, exact metadata, current/completed one-minute OHLC, index identity/membership/latest summary, and one-connection `trade.*`/`quote.*` streaming. V3 startup is background/non-blocking; the stream adapter owns the connection heartbeat, while the shared manager owns reconnect/backoff, resubscription, generation rejection, thread-safe TTL caches, snapshot persistence boundaries, and idempotent shutdown. No token or raw provider row is persisted.
+
+R1 validated StockClock operational foreign-value scales separately: HOSE `1`, HNX `1,000`, and UPCOM `1,000`. Across FPT/SSI/VCB/SHS/ACV, every eligible foreign buy/sell row was price-range-plausible at its accepted scale and no competing named scale passed. Two reads of each 20-session range were stable, with no duplicate dates or incomplete gross pairs.
+
+Current-date and latest completed provider-session rows are provisional. Older returned sessions are completed-history candidates after repeated-read stability. The rank is based on distinct returned trading dates, not weekdays, so weekends and holidays do not advance finality. SSI does not expose a revision identifier or final flag; `foreign_provider_finality_guaranteed` therefore remains false.
+
+Production remains V2 because the mandatory Python 3.11 production-image/startup gate is not complete. The V3 router does not fall back to V2; the selector must remain V2 until an atomic cutover gate passes. Full evidence, test classification, field/source decisions, and rollback are recorded in `docs/SSI_FASTCONNECT_V3_MIGRATION.md`.
+
 ## Scope
 
 This document covers the Vietnam dashboard SSI FastConnect transition foundation.

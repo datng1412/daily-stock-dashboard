@@ -94,6 +94,7 @@ class FakeMarketData:
         self.securities: Any = []
         self.indexes: Any = []
         self.ohlc_pages: Dict[int, Any] = {}
+        self.current_ohlc: Any = []
         self.error: Optional[BaseException] = None
 
     def _raise(self) -> None:
@@ -141,6 +142,11 @@ class FakeMarketData:
         self, symbol: str, start: str, end: str, *, page: int, size: int
     ) -> Any:
         return self._ohlc("1m", symbol, start, end, page, size)
+
+    def get_ohlc_1minute(self, symbol: str) -> Any:
+        self.calls.append(("1m_current", symbol))
+        self._raise()
+        return self.current_ohlc
 
 
 class FakeData:
@@ -354,7 +360,11 @@ def test_market_service_passes_dedicated_v3_settings_to_router() -> None:
     )
     try:
         router = service._get_ssi_rest_provider()
-        assert isinstance(router, SsiRestProviderRouter)
+        current_router_type = importlib.import_module(
+            "data_provider.ssi_provider_router"
+        ).SsiRestProviderRouter
+        assert isinstance(router, current_router_type)
+        assert router.v2_provider is None
         assert isinstance(router.v3_provider, SsiFastConnectV3Adapter)
         assert router.v3_provider.initialized is False
         assert router.v3_provider.settings.client_id == "<client-id>"
@@ -486,14 +496,34 @@ def test_security_normalization_preserves_missing_zero_and_no_type_heuristic() -
 
 
 def test_daily_ohlc_request_dates_pagination_and_normalization() -> None:
-    adapter, _auth, market, _data = make_adapter()
-    market.ohlc_pages = {1: [candle()], 2: []}
+    adapter, auth, _market, _data = make_adapter()
+    auth.rest_client.payload = {
+        "data": [
+            {
+                "symbol": "FPT",
+                "tradingDate": "2026/07/21",
+                "open": "100.5",
+                "high": "101.5",
+                "low": "99.5",
+                "close": "100",
+                "totalMatch": "0",
+                "totalMatchValue": None,
+            }
+        ],
+        "pagesCount": 1,
+    }
     result = adapter.get_daily_ohlcv(
         "fpt", from_date="2026-07-01", to_date="2026-07-21", limit=2
     )
     row = result["rows"][0]
 
-    assert market.calls[0] == ("daily", "FPT", "2026/07/01", "2026/07/21", 1, 2)
+    assert auth.rest_client.calls[0][1]["params"] == {
+        "from": "2026/07/01",
+        "to": "2026/07/21",
+        "pageIndex": 1,
+        "pageSize": 2,
+        "symbol": "FPT",
+    }
     assert result["pages_used"] == 1
     assert row == {
         "date": "2026-07-21",
@@ -526,32 +556,43 @@ def test_completed_intraday_uses_datetime_bounds_and_normalized_contract() -> No
     assert row["ticker"] == "FPT"
 
 
-def test_ohlc_empty_repeated_page_bounds_and_ordering(monkeypatch: pytest.MonkeyPatch) -> None:
-    import data_provider.ssi_v3_adapter as module
-
+def test_current_intraday_is_sorted_and_deduplicated() -> None:
     adapter, _auth, market, _data = make_adapter()
+    today = datetime.now(ZoneInfo("Asia/Ho_Chi_Minh")).strftime("%Y/%m/%d")
+    market.current_ohlc = [
+        candle(trading_date=f"{today} 09:16:00"),
+        candle(trading_date=f"{today} 09:15:00"),
+        candle(trading_date=f"{today} 09:16:00", close_price=101),
+    ]
+
+    result = adapter.get_completed_intraday_1m("FPT", today)
+
+    assert market.calls == [("1m_current", "FPT")]
+    assert [row["date_time"].split("T", 1)[1][:8] for row in result["rows"]] == [
+        "09:15:00",
+        "09:16:00",
+    ]
+    assert result["rows"][-1]["close"] == 101.0
+    assert result["duplicate_date_count"] == 1
+
+
+def test_daily_ohlc_empty_duplicate_date_and_ordering() -> None:
+    adapter, auth, _market, _data = make_adapter()
     assert adapter.get_daily_ohlcv("FPT", "2026-07-01", "2026-07-21", 2)["rows"] == []
 
-    repeated = [candle(trading_date="2026/07/21")] * 1000
-    market.ohlc_pages = {1: repeated, 2: repeated}
-    result = adapter.get_daily_ohlcv("FPT", "2026-07-01", "2026-07-21", 1001)
-    assert result["failure_class"] == "malformed_response"
-
-    monkeypatch.setattr(module, "SSI_V3_MAX_PAGES", 1)
-    market.ohlc_pages = {1: [candle()] * 1000}
-    guarded = adapter.get_daily_ohlcv(
-        "FPT", "2026-07-01", "2026-07-21", limit=2000
-    )
-    assert guarded["failure_class"] == "malformed_response"
-
-    ordered_adapter, _auth, ordered_market, _data = make_adapter()
-    ordered_market.ohlc_pages = {
-        1: [candle(trading_date="2026/07/21"), candle(trading_date="2026/07/20")]
+    auth.rest_client.payload = {
+        "data": [
+            {"symbol": "FPT", "tradingDate": "2026/07/21", "totalMatch": "2"},
+            {"symbol": "FPT", "tradingDate": "2026/07/20", "totalMatch": "1"},
+            {"symbol": "FPT", "tradingDate": "2026/07/21", "totalMatch": "3"},
+        ],
+        "pagesCount": 1,
     }
-    rows = ordered_adapter.get_daily_ohlcv(
-        "FPT", "2026-07-01", "2026-07-21", limit=2
+    rows = adapter.get_daily_ohlcv(
+        "FPT", "2026-07-01", "2026-07-21", limit=3
     )["rows"]
-    assert [row["date"] for row in rows] == ["2026-07-21", "2026-07-20"]
+    assert [row["date"] for row in rows] == ["2026-07-20", "2026-07-21"]
+    assert rows[-1]["volume"] == 3
 
 
 @pytest.mark.parametrize(
@@ -562,8 +603,13 @@ def test_ohlc_empty_repeated_page_bounds_and_ordering(monkeypatch: pytest.Monkey
     ],
 )
 def test_ohlc_rejects_non_finite_and_malformed_dates(row: Any, failure_class: str) -> None:
-    adapter, _auth, market, _data = make_adapter()
-    market.ohlc_pages = {1: [row]}
+    adapter, auth, _market, _data = make_adapter()
+    raw = {
+        "symbol": "FPT",
+        "tradingDate": getattr(row, "trading_date", None),
+        "open": getattr(row, "open_price", None),
+    }
+    auth.rest_client.payload = {"data": [raw], "pagesCount": 1}
     result = adapter.get_daily_ohlcv("FPT", "2026-07-01", "2026-07-21", 1)
     assert result["failure_class"] == failure_class
 
@@ -617,7 +663,7 @@ def test_index_summary_uses_official_board_index_date_request_and_normalizes() -
     assert auth.rest_client.calls == [
         (
             "/api/v3/data/indexSummary",
-            {"params": {"board": "HOSE", "index": "VN30", "tradingDate": "2026/07/21"}},
+            {"params": {"index": "VN30", "tradingDate": "2026/07/21"}},
         )
     ]
     assert row["index_code"] == "VN30"
@@ -727,6 +773,9 @@ class StubV3Provider:
     def get_security_basic_info(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
         return self._call("get_security_basic_info")
 
+    def get_security_metadata(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
+        return self._call("get_security_metadata")
+
     def get_securities_by_index(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
         return self._call("get_securities_by_index")
 
@@ -736,11 +785,23 @@ class StubV3Provider:
     def get_completed_intraday_1m(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
         return self._call("get_completed_intraday_1m")
 
+    def get_intraday_ohlcv(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
+        return self._call("get_intraday_ohlcv")
+
+    def get_daily_stock_price(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
+        return self._call("get_daily_stock_price")
+
     def get_index_list(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
         return self._call("get_index_list")
 
     def get_index_summary(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
         return self._call("get_index_summary")
+
+    def get_daily_index(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
+        return self._call("get_daily_index")
+
+    def get_index_components(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
+        return self._call("get_index_components")
 
     def close(self) -> None:
         self.calls.append("close")
@@ -756,12 +817,14 @@ def v3_config() -> Config:
     )
 
 
-def test_router_routes_supported_v3_and_explicit_v2_pins_without_fallback() -> None:
+def test_router_routes_all_retained_product_capabilities_to_v3_without_fallback() -> None:
     v2 = MinimalV2Fetcher()
     v3 = StubV3Provider()
     router = create_ssi_rest_provider_router(
         config=v3_config(), v2_fetcher=v2, v3_provider=v3  # type: ignore[arg-type]
     )
+
+    assert router.v2_provider is None
 
     router.get_daily_ohlcv("FPT")
     router.get_daily_stock_price("FPT")
@@ -769,17 +832,18 @@ def test_router_routes_supported_v3_and_explicit_v2_pins_without_fallback() -> N
     router.get_index_components("VN30")
     router.get_daily_index("VN30")
 
-    assert v3.calls == ["get_daily_ohlcv"]
-    assert v2.calls == [
+    assert v3.calls == [
+        "get_daily_ohlcv",
         "get_daily_stock_price",
         "get_intraday_ohlcv",
         "get_index_components",
         "get_daily_index",
     ]
+    assert v2.calls == []
     supported = router.routing_diagnostics("daily_ohlcv")
-    pinned = router.routing_diagnostics("foreign_flow")
+    summary = router.routing_diagnostics("foreign_flow")
     assert supported["selected_version"] == "v3" and supported["fallback_used"] is False
-    assert pinned["selected_version"] == "v2" and pinned["v2_pinned"] is True
+    assert summary["selected_version"] == "v3" and summary["v2_pinned"] is False
 
 
 def test_v3_failure_never_invokes_v2() -> None:
@@ -795,7 +859,7 @@ def test_v3_failure_never_invokes_v2() -> None:
     assert v2.calls == []
 
 
-def test_current_session_completed_method_name_remains_v2_pinned() -> None:
+def test_current_session_completed_method_routes_to_v3() -> None:
     v2 = MinimalV2Fetcher()
     v3 = StubV3Provider()
     router = create_ssi_rest_provider_router(
@@ -805,19 +869,22 @@ def test_current_session_completed_method_name_remains_v2_pinned() -> None:
     today = datetime.now(ZoneInfo("Asia/Ho_Chi_Minh")).strftime("%Y-%m-%d")
     router.get_completed_intraday_1m("FPT", today)
 
-    assert v2.calls == ["get_completed_intraday_1m"]
-    assert v3.calls == []
+    assert v2.calls == []
+    assert v3.calls == ["get_completed_intraday_1m"]
 
 
 def test_v2_adapter_remains_default_and_structural_router_contract_holds() -> None:
     v2 = MinimalV2Fetcher()
     router = create_ssi_rest_provider_router(version="", v2_fetcher=v2)
-    assert isinstance(router.provider, SsiFastConnectV2Adapter)
+    current_v2_type = importlib.import_module(
+        "data_provider.ssi_v2_adapter"
+    ).SsiFastConnectV2Adapter
+    assert isinstance(router.provider, current_v2_type)
     router.get_daily_ohlcv("FPT")
     assert v2.calls == ["get_daily_ohlcv"]
 
 
-def test_static_scope_guards_keep_v3_out_of_streaming_trading_and_production_foreign_flow() -> None:
+def test_static_scope_guards_keep_v3_out_of_trading_and_preserve_no_fallback_router() -> None:
     streaming_files = [
         ROOT / "data_provider" / "ssi_streaming_realtime.py",
         ROOT / "src" / "services" / "ssi_streaming_realtime_lifecycle.py",
@@ -865,7 +932,10 @@ def test_v3_sdk_import_is_scoped_to_adapter_tests_and_dependency_references() ->
         for path in base.rglob("*.py"):
             if "ssi_sdk" in path.read_text(encoding="utf-8"):
                 production_hits.append(path.relative_to(ROOT).as_posix())
-    assert production_hits == ["data_provider/ssi_v3_adapter.py"]
+    assert production_hits == [
+        "data_provider/ssi_v3_adapter.py",
+        "data_provider/ssi_v3_streaming.py",
+    ]
 
 
 def test_provider_version_namespaces_only_v3_service_cache_keys() -> None:

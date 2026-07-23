@@ -102,6 +102,13 @@ def _new_manager(
     config: Any,
     client_factory: Optional[Callable[[], SsiRealtimeStreamClient]] = None,
 ) -> SsiStreamingRealtimeManager:
+    if str(getattr(config, "ssi_fastconnect_rest_version", "v2")).strip().lower() == "v3":
+        from data_provider.ssi_v3_streaming import build_v3_streaming_realtime_manager
+
+        return build_v3_streaming_realtime_manager(
+            config,
+            client_factory=client_factory,
+        )
     fetcher = SsiFastConnectFetcher(
         config=config,
         streaming_realtime_client_factory=client_factory,

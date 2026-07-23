@@ -69,14 +69,28 @@ class DailySecuritySummaryRow(TypedDict, total=False):
     matched_value: Optional[float]
     put_through_volume: Optional[int]
     put_through_value: Optional[float]
+    average_price: Optional[float]
+    price_change: Optional[float]
+    price_change_pct: Optional[float]
     total_volume: Optional[int]
     total_value: Optional[float]
+    remaining_foreign_room: Optional[int]
+    total_foreign_room: Optional[int]
     foreign_buy_volume: Optional[int]
     foreign_sell_volume: Optional[int]
     foreign_net_volume: Optional[int]
     foreign_buy_value: Optional[float]
     foreign_sell_value: Optional[float]
     foreign_net_value: Optional[float]
+    foreign_volume_unit: str
+    foreign_value_unit: str
+    foreign_value_domain: str
+    foreign_value_scale: int
+    foreign_value_scale_confidence: str
+    foreign_finality_policy: str
+    foreign_finality: str
+    foreign_is_provisional: bool
+    foreign_provider_finality_guaranteed: bool
     source: str
     source_version: str
 

@@ -267,6 +267,12 @@ def _normalize_rows(rows: Optional[Iterable[Dict[str, Any]]]) -> Tuple[List[Dict
         if not isinstance(raw, dict):
             stats["rejected_rows"] += 1
             continue
+        # SSI V3 tags current-session and T-1 rows under StockClock's
+        # operational policy.  Completed foreign analytics must not mix these
+        # provisional revisions into historical windows or rankings.
+        if raw.get("foreign_is_provisional") is True:
+            stats["rejected_rows"] += 1
+            continue
         trading_date = _valid_date(raw.get("date"))
         if trading_date is None:
             stats["rejected_rows"] += 1

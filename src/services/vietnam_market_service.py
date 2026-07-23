@@ -3555,7 +3555,7 @@ class VietnamMarketService:
         self._ssi_rest_provider_injected = ssi_rest_provider is not None
         self._corporate_actions_provider = corporate_actions_provider
 
-    def _get_ssi_fetcher(self) -> SsiFastConnectFetcher:
+    def _get_ssi_fetcher(self) -> Any:
         if self._ssi_fetcher is None:
             streaming_realtime_manager = None
             try:
@@ -3566,7 +3566,20 @@ class VietnamMarketService:
                 streaming_realtime_manager = get_existing_ssi_streaming_realtime_manager()
             except Exception:  # noqa: BLE001 - lifecycle state is best-effort.
                 streaming_realtime_manager = None
-            if streaming_realtime_manager is not None:
+            if self.config.ssi_fastconnect_rest_version == "v3":
+                from data_provider.ssi_v3_streaming import (
+                    SsiStreamingRealtimeReader,
+                    build_v3_streaming_realtime_manager,
+                )
+
+                if streaming_realtime_manager is None:
+                    streaming_realtime_manager = build_v3_streaming_realtime_manager(
+                        self.config
+                    )
+                self._ssi_fetcher = SsiStreamingRealtimeReader(
+                    streaming_realtime_manager
+                )
+            elif streaming_realtime_manager is not None:
                 self._ssi_fetcher = SsiFastConnectFetcher(
                     realtime_enabled=self.config.ssi_realtime_enabled,
                     streaming_realtime_enabled=self.config.ssi_streaming_realtime_enabled,
@@ -3583,9 +3596,14 @@ class VietnamMarketService:
             if self._ssi_fetcher is not None and routed_fetcher is not self._ssi_fetcher:
                 self._ssi_rest_provider = None
         if self._ssi_rest_provider is None:
+            v2_fetcher = (
+                self._get_ssi_fetcher()
+                if self.config.ssi_fastconnect_rest_version == "v2"
+                else None
+            )
             self._ssi_rest_provider = create_ssi_rest_provider_router(
                 version=self.config.ssi_fastconnect_rest_version,
-                v2_fetcher=self._get_ssi_fetcher(),
+                v2_fetcher=v2_fetcher,
                 config=self.config,
             )
         return self._ssi_rest_provider

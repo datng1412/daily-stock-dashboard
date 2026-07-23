@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [improvement] Normalize SSI V3 foreign values once by proven equity-board domain: HOSE scale 1 and HNX/UPCOM scale 1,000, with explicit shares/VND metadata and null-preserving gross-pair net derivation.
+- [fix] Classify SSI V3 foreign-flow finality by returned trading-session rank so weekends and holidays cannot prematurely finalize the latest completed provider session.
+- [test] Record two-read foreign-flow stability evidence and complete regression results while keeping production on V2 until the mandatory production-image runtime gate passes.
+- [improvement] Implement an isolated product-driven SSI V3 REST contract for matched daily candles, raw daily summary and foreign fields, one-minute history, index membership, and latest index coverage without V2 fallback when V3 is selected.
+- [improvement] Add retained SSI V3 trade and quote streaming through one non-blocking shared connection with heartbeat, reconnect ownership, resubscription, scalar quote normalization, and bounded trade deduplication.
+- [test] Cover V3 raw renamed fields, summary-to-candle mapping, index membership, current and completed intraday ordering, streaming normalization, lifecycle, and no-fallback routing; record bounded live REST and WebSocket acceptance.
+- [documentation] Record SSI-V3-M1 as implementation-ready but cutover-blocked on the cross-exchange foreign-value unit and finality contract, leaving production entirely on V2.
+
 - [fix] Treat SSI V3 Client ID as optional for Market Data REST while retaining dedicated API key/secret requirements and no V2 credential alias.
 - [test] Add a double-guarded, zero-retry SSI V3 REST acceptance tool plus offline credential, call-budget, outcome, lifecycle, and redaction coverage.
 - [documentation] Record SSI-V3-B3.1 live outcome G/NOT_RUN, continued V2 ownership, and unresolved V3 access, units, finality, and parity.
