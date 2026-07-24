@@ -1,5 +1,15 @@
 # SSI FastConnect Integration
 
+## V3 foreign-session and auction integrity
+
+DailyStockPrice keeps its actual `data_date` and adds `requested_date`, `provider_session_date`, `freshness_status`, current/provisional/completed/stale flags, provider-session lag, provider version, and endpoint provenance. A prior completed-session row during active trading is valid historical provider data but is `partial`, not current or live. Outside active trading, the newest provider-backed completed row may be `latest_completed_session`; older returned-session history remains explicitly stale.
+
+The retained V3 stream maps `trade.*` to realtime/X-TRADE only when symbol and provider timestamp are valid and price and executed volume are finite and positive. Zero/empty ATO or ATC callbacks are classified as auction no-match/control evidence and counted without entering caches. A connected stream can therefore be transport-healthy and parser-healthy while symbol data is `auction_waiting_for_match`. Valid auction executions, including nullable-side executions, are retained. Provider sequence/id is the only safe replay key; equal unsequenced executions are not collapsed.
+
+Persisted streaming schema version 2 validates the same eligibility rules during write and restore, so incompatible zero rows from version 1 cannot return as live data. Current response session and event session are separate; old events keep their provider timestamp and event-session provenance.
+
+At M2.3, current-session foreign-flow capability remained unproven beyond a same-date `securitiesSummary` row and the retained V3 WebSocket enabled only trade and quote topics. M2.5 supersedes that narrow topic set by restoring bounded room observation, while still prohibiting total-market-trade inference, forward-fill, V2, external providers, and fallback.
+
 ## V3 daily-history completeness and freshness
 
 V3 daily OHLC is normalized from `securitiesSummary`. Long requests are retrieved through bounded recent-first date windows and all declared pages are exhausted. Rows are deduplicated by trading date, sorted ascending, and trimmed to the newest requested sessions. No session is synthesized or forward-filled.
@@ -900,6 +910,8 @@ Each logical attempt has a monotonically increasing generation. Callback closure
 
 Retry uses one manager-owned schedule with base delays 2, 5, 10, 20, and 30 seconds, capped by configuration and jittered within 20 percent. Network-close, timeout, transient DNS/TLS, and SDK errors are retryable during active morning/afternoon/ATC windows. Explicit authentication, authorization, configuration, and subscription failures do not retry indefinitely. Lunch and closed-session event silence are not transport failures; ATC is active and does not suppress recovery. Session classification is Asia/Ho_Chi_Minh schedule-derived, holiday-unaware, and does not prove provider intent, exchange halts, or half sessions.
 
+The V3 adapter uses one physical transport and one cohort subscription. A pre-open authentication or authorization failure emits one cohort subscription-failure notification before the manager records the transport error and blocks retry; it is not replayed once for every requested channel. This keeps the existing typed unavailable behavior while avoiding a startup warning burst proportional to the channel count.
+
 `GET /api/v1/stocks/vn/observability` exposes a sanitized typed `streaming` block with one logical cohort transport plus per-context readiness/freshness. It returns `Cache-Control: no-store`, performs no connect/reconnect/subscribe/cache refresh, omits full channels/symbols and raw errors, and represents only the worker serving the request. Multi-worker coordination, Redis, and distributed locking are not implemented.
 
 A bounded after-hours local smoke on 2026-07-16 reached the observability, realtime, and trade routes. SSI startup classified as `authorization` at generation 1, no transport opened, and reconnect scheduled/attempt counters stayed zero; optional realtime and trade responses remained unavailable. The authorization/entitlement condition was not guessed around or retried. This proves fail-fast classification and clean optional degradation only, not active-session recovery or continuity.
@@ -913,3 +925,90 @@ Phase 4.11F-A2 reran the normal entry point during the scheduled continuous morn
 Phase 4.11G proved that A2 did not establish missing streaming entitlement. The same environment and installed `ssi_fc_data` 2.2.2 package opened an official minimal `X:FPT` stream and received current callbacks; sequential minimal F, MI, X-QUOTE, X-TRADE, and R runs also received their matching event types. The StockClock X-only manager populated cache for 1, 5, 10, and 30 channels. A normal full-registry run reached connected state and accepted 449 events before the fix, while the post-fix run reached 130 opened transports and 1,494 accepted events within its bounded observation; both had zero subscription failures and zero reconnects. The earlier sanitized error remains a transient forbidden/authorization response whose exact external trigger cannot be reconstructed from deliberately discarded raw provider text. It must not be relabeled as entitlement denial.
 
 The installed SDK sequence is: construct `MarketDataClient` and obtain/cache an access token; construct `MarketDataStream`; call `start`; synchronously negotiate SignalR; create the websocket thread; on socket open invoke `SwitchChannels`; then deliver callbacks. StockClock follows that sequence once per channel-specific transport, but now shares one `MarketDataClient` across all streams in a generation. Previously it constructed a client per channel, causing up to 154 duplicate access-token requests. `physical_transport_count` remains the number of current-generation channels whose websocket open callback has fired; it intentionally stays zero during client construction, token acquisition, and negotiation and is separate from planned subscriptions. The standalone verifier now disables optional contexts unless explicitly selected and forwards the manager's generation keyword, preventing false `no_message_after_start` reports.
+## SSI-V3-M2.5 flow-data contract
+
+The retained V3 REST contract now exposes three provider-backed flow surfaces:
+
+| Capability | SSI V3 source | Historical | Current session | Classification |
+| --- | --- | --- | --- | --- |
+| Foreign flow by symbol | Securities Summary | yes | best-effort current REST only | `DIRECT_REST` |
+| Foreign flow by index | Securities Summary by index | yes | best-effort current REST only | `DIRECT_REST` |
+| Foreign flow by board | per-symbol explicit board universe | bounded only | not exposed as an implicit full-market request | `PROVIDER_BACKED_AGGREGATE` |
+| Foreign flow by ICB industry | Securities Summary joined to Securities Info | yes, explicit universe | blocked until same-session symbol flow is proven | `PROVIDER_BACKED_AGGREGATE` |
+| Proprietary flow by symbol | no retained field | no | no | `UNSUPPORTED_BY_RETAINED_V3` |
+| Proprietary flow by index | Index Summary | bounded date retrieval | current summary | `DIRECT_REST` |
+| Proprietary flow by board | Board Summary | bounded date retrieval | current summary | `DIRECT_REST` |
+| Proprietary flow by ICB industry | no per-symbol proprietary field | no | no | `UNSUPPORTED_BY_RETAINED_V3` |
+| Matched turnover by industry | Securities Summary `totalMatch`/`totalMatchValue` joined to SSI ICB metadata | yes, explicit universe | best-effort REST only | `PROVIDER_BACKED_AGGREGATE` |
+| Foreign ownership room | `room.<symbol>` / `ForeignRoomMessage` | no | yes, bounded bootstrap symbols | `DIRECT_STREAM` |
+
+Official SSI documents the current/historical index and board summaries, current/historical Securities Summary by symbol/index, and Securities Info by symbol/index/board in the [Python SDK service contract](https://developers.ssi.com.vn/docs/sdk/python/service-classes). The official model reference documents proprietary fields on `MarketIndexSummary`, exact `IcbCode`/`IcbName` on `SecuritiesInfo`, and `TotalRoom`, `CurrentRoom`, `BuyQuantity`, `BuyValue`, `SellQuantity`, and `SellValue` on `ForeignRoomMessage` in the [SSI SDK model contract](https://developers.ssi.com.vn/docs/sdk/go/utilities).
+
+Repository normalization retains raw Securities Summary aliases
+`totalForeignBuy`, `totalForeignBuyValue`, `totalForeignSell`, and
+`totalForeignSellValue`. Public fields remain provider-neutral:
+`foreign_buy_volume`, `foreign_sell_volume`, `foreign_net_volume`,
+`foreign_buy_value`, `foreign_sell_value`, and `foreign_net_value`. Net is
+calculated only when both corresponding gross sides exist; a provider zero
+remains zero and a missing gross side remains null. The established board
+normalization remains HOSE scale `1` and HNX/UPCOM scale `1,000`; that REST
+policy is not reused for streaming values.
+
+The V3 room subscription is restored for the existing bounded bootstrap
+universe so ownership-room rows can be observed. It does not subscribe the
+whole market. The parser maps the documented raw keys `tr`, `cr`, `bq`, `bv`,
+`sq`, and `sv`, preserves zero, requires symbol and provider time, and labels
+the update semantics `unproven`. Neither the official model nor the installed
+`ssi-sdk==3.0.5` source says whether buy/sell values are cumulative snapshots,
+per-event deltas, or replayed session state. Therefore they are not exposed as
+canonical current-session foreign flow, not accumulated, and not persisted in
+a dedicated current-flow cache. The public current endpoint reports
+`CURRENT_FOREIGN_STREAM_BLOCKED_SEMANTICS` and may return the latest completed
+REST row only as comparison data.
+
+Active-session acceptance on 2026-07-24 connected and subscribed only
+FPT/SSI/VCB, but observed zero room rows in 25 seconds. This proves transport
+and subscription readiness, not buy/sell update semantics. Bounded REST
+acceptance returned 17 complete sessions (2026-07-01 through 2026-07-23) for
+FPT/SSI/VCB/SHS/ACV; VNINDEX, VN30, and HOSE returned all four proprietary
+gross fields dated 2026-07-23. SSI returned 30/30 VN30 members with ICB
+classification. The direct by-index Securities Summary shape was one
+`symbol=VN30` aggregate row per date, not constituent rows, so industry
+aggregation uses the SSI member list plus bounded per-symbol summaries. The
+one-session VN30 run produced 13 industries, 100% foreign coverage, and exact
+foreign-buy, foreign-sell, and matched-value reconciliation.
+
+New bounded API surfaces:
+
+- `GET /api/v1/stocks/vn/foreign-flow/index/{index_code}?from_date=YYYY-MM-DD&to_date=YYYY-MM-DD`
+- `GET /api/v1/stocks/vn/foreign-flow/current/{ticker}`
+- `GET /api/v1/stocks/vn/proprietary-flow?scope=board|index&identifier=...`
+- `POST /api/v1/stocks/vn/industry-flow` with either explicit `symbols` or one `index_code`
+
+Industry aggregates always identify their universe, preserve SSI ICB code/name
+without inferring a hierarchy, exclude and count unclassified symbols, and
+report coverage. Matched turnover is labeled liquidity/turnover, never net
+cash flow. Proprietary-by-symbol and proprietary-by-ICB-industry remain
+explicitly unsupported; market-wide proprietary totals are never allocated to
+industries.
+### SSI-V3-M2.5-R2 VN30 canonical foreign-flow contract
+
+- `GET /api/v1/stocks/vn/foreign-flow/vn30` uses SSI V3 `securitiesSummary?index=VN30` rows with `symbol=VN30` as the canonical latest value, history, and 5/20-session windows.
+- Current VN30 membership from SSI IndexComponents is a separate `CURRENT_MEMBERSHIP_DECOMPOSITION` path for component ranking, breadth, contribution, coverage, and industry analysis. It is not a historically constituent-correct VN30 total.
+- Canonical provider aggregates use `coverage_mode=provider_aggregate` and `constituent_coverage=not_applicable`; `30/30` coverage belongs only to decomposition output.
+- An active current-session row is provisional. The latest provider session before it is eligible as `latest_completed_session`; cache age is reported separately and cannot make an older provider date source-fresh.
+- Gross-field presence is retained as explicit zero, nonzero, absent, or null. All-explicit-zero sessions are preserved and marked suspicious; absent/null fields remain unavailable and reduce completeness.
+- Canonical and decomposition cache identities are mode-, date-, session-count-, provider-version-, schema-version-, and membership-aware. Expected-session advancement prevents an old date-bounded response from remaining source-fresh.
+- Live acceptance on 2026-07-24 found 44 direct `symbol=VN30` rows from 2026-05-25 through 2026-07-23, but `foreign_buy_volume`, `foreign_sell_volume`, `foreign_buy_value`, and `foreign_sell_value` were null on every direct row. The direct canonical contract is therefore `unavailable` under the observed response; StockClock does not replace it with the current-member decomposition.
+- The same bounded decomposition read reached 2026-07-23 with 30/30 same-date value coverage. On both 2026-06-29 and 2026-06-30, all 30 members had all four gross fields explicitly present as zero, with no missing fields. Those sessions remain provider-backed zero anomalies; affected windows expose anomaly metadata without deleting, nulling, or changing the provider values.
+
+### SSI-V3-M2.5-R3 VN30 decomposition fallback contract
+
+- The observed direct SSI V3 capability is `UNSUPPORTED_BY_CURRENT_SSI_V3_RESPONSE`: a successful `securitiesSummary?index=VN30` response contained index rows, but no usable value in `totalForeignBuy`, `totalForeignSell`, `totalForeignBuyValue`, or `totalForeignSellValue`.
+- This field-level classification uses failure class `DIRECT_INDEX_FOREIGN_FIELDS_UNSUPPORTED`. It is not an outage, auth failure, timeout, or statement that future SSI versions cannot add the fields.
+- A process-local negative capability cache prevents normal dashboard refreshes from repeating the known unsupported probe. Its key includes provider, provider version, capability, index code, and schema version; TTL is 86,400 seconds. `force_capability_refresh=true` explicitly bypasses it. Authentication failures, timeouts, malformed/empty responses, and other provider failures are not cached as unsupported.
+- `GET /api/v1/stocks/vn/foreign-flow/vn30` returns `status=partial`, `data_state=partial`, `usable=true`, and `capability_status=decomposition_ready_canonical_unsupported` when current-member data is usable. Compatibility `latest`, `windows`, and `series` then mirror `decomposition` and declare `primary_data_mode=current_membership_decomposition` plus `aggregation_basis=current_vn30_membership`.
+- The usable dataset is current VN30 basket historical decomposition: SSI IndexComponents supplies the current membership, and SSI V3 per-symbol foreign rows supply values. It supports latest completed session, 5/20-session windows, series, components, rankings, breadth, contribution, and industry views. It is not a direct SSI VN30 aggregate and is never historically constituent-correct.
+- Source coverage separates the unsupported direct index fields from available symbol foreign data and available SSI VN30 membership. The optional unsupported source does not create a whole-feature outage while decomposition remains usable.
+- Provider-backed all-zero sessions remain valid values. Series rows expose `anomaly_code=all_constituents_explicit_zero`, `anomaly_status=provider_backed_suspect`, explicit-zero and missing-field counts; windows expose `contains_provider_anomaly`, dates, and count. Completeness remains based on field/session coverage, not on whether the values appear economically unusual.
+- Completed-session rules are unchanged. Latest prior provider data remains usable; no current-session or realtime foreign-flow claim is made without proven same-session symbol rows or separately proven room-stream semantics.

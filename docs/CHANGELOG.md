@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [fix] Return the VN30 foreign-flow route as partial and usable when current-membership decomposition is ready but direct SSI V3 index foreign fields are unsupported.
+- [improvement] Negatively cache the proven direct VN30 field-level capability absence for one day while keeping auth, timeout, and explicit capability-refresh behavior separate.
+- [fix] Present current-basket VN30 decomposition as the primary dataset and retain explicit all-zero provider sessions with visible anomaly metadata.
+- [fix] Collapse a pre-open SSI V3 streaming authorization failure to one cohort notification while retaining fail-fast typed unavailable state.
+- [fix] Make direct SSI V3 VN30 index rows canonical for foreign-flow totals and retain current-member aggregation only as explicitly labelled decomposition.
+- [fix] Select the latest completed provider session by session date, separate cache age from source freshness, and preserve explicit-zero anomalies without converting missing fields to zero.
+- [test] Cover direct-index canonical windows, latest-session selection, explicit-zero field presence, same-date decomposition, and canonical/decomposition UI labels.
+- [new feature] Add SSI V3 historical index foreign flow, board/index proprietary summaries, and bounded ICB industry flow APIs.
+- [fix] Preserve SSI ICB metadata and keep ambiguous foreign-room buy/sell values blocked from canonical current-session flow.
+- [documentation] Record SSI V3 flow capability boundaries, coverage rules, and unsupported proprietary scopes.
+- [fix] Classify SSI V3 foreign flow by provider session and reject zero or empty auction callbacks from realtime, trade-tape, and persisted streaming caches.
+- [improvement] Separate streaming transport, parser, and symbol-data health while preserving provider event-session provenance and unsequenced auction executions.
+- [test] Cover previous-session foreign flow, zero-value preservation, ATO waiting-to-live transition, positive trade eligibility, sequence replay, and snapshot schema invalidation.
+- [documentation] Record SSI-V3-M2.3 foreign-session freshness, auction execution eligibility, cache migration, and current-session foreign-flow capability boundary.
 - [fix] Retrieve the newest SSI V3 daily-history sessions across bounded windows/pages, reject incomplete or stale history as canonical, and keep technical indicators unavailable when their source history is stale.
 - [fix] Label persisted SSI realtime/trade caches stale, report the maximum provider trade timestamp, and send the validated V3 one-minute intraday interval.
 - [test] Add bounded daily-history pagination, freshness, canonical-price, cache, foreign-null, persisted-stream, trade-timestamp, and intraday-contract coverage.

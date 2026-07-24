@@ -1,5 +1,13 @@
 ﻿# VN Dashboard Roadmap
 
+## Phase SSI-V3-M2.3 - Foreign-session and auction integrity repaired (2026-07-24)
+
+- DailyStockPrice now exposes the actual provider data date plus current/provisional/completed/stale session metadata. During an active session, a latest provider row from the prior completed session is `partial` with `previous_session_during_live_market`; it is no longer presented as current-session foreign flow.
+- V3 `trade.*` callbacks enter the realtime snapshot and X-TRADE tape only with a valid symbol, original provider timestamp, positive finite price, and positive finite volume. Zero/empty auction messages remain diagnostic no-match/control evidence and never become `status=ok` market trades.
+- Transport, parser, and per-symbol market-data health are separate. A connected auction stream can truthfully report `auction_waiting_for_match`; the first valid execution transitions the symbol to live. Event-session provenance is retained across ATO/continuous/ATC boundaries.
+- Trade replay deduplication uses provider sequence/id only. Identical unsequenced auction executions are preserved. Persisted streaming schema v2 rejects old zero/invalid realtime and tape rows on load.
+- At M2.3, `securitiesSummary` was the only retained V3 foreign-flow source and room topics were disabled. M2.5 restores bounded room observation, but true current-session flow remains capability-dependent until the documented buy/sell fields' cumulative/delta/replay semantics are proven; it must never be synthesized.
+
 ## Phase SSI-V3-M2.2 - Daily history pagination and freshness repaired (2026-07-23)
 
 The V3 daily-history path could retain the oldest bounded `securitiesSummary` rows from a long ascending response. Retrieval now exhausts declared pages, splits long ranges into bounded recent-first windows, deduplicates/sorts provider trading dates, and keeps the newest requested sessions without synthesis or forward-fill. Incomplete or stale history cannot replace a complete cache entry, become canonical, or produce `ok` technical indicators.
@@ -2621,3 +2629,32 @@ Delivery order and gates:
 10. **Phase 4.13B - Foreign-flow alerts (future):** requires finality, correction, cooldown, and dedup gates; no alert runtime exists yet.
 
 The MVP is limited to summary, top buyers/sellers, watchlist table, and symbol detail. Sector aggregation is P1 and requires authoritative classification coverage. Historical constituent-correct VN30, negotiated-order splits, advanced anomaly analysis, export/reports, ownership analysis, and alerts are later work.
+### SSI-V3-M2.5 — Foreign, proprietary, and industry flow data
+
+- Implemented provider-backed historical foreign flow by symbol and SSI index with explicit per-session coverage.
+- Implemented official V3 board/index proprietary summaries and retained gross/net provenance.
+- Preserved exact SSI `icb_code`/`icb_name` and added bounded explicit-universe industry foreign-flow plus matched-turnover aggregation.
+- Restored bounded `room.<symbol>` observation and documented its buy/sell fields, while blocking canonical current-session use until cumulative/delta, rollover, and replay semantics are proven live.
+- Deferred current industry flow and dedicated current-flow persistence with `CURRENT_FOREIGN_STREAM_BLOCKED_SEMANTICS`.
+- Kept proprietary flow by symbol/ICB industry explicitly unsupported; no liquidity-weight allocation or synthetic participant flow is permitted.
+- Live acceptance returned five complete symbol histories, all proprietary gross fields for VNINDEX/VN30/HOSE, 30/30 VN30 ICB classification, and a 13-industry one-session aggregate with full reconciliation. The room stream connected/subscribed for three symbols but yielded no rows during the 25-second window, so current flow remains blocked.
+
+### SSI-V3-M2.5-R2 — Canonical VN30 foreign-flow alignment
+
+- Replaced the ambiguous current-member VN30 total with direct SSI V3 `symbol=VN30` index aggregate rows for canonical latest, series, and 5/20-session windows.
+- Preserved current SSI-derived VN30 membership only as `CURRENT_MEMBERSHIP_DECOMPOSITION` for same-date component rows, rankings, breadth, coverage, reconciliation, and ICB analysis. Historical constituent correctness remains false.
+- Fixed session selection so a valid 2026-07-23 provider row is eligible as the latest completed session during the active 2026-07-24 session; only an actual active-session row is provisional.
+- Separated cache freshness from source-session freshness, added expected-session-aware cache identity, and retained explicit provider zero sessions with anomaly metadata while keeping absent/null fields unavailable.
+- Updated the foreign-flow workspace to label the SSI index aggregate and current-basket decomposition separately. Direct totals no longer display constituent coverage.
+- Bounded live acceptance on 2026-07-24 returned 44 direct `symbol=VN30` sessions through 2026-07-23 but no non-null foreign gross field on any row. Outcome is `VN30_CANONICAL_BLOCKED_DIRECT_INDEX`; current-member totals are not promoted as canonical.
+- The live current-basket decomposition reached 2026-07-23 with 30/30 same-date coverage. Both 2026-06-29 and 2026-06-30 were proven as 30/30 explicit four-field zero sessions, not missing-field normalization. They remain visible with `all_constituents_explicit_zero` anomaly metadata.
+
+### SSI-V3-M2.5-R3 — VN30 decomposition fallback and capability finalization
+
+- Classify direct SSI V3 VN30 foreign fields as `DIRECT_INDEX_FOREIGN_FIELDS_UNSUPPORTED` only after a successful direct-index response has rows but no usable required gross field. This classification is a current response-contract limitation, not an outage.
+- Keep a bounded 86,400-second negative capability cache keyed by provider, provider version, capability, index, and schema version. Normal requests reuse it; `force_capability_refresh=true` bypasses it. Auth, timeout, malformed, and failed responses never become unsupported entries.
+- Promote `CURRENT_MEMBERSHIP_DECOMPOSITION` to the primary usable product dataset without calling it a direct or historically exact VN30 aggregate. When it has valid data and direct canonical fields remain unsupported, the route returns `partial`, `usable=true`, and explicit decomposition provenance.
+- Compatibility latest/windows/series mirror the decomposition only with `primary_data_mode=current_membership_decomposition` and `aggregation_basis=current_vn30_membership`. Direct capability metadata remains available separately; direct constituent coverage stays not applicable.
+- Present “Dòng tiền ngoại rổ VN30 hiện tại” in the workspace, keep the current-membership limitation and coverage visible, and move the direct unsupported note to secondary copy instead of a whole-feature unavailable state.
+- Preserve 2026-06-29 and 2026-06-30 as provider-backed explicit-zero sessions. They remain valid zeros and expose series/window anomaly metadata; no value is mutated, removed, or classified as missing.
+- Current-session foreign flow, historically effective membership, and official direct VN30 foreign totals remain unavailable. A future SSI provider/schema version may recover direct capability through an explicit re-probe.
