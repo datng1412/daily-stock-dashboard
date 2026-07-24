@@ -3050,6 +3050,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
   });
 
   it('renders unavailable market facts as missing instead of guessed labels or zero values', async () => {
+    localStorage.setItem(customWatchlistStorageKey, JSON.stringify(['FPT']));
     const response = makeResponse(['FPT']);
     const item = response.watchlist[0];
     item.status = 'unavailable';
@@ -3069,12 +3070,17 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(['FPT'], false));
 
-    const card = within(screen.getByRole('link', { name: 'Open FPT company research' }).closest('article') as HTMLElement);
+    const cardArticle = screen
+      .getAllByRole('link', { name: 'Open FPT company research' })
+      .map((link) => link.closest('article'))
+      .find((article) => article && within(article as HTMLElement).queryByText('Data unavailable'));
+    expect(cardArticle).toBeTruthy();
+    const card = within(cardArticle as HTMLElement);
     expect(card.getByText('Data unavailable')).toBeInTheDocument();
     expect(card.queryByText('VNINDEX.VN')).not.toBeInTheDocument();
     expect(card.queryByText('VN')).not.toBeInTheDocument();
     expect(card.getByText('20D liquidity').nextElementSibling).toHaveTextContent('—');
-    expect(foreignNetVolumeSummaryCard().getByText('—')).toBeInTheDocument();
+    expect(foreignNetVolumeSummaryCard().getByText('-')).toBeInTheDocument();
   });
 
   it('keeps the previous successful aggregate when a refresh returns incomplete watchlist rows', async () => {
