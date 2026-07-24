@@ -2984,6 +2984,34 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(foreignNetCard.queryByText('999,999,999')).not.toBeInTheDocument();
   });
 
+  it('renders unavailable market facts as missing instead of guessed labels or zero values', async () => {
+    const response = makeResponse(['FPT']);
+    const item = response.watchlist[0];
+    item.status = 'unavailable';
+    item.exchange = null;
+    item.marketIndex = null;
+    item.changePct = null;
+    item.latestPrice = null;
+    item.close = null;
+    item.dailyClose = null;
+    item.ohlcvClose = null;
+    item.liquidity = { avgVolume20D: null, score: null };
+    item.ssiForeignNetVolume = null;
+    item.statusLabels = [];
+    mockedGetVietnamWatchlist.mockResolvedValue(response);
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(['FPT'], false));
+
+    const card = within(screen.getByRole('link', { name: 'Open FPT company research' }).closest('article') as HTMLElement);
+    expect(card.getByText('Data unavailable')).toBeInTheDocument();
+    expect(card.queryByText('VNINDEX.VN')).not.toBeInTheDocument();
+    expect(card.queryByText('VN')).not.toBeInTheDocument();
+    expect(card.getByText('20D liquidity').nextElementSibling).toHaveTextContent('—');
+    expect(foreignNetVolumeSummaryCard().getByText('—')).toBeInTheDocument();
+  });
+
   it('keeps the previous successful aggregate when a refresh returns incomplete watchlist rows', async () => {
     const previous = withSsiForeignNetVolumes(makeResponse(defaultTickers), [10, 20, 30, 40, 50, 60]);
     const incomplete = withSsiForeignNetVolumes(makeResponse(['FPT']), [999_999]);

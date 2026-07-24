@@ -277,6 +277,9 @@ def test_ssi_realtime_success_returns_normalized_snapshot_and_daily_stays_ok(mon
     assert item["realtime_snapshot"]["source"] == "SSI realtime contract"
     assert item["realtime_snapshot"]["price"] == 130.5
     assert item["realtime_snapshot"]["bid_levels"][0]["price"] == 130.4
+    assert item["realtime_snapshot"]["fetched_at"] == "2026-06-30T04:00:00+00:00"
+    assert item["realtime_snapshot"]["realtime_time"] is None
+    assert item["realtime_snapshot"]["snapshot_time"] is None
     assert fetcher.realtime_calls == 1
 
 

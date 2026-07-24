@@ -78,7 +78,7 @@ describe('Vietnam watchlist helpers', () => {
   });
 
   it('defines normalized preset lists within the max watchlist size', () => {
-    expect(VIETNAM_WATCHLIST_PRESETS.map((preset) => preset.id)).toEqual(['vn30', 'banks', 'tech']);
+    expect(VIETNAM_WATCHLIST_PRESETS.map((preset) => preset.id)).toEqual(['banks', 'tech']);
     for (const preset of VIETNAM_WATCHLIST_PRESETS) {
       const normalized = getVietnamPresetTickers(preset.id);
       expect(normalized).toEqual(preset.tickers);

@@ -243,7 +243,7 @@ def test_daily_stock_price_history_populates_latest_available_foreign_flow_windo
     assert diagnostics["foreign_history_status"] == "ok"
     assert len(fetcher.daily_stock_price_calls) == 1
     assert fetcher.daily_stock_price_calls[0]["symbol"] == "FPT"
-    assert fetcher.daily_stock_price_calls[0]["kwargs"]["market"] == "HOSE"
+    assert fetcher.daily_stock_price_calls[0]["kwargs"].get("market") is None
     assert fetcher.daily_stock_price_calls[0]["kwargs"]["limit"] == 260
     assert fetcher.daily_stock_price_calls[0]["kwargs"]["from_date"]
     assert fetcher.daily_stock_price_calls[0]["kwargs"]["to_date"]
@@ -536,7 +536,7 @@ def test_daily_stock_price_unavailable_does_not_invalidate_daily_ohlcv():
     assert "foreign_flow_missing" in _issue_codes(item)
 
 
-def test_daily_ohlc_unavailable_exposes_daily_stock_price_without_latest_price_substitution():
+def test_daily_ohlc_unavailable_uses_current_daily_stock_price_as_partial_canonical_price():
     item = _watch_item(
         FakeSsiFetcher(
             daily_ohlcv_payload={
@@ -554,9 +554,11 @@ def test_daily_ohlc_unavailable_exposes_daily_stock_price_without_latest_price_s
     )
     enrichment = item["daily_stock_price"]
 
-    assert item["status"] == "unavailable"
-    assert item["latest_price"] is None
-    assert item["latest_price_source"] is None
+    assert item["status"] == "partial"
+    assert item["latest_price"] == 130.0
+    assert item["latest_price_source"] == "SSI DailyStockPrice"
+    assert item["status_labels"] == ["Data unavailable"]
+    assert item["liquidity"]["score"] is None
     assert item["cache_status"]["ohlcv_cache"] == "error"
     assert item["cache_status"]["daily_stock_price_cache"] == "refresh"
     assert enrichment["status"] == "ok"
@@ -573,7 +575,7 @@ def test_daily_ohlc_unavailable_exposes_daily_stock_price_without_latest_price_s
     assert "daily_ohlc_unavailable" in _issue_codes(item)
 
 
-def test_daily_ohlc_cooldown_keeps_cold_row_unavailable_with_enrichment_only():
+def test_daily_ohlc_cooldown_keeps_cold_row_partial_with_daily_stock_price():
     item = _watch_item(
         FakeSsiFetcher(
             daily_ohlcv_payload={
@@ -593,9 +595,9 @@ def test_daily_ohlc_cooldown_keeps_cold_row_unavailable_with_enrichment_only():
         )
     )
 
-    assert item["status"] == "unavailable"
-    assert item["latest_price"] is None
-    assert item["latest_price_source"] is None
+    assert item["status"] == "partial"
+    assert item["latest_price"] == 987.0
+    assert item["latest_price_source"] == "SSI DailyStockPrice"
     assert item["cache_status"]["ohlcv_cache"] == "error"
     assert item["cache_errors"]["ohlcv"] == DAILY_OHLC_RATE_LIMIT_COOLDOWN_REASON
     assert item["daily_stock_price"]["status"] == "ok"
@@ -670,7 +672,16 @@ def test_stale_daily_ohlc_cache_is_preserved_when_refresh_hits_cooldown():
 
 
 def test_short_daily_ohlc_history_exposes_ta_missing_reasons_without_changing_latest_price():
-    item = _watch_item(FakeSsiFetcher(daily_row_count=10))
+    item = _watch_item(
+        FakeSsiFetcher(
+            daily_stock_price_payload={
+                "status": "ok",
+                "source": "SSI",
+                "rows": [_full_daily_stock_price_row(date="2026-06-10")],
+            },
+            daily_row_count=10,
+        )
+    )
 
     assert item["status"] == "ok"
     assert item["latest_price_source"] == "SSI DailyOhlc"

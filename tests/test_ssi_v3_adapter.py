@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import ast
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timedelta
 from importlib import metadata
 import importlib
 import inspect
@@ -59,11 +59,14 @@ class FakeRestClient:
         self.calls: List[Any] = []
         self.payload: Any = []
         self.error: Optional[BaseException] = None
+        self.handler: Optional[Any] = None
 
     def get(self, path: str, **kwargs: Any) -> Any:
         self.calls.append((path, kwargs))
         if self.error is not None:
             raise self.error
+        if self.handler is not None:
+            return self.handler(path, kwargs)
         return self.payload
 
 
@@ -590,6 +593,155 @@ def test_daily_ohlc_empty_duplicate_date_and_ordering() -> None:
     )["rows"]
     assert [row["date"] for row in rows] == ["2026-07-20", "2026-07-21"]
     assert rows[-1]["volume"] == 3
+
+
+def _weekday_summary_rows(start: str, count: int) -> List[Dict[str, Any]]:
+    candidate = datetime.strptime(start, "%Y-%m-%d").date()
+    rows: List[Dict[str, Any]] = []
+    while len(rows) < count:
+        if candidate.weekday() < 5:
+            ordinal = len(rows) + 1
+            rows.append(
+                {
+                    "symbol": "FPT",
+                    "tradingDate": candidate.strftime("%Y/%m/%d"),
+                    "open": str(ordinal),
+                    "high": str(ordinal + 2),
+                    "low": str(ordinal - 1),
+                    "close": str(ordinal + 1),
+                    "totalMatch": str(ordinal * 10),
+                    "totalMatchValue": str(ordinal * 100),
+                }
+            )
+        candidate += timedelta(days=1)
+    return rows
+
+
+def _summary_window_handler(
+    rows: List[Dict[str, Any]],
+    *,
+    order: str,
+    provider_cap: Optional[int] = None,
+    paginate: bool = False,
+) -> Any:
+    def handler(_path: str, kwargs: Dict[str, Any]) -> Dict[str, Any]:
+        params = kwargs["params"]
+        start = datetime.strptime(params["from"], "%Y/%m/%d").date()
+        end = datetime.strptime(params["to"], "%Y/%m/%d").date()
+        selected = [
+            row
+            for row in rows
+            if start
+            <= datetime.strptime(row["tradingDate"], "%Y/%m/%d").date()
+            <= end
+        ]
+        selected.sort(
+            key=lambda row: row["tradingDate"],
+            reverse=order == "descending",
+        )
+        if paginate:
+            page_size = int(params["pageSize"])
+            page_index = int(params["pageIndex"])
+            pages_count = max(1, (len(selected) + page_size - 1) // page_size)
+            offset = (page_index - 1) * page_size
+            selected = selected[offset : offset + page_size]
+        else:
+            pages_count = 1
+            if provider_cap is not None:
+                selected = selected[:provider_cap]
+        return {
+            "data": selected,
+            "pagesCount": pages_count,
+            "totalCount": len(
+                [
+                    row
+                    for row in rows
+                    if start
+                    <= datetime.strptime(row["tradingDate"], "%Y/%m/%d").date()
+                    <= end
+                ]
+            ),
+        }
+
+    return handler
+
+
+@pytest.mark.parametrize("order", ["ascending", "descending"])
+def test_daily_history_windows_retain_newest_sessions_for_provider_order(order: str) -> None:
+    rows = _weekday_summary_rows("2025-01-02", 400)
+    adapter, auth, _market, _data = make_adapter()
+    auth.rest_client.handler = _summary_window_handler(
+        rows,
+        order=order,
+        provider_cap=252,
+    )
+
+    result = adapter.get_daily_ohlcv(
+        "FPT",
+        from_date=rows[0]["tradingDate"],
+        to_date=rows[-1]["tradingDate"],
+        limit=252,
+    )
+
+    expected_dates = [
+        datetime.strptime(row["tradingDate"], "%Y/%m/%d").date().isoformat()
+        for row in rows[-252:]
+    ]
+    assert result["status"] == "ok"
+    assert [row["date"] for row in result["rows"]] == expected_dates
+    assert result["diagnostics"]["window_count"] > 1
+    assert result["diagnostics"]["freshness_status"] == "fresh"
+    assert result["diagnostics"]["max_date"] == expected_dates[-1]
+
+
+def test_daily_history_exhausts_declared_pages_before_newest_limit_selection() -> None:
+    rows = _weekday_summary_rows("2026-06-01", 30)
+    adapter, auth, _market, _data = make_adapter()
+    auth.rest_client.handler = _summary_window_handler(
+        rows,
+        order="ascending",
+        paginate=True,
+    )
+
+    result = adapter.get_daily_ohlcv(
+        "FPT",
+        from_date=rows[0]["tradingDate"],
+        to_date=rows[-1]["tradingDate"],
+        limit=5,
+    )
+
+    assert result["status"] == "ok"
+    assert [row["date"] for row in result["rows"]] == [
+        datetime.strptime(row["tradingDate"], "%Y/%m/%d").date().isoformat()
+        for row in rows[-5:]
+    ]
+    assert result["pages_used"] == 6
+    assert [call[1]["params"]["pageIndex"] for call in auth.rest_client.calls] == list(
+        range(1, 7)
+    )
+
+
+def test_daily_history_fails_closed_when_provider_window_is_incomplete() -> None:
+    rows = _weekday_summary_rows("2026-01-02", 120)
+    adapter, auth, _market, _data = make_adapter()
+    auth.rest_client.handler = _summary_window_handler(
+        rows,
+        order="ascending",
+        provider_cap=20,
+    )
+
+    result = adapter.get_daily_ohlcv(
+        "FPT",
+        from_date=rows[0]["tradingDate"],
+        to_date=rows[-1]["tradingDate"],
+        limit=100,
+    )
+
+    assert result["status"] == "partial"
+    assert result["failure_class"] == "incomplete_daily_history"
+    assert result["diagnostics"]["provider_reported_total_count"] > result["diagnostics"][
+        "provider_row_count"
+    ]
 
 
 @pytest.mark.parametrize(

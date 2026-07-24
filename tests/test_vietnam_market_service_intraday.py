@@ -22,6 +22,7 @@ class FakeSsiFetcher:
     def __init__(self, intraday_payload=None):
         self.intraday_payload = intraday_payload
         self.intraday_calls = 0
+        self.last_intraday_kwargs = None
 
     def get_daily_ohlcv(self, symbol: str, **kwargs):
         start = date(2026, 6, 1)
@@ -64,6 +65,7 @@ class FakeSsiFetcher:
 
     def get_intraday_ohlcv(self, symbol: str, **kwargs):
         self.intraday_calls += 1
+        self.last_intraday_kwargs = dict(kwargs)
         if self.intraday_payload is not None:
             return self.intraday_payload
         return {
@@ -190,6 +192,7 @@ def test_ssi_intraday_success_returns_sorted_candles_and_daily_stays_ok(monkeypa
     assert item["intraday_status"]["date_match"] == "matched"
     assert item["cache_status"]["intraday_cache"] in {"miss", "refresh"}
     assert fetcher.intraday_calls == 1
+    assert fetcher.last_intraday_kwargs["interval"] == "1m"
 
 
 def test_ssi_intraday_date_mismatch_is_unavailable_without_downgrading_daily_row():

@@ -101,9 +101,12 @@ def test_running_manager_exposes_persisted_contexts_without_marking_them_live(tm
     foreign_room = manager.foreign_room("FPT")
     session = manager.session_status("FPT")
 
+    assert realtime["status"] == "stale"
     assert realtime["cache_status"] == "persisted_stale"
     assert realtime["quotes"][0]["snapshot_source"] == "persisted"
     assert order_book["order_book"]["snapshot_source"] == "persisted"
+    assert trades["status"] == "stale"
+    assert trades["cache_status"] == "persisted_stale"
     assert trades["trades"][0]["snapshot_source"] == "persisted"
     assert foreign_room["foreign_room"]["snapshot_source"] == "persisted"
     assert session["session_status"]["snapshot_source"] == "persisted"

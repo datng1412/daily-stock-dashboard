@@ -37,9 +37,9 @@ def test_dockerfile_runs_entrypoint_and_application_as_non_root_user() -> None:
 def test_dockerfile_bundles_mozyfin_cli_for_vietnam_dashboard() -> None:
     dockerfile = (REPO_ROOT / "docker" / "Dockerfile").read_text(encoding="utf-8")
 
-    assert "FROM node:20-bookworm-slim AS mozyfin-cli-builder" in dockerfile
-    assert "npm install -g mozyfin-cli" in dockerfile
-    assert "/usr/local/bin/mozyfin-cli" in dockerfile
+    assert "mozyfin-cli-builder" not in dockerfile
+    assert "npm install -g mozyfin-cli" not in dockerfile
+    assert "/usr/local/bin/mozyfin-cli" not in dockerfile
 
 
 def test_requirements_include_only_official_ssi_v3_sdk_for_docker_runtime() -> None:

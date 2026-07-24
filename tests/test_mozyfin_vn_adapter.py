@@ -434,7 +434,7 @@ def test_mozyfin_quote_history_derives_foreign_net_from_buy_sell(monkeypatch):
     assert history[0]["sell_raw_field"] == "sell_foreign_quantity"
 
 
-def test_manager_uses_mozyfin_when_market_vn(monkeypatch):
+def test_manager_never_activates_mozyfin_fixture_in_v3_only_runtime(monkeypatch):
     monkeypatch.setenv("MARKET", "VN")
     monkeypatch.setenv("MOZYFIN_FIXTURE_DIR", str(FIXTURE_DIR))
     monkeypatch.setenv("MOZYFIN_ENABLED", "true")
@@ -442,11 +442,8 @@ def test_manager_uses_mozyfin_when_market_vn(monkeypatch):
     Config.reset_instance()
 
     manager = DataFetcherManager()
-    df, source = manager.get_daily_data("VPB", days=30)
 
-    assert source == "MozyfinFetcher"
-    assert not df.empty
-    assert df.iloc[-1]["exchange"] == "HOSE"
+    assert manager._get_fetcher_by_name("MozyfinFetcher") is None
 
 
 def test_manager_does_not_initialize_mozyfin_for_vn_without_legacy_opt_in(monkeypatch):
@@ -1950,7 +1947,7 @@ def test_formula_helpers_are_stable():
     df = fetcher.get_daily_data("ACV", days=30)
 
     liquidity = calculate_liquidity_score(df)
-    limit_state = calculate_price_limit_state(df, "ACV")
+    limit_state = calculate_price_limit_state(df, "UPCoM")
 
     assert liquidity["score"] < 50
     assert liquidity["avg_volume_20d"] > 0

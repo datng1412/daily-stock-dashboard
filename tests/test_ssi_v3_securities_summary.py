@@ -185,7 +185,7 @@ def test_historical_symbol_request_uses_public_rest_transport_and_normalizes() -
     assert row["foreign_net_value"] == 600.25
     assert row["source"] == SSI_V3_SOURCE
     assert row["source_version"] == "v3"
-    assert result["diagnostics"] == {
+    expected_diagnostics = {
         "capability": "daily_stock_price",
         "source_version": "v3",
         "implementation_status": "implemented",
@@ -204,6 +204,10 @@ def test_historical_symbol_request_uses_public_rest_transport_and_normalizes() -
         "provisional_rows_included": True,
         "finality_contract": "stockclock_completed_session_rank_operational",
     }
+    assert expected_diagnostics.items() <= result["diagnostics"].items()
+    assert result["diagnostics"]["page_count"] == 1
+    assert result["diagnostics"]["min_date"] == "2026-07-21"
+    assert result["diagnostics"]["max_date"] == "2026-07-21"
 
 
 def test_current_symbol_and_index_requests_are_bounded_and_index_is_direct_only() -> None:

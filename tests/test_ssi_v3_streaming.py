@@ -171,6 +171,40 @@ def test_trade_tape_cache_deduplicates_content_when_sequence_is_absent() -> None
     assert cache.get("FPT")["buffer_row_count"] == 2
 
 
+def test_trade_tape_cache_reports_max_provider_timestamp_not_receive_order() -> None:
+    clock = [100.0]
+    cache = TradeTapeEventCache(
+        max_rows_per_symbol=5,
+        time_func=lambda: clock[0],
+    )
+    assert cache.put_rows(
+        [
+            {
+                "ticker": "FPT",
+                "price": 123.4,
+                "volume": 50,
+                "timestamp": "2026-07-23T09:16:00+07:00",
+            }
+        ]
+    ) == 1
+    clock[0] = 101.0
+    assert cache.put_rows(
+        [
+            {
+                "ticker": "FPT",
+                "price": 123.5,
+                "volume": 25,
+                "timestamp": "2026-07-23T09:15:00+07:00",
+            }
+        ]
+    ) == 1
+    clock[0] = 102.0
+
+    result = cache.get("FPT")
+
+    assert result["latest_trade_timestamp"] == "2026-07-23T09:16:00+07:00"
+
+
 def test_v3_manager_subscribes_only_retained_trade_and_quote_contexts() -> None:
     clients: List[Any] = []
 

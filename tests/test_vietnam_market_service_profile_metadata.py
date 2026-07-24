@@ -226,7 +226,7 @@ def test_partial_metadata_keeps_missing_values_null_and_daily_row_usable():
     assert "profile_partial" in _issue_codes(item)
 
 
-def test_metadata_falls_back_only_to_ssi_securities():
+def test_metadata_does_not_guess_a_board_after_exact_symbol_lookup_fails():
     fetcher = FakeSsiFetcher(
         details_payload={
             "status": "unavailable",
@@ -243,16 +243,12 @@ def test_metadata_falls_back_only_to_ssi_securities():
     item = _watch_item(fetcher)
     metadata = item["symbol_metadata"]
 
-    assert metadata["status"] == "ok"
-    assert metadata["quality_status"] == "complete"
-    assert metadata["source"] == "SSI Securities"
-    assert metadata["diagnostics"]["attempted_endpoints"] == [
-        "SecuritiesDetails",
-        "Securities",
-    ]
-    assert metadata["diagnostics"]["fallback_within_ssi"] is True
+    assert metadata["status"] == "unavailable"
+    assert metadata["exchange"] is None
+    assert metadata["market"] is None
+    assert metadata["diagnostics"]["attempted_endpoints"] == ["SecuritiesDetails"]
     assert fetcher.details_calls == 1
-    assert fetcher.securities_calls == 1
+    assert fetcher.securities_calls == 0
     assert item["fallback_used"] is False
 
 
@@ -275,6 +271,9 @@ def test_metadata_unavailable_is_non_fatal_and_does_not_infer_fields():
     assert item["latest_price"] == 130.0
     assert item["latest_price_source"] == "SSI DailyOhlc"
     assert item["daily_stock_price"]["status"] == "ok"
+    assert item["exchange"] is None
+    assert item["market_index"] is None
+    assert item["price_limit"]["limit_pct"] is None
     assert metadata["status"] == "unavailable"
     assert metadata["quality_status"] == "unavailable"
     assert metadata["completeness"] == 0.0
