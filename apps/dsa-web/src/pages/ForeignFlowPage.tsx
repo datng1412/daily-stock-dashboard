@@ -123,7 +123,7 @@ const ForeignFlowPage = () => {
   const batch = scope === 'vn30'
     ? { ...vn30, data: vn30BatchData, scope: { tickers: vn30.data?.membership.memberTickers ?? [], limited: false, totalNormalizedCount: vn30.data?.membership.memberCount ?? 0, invalidCount: 0 } }
     : watchlistBatch;
-  const scopeLabel = scope === 'vn30' ? 'VN30' : 'watchlist';
+  const scopeLabel = scope === 'vn30' ? 'rổ VN30 hiện tại' : 'watchlist';
   const requestedTicker = normalizeVietnamTicker(searchParams.get('ticker') ?? '');
   const selectedTicker = batch.scope.tickers.includes(requestedTicker) ? requestedTicker : null;
   const inspectOpen = searchParams.get('inspect') === '1' && Boolean(selectedTicker);
@@ -204,7 +204,7 @@ const ForeignFlowPage = () => {
               <Badge variant="default" aria-label="Nguồn: SSI DailyStockPrice · Trạng thái dữ liệu: daily_available">Dữ liệu theo phiên</Badge>
             </div>
             <p className="mt-2 text-sm text-secondary-text">Dữ liệu theo phiên giao dịch gần nhất có sẵn.</p>
-            {scope === 'vn30' ? <p className="mt-1 text-xs text-secondary-text">Chuỗi lịch sử được tổng hợp theo thành phần VN30 hiện tại, không tái tạo thành phần lịch sử theo từng ngày.</p> : null}
+            {scope === 'vn30' ? <p className="mt-1 text-xs text-secondary-text">Tổng VN30 dùng chuỗi chỉ số trực tiếp từ SSI. Xếp hạng và độ rộng là phân rã theo rổ VN30 hiện tại, không tái tạo thành phần lịch sử theo từng ngày.</p> : null}
             <p className="mt-1 text-xs text-secondary-text">Phiên thị trường: {marketPhase.phase}. Trạng thái phiên không thay đổi tính hợp lệ của dữ liệu ngày.</p>
             {scope === 'watchlist' && batch.scope.limited ? (
               <p className="mt-1 text-sm text-warning" role="status">Đang hiển thị 30/{batch.scope.totalNormalizedCount} mã đầu tiên. Các mã còn lại không được phân loại là lỗi nhà cung cấp.</p>
@@ -269,6 +269,7 @@ const ForeignFlowPage = () => {
           {scope === 'vn30' && vn30.data ? (
             <Vn30ForeignFlowHistoryChart
               series={vn30.data.series}
+              decompositionSeries={vn30.data.decomposition.series}
               metric={metric}
               mode={chartMode}
               range={chartRange}

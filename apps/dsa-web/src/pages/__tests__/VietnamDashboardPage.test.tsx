@@ -2470,6 +2470,71 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(screen.getAllByText('0.10').length).toBeGreaterThan(0);
   });
 
+  it('shows previous-session foreign freshness and hides zero auction trade facts', async () => {
+    mockedGetVietnamWatchlist.mockImplementation(async (tickers) => ({
+      ...makeResponse(tickers?.length ? tickers : defaultTickers),
+      watchlist: (tickers?.length ? tickers : defaultTickers).map((ticker) => {
+        const item = makeItem(ticker);
+        return ticker === 'FPT'
+          ? {
+              ...item,
+              dailyStockPrice: {
+                ...item.dailyStockPrice,
+                status: 'partial',
+                dataDate: '2026-07-23',
+                freshnessStatus: 'previous_session_during_live_market',
+                isCurrentSession: false,
+                isProvisional: false,
+                isCompletedSession: true,
+              },
+              realtimeStatus: {
+                ...item.realtimeStatus,
+                status: 'unavailable',
+                diagnostics: { symbolDataHealth: 'auction_waiting_for_match' },
+              },
+              tradeTape: [],
+              tradeTapeStatus: {
+                status: 'unavailable',
+                source: 'SSI trade-tape contract',
+                diagnostics: { symbolDataHealth: 'auction_waiting_for_match' },
+              },
+            }
+          : item;
+      }),
+    }));
+    mockedGetVietnamRealtimeQuotes.mockImplementation(async (tickers) => ({
+      ...makeRealtimeResponse(tickers),
+      status: 'unavailable',
+      quotes: tickers.map((ticker) => ({
+        ...makeRealtimeResponse([ticker]).quotes[0],
+        price: 0,
+        realtimePrice: 0,
+        snapshotPrice: 0,
+        status: 'ok',
+      })),
+    }));
+    mockedGetVietnamRealtimeTrades.mockImplementation(async (symbol) => ({
+      ...makeTradesResponse(symbol),
+      status: 'unavailable',
+      symbolDataHealth: 'auction_waiting_for_match',
+      diagnostics: { symbolDataHealth: 'auction_waiting_for_match' },
+      trades: [{
+        ...makeTradesResponse(symbol).trades[0],
+        price: 0,
+        volume: 0,
+      }],
+    }));
+
+    render(<VietnamDashboardPage />);
+
+    const freshness = await screen.findByTestId('foreign-flow-freshness');
+    expect(within(freshness).getByText('Previous completed session')).toBeInTheDocument();
+    expect(within(freshness).getByText(/Data date: 2026-07-23/)).toBeInTheDocument();
+    expect(screen.getByText('Waiting for auction match')).toBeInTheDocument();
+    expect(screen.getByText('Waiting for auction match — no valid execution yet.')).toBeInTheDocument();
+    expect(screen.queryByText('0.00')).not.toBeInTheDocument();
+  });
+
   it('renders buffered X-TRADE rows even when trade tape diagnostics are stale', async () => {
     mockedGetVietnamRealtimeTrades.mockImplementation(async (symbol) => {
       const response = makeTradesResponse(symbol);

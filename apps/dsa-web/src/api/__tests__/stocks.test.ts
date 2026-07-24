@@ -297,7 +297,7 @@ describe('stocksApi Vietnam SSI-derived metric mapping', () => {
     const result = await stocksApi.getVietnamVn30ForeignFlow({ topN: 7, forceRefresh: true, signal: controller.signal });
 
     expect(get).toHaveBeenCalledWith('/api/v1/stocks/vn/foreign-flow/vn30', {
-      params: { top_n: 7, force_refresh: true },
+      params: { top_n: 7, force_refresh: true, force_capability_refresh: false },
       timeout: 180000,
       signal: controller.signal,
     });

@@ -9,6 +9,7 @@ import {
   type VietnamCorporateActionEvent,
   type VietnamCorporateActionsResponse,
   type VietnamDailyIndexResponse,
+  type VietnamDailyStockPrice,
   type VietnamForeignFlowBatchSymbol,
   type VietnamIndexComponentsResponse,
   type VietnamIndexListResponse,
@@ -623,12 +624,33 @@ const hasCurrentIntradayData = (item?: VietnamWatchItem | null) => (
 
 const hasRealtimeSnapshotData = (quote?: VietnamRealtimeQuote | null) => (
   quote?.status === 'ok'
-  && hasDisplayValue(quote.snapshotPrice ?? quote.realtimePrice ?? quote.price)
+  && Number.isFinite(Number(quote.snapshotPrice ?? quote.realtimePrice ?? quote.price))
+  && Number(quote.snapshotPrice ?? quote.realtimePrice ?? quote.price) > 0
+);
+
+const validTradeTapeRows = (rows?: VietnamRealtimeTrade[] | null) => (
+  (Array.isArray(rows) ? rows : []).filter((row) => (
+    Boolean(row.timestamp)
+    && Number.isFinite(Number(row.price))
+    && Number(row.price) > 0
+    && Number.isFinite(Number(row.volume))
+    && Number(row.volume) > 0
+  ))
 );
 
 const hasTradeTapeData = (rows?: VietnamRealtimeTrade[] | null) => (
-  Array.isArray(rows) && rows.length > 0
+  validTradeTapeRows(rows).length > 0
 );
+
+const dailyStockPriceFreshnessLabel = (row?: VietnamDailyStockPrice | null) => {
+  switch (row?.freshnessStatus) {
+    case 'current_session_provisional': return 'Current session · provisional';
+    case 'latest_completed_session': return 'Latest completed session';
+    case 'previous_session_during_live_market': return 'Previous completed session';
+    case 'stale_history': return 'Stale history';
+    default: return row?.freshnessStatus ?? 'Freshness unavailable';
+  }
+};
 
 const readinessFromCoverage = (
   total: number,
@@ -4192,7 +4214,9 @@ const StockDetailView: React.FC<{
   const realtimeState = realtimeSnapshotState(realtimeQuote, marketPhase.code);
   const hasRealtimeSnapshot = hasRealtimeSnapshotData(realtimeQuote);
   const hasCurrentIntraday = hasCurrentIntradayData(item);
-  const tradeTapeDisplayRows = hasTradeTapeData(realtimeTrades) ? realtimeTrades : item.tradeTape ?? [];
+  const tradeTapeDisplayRows = validTradeTapeRows(
+    hasTradeTapeData(realtimeTrades) ? realtimeTrades : item.tradeTape ?? [],
+  );
   const hasTradeTape = hasTradeTapeData(tradeTapeDisplayRows);
   const responseSymbol = normalizeVietnamTicker(realtimeTradesResponse?.symbol ?? '');
   const tradeTapeStatusBlock = responseSymbol === item.ticker ? realtimeTradesResponse : item.tradeTapeStatus;
@@ -4447,6 +4471,20 @@ const StockDetailView: React.FC<{
         <p className="mb-3 text-xs text-secondary-text">
           SSI DailyStockPrice · Volume fields: shares · Value fields: VND.
         </p>
+        {ssiDailyStockPrice.dataDate || ssiDailyStockPrice.date ? (
+          <div
+            data-testid="foreign-flow-freshness"
+            className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-border/60 bg-card/50 p-2 text-xs text-secondary-text"
+          >
+            <Badge variant={ssiDailyStockPrice.freshnessStatus === 'current_session_provisional' ? 'info' : ssiDailyStockPrice.isStale ? 'warning' : 'default'}>
+              {dailyStockPriceFreshnessLabel(ssiDailyStockPrice)}
+            </Badge>
+            <span>
+              Data date: {ssiDailyStockPrice.dataDate ?? ssiDailyStockPrice.date}
+              {ssiDailyStockPrice.isProvisional ? ' · provisional' : ssiDailyStockPrice.isCompletedSession ? ' · completed session' : ''}
+            </span>
+          </div>
+        ) : null}
         <dl className="grid gap-3 text-sm md:grid-cols-3 xl:grid-cols-4">
           <div className="rounded-lg bg-card/60 p-3">
             <dt className="text-xs text-secondary-text">20D avg volume</dt>
@@ -4853,7 +4891,11 @@ const StockDetailView: React.FC<{
           </div>
         </dl>
         ) : (
-          <p className="mt-3 text-sm text-secondary-text">{realtimeUnavailableStatusText(item.realtimeStatus)}</p>
+          <p className="mt-3 text-sm text-secondary-text">
+            {item.realtimeStatus?.diagnostics?.symbolDataHealth === 'auction_waiting_for_match'
+              ? 'Waiting for auction match'
+              : realtimeUnavailableStatusText(item.realtimeStatus)}
+          </p>
         )}
         {hasRealtimeSnapshot ? (
         <p className="mt-3 text-xs text-secondary-text">
@@ -4893,7 +4935,9 @@ const StockDetailView: React.FC<{
         ) : null}
         {!hasTradeTape && !tradeTapePending && (tradesError || !tradesLoading) ? (
           <div className="mt-3 rounded-lg border border-warning/20 bg-warning/10 p-2 text-xs text-warning">
-            {optionalLiveStatusText('tradeTape', item.tradeTapeStatus)}
+            {tradeTapeStatusBlock?.diagnostics?.symbolDataHealth === 'auction_waiting_for_match'
+              ? 'Waiting for auction match — no valid execution yet.'
+              : optionalLiveStatusText('tradeTape', item.tradeTapeStatus)}
           </div>
         ) : null}
         {hasTradeTape ? (
@@ -6224,7 +6268,9 @@ const VietnamDashboardPage: React.FC = () => {
     const selectedTradeResponse = normalizedSelectedTicker && responseSymbol === normalizedSelectedTicker
       ? realtimeTradesResponse
       : null;
-    const displayRows = hasTradeTapeData(realtimeTrades) ? realtimeTrades : selectedItem?.tradeTape ?? [];
+    const displayRows = validTradeTapeRows(
+      hasTradeTapeData(realtimeTrades) ? realtimeTrades : selectedItem?.tradeTape ?? [],
+    );
     const statusBlock = selectedTradeResponse ?? selectedItem?.tradeTapeStatus ?? null;
     if (
       !normalizedSelectedTicker

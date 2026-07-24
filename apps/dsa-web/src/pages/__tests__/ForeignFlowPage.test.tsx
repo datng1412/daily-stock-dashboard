@@ -73,17 +73,36 @@ const makeResponse = (
   ...overrides,
 });
 
-const makeVn30Response = (): VietnamVn30ForeignFlowResponse => ({
+const makeVn30Response = (
+  overrides: Partial<VietnamVn30ForeignFlowResponse> = {},
+): VietnamVn30ForeignFlowResponse => ({
   scope: 'vn30',
   indexCode: 'VN30',
   source: 'ssi_fastconnect',
-  sourceEndpoint: 'DailyStockPrice',
+  sourceEndpoint: 'daily_stock_price',
   membershipSource: 'SSI IndexComponents',
   volumeUnit: 'shares',
   valueUnit: 'VND',
   finality: 'daily_available',
   aggregationBasis: 'current_vn30_membership',
   historicalConstituentCorrect: false,
+  status: 'partial',
+  usable: true,
+  capabilityStatus: 'decomposition_ready_canonical_unsupported',
+  primaryDataMode: 'current_membership_decomposition',
+  sourceCoverage: [
+    { source: 'SSI V3 Direct VN30 Foreign Aggregate', capabilityStatus: 'unsupported', usable: false, failureClass: 'DIRECT_INDEX_FOREIGN_FIELDS_UNSUPPORTED' },
+    { source: 'SSI V3 Symbol Foreign Data', capabilityStatus: 'available', usable: true },
+    { source: 'SSI VN30 Index Components', capabilityStatus: 'available', usable: true },
+  ],
+  canonicalSource: 'ssi_fastconnect',
+  canonicalProviderVersion: 'v3',
+  canonicalEndpoint: 'securitiesSummary?index=',
+  canonicalAggregationMode: 'DIRECT_INDEX_CANONICAL',
+  canonicalTradingDate: '2026-07-20',
+  decompositionAggregationMode: 'CURRENT_MEMBERSHIP_DECOMPOSITION',
+  decompositionUniverse: 'current_vn30_membership',
+  decompositionDate: '2026-07-20',
   dataState: 'partial',
   membership: {
     status: 'ready', indexCode: 'VN30', source: 'SSI IndexComponents', memberCount: 2, componentCount: 2,
@@ -127,9 +146,40 @@ const makeVn30Response = (): VietnamVn30ForeignFlowResponse => ({
   })),
   componentCounts: { usable: 2, stale: 0, empty: 0, unavailable: 0 },
   rankings: {},
+  canonical: {
+    status: 'unavailable',
+    capabilityStatus: 'unsupported',
+    failureClass: 'DIRECT_INDEX_FOREIGN_FIELDS_UNSUPPORTED',
+    usable: false,
+    latest: null,
+    windows: {} as VietnamVn30ForeignFlowResponse['windows'],
+    series: [],
+    diagnostics: { sourceFreshness: 'latest_completed_session' },
+  },
+  decomposition: {
+    status: 'partial',
+    dataState: 'partial',
+    usable: true,
+    aggregationMode: 'CURRENT_MEMBERSHIP_DECOMPOSITION',
+    aggregationBasis: 'current_vn30_membership',
+    membershipSource: 'SSI IndexComponents',
+    memberCount: 2,
+    latestCompletedSession: '2026-07-20',
+    historicalConstituentCorrect: false,
+    source: 'ssi_fastconnect',
+    providerVersion: 'v3',
+    date: '2026-07-20',
+    latest: null,
+    windows: {} as VietnamVn30ForeignFlowResponse['windows'],
+    series: [],
+    reconciliation: {},
+    anomalySessions: [],
+    anomalyCount: 0,
+  },
   cache: { status: 'miss', coalesced: false, ageSeconds: 0, ttlSeconds: 300, negative: false },
   timing: { membershipMs: 1, componentHistoriesMs: 2, aggregateBuildMs: 1, totalMs: 4 },
   fetchedAt: '2026-07-20T08:00:00Z',
+  ...overrides,
 });
 
 const renderPage = (url = '/foreign-flow') => {
@@ -191,9 +241,13 @@ describe('ForeignFlowPage', () => {
     await waitFor(() => expect(mockedVn30).toHaveBeenCalledTimes(1));
     expect(mockedBatch).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: 'VN30' })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByRole('heading', { name: 'Tổng quan VN30' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Lịch sử dòng tiền VN30' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Bộ quét VN30' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Dòng tiền ngoại rổ VN30 hiện tại' })).toBeInTheDocument();
+    expect(screen.getByText(/Nguồn: tổng hợp dữ liệu SSI V3 theo từng mã/)).toBeInTheDocument();
+    expect(screen.getByText(/Lịch sử thành phần theo từng kỳ: chưa áp dụng/)).toBeInTheDocument();
+    expect(screen.getByText(/không cung cấp các trường dòng tiền ngoại trực tiếp cho VN30/)).toBeInTheDocument();
+    expect(screen.queryByText(/VN30 data unavailable/i)).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Lịch sử dòng tiền rổ VN30 hiện tại' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Bộ quét rổ VN30 hiện tại' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Mua / bán' }));
     fireEvent.click(screen.getByRole('button', { name: 'Lũy kế ròng' }));
@@ -203,6 +257,25 @@ describe('ForeignFlowPage', () => {
     expect(window.location.search).toContain('range=10');
     expect(mockedVn30).toHaveBeenCalledTimes(1);
     expect(mockedBatch).not.toHaveBeenCalled();
+  });
+
+  it('shows provider-backed zero anomaly metadata only for an affected window', async () => {
+    const response = makeVn30Response();
+    response.windows['5'] = {
+      ...response.windows['5'],
+      containsProviderAnomaly: true,
+      anomalySessions: ['2026-06-29', '2026-06-30'],
+      anomalyCount: 2,
+    };
+    mockedVn30.mockResolvedValue(response);
+    renderPage('/foreign-flow?scope=vn30&window=5');
+
+    await waitFor(() => expect(mockedVn30).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole('note')).toHaveTextContent(
+      'Một số phiên có dữ liệu ngoại bằng 0 cho toàn bộ rổ theo nguồn SSI (2026-06-29, 2026-06-30).',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Phiên gần nhất' }));
+    expect(screen.queryByRole('note')).not.toBeInTheDocument();
   });
 
   it('updates URL presentation state without refetching and supports symbol navigation', async () => {

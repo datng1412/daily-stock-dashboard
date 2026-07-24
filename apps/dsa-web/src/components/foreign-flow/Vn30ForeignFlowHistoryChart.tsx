@@ -21,6 +21,7 @@ export type Vn30ForeignFlowChartRange = '5' | '10' | '20';
 
 export const Vn30ForeignFlowHistoryChart = ({
   series,
+  decompositionSeries = [],
   metric,
   mode,
   range,
@@ -28,13 +29,15 @@ export const Vn30ForeignFlowHistoryChart = ({
   onRangeChange,
 }: {
   series: VietnamVn30ForeignFlowDaily[];
+  decompositionSeries?: VietnamVn30ForeignFlowDaily[];
   metric: ForeignFlowMetric;
   mode: Vn30ForeignFlowChartMode;
   range: Vn30ForeignFlowChartRange;
   onModeChange: (mode: Vn30ForeignFlowChartMode) => void;
   onRangeChange: (range: Vn30ForeignFlowChartRange) => void;
 }) => {
-  const selected = series.slice(-Number(range));
+  const currentBasketSeries = decompositionSeries.length ? decompositionSeries : series;
+  const selected = currentBasketSeries.slice(-Number(range));
   const suffix = metric === 'value' ? 'Value' : 'Volume';
   const formatter = metric === 'value' ? formatForeignFlowValue : formatForeignFlowVolume;
   const chartRows = selected.map((row, index) => {
@@ -49,8 +52,8 @@ export const Vn30ForeignFlowHistoryChart = ({
       sell: row[`foreignSell${suffix}` as keyof VietnamVn30ForeignFlowDaily] as number | null,
       net,
       cumulative: cumulativeValues.length ? cumulativeValues.reduce((sum, value) => sum + value, 0) : null,
-      breadthBuy: breadth.netBuyCount,
-      breadthSell: -breadth.netSellCount,
+      breadthBuy: breadth?.netBuyCount ?? null,
+      breadthSell: breadth ? -breadth.netSellCount : null,
       coverage: metric === 'value' ? row.valueCoverageRatio : row.volumeCoverageRatio,
     };
   });
@@ -61,8 +64,8 @@ export const Vn30ForeignFlowHistoryChart = ({
     <section className="rounded-lg border border-border/70 bg-card p-4" aria-labelledby="vn30-flow-history-heading">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 id="vn30-flow-history-heading" className="text-base font-semibold text-foreground">Lịch sử dòng tiền VN30</h2>
-          <p className="mt-1 text-xs text-secondary-text">Tổng hợp theo thành phần VN30 hiện tại; không phải lịch sử thành phần tại từng ngày.</p>
+          <h2 id="vn30-flow-history-heading" className="text-base font-semibold text-foreground">Lịch sử dòng tiền rổ VN30 hiện tại</h2>
+          <p className="mt-1 text-xs text-secondary-text">Chuỗi được tổng hợp theo thành phần VN30 hiện tại; không phải lịch sử thành phần có hiệu lực tại từng ngày.</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <div className="inline-flex rounded-lg border border-border/70 p-1" role="group" aria-label="Chế độ biểu đồ VN30">

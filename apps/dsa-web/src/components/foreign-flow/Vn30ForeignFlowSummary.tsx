@@ -1,5 +1,5 @@
 import type { VietnamVn30ForeignFlowResponse } from '../../api/stocks';
-import { formatForeignFlowPercent, formatForeignFlowValue, formatForeignFlowVolume } from '../../utils/vietnamNumberFormat';
+import { formatForeignFlowValue, formatForeignFlowVolume } from '../../utils/vietnamNumberFormat';
 import { cn } from '../../utils/cn';
 import { foreignFlowSignTextClass } from '../../utils/foreignFlowSign';
 import { Badge } from '../common';
@@ -26,9 +26,10 @@ export const Vn30ForeignFlowSummary = ({
   const buy = selected?.[`foreignBuy${family}` as keyof typeof selected] as number | null | undefined;
   const sell = selected?.[`foreignSell${family}` as keyof typeof selected] as number | null | undefined;
   const net = selected?.[`foreignNet${family}` as keyof typeof selected] as number | null | undefined;
-  const coverage = window === 'today'
-    ? (metric === 'value' ? data.latest?.valueCoverageRatio : data.latest?.volumeCoverageRatio)
-    : (metric === 'value' ? data.windows[window].valueCoverageRatio : data.windows[window].volumeCoverageRatio);
+  const dataDate = window === 'today' ? data.latest?.tradingDate : data.windows[window].endDate;
+  const anomalySessions = window === 'today'
+    ? data.latest?.suspiciousZeroSession && data.latest.tradingDate ? [data.latest.tradingDate] : []
+    : data.windows[window].anomalySessions ?? [];
   const formatter = metric === 'value' ? formatForeignFlowValue : formatForeignFlowVolume;
   const cards = [
     { label: 'Tổng mua', value: buy, signed: false },
@@ -38,7 +39,7 @@ export const Vn30ForeignFlowSummary = ({
   return (
     <section aria-labelledby="vn30-foreign-flow-summary-heading">
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <h2 id="vn30-foreign-flow-summary-heading" className="text-base font-semibold text-foreground">Tổng quan VN30</h2>
+        <h2 id="vn30-foreign-flow-summary-heading" className="text-base font-semibold text-foreground">Dòng tiền ngoại rổ VN30 hiện tại</h2>
         <Badge variant="info">{window === 'today' ? 'Phiên gần nhất' : `${window} phiên`}</Badge>
         <Badge variant={data.dataState === 'ready' ? 'success' : data.dataState === 'unavailable' ? 'danger' : 'warning'}>{stateLabel(data.dataState)}</Badge>
       </div>
@@ -51,8 +52,21 @@ export const Vn30ForeignFlowSummary = ({
         ))}
       </div>
       <p className="mt-3 text-xs text-secondary-text">
-        Độ phủ {formatForeignFlowPercent(coverage === undefined ? null : coverage * 100)} · {data.componentCounts.usable}/{data.membership.memberCount} mã có lịch sử dùng được · Thành phần hiện tại từ SSI IndexComponents
+        Thành phần: VN30 hiện tại · Nguồn: tổng hợp dữ liệu SSI V3 theo từng mã · Ngày dữ liệu mới nhất: {dataDate ?? '—'}.
       </p>
+      <p className="mt-1 text-xs text-secondary-text">
+        Coverage: {data.componentCounts.usable}/{data.membership.memberCount} mã tại {data.decompositionDate ?? '—'} · Lịch sử thành phần theo từng kỳ: chưa áp dụng.
+      </p>
+      {data.canonical.capabilityStatus === 'unsupported' ? (
+        <p className="mt-1 text-xs text-secondary-text">
+          SSI V3 hiện không cung cấp các trường dòng tiền ngoại trực tiếp cho VN30; dữ liệu hiển thị là phân rã theo rổ hiện tại.
+        </p>
+      ) : null}
+      {anomalySessions.length ? (
+        <p className="mt-2 rounded-md border border-warning/25 bg-warning/5 px-3 py-2 text-xs text-secondary-text" role="note">
+          Một số phiên có dữ liệu ngoại bằng 0 cho toàn bộ rổ theo nguồn SSI ({anomalySessions.join(', ')}).
+        </p>
+      ) : null}
     </section>
   );
 };
