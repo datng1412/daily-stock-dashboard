@@ -4,6 +4,31 @@
 
 This strategy defines the expected validation for VN dashboard documentation, API contracts, and UI states. It is scoped to SSI-first VN dashboard work and should be referenced before data-quality, contract, progressive workspace, live-section, provider, and packaging tasks.
 
+## SSI-V3-M2 market-data authenticity
+
+## SSI-V3-M2.1 daily-OHLC lineage
+
+- Daily chart/watchlist lineage tests use an injected V3-bound provider spy, never a fixture file or network request.
+- Empty-cache provider failure must return unavailable/empty candles and no watchlist exception path may default the row to `ok`; a stale result is permitted only after a prior V3-backed in-process cache write.
+- Test-only Mozyfin CSV fixtures and frontend mocks must remain unreachable from the V3 daily path and excluded from the production Docker image.
+
+## SSI-V3-M2.2 daily-history completeness and freshness
+
+- Adapter tests cover ascending and descending provider order, declared pagination, bounded date-window splitting, deterministic duplicate-date resolution, and newest-session retention beyond 252 rows.
+- Service tests prove that a daily-history max date materially behind DailyStockPrice cannot remain canonical or produce `ok` RSI/MA/Bollinger output, while fresh aligned history restores V3 daily OHLC ownership.
+- Cache tests prove incomplete refreshes cannot become successful cache entries or replace an earlier valid provider-backed entry.
+- Adjacent truthfulness tests preserve foreign nulls, mark persisted realtime/trade rows stale, report the maximum returned provider trade timestamp, and send `interval=1m` to the retained V3 intraday contract.
+- Live acceptance is double-guarded and emits only counts, date bounds, latest OHLC, cache/freshness state, and date match for FPT/SSI/VCB/SHS/ACV.
+
+Authenticity coverage must prove that unavailable provider data cannot become a
+guessed exchange/index, numeric zero, generated provider time, bundled VN30
+membership, or runtime fixture. The focused gate covers V3 adapter/routing,
+streaming normalization/lifecycle/persistence, daily/intraday, foreign flow,
+indexes, exact-symbol metadata, unavailable behavior, startup readiness, and
+frontend null rendering. Provider fetch/receipt time remains separate from
+nullable provider event time. The legacy Vietnam `DataFetcherManager` must not
+activate Mozyfin even when old flags or a fixture directory are present.
+
 ## SSI-V3-M1-R2 V3-only production validation
 
 The production gate is V3-only. Required deterministic coverage is `tests/test_ssi_v3_adapter.py`, `tests/test_ssi_v3_rest_credentials.py`, `tests/test_ssi_v3_live_acceptance.py`, `tests/test_ssi_v3_securities_summary.py`, `tests/test_ssi_v3_foreign_policy.py`, `tests/test_ssi_v3_streaming.py`, `tests/test_ssi_provider_routing.py`, `tests/test_ssi_streaming_realtime_lifecycle.py`, and `tests/test_backend_startup_readiness.py`, plus affected Vietnam service/API suites. Tests must prove no V2 construction/import/fallback, no V2 dependency or credentials, lazy provider startup, public-contract compatibility, and clean shutdown.

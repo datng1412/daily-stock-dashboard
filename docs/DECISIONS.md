@@ -56,7 +56,8 @@ Rationale:
 Operational rule:
 
 - SSI owns VN daily OHLCV, chart candles, DailyStockPrice/reference/ceiling/floor, latest foreign-flow row, bounded recent DailyStockPrice foreign-flow history, index list, index components when available, symbol metadata when available, intraday candles, realtime snapshot contract, and trade-tape contract.
-- `latest_price` uses SSI DailyOhlc close as the canonical dashboard price when SSI daily rows are available.
+- `latest_price` uses SSI V3 daily OHLC close only when the returned history passes completeness and freshness validation.
+- If daily history is materially stale or incomplete while a newer SSI DailyStockPrice row exists, expose a partial row with DailyStockPrice as the explicitly labeled canonical provider value; do not compute technical indicators from stale history.
 - Mozyfin is disabled for VN runtime and must not be used as fallback for SSI-owned fields.
 - KBS is legacy optional only, disabled by default, and must require explicit legacy flags before diagnostic use.
 - News is disabled until a separate NewsProvider is implemented.
@@ -128,19 +129,20 @@ Operational rule:
 
 ## Latest Price Semantics
 
-Decision: `latest_price` uses SSI DailyOhlc close when SSI daily data is available.
+Decision: `latest_price` uses SSI V3 daily OHLC close only when its newest trading date passes the daily-history freshness contract.
 
 Rationale:
 
-- SSI DailyOhlc is the strict daily OHLCV source for the dashboard.
+- SSI V3 `securitiesSummary` remains the strict daily OHLCV/history source for the dashboard.
 - Current same-date DailyOhlc versus DailyStockPrice mismatches need investigation before changing canonical price semantics.
+- A materially older DailyOhlc history is not a same-date mismatch: it is incomplete/stale history and cannot be canonical or feed technical indicators.
 - The UI should disclose finality/provisional uncertainty separately from the value itself.
 
 Implication:
 
 - During trading hours, the latest daily candle may still be in progress.
 - After market close, it may represent final close, but finality still depends on source metadata.
-- DailyStockPrice supplies reference/limits, matched/put-through, latest foreign-flow fields, and bounded recent foreign-flow summaries unless a future decision explicitly changes canonical close behavior.
+- DailyStockPrice supplies reference/limits, matched/put-through, latest foreign-flow fields, and bounded recent foreign-flow summaries. It may supply the explicitly labeled canonical provider value only when DailyOhlc fails freshness and DailyStockPrice is newer; this is a truthful degradation state, not a fallback provider.
 
 ## Intraday Semantics
 

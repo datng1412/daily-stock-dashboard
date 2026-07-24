@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [fix] Retrieve the newest SSI V3 daily-history sessions across bounded windows/pages, reject incomplete or stale history as canonical, and keep technical indicators unavailable when their source history is stale.
+- [fix] Label persisted SSI realtime/trade caches stale, report the maximum provider trade timestamp, and send the validated V3 one-minute intraday interval.
+- [test] Add bounded daily-history pagination, freshness, canonical-price, cache, foreign-null, persisted-stream, trade-timestamp, and intraday-contract coverage.
+- [documentation] Record SSI-V3-M2.2 root cause, five-symbol live acceptance, freshness contract, and canonical-price arbitration.
+- [test] Add SSI V3 daily-OHLC fixture-lineage guards for cache, force-refresh, unavailable, and legacy fixture isolation.
+- [fix] Mark an outer SSI watchlist failure unavailable so a schema default cannot report `ok` without provider-backed daily OHLC.
+- [documentation] Record the daily-OHLC V3 call graph, fixture classification, cache provenance, and live-verification boundary.
+- [fix] Remove guessed Vietnam exchange/index facts, generated realtime provider timestamps, null-to-zero market summaries, bundled VN30 membership, and legacy Mozyfin fixture activation from the V3-only runtime.
+- [test] Add market-data authenticity guards for exact-symbol board resolution, provider-unavailable nulls, missing realtime event time, and disabled legacy VN fixture activation.
+- [documentation] Record the SSI V3 runtime market-data authenticity audit, provenance map, remediation, and bounded validation limits.
 - [improvement] Complete the atomic SSI FastConnect V3 production cutover and remove V2 runtime, credentials, selector, dependency, and fallback paths.
 - [fix] Make SIGTERM shutdown deterministic for the production FastAPI container and keep provider initialization behind HTTP readiness.
 - [chore] Move optional Longbridge support out of the production dependency graph into `requirements-longbridge.txt`.

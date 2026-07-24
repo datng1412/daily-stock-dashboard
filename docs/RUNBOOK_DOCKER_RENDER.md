@@ -188,7 +188,9 @@ fixture_mode: false
 - Wrong port: confirm the service uses Render's `PORT` environment variable or local fallback `8000`.
 - Missing API key: set `MOZYFIN_API_KEY` in Render environment variables, or the live Mozyfin path cannot authenticate.
 - Build fails during frontend install/build: check `npm ci` and `npm run build` logs in the Render build output.
-- Mozyfin CLI unavailable: the Docker image installs `mozyfin-cli`; if installation fails, live VN endpoints cannot fetch Mozyfin data.
+- Legacy Mozyfin CLI is intentionally absent from the V3-only production image.
+  Vietnam market-data routes must degrade to explicit SSI V3 unavailable/stale
+  states and must never activate Mozyfin or a Mozyfin fixture.
 - KBS endpoint returns unavailable: confirm `vnstock` installed in the image, for example by checking container logs or running `python -m pip show vnstock` inside the container.
 - Source says fixture: `MOZYFIN_FIXTURE_DIR` is set; remove it for live data.
 - Large watchlists time out: the full watchlist endpoint loads many tickers and can exceed free-tier host/request time limits.

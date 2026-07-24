@@ -1,5 +1,23 @@
 ﻿# VN Dashboard Roadmap
 
+## Phase SSI-V3-M2.2 - Daily history pagination and freshness repaired (2026-07-23)
+
+The V3 daily-history path could retain the oldest bounded `securitiesSummary` rows from a long ascending response. Retrieval now exhausts declared pages, splits long ranges into bounded recent-first windows, deduplicates/sorts provider trading dates, and keeps the newest requested sessions without synthesis or forward-fill. Incomplete or stale history cannot replace a complete cache entry, become canonical, or produce `ok` technical indicators.
+
+A guarded fresh-process acceptance for FPT/SSI/VCB/SHS/ACV returned 260 sessions per symbol through `2026-07-23`, matching each latest DailyStockPrice date. FPT latest OHLC close was `64,700`; the stale `2026-03-05` close is no longer selected. Fresh daily history remains canonical. Only when daily history fails freshness and a newer SSI DailyStockPrice row exists does the row degrade to partial and expose DailyStockPrice as the explicitly labeled canonical provider value. No V2, fixture, external provider, or fallback was introduced.
+
+## Phase SSI-V3-M2.1 - Daily OHLC fixture lineage audited (2026-07-23)
+
+- Traced the daily chart, watchlist, and company daily-frame paths to the sole V3 router and `securitiesSummary` normalization; no production fixture, sample-candle, static-OHLC, or cache-seed path was found.
+- Legacy Mozyfin OHLC CSVs remain test-only and are excluded from the production image. Empty-cache V3 failure stays unavailable; stale reuse is limited to an earlier V3-backed process-local cache entry.
+- Live provider access was intentionally not invoked. Offline provider-spy and adapter tests prove route/transport lineage; see `docs/SSI_V3_DAILY_OHLC_LINEAGE_AUDIT.md`.
+
+## Phase SSI-V3-M2 - Runtime market-data authenticity remediated (2026-07-23)
+
+- Removed production-reachable guessed exchange/index metadata, null-to-zero liquidity/foreign summaries, generated realtime provider timestamps, bundled VN30 membership, and legacy Mozyfin fixture activation.
+- Exact-symbol SSI V3 metadata now controls exchange/board identity. Daily/intraday rows are never synthesized, missing values remain null, VN30 uses SSI securities-by-index only, and persisted stream rows retain provider timestamps with explicit stale state.
+- Deterministic SSI/authenticity validation passed 204 tests; TypeScript and the production frontend build passed. The Python 3.11 image rebuilt without Mozyfin CLI/V2 package, reached health 200, and stopped cleanly. Vitest stalled on the Windows host and live REST stayed `G/NOT_RUN` with zero operations. Full evidence is in `docs/SSI_V3_DATA_AUTHENTICITY_AUDIT.md`.
+
 ## Phase SSI-V3-M1-R2 - Atomic V3 production cutover complete (2026-07-23)
 
 - Classified all 67 retained full-suite failures as pre-existing baseline failures. The base worktree had 90 failures; M1/R1 reduced that set by 23. Final V3-only validation finished with 3,076 passed, 4 skipped, and the same 67 failures; mandatory changed areas are green and migration regressions are zero.

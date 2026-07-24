@@ -2,6 +2,38 @@
 
 Status: Phase SSI-V3-M1-R2 completed the atomic production cutover. SSI FastConnect V3 is the sole production REST/realtime implementation; V2 runtime code, dependency, credentials, selector, fallback paths, and obsolete diagnostics/tests have been removed.
 
+## SSI-V3-M2.2 daily-history pagination and freshness repair (2026-07-23)
+
+The production defect was adapter range handling, not fixture lineage or provider incapability. A long `securitiesSummary` request could accept a bounded ascending first result and retain the oldest 252 sessions. The repaired adapter exhausts declared pages, splits long ranges into bounded recent-first windows, deduplicates by trading date, sorts ascending, and retains the newest requested sessions. It reports sanitized page/window counts, provider and normalized row counts, date bounds, duplicate counts, latest completed session, and freshness state.
+
+A guarded fresh-process live run used ten data operations across FPT, SSI, VCB, SHS, and ACV. Each symbol returned 260 normalized sessions from `2025-07-09` through `2026-07-23`, used three pages/windows, and matched the latest DailyStockPrice date. FPT latest OHLC was open `65,000`, high `65,700`, low `64,200`, close `64,700`. No V2, fixture, Mozyfin, or external fallback was used.
+
+Incomplete or materially stale history is now `partial`/`unavailable`, is not cached as a complete success, cannot become canonical merely because rows exist, and cannot produce `ok` technical indicators. Fresh V3 history remains canonical. The precise evidence and rollback boundary are recorded in `docs/SSI_V3_DAILY_HISTORY_REPAIR.md`.
+
+## SSI-V3-M2.1 daily OHLC lineage audit (2026-07-23)
+
+`/api/v1/stocks/vn/chart`, watchlist daily rows, and company daily frames reach
+the sole V3 router and `securitiesSummary`-based daily normalization. The
+process-local key includes `provider_version=v3`; it has no disk/startup seed.
+Legacy Mozyfin OHLC fixtures are test-only and Docker-excluded. Empty V3 data
+remains unavailable (including the outer watchlist error guard), and stale
+reuse requires an earlier V3-backed cache entry.
+No live provider call was made for this audit. See
+`docs/SSI_V3_DAILY_OHLC_LINEAGE_AUDIT.md`.
+
+## SSI-V3-M2 runtime authenticity remediation (2026-07-23)
+
+The post-cutover audit removed guessed HOSE/index metadata, missing-to-zero
+market summaries, local fetch time exposed as provider event time, bundled VN30
+membership, and legacy Mozyfin fixture activation. Exact-symbol V3 metadata now
+owns board identity; provider time remains nullable and separate from local
+fetch/receipt time; unavailable values remain null/empty. Changed SSI backend
+coverage passed 204 tests and TypeScript/Vite passed. The Python 3.11 image
+rebuilt without Mozyfin CLI/V2 package, reached health 200, and stopped cleanly.
+The safe live probe was `G/NOT_RUN` with zero operations and Vitest stalled on
+the Windows host. Detailed provenance, classifications, and limits are in
+`docs/SSI_V3_DATA_AUTHENTICITY_AUDIT.md`.
+
 ## SSI-V3-M1-R2 atomic production cutover (2026-07-23)
 
 Outcome: `V3_CUTOVER_COMPLETE`.

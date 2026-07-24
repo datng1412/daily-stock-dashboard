@@ -1,5 +1,13 @@
 # SSI FastConnect Integration
 
+## V3 daily-history completeness and freshness
+
+V3 daily OHLC is normalized from `securitiesSummary`. Long requests are retrieved through bounded recent-first date windows and all declared pages are exhausted. Rows are deduplicated by trading date, sorted ascending, and trimmed to the newest requested sessions. No session is synthesized or forward-filled.
+
+Daily history marked complete exposes sanitized diagnostics including `requested_from`, `requested_to`, `page_count`, provider/normalized row counts, `min_date`, `max_date`, `latest_completed_session`, `freshness_status`, `cache_hit`, and `cache_source`. An incomplete or materially stale response is not a successful cache replacement, is not canonical when a newer SSI DailyStockPrice row exists, and does not feed technical indicators.
+
+The retained V3 intraday service request uses the supported `interval=1m`; requested dashboard cadence remains separate and is compared with observed provider cadence.
+
 ## SSI-V3-M1-R2 production status (2026-07-23)
 
 SSI FastConnect V3 is now the sole production REST and realtime implementation. Production uses `ssi-sdk==3.0.5`; the V2 `ssi-fc-data` package, V2 fetcher/adapter/stream wrapper, Consumer ID/Secret configuration, global REST selector, fallback paths, and obsolete V2 diagnostics/tests are removed.
@@ -18,7 +26,13 @@ R1 validated StockClock operational foreign-value scales separately: HOSE `1`, H
 
 Current-date and latest completed provider-session rows are provisional. Older returned sessions are completed-history candidates after repeated-read stability. The rank is based on distinct returned trading dates, not weekdays, so weekends and holidays do not advance finality. SSI does not expose a revision identifier or final flag; `foreign_provider_finality_guaranteed` therefore remains false.
 
-Production remains V2 because the mandatory Python 3.11 production-image/startup gate is not complete. The V3 router does not fall back to V2; the selector must remain V2 until an atomic cutover gate passes. Full evidence, test classification, field/source decisions, and rollback are recorded in `docs/SSI_FASTCONNECT_V3_MIGRATION.md`.
+Production is V3-only after SSI-V3-M1-R2; no V2 selector or automatic fallback
+remains. SSI-V3-M2 additionally removed guessed exchange/index facts, generated
+provider event timestamps, null-to-zero summaries, bundled VN30 membership, and
+legacy Mozyfin fixture activation. Exact-symbol V3 metadata owns board identity;
+fetch/receipt time remains separate from provider event time; missing values
+remain null/empty. See `docs/SSI_FASTCONNECT_V3_MIGRATION.md` for migration
+history and `docs/SSI_V3_DATA_AUTHENTICITY_AUDIT.md` for the authenticity trace.
 
 ## Scope
 
