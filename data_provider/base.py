@@ -1062,25 +1062,10 @@ class DataFetcherManager:
         config = get_config()
         if (getattr(config, "market", "") or "").upper() == "VN":
             self._ensure_concurrency_guards()
-            legacy_mozyfin_enabled = bool(
-                getattr(config, "vn_allow_legacy_mozyfin_provider", False)
-                and getattr(config, "mozyfin_enabled", False)
-            )
-            if not legacy_mozyfin_enabled:
-                with self._fetchers_lock:
-                    self._fetchers = []
-                    self._refresh_fetcher_indexes_locked()
-                logger.info("Initialized 0 Vietnam market data source(s): Mozyfin disabled for VN runtime")
-                return
-
-            from .mozyfin_fetcher import MozyfinFetcher
-
             with self._fetchers_lock:
-                self._fetchers = [MozyfinFetcher()]
-                self._fetchers.sort(key=lambda f: f.priority)
+                self._fetchers = []
                 self._refresh_fetcher_indexes_locked()
-            priority_info = ", ".join([f"{f.name}(P{f.priority})" for f in self._get_fetchers_snapshot()])
-            logger.info(f"Initialized {len(self._fetchers)} Vietnam market data source(s): {priority_info}")
+            logger.info("Initialized 0 legacy Vietnam market data source(s): SSI V3 uses its dedicated provider path")
             return
         # 创建所有数据源实例（优先级在各 Fetcher 的 __init__ 中确定）
         efinance = EfinanceFetcher()

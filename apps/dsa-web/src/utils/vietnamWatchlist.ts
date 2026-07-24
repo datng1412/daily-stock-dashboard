@@ -1,7 +1,7 @@
 export const VIETNAM_WATCHLIST_STORAGE_KEY = 'vietnamDashboard.watchlist.v1';
 export const VIETNAM_WATCHLIST_MAX_SIZE = 30;
 
-export type VietnamWatchlistPresetId = 'my' | 'vn30' | 'banks' | 'tech';
+export type VietnamWatchlistPresetId = 'my' | 'banks' | 'tech';
 
 export type VietnamWatchlistPreset = {
   id: Exclude<VietnamWatchlistPresetId, 'my'>;
@@ -20,43 +20,6 @@ export type VietnamTickerValidationResult =
   | { valid: false; ticker?: string; error: string };
 
 export const VIETNAM_WATCHLIST_PRESETS: VietnamWatchlistPreset[] = [
-  {
-    id: 'vn30',
-    label: 'VN30',
-    description: 'Static VN30 convenience list; not an investment suggestion.',
-    tickers: [
-      'VIC',
-      'VHM',
-      'VRE',
-      'VCB',
-      'BID',
-      'CTG',
-      'TCB',
-      'VPB',
-      'MBB',
-      'ACB',
-      'STB',
-      'HDB',
-      'VIB',
-      'MSB',
-      'SSI',
-      'VND',
-      'HCM',
-      'HPG',
-      'HSG',
-      'GAS',
-      'PLX',
-      'POW',
-      'FPT',
-      'MWG',
-      'PNJ',
-      'SAB',
-      'VNM',
-      'MSN',
-      'GVR',
-      'BCM',
-    ],
-  },
   {
     id: 'banks',
     label: 'Banks',

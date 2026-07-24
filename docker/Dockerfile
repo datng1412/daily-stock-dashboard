@@ -9,11 +9,6 @@ COPY apps/dsa-web/ ./
 RUN npm run build
 
 
-FROM node:20-bookworm-slim AS mozyfin-cli-builder
-
-RUN npm install -g mozyfin-cli
-
-
 FROM python:3.11-slim-bookworm
 
 ENV PYTHONUNBUFFERED=1 \
@@ -41,14 +36,6 @@ RUN apt-get update \
         libxrender1 \
         wkhtmltopdf \
     && rm -rf /var/lib/apt/lists/*
-
-COPY --from=mozyfin-cli-builder /usr/local/bin/node /usr/local/bin/node
-COPY --from=mozyfin-cli-builder /usr/local/lib/node_modules/mozyfin-cli /usr/local/lib/node_modules/mozyfin-cli
-RUN printf '%s\n' \
-        '#!/bin/sh' \
-        'exec /usr/local/bin/node /usr/local/lib/node_modules/mozyfin-cli/dist/index.js "$@"' \
-        > /usr/local/bin/mozyfin-cli \
-    && chmod +x /usr/local/bin/mozyfin-cli
 
 RUN groupadd --gid 1000 dsa \
     && useradd --uid 1000 --gid dsa --create-home --home-dir /home/dsa dsa

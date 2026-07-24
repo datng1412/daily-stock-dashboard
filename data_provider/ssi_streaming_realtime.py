@@ -160,6 +160,33 @@ def normalize_trade_side(value: Any) -> Optional[str]:
     return None
 
 
+def _provider_timestamp_sort_key(value: Any) -> Tuple[float, str]:
+    text = str(value or "").strip()
+    if not text:
+        return (float("-inf"), "")
+    parsed: Optional[datetime] = None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        for fmt in (
+            "%Y/%m/%d %H:%M:%S",
+            "%Y-%m-%d %H:%M:%S",
+            "%d/%m/%Y %H:%M:%S",
+        ):
+            try:
+                parsed = datetime.strptime(text, fmt).replace(
+                    tzinfo=VIETNAM_MARKET_TIMEZONE
+                )
+                break
+            except ValueError:
+                continue
+    if parsed is None:
+        return (float("-inf"), text)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=VIETNAM_MARKET_TIMEZONE)
+    return (parsed.timestamp(), text)
+
+
 class SsiRealtimeStreamClient(Protocol):
     """Small stream-client interface used by the background manager."""
 
@@ -621,7 +648,15 @@ class TradeTapeEventCache:
             rows.append(trade)
 
         newest_age = max(0.0, now - events[0].received_at)
-        latest_trade_timestamp = events[0].trade.get("timestamp")
+        latest_trade_timestamp = max(
+            (
+                event.trade.get("timestamp")
+                for event in events[:safe_limit]
+                if event.trade.get("timestamp")
+            ),
+            key=_provider_timestamp_sort_key,
+            default=None,
+        )
         persisted_only = bool(events) and all(event.trade.get("snapshot_source") == "persisted" for event in events[:safe_limit])
         return {
             "rows": rows,
@@ -2065,7 +2100,7 @@ class SsiStreamingRealtimeManager:
             )
             return {
                 **base,
-                "status": "ok",
+                "status": "stale" if persisted_only else "ok",
                 "reason": reason,
                 "quotes": cache_result["rows"],
                 "count": len(cache_result["rows"]),
@@ -2810,7 +2845,13 @@ class SsiStreamingRealtimeManager:
             diagnostics["streaming_status"] = streaming_status
             return {
                 **base,
-                "status": "ok",
+                "status": (
+                    "stale"
+                    if after_hours
+                    or persisted_only
+                    or cache_result["status"] == "stale"
+                    else "ok"
+                ),
                 "reason": "Market closed — showing last known data." if after_hours else "Waiting for live SSI updates — showing last known data." if persisted_only else "Buffered SSI X-TRADE rows available." if cache_result["status"] == "stale" else None,
                 "trades": cache_result["rows"],
                 "count": len(cache_result["rows"]),

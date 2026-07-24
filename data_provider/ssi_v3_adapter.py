@@ -28,6 +28,9 @@ SSI_V3_DEFAULT_API_URL = "https://api.ssi.com.vn/api/v3"
 SSI_V3_PAGE_SIZE = 1000
 SSI_V3_MAX_PAGES = 20
 SSI_V3_MAX_ROWS = 5000
+SSI_V3_DAILY_WINDOW_DAYS = 180
+SSI_V3_DAILY_MAX_WINDOWS = 40
+SSI_V3_DAILY_FRESHNESS_MAX_WEEKDAYS = 5
 SSI_V3_SECURITIES_SUMMARY_PATH = "/api/v3/data/securitiesSummary"
 _VN_TIMEZONE = ZoneInfo("Asia/Ho_Chi_Minh")
 _VALID_BOARDS = {"HOSE", "HNX", "UPCOM"}
@@ -227,6 +230,40 @@ def _provider_date(value: Optional[str], *, intraday: bool, end: bool = False) -
             parsed = parsed.replace(hour=23, minute=59, second=59)
         return parsed.strftime("%Y/%m/%d %H:%M:%S")
     return parsed.strftime("%Y/%m/%d")
+
+
+def _previous_weekday(value: datetime) -> datetime:
+    candidate = value
+    while candidate.weekday() >= 5:
+        candidate -= timedelta(days=1)
+    return candidate
+
+
+def _latest_completed_daily_session(requested_to: str) -> str:
+    requested = datetime.strptime(requested_to, "%Y/%m/%d").date()
+    now = datetime.now(_VN_TIMEZONE)
+    today = now.date()
+    if requested < today:
+        candidate = datetime.combine(requested, datetime.min.time())
+    elif now.weekday() < 5 and now.hour >= 15:
+        candidate = datetime.combine(today, datetime.min.time())
+    else:
+        candidate = datetime.combine(today - timedelta(days=1), datetime.min.time())
+    return _previous_weekday(candidate).date().isoformat()
+
+
+def _weekday_session_gap(older: str, newer: str) -> int:
+    older_date = datetime.strptime(older, "%Y-%m-%d").date()
+    newer_date = datetime.strptime(newer, "%Y-%m-%d").date()
+    if older_date >= newer_date:
+        return 0
+    gap = 0
+    candidate = older_date + timedelta(days=1)
+    while candidate <= newer_date:
+        if candidate.weekday() < 5:
+            gap += 1
+        candidate += timedelta(days=1)
+    return gap
 
 
 def _normalize_board(value: Any) -> str:
@@ -502,7 +539,9 @@ class SsiFastConnectV3Adapter:
         }
 
     @staticmethod
-    def _summary_page(payload: Any) -> Tuple[List[Mapping[str, Any]], Optional[int]]:
+    def _summary_page(
+        payload: Any,
+    ) -> Tuple[List[Mapping[str, Any]], Optional[int], Optional[int]]:
         """Extract the documented V3 summary envelope without SDK model loss.
 
         ``ssi-sdk==3.0.5`` exposes the official authenticated REST transport,
@@ -517,11 +556,34 @@ class SsiFastConnectV3Adapter:
                 raise SsiV3MalformedResponse("securities summary data envelope is missing")
             data = payload["data"]
             pages_count_raw = payload.get("pagesCount")
+            total_count_raw = next(
+                (
+                    payload.get(name)
+                    for name in ("totalCount", "totalRecords", "recordsTotal", "count")
+                    if payload.get(name) is not None
+                ),
+                None,
+            )
         elif hasattr(payload, "data"):
             data = getattr(payload, "data")
             pages_count_raw = getattr(payload, "pages_count", None)
             if pages_count_raw is None:
                 pages_count_raw = getattr(payload, "pagesCount", None)
+            total_count_raw = next(
+                (
+                    getattr(payload, name, None)
+                    for name in (
+                        "total_count",
+                        "totalCount",
+                        "total_records",
+                        "totalRecords",
+                        "recordsTotal",
+                        "count",
+                    )
+                    if getattr(payload, name, None) is not None
+                ),
+                None,
+            )
         else:
             raise SsiV3MalformedResponse("expected securities summary data envelope")
         if not isinstance(data, list):
@@ -531,7 +593,10 @@ class SsiFastConnectV3Adapter:
         pages_count = _number(pages_count_raw, integer=True)
         if pages_count is not None and pages_count < 0:
             raise SsiV3MalformedResponse("securities summary pagesCount is negative")
-        return data, pages_count
+        total_count = _number(total_count_raw, integer=True)
+        if total_count is not None and total_count < 0:
+            raise SsiV3MalformedResponse("securities summary total count is negative")
+        return data, pages_count, total_count
 
     @staticmethod
     def _summary_row(
@@ -617,12 +682,16 @@ class SsiFastConnectV3Adapter:
         page_index: int,
         page_size: int,
         limit: int,
+        exhaust_pages: bool,
     ) -> ProviderResult:
         effective_page_size = min(page_size, limit)
         normalized_rows: List[Dict[str, Any]] = []
         previous_fingerprint: Optional[Tuple[str, ...]] = None
         pages_used = 0
         current_page = page_index
+        page_row_counts: List[int] = []
+        page_date_bounds: List[Dict[str, Any]] = []
+        provider_reported_total_count: Optional[int] = None
         for _ in range(SSI_V3_MAX_PAGES):
             if current_page > SSI_V3_MAX_PAGES:
                 raise SsiV3PaginationGuard("maximum page bound exceeded")
@@ -641,24 +710,46 @@ class SsiFastConnectV3Adapter:
                 SSI_V3_SECURITIES_SUMMARY_PATH,
                 params=params,
             )
-            page_rows, pages_count = self._summary_page(payload)
+            page_rows, pages_count, total_count = self._summary_page(payload)
             pages_used += 1
+            page_row_counts.append(len(page_rows))
+            if total_count is not None:
+                provider_reported_total_count = total_count
             if not page_rows:
+                page_date_bounds.append(
+                    {"page_index": current_page, "row_count": 0, "min_date": None, "max_date": None}
+                )
                 break
             fingerprint = tuple(repr(item) for item in page_rows)
             if fingerprint == previous_fingerprint:
                 raise SsiV3PaginationGuard("repeated securities summary page")
             previous_fingerprint = fingerprint
-            normalized_rows.extend(
+            normalized_page = [
                 self._summary_row(item, expected_symbol=symbol) for item in page_rows
+            ]
+            normalized_rows.extend(normalized_page)
+            page_dates = sorted(
+                str(row["date"]) for row in normalized_page if row.get("date")
+            )
+            page_date_bounds.append(
+                {
+                    "page_index": current_page,
+                    "row_count": len(normalized_page),
+                    "min_date": page_dates[0] if page_dates else None,
+                    "max_date": page_dates[-1] if page_dates else None,
+                }
             )
             if len(normalized_rows) > SSI_V3_MAX_ROWS:
                 raise SsiV3PaginationGuard("maximum row bound exceeded")
-            if len(normalized_rows) >= limit:
-                break
             if pages_count is not None and pages_count > 0 and current_page >= pages_count:
                 break
-            if len(page_rows) < effective_page_size:
+            if (
+                not exhaust_pages
+                and (pages_count is None or pages_count <= 0)
+                and len(normalized_rows) >= limit
+            ):
+                break
+            if (pages_count is None or pages_count <= 0) and len(page_rows) < effective_page_size:
                 break
             current_page += 1
         else:
@@ -685,6 +776,18 @@ class SsiFastConnectV3Adapter:
                 "implementation_status": "implemented",
                 "units_verified": False,
                 "finality_verified": False,
+                "requested_from": from_value,
+                "requested_to": to_value,
+                "page_count": pages_used,
+                "page_row_counts": page_row_counts,
+                "page_date_bounds": page_date_bounds,
+                "provider_reported_total_count": provider_reported_total_count,
+                "provider_row_count": len(normalized_rows),
+                "normalized_row_count": len(rows),
+                "min_date": rows[0]["date"] if rows else None,
+                "max_date": rows[-1]["date"] if rows else None,
+                "duplicate_dates": duplicate_count,
+                "sort_order": "trading_date_ascending",
             },
         )
 
@@ -845,14 +948,141 @@ class SsiFastConnectV3Adapter:
         except Exception as exc:
             return _error_result("daily_ohlcv", exc)
 
-        summary = self.get_securities_summary(
-            symbol=normalized,
-            from_date=start_value,
-            to_date=end_value,
-            limit=safe_limit,
+        start_day = datetime.strptime(start_value, "%Y/%m/%d").date()
+        end_day = datetime.strptime(end_value, "%Y/%m/%d").date()
+        window_end = end_day
+        summary_rows: List[Dict[str, Any]] = []
+        window_diagnostics: List[Dict[str, Any]] = []
+        page_row_counts: List[int] = []
+        page_date_bounds: List[Dict[str, Any]] = []
+        page_count = 0
+        provider_row_count = 0
+        provider_total_counts: List[int] = []
+        duplicate_dates = 0
+        reached_requested_start = False
+
+        for window_index in range(1, SSI_V3_DAILY_MAX_WINDOWS + 1):
+            window_start = max(
+                start_day,
+                window_end - timedelta(days=SSI_V3_DAILY_WINDOW_DAYS - 1),
+            )
+            summary = self.get_securities_summary(
+                symbol=normalized,
+                from_date=window_start.isoformat(),
+                to_date=window_end.isoformat(),
+                limit=safe_limit,
+                exhaust_pages=True,
+            )
+            if summary.get("status") != "ok":
+                return summary
+            diagnostics = dict(summary.get("diagnostics") or {})
+            rows = [
+                dict(row)
+                for row in summary.get("rows") or []
+                if isinstance(row, Mapping)
+            ]
+            summary_rows.extend(rows)
+            page_count += int(summary.get("pages_used") or diagnostics.get("page_count") or 0)
+            provider_row_count += int(
+                diagnostics.get("provider_row_count")
+                if diagnostics.get("provider_row_count") is not None
+                else len(rows)
+            )
+            duplicate_dates += int(summary.get("duplicate_date_count") or 0)
+            page_row_counts.extend(
+                int(value) for value in diagnostics.get("page_row_counts") or []
+            )
+            for bounds in diagnostics.get("page_date_bounds") or []:
+                if isinstance(bounds, Mapping):
+                    page_date_bounds.append(
+                        {"window_index": window_index, **dict(bounds)}
+                    )
+            reported_total = diagnostics.get("provider_reported_total_count")
+            if reported_total is not None:
+                provider_total_counts.append(int(reported_total))
+            window_diagnostics.append(
+                {
+                    "window_index": window_index,
+                    "requested_from": window_start.isoformat(),
+                    "requested_to": window_end.isoformat(),
+                    "page_count": int(
+                        summary.get("pages_used") or diagnostics.get("page_count") or 0
+                    ),
+                    "provider_row_count": int(
+                        diagnostics.get("provider_row_count")
+                        if diagnostics.get("provider_row_count") is not None
+                        else len(rows)
+                    ),
+                    "normalized_row_count": len(rows),
+                    "min_date": diagnostics.get("min_date"),
+                    "max_date": diagnostics.get("max_date"),
+                    "provider_reported_total_count": reported_total,
+                }
+            )
+            reached_requested_start = window_start <= start_day
+            if len({row.get("date") for row in summary_rows if row.get("date")}) >= safe_limit:
+                break
+            if reached_requested_start:
+                break
+            window_end = window_start - timedelta(days=1)
+        else:
+            return _error_result(
+                "daily_ohlcv",
+                SsiV3PaginationGuard("daily history maximum window bound exceeded"),
+            )
+
+        deduped: Dict[str, Dict[str, Any]] = {}
+        for row in summary_rows:
+            row_date = str(row.get("date") or "")
+            if row_date:
+                deduped[row_date] = row
+        duplicate_dates += len(summary_rows) - len(deduped)
+        normalized_summary_rows = sorted(
+            deduped.values(), key=lambda row: str(row.get("date") or "")
         )
-        if summary.get("status") != "ok":
-            return summary
+        if len(normalized_summary_rows) > safe_limit:
+            normalized_summary_rows = normalized_summary_rows[-safe_limit:]
+
+        latest_completed_session = _latest_completed_daily_session(end_value)
+        min_date = (
+            str(normalized_summary_rows[0].get("date"))
+            if normalized_summary_rows
+            else None
+        )
+        max_date = (
+            str(normalized_summary_rows[-1].get("date"))
+            if normalized_summary_rows
+            else None
+        )
+        freshness_gap = (
+            _weekday_session_gap(max_date, latest_completed_session)
+            if max_date is not None
+            else None
+        )
+        freshness_status = (
+            "fresh"
+            if freshness_gap is not None
+            and freshness_gap <= SSI_V3_DAILY_FRESHNESS_MAX_WEEKDAYS
+            else "stale"
+            if max_date is not None
+            else "unavailable"
+        )
+        provider_total_count = (
+            sum(provider_total_counts) if provider_total_counts else None
+        )
+        incomplete_provider_count = (
+            provider_total_count is not None
+            and provider_total_count > provider_row_count
+        )
+        complete = (
+            bool(normalized_summary_rows)
+            and freshness_status == "fresh"
+            and not incomplete_provider_count
+            and (
+                reached_requested_start
+                or len(normalized_summary_rows) >= safe_limit
+            )
+        )
         candles = [
             {
                 "date": row.get("date"),
@@ -864,23 +1094,52 @@ class SsiFastConnectV3Adapter:
                 "value": row.get("matched_value"),
                 "source": SSI_V3_SOURCE,
             }
-            for row in summary.get("rows", [])
+            for row in normalized_summary_rows
             if isinstance(row, Mapping)
         ]
-        result = dict(summary)
-        result.update(
-            {
-                "rows": candles,
-                "count": len(candles),
-                "diagnostics": {
-                    **dict(summary.get("diagnostics") or {}),
-                    "capability": "daily_ohlcv",
-                    "source_endpoint": "securitiesSummary",
-                    "volume_semantics": "matched_volume",
-                    "value_semantics": "matched_value",
-                },
-            }
+        result = _ok_result(
+            candles,
+            pages_used=page_count,
+            duplicate_date_count=duplicate_dates,
+            diagnostics={
+                "capability": "daily_ohlcv",
+                "source_version": "v3",
+                "source_endpoint": "securitiesSummary",
+                "adapter": type(self).__name__,
+                "requested_from": start_day.isoformat(),
+                "requested_to": end_day.isoformat(),
+                "page_count": page_count,
+                "window_count": len(window_diagnostics),
+                "windows": window_diagnostics,
+                "page_row_counts": page_row_counts,
+                "page_date_bounds": page_date_bounds,
+                "provider_reported_total_count": provider_total_count,
+                "provider_row_count": provider_row_count,
+                "normalized_row_count": len(candles),
+                "min_date": min_date,
+                "max_date": max_date,
+                "duplicate_dates": duplicate_dates,
+                "latest_completed_session": latest_completed_session,
+                "freshness_gap_weekdays": freshness_gap,
+                "freshness_max_weekdays": SSI_V3_DAILY_FRESHNESS_MAX_WEEKDAYS,
+                "freshness_status": freshness_status,
+                "cache_hit": False,
+                "cache_source": "provider",
+                "complete": complete,
+                "sort_order": "trading_date_ascending",
+                "volume_semantics": "matched_volume",
+                "value_semantics": "matched_value",
+                "provider_timestamp_semantics": "trading_date_only",
+            },
         )
+        if not complete:
+            result["status"] = "partial" if candles else "unavailable"
+            result["reason"] = (
+                "SSI V3 daily history is incomplete or stale."
+                if candles
+                else "SSI V3 daily history returned no rows."
+            )
+            result["failure_class"] = "incomplete_daily_history"
         return result
 
     def get_completed_intraday_1m(self, symbol: str, trading_date: str) -> ProviderResult:
@@ -949,6 +1208,7 @@ class SsiFastConnectV3Adapter:
         page_index: int = 1,
         page_size: int = SSI_V3_PAGE_SIZE,
         limit: int = 260,
+        exhaust_pages: bool = False,
     ) -> ProviderResult:
         """Normalize one symbol or index through authenticated raw V3 REST."""
 
@@ -998,6 +1258,7 @@ class SsiFastConnectV3Adapter:
                 page_index=page_index,
                 page_size=page_size,
                 limit=limit,
+                exhaust_pages=exhaust_pages,
             )
 
         return self._run("securities_summary", operation)
@@ -1182,6 +1443,7 @@ class SsiFastConnectV3Adapter:
             from_date=effective_from,
             to_date=effective_to,
             limit=min(SSI_V3_MAX_ROWS, safe_limit + 2),
+            exhaust_pages=True,
         )
         if result.get("status") != "ok":
             return result

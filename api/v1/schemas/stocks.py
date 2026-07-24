@@ -213,6 +213,9 @@ class VietnamWatchItem(BaseModel):
     source: Optional[str] = None
     primary_source: Optional[str] = None
     actual_source: Optional[str] = None
+    provider_version: Optional[str] = None
+    endpoint: Optional[str] = None
+    adapter: Optional[str] = None
     fallback_used: bool = False
     fallback_reason: Optional[str] = None
     reference_source: Optional[str] = None
@@ -362,6 +365,10 @@ class VietnamChartResponse(BaseModel):
     actual_source: Optional[str] = None
     fallback_used: bool = False
     fallback_reason: Optional[str] = None
+    provider_version: Optional[str] = None
+    endpoint: Optional[str] = None
+    adapter: Optional[str] = None
+    diagnostics: Dict[str, Any] = Field(default_factory=dict)
     timeframe: str = "1d"
     range: str = "6M"
     latest_date: Optional[str] = None

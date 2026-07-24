@@ -328,8 +328,10 @@ const signalTone = (change?: number | null) => {
 };
 
 const liquidityVariant = (score?: number | null) => {
-  if ((score ?? 0) >= 70) return 'success';
-  if ((score ?? 0) >= 35) return 'warning';
+  const numeric = finiteNumber(score ?? null);
+  if (numeric === null) return 'default';
+  if (numeric >= 70) return 'success';
+  if (numeric >= 35) return 'warning';
   return 'danger';
 };
 
@@ -442,7 +444,10 @@ const hasEncodingArtifacts = (value?: string | null) => Boolean(value && /(?:Ã|
 
 const marketStatusLabels = (item: VietnamWatchItem, max = 3) => {
   const labels = (item.statusLabels ?? []).filter((label) => !DATA_CAVEAT_LABELS.has(label));
-  return compactLabels(labels.length ? labels : ['Watch'], max);
+  const fallback = item.status === 'unavailable' || !hasOfficialDailyData(item)
+    ? ['Data unavailable']
+    : ['Watch'];
+  return compactLabels(labels.length ? labels : fallback, max);
 };
 
 const hasAvailableSsiDailyStockPrice = (item: VietnamWatchItem) => {
@@ -1113,12 +1118,12 @@ const metadataValue = (item: VietnamWatchItem, key: 'exchange' | 'market' | 'sec
   item.symbolMetadata?.[key] ?? item[key] ?? null
 );
 
-const sumSsiForeignNetVolume = (items: VietnamWatchItem[]) => (
-  items.reduce((sum, item) => {
-    const value = finiteNumber(item.ssiForeignNetVolume);
-    return value === null ? sum : sum + value;
-  }, 0)
-);
+const sumSsiForeignNetVolume = (items: VietnamWatchItem[]) => {
+  const values = items
+    .map((item) => finiteNumber(item.ssiForeignNetVolume))
+    .filter((value): value is number => value !== null);
+  return values.length ? values.reduce((sum, value) => sum + value, 0) : null;
+};
 
 const getDashboardPresetTickers = (presetId: VietnamDashboardPresetId) => {
   const preset = VIETNAM_DASHBOARD_PRESETS.find((item) => item.id === presetId);
@@ -1768,8 +1773,8 @@ const DataCaveatDisclosure: React.FC<{ item: VietnamWatchItem; className?: strin
 };
 
 const WatchCard: React.FC<{ item: VietnamWatchItem; realtimeQuote?: VietnamRealtimeQuote | null; marketPhase: VietnamMarketPhase }> = ({ item, realtimeQuote, marketPhase }) => {
-  const positive = (item.changePct ?? 0) >= 0;
-  const TrendIcon = positive ? ArrowUpRight : ArrowDownRight;
+  const changePct = finiteNumber(item.changePct ?? null);
+  const TrendIcon = changePct === null ? null : changePct >= 0 ? ArrowUpRight : ArrowDownRight;
   const lastFetched = latestFetchedValue(item);
   const realtimeState = realtimeSnapshotState(realtimeQuote, marketPhase.code);
   const sessionVolumeRatioText = sessionVolumeToAvgDailyVolume(item, realtimeQuote, realtimeState);
@@ -1791,8 +1796,8 @@ const WatchCard: React.FC<{ item: VietnamWatchItem; realtimeQuote?: VietnamRealt
                 {item.ticker}
               </a>
             </h2>
-            <Badge variant="info">{item.exchange ?? 'VN'}</Badge>
-            <Badge variant="default">{item.marketIndex ?? 'VNINDEX.VN'}</Badge>
+            {item.exchange ? <Badge variant="info">{item.exchange}</Badge> : null}
+            {item.marketIndex ? <Badge variant="default">{item.marketIndex}</Badge> : null}
           </div>
           <div className="mt-2 flex flex-wrap gap-1">
             {marketStatusLabels(item, 3).map((label) => (
@@ -1805,7 +1810,7 @@ const WatchCard: React.FC<{ item: VietnamWatchItem; realtimeQuote?: VietnamRealt
           </p>
         </div>
         <div className={cn('flex items-center gap-1 text-sm font-semibold', signalTone(item.changePct))}>
-          <TrendIcon className="h-4 w-4" />
+          {TrendIcon ? <TrendIcon className="h-4 w-4" /> : null}
           {formatNumber(item.changePct, 2)}%
         </div>
       </div>
@@ -1842,7 +1847,9 @@ const WatchCard: React.FC<{ item: VietnamWatchItem; realtimeQuote?: VietnamRealt
         </div>
         <div>
           <p className="text-xs text-secondary-text">20D liquidity</p>
-          <Badge variant={liquidityVariant(item.liquidity.score)}>{item.liquidity.score ?? 0}/100</Badge>
+          <Badge variant={liquidityVariant(item.liquidity.score)}>
+            {item.liquidity.score === null || item.liquidity.score === undefined ? '—' : `${item.liquidity.score}/100`}
+          </Badge>
         </div>
         <div>
           <p className="text-xs text-secondary-text">RSI14 Wilder/RMA</p>
@@ -6197,9 +6204,12 @@ const VietnamDashboardPage: React.FC = () => {
   const summary = useMemo(() => {
     const rows = data?.watchlist ?? [];
     const up = rows.filter((item) => (item.changePct ?? 0) > 0).length;
-    const avgLiquidity = rows.length
-      ? Math.round(rows.reduce((sum, item) => sum + (item.liquidity.score ?? 0), 0) / rows.length)
-      : 0;
+    const liquidityScores = rows
+      .map((item) => finiteNumber(item.liquidity.score ?? null))
+      .filter((score): score is number => score !== null);
+    const avgLiquidity = liquidityScores.length
+      ? Math.round(liquidityScores.reduce((sum, score) => sum + score, 0) / liquidityScores.length)
+      : null;
     const foreignNetVolume = sumSsiForeignNetVolume(rows);
     return { count: rows.length, up, avgLiquidity, foreignNetVolume };
   }, [data]);
@@ -6793,7 +6803,9 @@ const VietnamDashboardPage: React.FC = () => {
         <div className="rounded-lg border border-border/70 bg-card p-4">
           <Banknote className="mb-3 h-5 w-5 text-warning" />
           <p className="text-xs text-secondary-text">Avg liquidity</p>
-          <p className="text-2xl font-semibold text-foreground">{summary.avgLiquidity}/100</p>
+          <p className="text-2xl font-semibold text-foreground">
+            {summary.avgLiquidity === null ? '—' : `${summary.avgLiquidity}/100`}
+          </p>
         </div>
         <div className="rounded-lg border border-border/70 bg-card p-4" data-testid="foreign-net-volume-summary-card">
           <ShieldAlert className="mb-3 h-5 w-5 text-purple" />
