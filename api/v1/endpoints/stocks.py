@@ -36,6 +36,11 @@ from api.v1.schemas.stocks import (
     VietnamForeignFlowBatchRequest,
     VietnamForeignFlowBatchResponse,
     VietnamForeignFlowSymbolHistoryResponse,
+    VietnamForeignIndexFlowResponse,
+    VietnamCurrentForeignFlowResponse,
+    VietnamProprietaryFlowResponse,
+    VietnamIndustryFlowRequest,
+    VietnamIndustryFlowResponse,
     VietnamVn30ForeignFlowResponse,
     VietnamIndexComponentsResponse,
     VietnamIndexListResponse,
@@ -67,6 +72,7 @@ from src.services.vietnam_foreign_flow_service import (
     VietnamForeignFlowVn30Service,
     normalize_vietnam_foreign_flow_tickers,
 )
+from src.services.vietnam_flow_data_service import VietnamFlowDataService
 from src.services.vietnam_market_service import VietnamMarketService, vietnam_intraday_chart_health_snapshot
 from src.services.vietnam_observability import vietnam_observability_snapshot
 from data_provider.base import normalize_stock_code
@@ -781,16 +787,24 @@ def post_vietnam_foreign_flow_batch(
     "/vn/foreign-flow/vn30",
     response_model=VietnamVn30ForeignFlowResponse,
     summary="Vietnam VN30 daily foreign-flow aggregate",
-    description="Aggregate SSI DailyStockPrice foreign flow over the current SSI IndexComponents VN30 membership.",
+    description=(
+        "Return the provider-backed current-membership VN30 decomposition; "
+        "direct SSI V3 index totals remain a separately classified optional capability."
+    ),
 )
 def get_vietnam_vn30_foreign_flow(
     top_n: int = Query(10, ge=1, le=10, description="Maximum gainers and decliners returned per ranking."),
     force_refresh: bool = Query(False, description="Bypass aggregate, membership, and component-history caches."),
+    force_capability_refresh: bool = Query(
+        False,
+        description="Explicitly re-probe the direct SSI VN30 foreign-field capability.",
+    ),
 ) -> VietnamVn30ForeignFlowResponse:
     try:
         payload = VietnamForeignFlowVn30Service().get_vn30_aggregate(
             top_n=top_n,
             force_refresh=force_refresh,
+            force_capability_refresh=force_capability_refresh,
         )
         return VietnamVn30ForeignFlowResponse(**payload)
     except ValueError as exc:
@@ -804,6 +818,102 @@ def get_vietnam_vn30_foreign_flow(
             status_code=500,
             detail={"error": "vn30_foreign_flow_failed", "message": "Vietnam VN30 foreign-flow request failed"},
         ) from exc
+
+
+@router.get(
+    "/vn/foreign-flow/index/{index_code}",
+    response_model=VietnamForeignIndexFlowResponse,
+    summary="Vietnam historical foreign flow by SSI index",
+)
+def get_vietnam_foreign_flow_index(
+    index_code: str,
+    from_date: str = Query(..., description="Inclusive YYYY-MM-DD start date."),
+    to_date: str = Query(..., description="Inclusive YYYY-MM-DD end date."),
+    limit: int = Query(260, ge=1, le=3000),
+    force_capability_refresh: bool = Query(
+        False,
+        description="Bypass the bounded direct-index capability cache.",
+    ),
+) -> VietnamForeignIndexFlowResponse:
+    service = VietnamFlowDataService()
+    try:
+        return VietnamForeignIndexFlowResponse(**service.foreign_history_by_index(
+            index_code,
+            from_date=from_date,
+            to_date=to_date,
+            limit=limit,
+            force_capability_refresh=force_capability_refresh,
+        ))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail={"error": "vn_foreign_index_invalid_request", "message": str(exc)}) from exc
+    finally:
+        service.close()
+
+
+@router.get(
+    "/vn/foreign-flow/current/{ticker}",
+    response_model=VietnamCurrentForeignFlowResponse,
+    summary="Vietnam current-session foreign flow by symbol",
+)
+def get_vietnam_current_foreign_flow(
+    ticker: str,
+) -> VietnamCurrentForeignFlowResponse:
+    service = VietnamFlowDataService()
+    try:
+        return VietnamCurrentForeignFlowResponse(**service.current_foreign_by_symbol(ticker))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail={"error": "vn_current_foreign_invalid_request", "message": str(exc)}) from exc
+    finally:
+        service.close()
+
+
+@router.get(
+    "/vn/proprietary-flow",
+    response_model=VietnamProprietaryFlowResponse,
+    summary="Vietnam proprietary flow for one SSI board or index",
+)
+def get_vietnam_proprietary_flow(
+    scope: str = Query(..., pattern="^(board|index)$"),
+    identifier: str = Query(...),
+    from_date: Optional[str] = Query(None),
+    to_date: Optional[str] = Query(None),
+) -> VietnamProprietaryFlowResponse:
+    service = VietnamFlowDataService()
+    try:
+        return VietnamProprietaryFlowResponse(**service.proprietary_flow(
+            scope,
+            identifier,
+            from_date=from_date,
+            to_date=to_date,
+        ))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail={"error": "vn_proprietary_flow_invalid_request", "message": str(exc)}) from exc
+    finally:
+        service.close()
+
+
+@router.post(
+    "/vn/industry-flow",
+    response_model=VietnamIndustryFlowResponse,
+    summary="Vietnam ICB industry foreign flow and matched turnover",
+)
+def post_vietnam_industry_flow(
+    request: VietnamIndustryFlowRequest,
+) -> VietnamIndustryFlowResponse:
+    service = VietnamFlowDataService()
+    try:
+        return VietnamIndustryFlowResponse(**service.industry_history(
+            symbols=request.symbols,
+            index_code=request.index_code,
+            from_date=request.from_date,
+            to_date=request.to_date,
+        ))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail={"error": "vn_industry_flow_invalid_request", "message": str(exc)}) from exc
+    finally:
+        service.close()
+
+
 @router.get(
     "/vn/observability",
     response_model=VietnamObservabilityResponse,

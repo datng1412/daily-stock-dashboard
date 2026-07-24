@@ -14,7 +14,7 @@ def _now_factory(now: datetime):
 
 def _contexts():
     return {
-        "realtime": {"FPT": {"ticker": "FPT", "price": 100.0, "stream_timestamp": "2026-07-10T08:00:00+00:00", "forbidden_private_value": "never-save"}},
+        "realtime": {"FPT": {"ticker": "FPT", "price": 100.0, "last_volume": 10, "has_last_trade": True, "stream_timestamp": "2026-07-10T08:00:00+00:00", "forbidden_private_value": "never-save"}},
         "order_book": {"FPT": {"ticker": "FPT", "bids": [{"level": 1, "price": 99.0, "volume": 100}], "asks": [{"level": 1, "price": 101.0, "volume": 100}]}},
         "trades": {"FPT": [{"ticker": "FPT", "price": 100.0, "volume": 10, "timestamp": "2026-07-10T08:00:00+00:00", "id": "a"}, {"ticker": "FPT", "price": 100.0, "volume": 10, "timestamp": "2026-07-10T08:00:00+00:00", "id": "a"}]},
         "foreign_room": {"FPT": {"ticker": "FPT", "current_room": 20.0}},
@@ -47,7 +47,7 @@ def test_snapshot_load_rejects_invalid_and_expired_files_without_raising(tmp_pat
     assert store.load()["contexts"]["realtime"] == {}
     assert store.diagnostics()["snapshot_status"] == "invalid"
 
-    path.write_text('{"schema_version":1,"provider":"SSI","captured_at":"2026-06-01T00:00:00+00:00","trading_date":"2026-06-01","contexts":{}}', encoding="utf-8")
+    path.write_text('{"schema_version":2,"provider":"SSI","captured_at":"2026-06-01T00:00:00+00:00","trading_date":"2026-06-01","contexts":{}}', encoding="utf-8")
     assert store.load()["contexts"]["realtime"] == {}
     assert store.diagnostics()["snapshot_status"] == "expired"
 
@@ -76,7 +76,7 @@ def test_manager_restore_is_persisted_stale_and_live_row_replaces_it(tmp_path):
     assert restored["realtime"] == 1
     assert status == "persisted_stale"
     assert quote and quote["snapshot_source"] == "persisted" and quote["is_stale"] is True
-    assert manager.cache.put_rows([{"ticker": "FPT", "price": 101.0}]) == 1
+    assert manager.cache.put_rows([{"ticker": "FPT", "price": 101.0, "last_volume": 5, "has_last_trade": True, "stream_timestamp": "2026-07-10T08:01:00+00:00"}]) == 1
     live_quote, live_status, _ = manager.cache.get("FPT")
     assert live_status == "hit"
     assert live_quote and live_quote.get("snapshot_source") is None
@@ -124,7 +124,28 @@ def test_snapshot_rejects_future_timestamp(tmp_path):
     now = datetime(2026, 7, 10, tzinfo=timezone.utc)
     path = tmp_path / "snapshot.json"
     future = now + timedelta(minutes=6)
-    path.write_text(f'{{"schema_version":1,"provider":"SSI","captured_at":"{future.isoformat()}","trading_date":"2026-07-10","contexts":{{}}}}', encoding="utf-8")
+    path.write_text(f'{{"schema_version":2,"provider":"SSI","captured_at":"{future.isoformat()}","trading_date":"2026-07-10","contexts":{{}}}}', encoding="utf-8")
     store = SsiStreamingSnapshotStore(enabled=True, path=str(path), now_func=_now_factory(now))
     assert store.load()["contexts"]["realtime"] == {}
     assert store.diagnostics()["snapshot_status"] == "expired"
+
+
+def test_snapshot_rejects_zero_trade_and_realtime_rows(tmp_path):
+    now = datetime(2026, 7, 10, tzinfo=timezone.utc)
+    contexts = _contexts()
+    contexts["realtime"]["FPT"].update({"price": 0.0, "last_volume": 0})
+    contexts["trades"]["FPT"] = [
+        {"ticker": "FPT", "price": 0.0, "volume": 0, "timestamp": "2026-07-10T08:00:00+00:00"}
+    ]
+    store = SsiStreamingSnapshotStore(
+        enabled=True,
+        path=str(tmp_path / "snapshot.json"),
+        now_func=_now_factory(now),
+    )
+
+    store.mark_dirty()
+    assert store.flush_now(lambda: contexts)
+    loaded = store.load()
+
+    assert loaded["contexts"]["realtime"] == {}
+    assert loaded["contexts"]["trades"] == {}

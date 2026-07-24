@@ -170,9 +170,11 @@ def test_bootstrap_rejects_unsafe_symbols_and_starts_no_space_channels():
     assert client.channels == [
         "X:FPT",
         "X-QUOTE:FPT",
+        "R:FPT",
         "X-TRADE:FPT",
         "X:HPG",
         "X-QUOTE:HPG",
+        "R:HPG",
         "X-TRADE:HPG",
     ]
     assert "ALL" in status["bootstrap_rejected_symbols"]
@@ -192,6 +194,7 @@ def test_v3_bootstrap_normalizes_legacy_space_channel_override():
     assert client.channels == [
         "X:FPT",
         "X-QUOTE:FPT",
+        "R:FPT",
         "X-TRADE:FPT",
     ]
 
@@ -202,6 +205,7 @@ def test_service_reads_backend_lifecycle_cache_without_dynamic_subscription():
     assert client.channels == [
         "X:FPT",
         "X-QUOTE:FPT",
+        "R:FPT",
         "X-TRADE:FPT",
     ]
 
@@ -220,6 +224,7 @@ def test_service_reads_backend_lifecycle_cache_without_dynamic_subscription():
     assert client.channels == [
         "X:FPT",
         "X-QUOTE:FPT",
+        "R:FPT",
         "X-TRADE:FPT",
     ]
 
@@ -234,6 +239,7 @@ def test_service_reads_backend_lifecycle_cache_without_dynamic_subscription():
     assert client.channels == [
         "X:FPT",
         "X-QUOTE:FPT",
+        "R:FPT",
         "X-TRADE:FPT",
     ]
 

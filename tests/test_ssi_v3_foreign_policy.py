@@ -107,7 +107,7 @@ def test_duplicate_dates_are_rejected_before_product_analytics() -> None:
         )
 
 
-def test_current_and_t1_are_provisional_while_t2_is_completed_candidate() -> None:
+def test_current_is_provisional_and_latest_prior_provider_session_is_completed() -> None:
     as_of = date(2026, 7, 23)
     current = foreign_row_finality("2026-07-23", as_of=as_of)
     t1 = foreign_row_finality(
@@ -121,10 +121,10 @@ def test_current_and_t1_are_provisional_while_t2_is_completed_candidate() -> Non
         completed_session_rank=2,
     )
     assert current["state"] == "current_session_provisional"
-    assert t1["state"] == "t_minus_1_provisional"
+    assert t1["state"] == "latest_completed_session"
     assert t2["state"] == "t_minus_2_or_older_completed_candidate"
     assert current["is_provisional"] is True
-    assert t1["is_provisional"] is True
+    assert t1["is_provisional"] is False
     assert t2["is_provisional"] is False
     assert t2["policy"] == SSI_V3_FOREIGN_FINALITY_POLICY
     assert t2["provider_guaranteed"] is False
@@ -140,11 +140,11 @@ def test_session_rank_does_not_treat_weekends_or_holidays_as_sessions() -> None:
         as_of=date(2026, 5, 5),
     )
     by_date = {row["date"]: row for row in rows}
-    assert by_date["2026-05-04"]["foreign_finality"] == "t_minus_1_provisional"
+    assert by_date["2026-05-04"]["foreign_finality"] == "latest_completed_session"
     assert by_date["2026-04-29"]["foreign_finality"] == (
         "t_minus_2_or_older_completed_candidate"
     )
-    assert by_date["2026-05-04"]["foreign_is_provisional"] is True
+    assert by_date["2026-05-04"]["foreign_is_provisional"] is False
     assert by_date["2026-04-29"]["foreign_is_provisional"] is False
 
 
@@ -171,9 +171,9 @@ def test_completed_analytics_filter_provisional_rows_but_raw_rows_can_retain_the
         as_of=date(2026, 7, 23),
         include_provisional=True,
     )
-    assert [row["date"] for row in completed] == ["2026-07-21"]
+    assert [row["date"] for row in completed] == ["2026-07-21", "2026-07-22"]
     assert len(raw) == 3
-    assert diagnostics["provisional_row_count"] == 2
+    assert diagnostics["provisional_row_count"] == 1
     assert diagnostics["foreign_provider_finality_guaranteed"] is False
 
 

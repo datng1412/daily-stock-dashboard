@@ -149,6 +149,28 @@ def _value(row: Any, *names: str) -> Any:
     return None
 
 
+def _field_presence(row: Any, name: str, normalized: Any) -> str:
+    """Retain raw provider presence separately from its normalized value."""
+
+    if isinstance(row, Mapping):
+        if name not in row:
+            return "FIELD_ABSENT"
+        raw = row[name]
+    elif not hasattr(row, name):
+        return "FIELD_ABSENT"
+    else:
+        raw = getattr(row, name)
+    if raw is None or raw == "":
+        return "FIELD_NULL"
+    if normalized is None:
+        return "PARSE_FAILURE"
+    return (
+        "FIELD_PRESENT_EXPLICIT_ZERO"
+        if normalized == 0
+        else "FIELD_PRESENT_NONZERO"
+    )
+
+
 def _enum_text(value: Any) -> Optional[str]:
     if value is None:
         return None
@@ -454,6 +476,8 @@ class SsiFastConnectV3Adapter:
             "name": _optional_text(_value(item, "symbol_name_vi", "symbolNameVi")),
             "name_en": _optional_text(_value(item, "symbol_name_en", "symbolNameEn")),
             "industry": _optional_text(_value(item, "icb_name", "icbName")),
+            "icb_code": _optional_text(_value(item, "icb_code", "icbCode")),
+            "icb_name": _optional_text(_value(item, "icb_name", "icbName")),
             "sector": None,
             "issuer": None,
             "lot_size": _number(_value(item, "lot_size", "lotSize"), integer=True),
@@ -504,6 +528,18 @@ class SsiFastConnectV3Adapter:
 
     @staticmethod
     def _index_summary_row(item: Any, *, board: str, index_code: Optional[str]) -> Dict[str, Any]:
+        prop_buy_volume = _number(
+            _value(item, "total_prop_buy", "totalPropBuy"), integer=True
+        )
+        prop_sell_volume = _number(
+            _value(item, "total_prop_sell", "totalPropSell"), integer=True
+        )
+        prop_buy_value = _number(
+            _value(item, "total_prop_buy_value", "totalPropBuyValue")
+        )
+        prop_sell_value = _number(
+            _value(item, "total_prop_sell_value", "totalPropSellValue")
+        )
         return {
             "date": _parse_date_value(_value(item, "trading_date", "tradingDate")),
             "index_code": index_code,
@@ -532,6 +568,20 @@ class SsiFastConnectV3Adapter:
             ),
             "floor": _number(
                 _value(item, "total_floor_stock", "totalFloorStock"), integer=True
+            ),
+            "proprietary_buy_volume": prop_buy_volume,
+            "proprietary_sell_volume": prop_sell_volume,
+            "proprietary_net_volume": (
+                prop_buy_volume - prop_sell_volume
+                if prop_buy_volume is not None and prop_sell_volume is not None
+                else None
+            ),
+            "proprietary_buy_value": prop_buy_value,
+            "proprietary_sell_value": prop_sell_value,
+            "proprietary_net_value": (
+                prop_buy_value - prop_sell_value
+                if prop_buy_value is not None and prop_sell_value is not None
+                else None
             ),
             "trading_session": None,
             "exchange": board,
@@ -619,6 +669,20 @@ class SsiFastConnectV3Adapter:
         )
         foreign_buy_value = _number(_value(item, "totalForeignBuyValue"))
         foreign_sell_value = _number(_value(item, "totalForeignSellValue"))
+        foreign_field_presence = {
+            "foreign_buy_volume": _field_presence(
+                item, "totalForeignBuy", foreign_buy_volume
+            ),
+            "foreign_sell_volume": _field_presence(
+                item, "totalForeignSell", foreign_sell_volume
+            ),
+            "foreign_buy_value": _field_presence(
+                item, "totalForeignBuyValue", foreign_buy_value
+            ),
+            "foreign_sell_value": _field_presence(
+                item, "totalForeignSellValue", foreign_sell_value
+            ),
+        }
         foreign_net_volume = (
             foreign_buy_volume - foreign_sell_volume
             if foreign_buy_volume is not None and foreign_sell_volume is not None
@@ -667,6 +731,7 @@ class SsiFastConnectV3Adapter:
             "_foreign_net_value_source": (
                 "derived" if foreign_net_value is not None else None
             ),
+            "_foreign_field_presence": foreign_field_presence,
             "source": SSI_V3_SOURCE,
             "source_version": "v3",
         }
@@ -1282,7 +1347,78 @@ class SsiFastConnectV3Adapter:
             page_index=page_index,
             page_size=page_size,
             limit=limit,
+            exhaust_pages=True,
         )
+
+    def get_market_summary(
+        self,
+        scope: str,
+        identifier: str,
+        *,
+        trading_date: Optional[str] = None,
+    ) -> ProviderResult:
+        """Return the official V3 board/index summary without conflating scopes."""
+
+        try:
+            normalized_scope = str(scope or "").strip().lower()
+            normalized_identifier = str(identifier or "").strip().upper()
+            if normalized_scope not in {"board", "index"}:
+                raise ValueError("scope must be board or index")
+            if not normalized_identifier:
+                raise ValueError("identifier is required")
+            normalized_board = (
+                _normalize_board(normalized_identifier)
+                if normalized_scope == "board"
+                else None
+            )
+            provider_date = (
+                _provider_date(trading_date, intraday=False)
+                if trading_date
+                else None
+            )
+        except Exception as exc:
+            return _error_result("market_summary", exc)
+
+        def operation(_auth: Any, data: Any) -> ProviderResult:
+            if normalized_scope == "board":
+                board_value = _sdk_board(normalized_board)
+                payload = (
+                    data.market_data.get_board_summary_historical(
+                        board_value, provider_date
+                    )
+                    if provider_date
+                    else data.market_data.get_board_summary(board_value)
+                )
+                board = normalized_board
+                index_code = None
+            else:
+                payload = (
+                    data.market_data.get_index_summary_historical(
+                        normalized_identifier, provider_date
+                    )
+                    if provider_date
+                    else data.market_data.get_index_summary(normalized_identifier)
+                )
+                board = None
+                index_code = normalized_identifier
+            rows = [] if payload is None else [
+                self._index_summary_row(
+                    payload,
+                    board=board,
+                    index_code=index_code,
+                )
+            ]
+            return _ok_result(
+                rows,
+                diagnostics={
+                    "capability": "market_summary",
+                    "scope": normalized_scope,
+                    "identifier": normalized_identifier,
+                    "provider_endpoint": "indexSummary",
+                },
+            )
+
+        return self._run("market_summary", operation)
 
     def get_index_list(
         self,

@@ -98,6 +98,7 @@ class FakeMarketData:
         self.ohlc_pages: Dict[int, Any] = {}
         self.current_ohlc: Any = []
         self.error: Optional[BaseException] = None
+        self.market_summary: Any = None
 
     def _raise(self) -> None:
         if self.error is not None:
@@ -150,6 +151,22 @@ class FakeMarketData:
         self._raise()
         return self.current_ohlc
 
+    def get_index_summary(self, index: str) -> Any:
+        self.calls.append(("index_summary", index))
+        return self.market_summary
+
+    def get_index_summary_historical(self, index: str, trading_date: str) -> Any:
+        self.calls.append(("index_summary_historical", index, trading_date))
+        return self.market_summary
+
+    def get_board_summary(self, board: Any) -> Any:
+        self.calls.append(("board_summary", getattr(board, "value", board)))
+        return self.market_summary
+
+    def get_board_summary_historical(self, board: Any, trading_date: str) -> Any:
+        self.calls.append(("board_summary_historical", getattr(board, "value", board), trading_date))
+        return self.market_summary
+
 
 class FakeData:
     def __init__(self, market_data: FakeMarketData, events: Optional[List[str]] = None) -> None:
@@ -191,9 +208,77 @@ def security(**overrides: Any) -> SimpleNamespace:
         "listed_shares": 0,
         "first_trading_date": "2006/12/13",
         "icb_name": None,
+        "icb_code": None,
     }
     values.update(overrides)
     return SimpleNamespace(**values)
+
+
+def market_summary(**overrides: Any) -> SimpleNamespace:
+    values = {
+        "trading_date": "2026/07/24",
+        "total_trade": 100,
+        "total_trade_value": 1_000,
+        "total_match": 90,
+        "total_match_value": 900,
+        "total_deal": 10,
+        "total_deal_value": 100,
+        "index_value": 1_500,
+        "index_change": 5,
+        "index_change_percent": 0.3,
+        "total_advance_stock": 10,
+        "total_decline_stock": 5,
+        "total_steady_stock": 2,
+        "total_ceiling_stock": 1,
+        "total_floor_stock": 0,
+        "total_prop_buy": 20,
+        "total_prop_buy_value": 200,
+        "total_prop_sell": 7,
+        "total_prop_sell_value": 70,
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
+def test_security_normalization_preserves_exact_ssi_icb_fields() -> None:
+    adapter, _auth, market, _data = make_adapter()
+    market.securities = security(icb_code="9530", icb_name="Software")
+
+    result = adapter.get_security_basic_info("FPT")
+
+    assert result["status"] == "ok"
+    assert result["rows"][0]["icb_code"] == "9530"
+    assert result["rows"][0]["icb_name"] == "Software"
+
+
+def test_market_summary_keeps_board_scope_and_nullable_gross_proprietary_fields() -> None:
+    adapter, _auth, market, _data = make_adapter()
+    market.market_summary = market_summary()
+
+    result = adapter.get_market_summary("board", "HOSE", trading_date="2026-07-24")
+
+    assert result["status"] == "ok"
+    row = result["rows"][0]
+    assert row["index_code"] is None
+    assert row["exchange"] == "HOSE"
+    assert row["proprietary_buy_volume"] == 20
+    assert row["proprietary_sell_volume"] == 7
+    assert row["proprietary_net_volume"] == 13
+    assert row["proprietary_net_value"] == 130
+    assert market.calls[-1] == ("board_summary_historical", "HOSE", "2026/07/24")
+
+
+def test_market_summary_does_not_derive_net_when_one_gross_side_is_missing() -> None:
+    adapter, _auth, market, _data = make_adapter()
+    market.market_summary = market_summary(total_prop_sell=None, total_prop_sell_value=None)
+
+    result = adapter.get_market_summary("index", "VN30")
+
+    row = result["rows"][0]
+    assert row["proprietary_sell_volume"] is None
+    assert row["proprietary_net_volume"] is None
+    assert row["proprietary_sell_value"] is None
+    assert row["proprietary_net_value"] is None
 
 
 def candle(**overrides: Any) -> SimpleNamespace:

@@ -1,7 +1,9 @@
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from threading import Lock
+from datetime import datetime
 from time import sleep
+from zoneinfo import ZoneInfo
 
 from api.v1.schemas.stocks import VietnamVn30ForeignFlowResponse
 from src.services.vietnam_foreign_flow_service import (
@@ -83,6 +85,57 @@ class FakeSymbolService:
         return result
 
 
+class FakeFlowDataService:
+    def __init__(
+        self,
+        rows=None,
+        status="ok",
+        capability_status=None,
+        failure_class=None,
+    ):
+        self.rows = rows or []
+        self.status = status
+        self.capability_status = capability_status
+        self.failure_class = failure_class
+        self.calls = []
+
+    def foreign_history_by_index(self, index_code, **kwargs):
+        self.calls.append((index_code, kwargs))
+        return {
+            "status": self.status,
+            "capability_status": self.capability_status,
+            "failure_class": self.failure_class,
+            "rows": deepcopy(self.rows),
+            "diagnostics": {
+                "provider_operation_count": 1,
+                "capability_cache_status": "stored"
+                if self.capability_status == "unsupported"
+                else "miss",
+            },
+        }
+
+
+def _direct_row(day, *, buy_value=1_000, sell_value=400, buy_volume=100, sell_volume=40):
+    return {
+        "trading_date": day,
+        "foreign_buy_value": buy_value,
+        "foreign_sell_value": sell_value,
+        "foreign_net_value": buy_value - sell_value,
+        "foreign_buy_volume": buy_volume,
+        "foreign_sell_volume": sell_volume,
+        "foreign_net_volume": buy_volume - sell_volume,
+        "field_presence": {
+            "foreign_buy_value": "FIELD_PRESENT_NONZERO",
+            "foreign_sell_value": "FIELD_PRESENT_NONZERO",
+            "foreign_buy_volume": "FIELD_PRESENT_NONZERO",
+            "foreign_sell_volume": "FIELD_PRESENT_NONZERO",
+        },
+    }
+
+
+NOW = lambda: datetime(2026, 7, 21, 10, tzinfo=ZoneInfo("Asia/Ho_Chi_Minh"))
+
+
 def setup_function():
     reset_vietnam_foreign_flow_state()
 
@@ -105,7 +158,12 @@ def test_vn30_aggregate_uses_common_date_axis_and_preserves_partial_coverage():
     service = VietnamForeignFlowVn30Service(
         FakeSymbolService(histories),
         FakeMarketService(),
+        flow_data_service=FakeFlowDataService([
+            _direct_row("2026-07-17", buy_value=900, sell_value=300),
+            _direct_row("2026-07-20", buy_value=1_000, sell_value=400),
+        ]),
         max_concurrency=2,
+        now_fn=NOW,
     )
 
     payload = service.get_vn30_aggregate(top_n=2)
@@ -113,20 +171,22 @@ def test_vn30_aggregate_uses_common_date_axis_and_preserves_partial_coverage():
 
     assert validated.data_state == "partial"
     assert payload["aggregate_session_dates"] == ["2026-07-17", "2026-07-20"]
-    assert payload["latest"]["foreign_net_value"] == 50
-    assert payload["latest"]["value_coverage_count"] == 1
-    assert payload["latest"]["value_breadth"]["net_buy_count"] == 1
-    assert payload["latest"]["volume_breadth"]["net_sell_count"] == 1
-    assert payload["latest"]["missing_components"] == 2
-    assert payload["windows"]["5"]["foreign_net_value"] == 110
-    assert payload["windows"]["5"]["value_component_sessions"] == 3
+    assert payload["latest"]["foreign_net_value"] == 600
+    assert payload["latest"]["constituent_coverage"] == "not_applicable"
+    assert payload["decomposition"]["latest"]["value_coverage_count"] == 1
+    assert payload["decomposition"]["latest"]["value_breadth"]["net_buy_count"] == 1
+    assert payload["decomposition"]["latest"]["volume_breadth"]["net_sell_count"] == 1
+    assert payload["decomposition"]["latest"]["missing_components"] == 2
+    assert payload["windows"]["5"]["foreign_net_value"] == 1_200
+    assert payload["decomposition"]["windows"]["5"]["value_component_sessions"] == 3
     hpg = next(row for row in payload["components"] if row["ticker"] == "HPG")
     assert hpg["aggregate_latest_date"] == "2026-07-20"
     assert hpg["latest_trading_date"] == "2026-07-17"
     assert hpg["foreign_net_value"] is None
     assert hpg["foreign_net_value_5d"] == 0
     assert payload["rankings"]["latest_net_value"]["top_buy"][0]["ticker"] == "FPT"
-    assert payload["source_endpoint"] == "DailyStockPrice"
+    assert payload["source_endpoint"] == "securitiesSummary?index="
+    assert payload["canonical_aggregation_mode"] == "DIRECT_INDEX_CANONICAL"
 
 
 def test_vn30_aggregate_cache_and_force_refresh_are_deterministic():
@@ -136,7 +196,12 @@ def test_vn30_aggregate_cache_and_force_refresh_are_deterministic():
     }
     symbol_service = FakeSymbolService(histories)
     market_service = FakeMarketService(["fpt", "FPT", "HPG"])
-    service = VietnamForeignFlowVn30Service(symbol_service, market_service)
+    service = VietnamForeignFlowVn30Service(
+        symbol_service,
+        market_service,
+        flow_data_service=FakeFlowDataService([_direct_row("2026-07-20")]),
+        now_fn=NOW,
+    )
 
     first = service.get_vn30_aggregate(top_n=1)
     second = service.get_vn30_aggregate(top_n=1)
@@ -156,6 +221,8 @@ def test_vn30_membership_unavailable_does_not_call_symbol_history():
     payload = VietnamForeignFlowVn30Service(
         symbol_service,
         FakeMarketService(available=False),
+        flow_data_service=FakeFlowDataService(status="unavailable"),
+        now_fn=NOW,
     ).get_vn30_aggregate()
 
     assert payload["data_state"] == "unavailable"
@@ -166,13 +233,36 @@ def test_vn30_membership_unavailable_does_not_call_symbol_history():
     assert symbol_service.calls == []
 
 
+def test_vn30_provider_initialization_failure_is_typed_unavailable():
+    class FailingMarketService:
+        def build_index_components(self, *args, **kwargs):
+            raise ValueError("provider is not configured")
+
+    payload = VietnamForeignFlowVn30Service(
+        FakeSymbolService({}),
+        FailingMarketService(),
+        flow_data_service=FakeFlowDataService(status="unavailable"),
+        now_fn=NOW,
+    ).get_vn30_aggregate()
+
+    assert payload["data_state"] == "unavailable"
+    assert payload["canonical"]["status"] == "unavailable"
+    assert payload["membership"]["failure_class"] == "provider_not_configured"
+
+
 def test_vn30_concurrent_requests_coalesce_aggregate_build():
     histories = {
         ticker: _history(ticker, [_row("2026-07-20", buy_value=10, sell_value=5, buy_volume=2, sell_volume=1)])
         for ticker in ("FPT", "HPG")
     }
     symbol_service = FakeSymbolService(histories, delay=0.03)
-    service = VietnamForeignFlowVn30Service(symbol_service, FakeMarketService(["FPT", "HPG"]), max_concurrency=1)
+    service = VietnamForeignFlowVn30Service(
+        symbol_service,
+        FakeMarketService(["FPT", "HPG"]),
+        flow_data_service=FakeFlowDataService([_direct_row("2026-07-20")]),
+        max_concurrency=1,
+        now_fn=NOW,
+    )
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         results = list(executor.map(lambda _: service.get_vn30_aggregate(top_n=1), range(2)))
@@ -194,7 +284,9 @@ def test_vn30_component_history_concurrency_is_capped_at_four():
     payload = VietnamForeignFlowVn30Service(
         symbol_service,
         FakeMarketService(tickers),
+        flow_data_service=FakeFlowDataService([_direct_row("2026-07-20")]),
         max_concurrency=99,
+        now_fn=NOW,
     ).get_vn30_aggregate()
 
     assert payload["membership"]["component_count"] == 6
@@ -211,7 +303,12 @@ def test_vn30_rejects_mismatched_membership_without_history_calls():
             }
 
     symbol_service = FakeSymbolService({})
-    payload = VietnamForeignFlowVn30Service(symbol_service, MismatchedMarketService()).get_vn30_aggregate()
+    payload = VietnamForeignFlowVn30Service(
+        symbol_service,
+        MismatchedMarketService(),
+        flow_data_service=FakeFlowDataService(status="unavailable"),
+        now_fn=NOW,
+    ).get_vn30_aggregate()
 
     assert payload["membership"]["failure_class"] == "membership_mismatch"
     assert payload["membership"]["member_tickers"] == []
@@ -226,6 +323,8 @@ def test_vn30_rejects_unbounded_membership_without_history_calls():
     payload = VietnamForeignFlowVn30Service(
         symbol_service,
         FakeMarketService(tickers),
+        flow_data_service=FakeFlowDataService(status="unavailable"),
+        now_fn=NOW,
     ).get_vn30_aggregate()
 
     assert payload["membership"]["failure_class"] == "membership_count_exceeded"
@@ -233,3 +332,300 @@ def test_vn30_rejects_unbounded_membership_without_history_calls():
     assert payload["membership"]["component_count"] == 0
     assert payload["components"] == []
     assert symbol_service.calls == []
+
+
+def test_direct_index_uses_latest_completed_session_and_excludes_current_session():
+    histories = {
+        "FPT": _history(
+            "FPT",
+            [_row("2026-07-23", buy_value=30, sell_value=10, buy_volume=3, sell_volume=1)],
+        )
+    }
+    service = VietnamForeignFlowVn30Service(
+        FakeSymbolService(histories),
+        FakeMarketService(["FPT"]),
+        flow_data_service=FakeFlowDataService([
+            _direct_row("2026-07-22", buy_value=500, sell_value=200),
+            _direct_row("2026-07-23", buy_value=700, sell_value=250),
+            _direct_row("2026-07-24", buy_value=900, sell_value=300),
+        ]),
+        now_fn=lambda: datetime(2026, 7, 24, 10, tzinfo=ZoneInfo("Asia/Ho_Chi_Minh")),
+    )
+
+    payload = service.get_vn30_aggregate()
+
+    assert payload["canonical_trading_date"] == "2026-07-23"
+    assert payload["latest"]["foreign_net_value"] == 450
+    diagnostics = payload["canonical"]["diagnostics"]
+    assert diagnostics["latest_completed_provider_session"] == "2026-07-23"
+    assert diagnostics["session_lag"] == 0
+    assert diagnostics["source_freshness"] == "latest_completed_session"
+    assert diagnostics["excluded_dates"] == ["2026-07-24"]
+    assert payload["latest"]["constituent_coverage"] == "not_applicable"
+    assert payload["decomposition_date"] == "2026-07-23"
+
+
+def test_all_explicit_zero_component_session_is_preserved_but_suspicious():
+    zero_presence = {
+        name: "FIELD_PRESENT_EXPLICIT_ZERO"
+        for name in (
+            "foreign_buy_value",
+            "foreign_sell_value",
+            "foreign_buy_volume",
+            "foreign_sell_volume",
+        )
+    }
+    zero = _row(
+        "2026-07-20",
+        buy_value=0,
+        sell_value=0,
+        buy_volume=0,
+        sell_volume=0,
+    )
+    zero["field_presence"] = zero_presence
+    histories = {
+        ticker: _history(ticker, [deepcopy(zero)])
+        for ticker in ("FPT", "HPG")
+    }
+    service = VietnamForeignFlowVn30Service(
+        FakeSymbolService(histories),
+        FakeMarketService(["FPT", "HPG"]),
+        flow_data_service=FakeFlowDataService([_direct_row("2026-07-20")]),
+        now_fn=NOW,
+    )
+
+    payload = service.get_vn30_aggregate()
+    day = payload["decomposition"]["latest"]
+
+    assert day["foreign_net_value"] == 0
+    assert day["all_constituents_zero"] is True
+    assert day["explicit_zero_component_count"] == 2
+    assert day["suspicious_zero_session"] is True
+    assert day["anomaly"] == "all_constituents_explicit_zero"
+    assert day["anomaly_status"] == "provider_backed_suspect"
+    assert payload["decomposition"]["windows"]["5"]["complete"] is False
+
+
+def test_direct_unsupported_keeps_ready_decomposition_partial_and_usable():
+    histories = {
+        ticker: _history(
+            ticker,
+            [
+                _row(
+                    "2026-07-23",
+                    buy_value=100,
+                    sell_value=40,
+                    buy_volume=10,
+                    sell_volume=4,
+                )
+            ],
+        )
+        for ticker in ("FPT", "HPG")
+    }
+    service = VietnamForeignFlowVn30Service(
+        FakeSymbolService(histories),
+        FakeMarketService(["FPT", "HPG"]),
+        flow_data_service=FakeFlowDataService(
+            status="unavailable",
+            capability_status="unsupported",
+            failure_class="DIRECT_INDEX_FOREIGN_FIELDS_UNSUPPORTED",
+        ),
+        now_fn=lambda: datetime(
+            2026, 7, 24, 10, tzinfo=ZoneInfo("Asia/Ho_Chi_Minh")
+        ),
+    )
+
+    payload = service.get_vn30_aggregate()
+
+    assert payload["status"] == "partial"
+    assert payload["data_state"] == "partial"
+    assert payload["usable"] is True
+    assert (
+        payload["capability_status"]
+        == "decomposition_ready_canonical_unsupported"
+    )
+    assert payload["canonical"]["status"] == "unavailable"
+    assert payload["canonical"]["capability_status"] == "unsupported"
+    assert (
+        payload["canonical"]["failure_class"]
+        == "DIRECT_INDEX_FOREIGN_FIELDS_UNSUPPORTED"
+    )
+    assert payload["canonical"]["constituent_coverage"] == "not_applicable"
+    assert payload["decomposition"]["status"] == "ready"
+    assert payload["decomposition"]["usable"] is True
+    assert payload["latest"] == payload["decomposition"]["latest"]
+    assert payload["series"] == payload["decomposition"]["series"]
+    assert payload["primary_data_mode"] == "current_membership_decomposition"
+    assert payload["aggregation_basis"] == "current_vn30_membership"
+    assert payload["source_endpoint"] == "daily_stock_price"
+    assert payload["decomposition_date"] == "2026-07-23"
+    assert payload["decomposition"]["historical_constituent_correct"] is False
+    assert payload["decomposition"]["latest"]["value_coverage_count"] == 2
+    assert payload["source_coverage"] == [
+        {
+            "source": "SSI V3 Direct VN30 Foreign Aggregate",
+            "capability_status": "unsupported",
+            "usable": False,
+            "failure_class": "DIRECT_INDEX_FOREIGN_FIELDS_UNSUPPORTED",
+        },
+        {
+            "source": "SSI V3 Symbol Foreign Data",
+            "capability_status": "available",
+            "usable": True,
+        },
+        {
+            "source": "SSI VN30 Index Components",
+            "capability_status": "available",
+            "usable": True,
+        },
+    ]
+
+
+def test_direct_unsupported_and_decomposition_unavailable_is_not_usable():
+    histories = {
+        "FPT": _history("FPT", [], state="unavailable", freshness="unavailable")
+    }
+    payload = VietnamForeignFlowVn30Service(
+        FakeSymbolService(histories),
+        FakeMarketService(["FPT"]),
+        flow_data_service=FakeFlowDataService(
+            status="unavailable",
+            capability_status="unsupported",
+            failure_class="DIRECT_INDEX_FOREIGN_FIELDS_UNSUPPORTED",
+        ),
+        now_fn=NOW,
+    ).get_vn30_aggregate()
+
+    assert payload["status"] == "unavailable"
+    assert payload["data_state"] == "unavailable"
+    assert payload["usable"] is False
+    assert (
+        payload["capability_status"]
+        == "canonical_unsupported_decomposition_unavailable"
+    )
+
+
+def test_partial_decomposition_with_one_valid_session_remains_usable():
+    histories = {
+        "FPT": _history(
+            "FPT",
+            [
+                _row(
+                    "2026-07-23",
+                    buy_value=100,
+                    sell_value=40,
+                    buy_volume=10,
+                    sell_volume=4,
+                )
+            ],
+        ),
+        "HPG": _history(
+            "HPG", [], state="unavailable", freshness="unavailable"
+        ),
+    }
+    payload = VietnamForeignFlowVn30Service(
+        FakeSymbolService(histories),
+        FakeMarketService(["FPT", "HPG"]),
+        flow_data_service=FakeFlowDataService(
+            status="unavailable",
+            capability_status="unsupported",
+            failure_class="DIRECT_INDEX_FOREIGN_FIELDS_UNSUPPORTED",
+        ),
+        now_fn=lambda: datetime(
+            2026, 7, 24, 10, tzinfo=ZoneInfo("Asia/Ho_Chi_Minh")
+        ),
+    ).get_vn30_aggregate()
+
+    assert payload["decomposition"]["status"] == "partial"
+    assert payload["decomposition"]["usable"] is True
+    assert payload["status"] == "partial"
+    assert payload["usable"] is True
+
+
+def test_provider_zero_session_stays_valid_and_sets_window_anomaly_metadata():
+    days = [
+        "2026-06-26",
+        "2026-06-29",
+        "2026-06-30",
+        "2026-07-01",
+        "2026-07-02",
+    ]
+    zero_presence = {
+        name: "FIELD_PRESENT_EXPLICIT_ZERO"
+        for name in (
+            "foreign_buy_value",
+            "foreign_sell_value",
+            "foreign_buy_volume",
+            "foreign_sell_volume",
+        )
+    }
+    rows = []
+    for day in days:
+        row = _row(
+            day,
+            buy_value=0 if day in {"2026-06-29", "2026-06-30"} else 10,
+            sell_value=0 if day in {"2026-06-29", "2026-06-30"} else 5,
+            buy_volume=0 if day in {"2026-06-29", "2026-06-30"} else 2,
+            sell_volume=0 if day in {"2026-06-29", "2026-06-30"} else 1,
+        )
+        if day in {"2026-06-29", "2026-06-30"}:
+            row["field_presence"] = zero_presence
+        rows.append(row)
+    histories = {
+        ticker: _history(ticker, deepcopy(rows)) for ticker in ("FPT", "HPG")
+    }
+    payload = VietnamForeignFlowVn30Service(
+        FakeSymbolService(histories),
+        FakeMarketService(["FPT", "HPG"]),
+        flow_data_service=FakeFlowDataService(
+            status="unavailable",
+            capability_status="unsupported",
+            failure_class="DIRECT_INDEX_FOREIGN_FIELDS_UNSUPPORTED",
+        ),
+        now_fn=lambda: datetime(
+            2026, 7, 3, 10, tzinfo=ZoneInfo("Asia/Ho_Chi_Minh")
+        ),
+    ).get_vn30_aggregate()
+
+    by_date = {
+        row["trading_date"]: row for row in payload["decomposition"]["series"]
+    }
+    for day in ("2026-06-29", "2026-06-30"):
+        assert by_date[day]["foreign_net_value"] == 0
+        assert by_date[day]["valid_session"] is True
+        assert by_date[day]["anomaly_code"] == "all_constituents_explicit_zero"
+        assert by_date[day]["anomaly_status"] == "provider_backed_suspect"
+        assert by_date[day]["explicit_zero_component_count"] == 2
+        assert by_date[day]["missing_field_component_count"] == 0
+    window = payload["decomposition"]["windows"]["5"]
+    assert window["complete"] is True
+    assert window["valid_sessions"] == 5
+    assert window["contains_provider_anomaly"] is True
+    assert window["anomaly_sessions"] == ["2026-06-29", "2026-06-30"]
+    assert window["anomaly_count"] == 2
+
+
+def test_component_missing_canonical_date_is_unavailable_not_backfilled():
+    histories = {
+        "FPT": _history(
+            "FPT",
+            [_row("2026-07-22", buy_value=30, sell_value=10, buy_volume=3, sell_volume=1)],
+        ),
+        "HPG": _history(
+            "HPG",
+            [_row("2026-07-23", buy_value=20, sell_value=5, buy_volume=2, sell_volume=1)],
+        ),
+    }
+    service = VietnamForeignFlowVn30Service(
+        FakeSymbolService(histories),
+        FakeMarketService(["FPT", "HPG"]),
+        flow_data_service=FakeFlowDataService([_direct_row("2026-07-23")]),
+        now_fn=lambda: datetime(2026, 7, 24, 10, tzinfo=ZoneInfo("Asia/Ho_Chi_Minh")),
+    )
+
+    payload = service.get_vn30_aggregate()
+    fpt = next(row for row in payload["components"] if row["ticker"] == "FPT")
+
+    assert fpt["data_state"] == "unavailable"
+    assert fpt["foreign_net_value"] is None
+    assert payload["decomposition"]["latest"]["value_coverage_count"] == 1

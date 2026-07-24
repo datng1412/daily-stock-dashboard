@@ -135,6 +135,18 @@ class VietnamDailyStockPrice(BaseModel):
     quality_status: Optional[str] = None
     reason: Optional[str] = None
     date: Optional[str] = None
+    data_date: Optional[str] = None
+    requested_date: Optional[str] = None
+    provider_session_date: Optional[str] = None
+    freshness_status: Optional[str] = None
+    is_current_session: Optional[bool] = None
+    is_provisional: Optional[bool] = None
+    is_completed_session: Optional[bool] = None
+    is_stale: Optional[bool] = None
+    session_lag: Optional[int] = Field(default=None, ge=0)
+    provider_version: Optional[str] = None
+    endpoint: Optional[str] = None
+    current_market_session: Optional[str] = None
     date_match: Optional[str] = None
     staleness_reason: Optional[str] = None
     reference_price: Optional[float] = None
@@ -935,6 +947,7 @@ class VietnamRealtimeQuote(BaseModel):
     error: Optional[str] = None
     error_detail: Optional[str] = None
     raw_error: Optional[str] = None
+    event_market_session: Optional[str] = None
 
 
 class VietnamRealtimeResponse(BaseModel):
@@ -962,6 +975,13 @@ class VietnamRealtimeResponse(BaseModel):
     last_event_at: Optional[str] = None
     event_age_seconds: Optional[int] = Field(default=None, ge=0)
     generation: Optional[int] = Field(default=None, ge=0)
+    transport_health: Optional[str] = None
+    parser_health: Optional[str] = None
+    symbol_data_health: Optional[str] = None
+    response_market_session: Optional[str] = None
+    current_market_session: Optional[str] = None
+    last_valid_trade_at: Optional[str] = None
+    dropped_invalid_row_count: Optional[int] = Field(default=None, ge=0)
 
 
 class VietnamRealtimeTrade(BaseModel):
@@ -986,6 +1006,7 @@ class VietnamRealtimeTrade(BaseModel):
     id: Optional[str] = None
     raw_type: Optional[str] = None
     source: str = "SSI trade-tape contract"
+    event_market_session: Optional[str] = None
 
 
 class VietnamRealtimeTradesResponse(BaseModel):
@@ -1009,6 +1030,13 @@ class VietnamRealtimeTradesResponse(BaseModel):
     last_event_at: Optional[str] = None
     event_age_seconds: Optional[int] = Field(default=None, ge=0)
     generation: Optional[int] = Field(default=None, ge=0)
+    transport_health: Optional[str] = None
+    parser_health: Optional[str] = None
+    symbol_data_health: Optional[str] = None
+    response_market_session: Optional[str] = None
+    current_market_session: Optional[str] = None
+    last_valid_trade_at: Optional[str] = None
+    dropped_invalid_row_count: Optional[int] = Field(default=None, ge=0)
 
 
 class VietnamForeignFlowRow(BaseModel):
@@ -1290,18 +1318,34 @@ class VietnamVn30ForeignFlowDaily(BaseModel):
     foreign_buy_value: Optional[int] = None
     foreign_sell_value: Optional[int] = None
     foreign_net_value: Optional[int] = None
-    volume_coverage_count: int = Field(ge=0, le=30)
-    volume_coverage_ratio: float = Field(ge=0, le=1)
-    value_coverage_count: int = Field(ge=0, le=30)
-    value_coverage_ratio: float = Field(ge=0, le=1)
-    volume_coverage: VietnamVn30ForeignFlowCoverage
-    value_coverage: VietnamVn30ForeignFlowCoverage
-    volume_breadth: VietnamVn30ForeignFlowBreadth
-    value_breadth: VietnamVn30ForeignFlowBreadth
-    positive_components: int = Field(ge=0, le=30)
-    negative_components: int = Field(ge=0, le=30)
-    zero_components: int = Field(ge=0, le=30)
-    missing_components: int = Field(ge=0, le=30)
+    volume_coverage_count: Optional[int] = Field(None, ge=0, le=30)
+    volume_coverage_ratio: Optional[float] = Field(None, ge=0, le=1)
+    value_coverage_count: Optional[int] = Field(None, ge=0, le=30)
+    value_coverage_ratio: Optional[float] = Field(None, ge=0, le=1)
+    volume_coverage: Optional[VietnamVn30ForeignFlowCoverage] = None
+    value_coverage: Optional[VietnamVn30ForeignFlowCoverage] = None
+    volume_breadth: Optional[VietnamVn30ForeignFlowBreadth] = None
+    value_breadth: Optional[VietnamVn30ForeignFlowBreadth] = None
+    positive_components: Optional[int] = Field(None, ge=0, le=30)
+    negative_components: Optional[int] = Field(None, ge=0, le=30)
+    zero_components: Optional[int] = Field(None, ge=0, le=30)
+    missing_components: Optional[int] = Field(None, ge=0, le=30)
+    coverage_mode: Optional[str] = None
+    constituent_coverage: Optional[str] = None
+    valid_session: Optional[bool] = None
+    suspicious_zero_session: bool = False
+    anomaly: Optional[str] = None
+    anomaly_code: Optional[str] = None
+    anomaly_status: Optional[str] = None
+    explicit_zero_component_count: int = Field(0, ge=0, le=30)
+    missing_field_component_count: int = Field(0, ge=0, le=30)
+    missing_field_count: int = 0
+    explicit_zero_field_count: int = 0
+    source: Optional[str] = None
+    provider_version: Optional[str] = None
+    endpoint: Optional[str] = None
+    freshness: Optional[str] = None
+    finality: Optional[str] = None
     data_state: Literal["ready", "partial", "stale", "unavailable"]
     state: Literal["ready", "partial", "stale", "unavailable"]
 
@@ -1310,6 +1354,13 @@ class VietnamVn30ForeignFlowWindow(BaseModel):
     requested_sessions: Literal[5, 20]
     covered_sessions: int = Field(ge=0, le=20)
     complete: bool
+    valid_sessions: Optional[int] = Field(None, ge=0, le=20)
+    partial_sessions: Optional[int] = Field(None, ge=0, le=20)
+    suspicious_sessions: Optional[int] = Field(None, ge=0, le=20)
+    contains_provider_anomaly: bool = False
+    anomaly_sessions: List[str] = Field(default_factory=list, max_length=20)
+    anomaly_count: int = Field(0, ge=0, le=20)
+    missing_sessions: Optional[int] = Field(None, ge=0, le=20)
     start_date: Optional[str] = None
     end_date: Optional[str] = None
     foreign_buy_volume: Optional[int] = None
@@ -1318,22 +1369,25 @@ class VietnamVn30ForeignFlowWindow(BaseModel):
     foreign_buy_value: Optional[int] = None
     foreign_sell_value: Optional[int] = None
     foreign_net_value: Optional[int] = None
-    volume_component_sessions: int = Field(ge=0, le=600)
-    volume_coverage_ratio: float = Field(ge=0, le=1)
-    volume_complete: bool
-    value_component_sessions: int = Field(ge=0, le=600)
-    value_coverage_ratio: float = Field(ge=0, le=1)
-    value_complete: bool
-    positive_component_sessions: int = Field(ge=0, le=600)
-    negative_component_sessions: int = Field(ge=0, le=600)
-    zero_component_sessions: int = Field(ge=0, le=600)
-    missing_component_sessions: int = Field(ge=0, le=600)
+    volume_component_sessions: Optional[int] = Field(None, ge=0, le=600)
+    volume_coverage_ratio: Optional[float] = Field(None, ge=0, le=1)
+    volume_complete: Optional[bool] = None
+    value_component_sessions: Optional[int] = Field(None, ge=0, le=600)
+    value_coverage_ratio: Optional[float] = Field(None, ge=0, le=1)
+    value_complete: Optional[bool] = None
+    positive_component_sessions: Optional[int] = Field(None, ge=0, le=600)
+    negative_component_sessions: Optional[int] = Field(None, ge=0, le=600)
+    zero_component_sessions: Optional[int] = Field(None, ge=0, le=600)
+    missing_component_sessions: Optional[int] = Field(None, ge=0, le=600)
+    coverage_mode: Optional[str] = None
+    constituent_coverage: Optional[str] = None
 
 
 class VietnamVn30ForeignFlowComponent(BaseModel):
     ticker: str
     data_state: Literal["ready", "stale", "empty", "unavailable"]
     freshness: Literal["fresh", "stale", "empty", "unavailable"]
+    source_freshness: Optional[str] = None
     failure_class: Optional[str] = None
     stale_reason: Optional[str] = None
     latest_trading_date: Optional[str] = None
@@ -1409,21 +1463,39 @@ class VietnamVn30ForeignFlowTiming(BaseModel):
     component_histories_ms: int = Field(ge=0)
     aggregate_build_ms: int = Field(ge=0)
     total_ms: int = Field(ge=0)
+    direct_index_ms: int = Field(0, ge=0)
 
 
 class VietnamVn30ForeignFlowResponse(BaseModel):
-    """Daily aggregate over the current SSI-derived VN30 membership."""
+    """Current-membership decomposition with optional direct SSI VN30 totals."""
 
     scope: Literal["vn30"] = "vn30"
     index_code: Literal["VN30"] = "VN30"
     source: Literal["ssi_fastconnect"] = "ssi_fastconnect"
-    source_endpoint: Literal["DailyStockPrice"] = "DailyStockPrice"
+    source_endpoint: Literal["securitiesSummary?index=", "daily_stock_price"]
     membership_source: Literal["SSI IndexComponents"] = "SSI IndexComponents"
     volume_unit: Literal["shares"] = "shares"
     value_unit: Literal["VND"] = "VND"
     finality: Literal["daily_available"] = "daily_available"
-    aggregation_basis: Literal["current_vn30_membership"] = "current_vn30_membership"
+    aggregation_basis: Literal[
+        "direct_index_provider_aggregate", "current_vn30_membership"
+    ]
     historical_constituent_correct: Literal[False] = False
+    status: Literal["ready", "partial", "stale", "unavailable"]
+    usable: bool
+    capability_status: str
+    primary_data_mode: Literal[
+        "direct_index_canonical", "current_membership_decomposition"
+    ]
+    source_coverage: List[Dict[str, Any]] = Field(default_factory=list)
+    canonical_source: str
+    canonical_provider_version: Literal["v3"] = "v3"
+    canonical_endpoint: str
+    canonical_aggregation_mode: Literal["DIRECT_INDEX_CANONICAL"]
+    canonical_trading_date: Optional[str] = None
+    decomposition_aggregation_mode: Literal["CURRENT_MEMBERSHIP_DECOMPOSITION"]
+    decomposition_universe: Literal["current_vn30_membership"]
+    decomposition_date: Optional[str] = None
     data_state: Literal["ready", "partial", "stale", "unavailable"]
     membership: VietnamVn30ForeignFlowMembership
     aggregate_session_dates: List[str] = Field(default_factory=list, max_length=20)
@@ -1433,6 +1505,9 @@ class VietnamVn30ForeignFlowResponse(BaseModel):
     components: List[VietnamVn30ForeignFlowComponent] = Field(default_factory=list, max_length=30)
     component_counts: VietnamVn30ForeignFlowComponentCounts
     rankings: VietnamVn30ForeignFlowRankings
+    canonical: Dict[str, Any]
+    decomposition: Dict[str, Any]
+    cache_key_dimensions: Dict[str, Any] = Field(default_factory=dict)
     cache: VietnamVn30ForeignFlowCache
     timing: VietnamVn30ForeignFlowTiming
     fetched_at: str
@@ -1644,3 +1719,80 @@ class VietnamObservabilityResponse(BaseModel):
     ssi_trade_tape: VietnamProviderRuntimeStatus = Field(default_factory=VietnamProviderRuntimeStatus)
     foreign_flow: VietnamForeignFlowObservability = Field(default_factory=VietnamForeignFlowObservability)
     streaming: VietnamStreamingObservability = Field(default_factory=VietnamStreamingObservability)
+
+
+class VietnamForeignIndexFlowResponse(BaseModel):
+    """Provider-neutral historical foreign-flow aggregate for one SSI index."""
+
+    status: Literal["ok", "partial", "unavailable"]
+    capability_status: Optional[
+        Literal["available", "unsupported", "unavailable", "inconclusive"]
+    ] = None
+    failure_class: Optional[str] = None
+    scope: Literal["index"] = "index"
+    identifier: str
+    requested_from_date: Optional[str] = None
+    requested_to_date: Optional[str] = None
+    rows: List[Dict[str, Any]] = Field(default_factory=list)
+    source: str
+    provider_version: str
+    endpoint: str
+    usable_session_count: Optional[int] = Field(None, ge=0)
+    diagnostics: Dict[str, Any] = Field(default_factory=dict)
+
+
+class VietnamCurrentForeignFlowResponse(BaseModel):
+    """Best available current-session foreign flow without REST/stream blending."""
+
+    status: Literal["ok", "partial", "unavailable"]
+    symbol: str
+    trading_date: Optional[str] = None
+    freshness_status: str
+    is_current_session: bool = False
+    is_provisional: bool = False
+    current: Optional[Dict[str, Any]] = None
+    latest_completed_comparison: Optional[Dict[str, Any]] = None
+    stream_status: str
+    stream_reason: str
+    source: str
+    provider_version: str
+    endpoint: str
+
+
+class VietnamProprietaryFlowResponse(BaseModel):
+    """SSI V3 proprietary summary for a supported board or index scope."""
+
+    status: Literal["ok", "partial", "unavailable"]
+    scope: Literal["board", "index"]
+    identifier: str
+    rows: List[Dict[str, Any]] = Field(default_factory=list)
+    source: str
+    provider_version: str
+    endpoint: str
+    unsupported_scopes: List[str] = Field(default_factory=list)
+    diagnostics: Dict[str, Any] = Field(default_factory=dict)
+
+
+class VietnamIndustryFlowRequest(BaseModel):
+    """Bounded explicit-universe ICB industry history request."""
+
+    symbols: Optional[List[str]] = None
+    index_code: Optional[str] = None
+    from_date: str
+    to_date: str
+
+
+class VietnamIndustryFlowResponse(BaseModel):
+    """Provider-backed ICB industry foreign flow and matched turnover."""
+
+    status: Literal["ok", "partial", "unavailable"]
+    universe: str
+    requested_symbol_count: int = Field(ge=0)
+    classified_symbol_count: int = Field(ge=0)
+    unclassified_symbol_count: int = Field(ge=0)
+    rows: List[Dict[str, Any]] = Field(default_factory=list)
+    current_session_status: str
+    proprietary_industry_status: Literal["unsupported"] = "unsupported"
+    source: str
+    provider_version: str
+    diagnostics: Dict[str, Any] = Field(default_factory=dict)

@@ -172,13 +172,25 @@ def _vn30_payload():
         "scope": "vn30",
         "index_code": "VN30",
         "source": "ssi_fastconnect",
-        "source_endpoint": "DailyStockPrice",
+        "source_endpoint": "securitiesSummary?index=",
         "membership_source": "SSI IndexComponents",
         "volume_unit": "shares",
         "value_unit": "VND",
         "finality": "daily_available",
-        "aggregation_basis": "current_vn30_membership",
+        "aggregation_basis": "direct_index_provider_aggregate",
         "historical_constituent_correct": False,
+        "status": "unavailable",
+        "usable": False,
+        "capability_status": "unavailable",
+        "primary_data_mode": "direct_index_canonical",
+        "canonical_source": "ssi_fastconnect",
+        "canonical_provider_version": "v3",
+        "canonical_endpoint": "securitiesSummary?index=",
+        "canonical_aggregation_mode": "DIRECT_INDEX_CANONICAL",
+        "canonical_trading_date": None,
+        "decomposition_aggregation_mode": "CURRENT_MEMBERSHIP_DECOMPOSITION",
+        "decomposition_universe": "current_vn30_membership",
+        "decomposition_date": None,
         "data_state": "unavailable",
         "membership": {
             "status": "unavailable",
@@ -203,6 +215,17 @@ def _vn30_payload():
             "latest_net_value", "latest_net_volume", "net_value_5d",
             "net_volume_5d", "net_value_20d", "net_volume_20d",
         )},
+        "canonical": {
+            "status": "unavailable",
+            "latest": None,
+            "windows": {"5": window, "20": {**window, "requested_sessions": 20}},
+            "series": [],
+            "diagnostics": {},
+        },
+        "decomposition": {
+            "status": "unavailable",
+            "mode": "CURRENT_MEMBERSHIP_DECOMPOSITION",
+        },
         "cache": {"status": "miss", "coalesced": False, "age_seconds": 0, "ttl_seconds": 60, "negative": True},
         "timing": {"membership_ms": 1, "component_histories_ms": 0, "aggregate_build_ms": 0, "total_ms": 1},
         "fetched_at": "2026-07-20T01:00:00+00:00",
@@ -342,7 +365,11 @@ def test_vn30_endpoint_exposes_typed_unavailable_state(monkeypatch):
 
     assert response.status_code == 200
     assert response.json()["membership"]["failure_class"] == "index_components_unavailable"
-    assert calls == [{"top_n": 7, "force_refresh": True}]
+    assert calls == [{
+        "top_n": 7,
+        "force_refresh": True,
+        "force_capability_refresh": False,
+    }]
 
 
 def test_openapi_registers_vn30_foreign_flow_contract():

@@ -28,10 +28,12 @@ V3_PRODUCT_CAPABILITIES = frozenset(
         "daily_security_summary",
         "foreign_flow",
         "foreign_flow_history",
+        "foreign_flow_by_index",
         "foreign_flow_analytics_input",
         "vn30_foreign_flow_input",
         "index_list",
         "index_summary",
+        "market_summary",
         "daily_index_series",
         "index_membership_production",
     }
@@ -206,6 +208,26 @@ class SsiRestProviderRouter:
             limit=limit,
         )
 
+    def get_securities_summary_by_index(
+        self,
+        index_code: str,
+        *,
+        from_date: Optional[str] = None,
+        to_date: Optional[str] = None,
+        page_index: int = 1,
+        page_size: int = 100,
+        limit: int = 260,
+    ) -> ProviderResult:
+        provider, _ = self._route("foreign_flow_by_index")
+        return provider.get_securities_summary_by_index(
+            index_code,
+            from_date=from_date,
+            to_date=to_date,
+            page_index=page_index,
+            page_size=page_size,
+            limit=limit,
+        )
+
     def get_index_list(
         self,
         market: Optional[str] = None,
@@ -241,6 +263,20 @@ class SsiRestProviderRouter:
         return provider.get_index_summary(
             board,
             index_code=index_code,
+            trading_date=trading_date,
+        )
+
+    def get_market_summary(
+        self,
+        scope: str,
+        identifier: str,
+        *,
+        trading_date: Optional[str] = None,
+    ) -> ProviderResult:
+        provider, _ = self._route("market_summary")
+        return provider.get_market_summary(
+            scope,
+            identifier,
             trading_date=trading_date,
         )
 

@@ -38,6 +38,7 @@ from data_provider.ssi_provider_router import (
 from data_provider.ssi_streaming_realtime import (
     SSI_STREAMING_REALTIME_DISABLED_REASON,
     normalize_trade_side,
+    vietnam_market_session_from_epoch,
 )
 from data_provider.vnstock_news_provider import (
     VNSTOCK_NEWS_PERSONAL_PROVIDER,
@@ -118,6 +119,72 @@ VN_PROVIDER_MOZYFIN = "mozyfin"
 VN_PROVIDER_SSI = "ssi"
 VN_PROVIDER_NONE = "none"
 VN_SOURCE_MOZYFIN = "Mozyfin"
+
+
+def _classify_daily_stock_price_session_freshness(
+    *,
+    data_date: Optional[str],
+    requested_date: Optional[str],
+    daily_ohlc_date: Optional[str],
+    provider_session_dates: Iterable[str],
+    market_session: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Classify SSI foreign-flow rows using provider-session evidence."""
+
+    dates = sorted({
+        value for value in (_valid_date_string(item) for item in provider_session_dates)
+        if value
+    })
+    data = _valid_date_string(data_date)
+    requested = _valid_date_string(requested_date)
+    daily = _valid_date_string(daily_ohlc_date)
+    active = bool(market_session.get("market_session_active"))
+    if not data:
+        return {
+            "freshness_status": "unavailable",
+            "is_current_session": False,
+            "is_provisional": False,
+            "is_completed_session": False,
+            "is_stale": False,
+            "session_lag": None,
+            "status": "ok",
+        }
+    latest_provider_date = dates[-1] if dates else data
+    provider_rank_lag = max(0, len([value for value in dates if value > data]))
+    behind_daily = bool(daily and data < daily)
+    if requested and data == requested:
+        freshness = "current_session_provisional"
+        session_lag = 0
+        status = "ok"
+    elif data < latest_provider_date:
+        freshness = "stale_history"
+        session_lag = max(1, provider_rank_lag)
+        status = "partial"
+    elif active and daily == requested:
+        freshness = "previous_session_during_live_market"
+        session_lag = 1
+        status = "partial"
+    elif behind_daily:
+        freshness = "stale_history"
+        session_lag = max(1, provider_rank_lag)
+        status = "partial"
+    else:
+        freshness = "latest_completed_session"
+        session_lag = 0
+        status = "ok"
+    return {
+        "freshness_status": freshness,
+        "is_current_session": freshness == "current_session_provisional",
+        "is_provisional": freshness == "current_session_provisional",
+        "is_completed_session": freshness in {
+            "latest_completed_session",
+            "previous_session_during_live_market",
+            "stale_history",
+        },
+        "is_stale": freshness == "stale_history",
+        "session_lag": session_lag,
+        "status": status,
+    }
 VN_SOURCE_SSI = "SSI"
 DAILY_OHLC_RATE_LIMIT_COOLDOWN_REASON = "SSI DailyOhlc rate-limit cooldown active."
 SSI_DAILY_OHLC_SOURCE = "SSI DailyOhlc"
@@ -1069,6 +1136,21 @@ LIVE_DIAGNOSTIC_KEYS = {
     "trade_tape_buffer_row_count",
     "trade_tape_returned_row_count",
     "trade_rows_observed",
+    "raw_trade_messages_observed",
+    "valid_trade_rows_observed",
+    "zero_price_trade_rows_dropped",
+    "zero_volume_trade_rows_dropped",
+    "non_trade_messages_dropped",
+    "malformed_trade_rows_dropped",
+    "missing_timestamp_rows_dropped",
+    "last_raw_trade_message_at",
+    "last_valid_trade_at",
+    "dropped_invalid_row_count",
+    "transport_health",
+    "parser_health",
+    "symbol_data_health",
+    "response_market_session",
+    "current_market_session",
     "latest_trade_timestamp",
     "latest_trade_age_seconds",
     "session_status_ttl_seconds",
@@ -4646,6 +4728,7 @@ class VietnamMarketService:
             "bid_vol_1": _safe_float(first_bid.get("volume")),
             "ask_price_1": _safe_float(first_ask.get("price")),
             "ask_vol_1": _safe_float(first_ask.get("volume")),
+            "event_market_session": row.get("event_market_session"),
         }
 
     @staticmethod
@@ -4786,7 +4869,15 @@ class VietnamMarketService:
         timestamp_display = row.get("timestamp_display") or row.get("time")
         price = _safe_float(row.get("price"))
         volume = _safe_float(row.get("volume"))
-        if not timestamp or price is None or volume is None:
+        if (
+            not timestamp
+            or price is None
+            or not math.isfinite(price)
+            or price <= 0
+            or volume is None
+            or not math.isfinite(volume)
+            or volume <= 0
+        ):
             return None
         return {
             "ticker": row.get("ticker") or row.get("symbol"),
@@ -4808,6 +4899,7 @@ class VietnamMarketService:
             "source": SSI_TRADE_TAPE_SOURCE,
             "change": _safe_float(row.get("change")),
             "change_pct": _safe_float(row.get("change_pct")),
+            "event_market_session": row.get("event_market_session"),
         }
 
     @staticmethod
@@ -5228,6 +5320,7 @@ class VietnamMarketService:
         diagnostics["selected_latest_row_date"] = _valid_date_string(selected.get("date"))
         diagnostics.update(
             {
+                "provider_session_dates": history_dates,
                 "foreign_history_row_count": len(foreign_history),
                 "foreign_history_net_row_count": history_net_row_count,
                 "foreign_history_date_start": history_dates[0] if history_dates else None,
@@ -5337,16 +5430,55 @@ class VietnamMarketService:
         *,
         daily_ohlc_date: Optional[str],
         diagnostics: Dict[str, Any],
+        now_epoch: Optional[float] = None,
     ) -> Dict[str, Any]:
         normalized = dict(row)
-        normalized["status"] = "ok"
         normalized["source"] = SSI_DAILY_STOCK_PRICE_SOURCE
         normalized["date"] = _valid_date_string(row.get("date"))
+        requested_date = _valid_date_string(diagnostics.get("to_date"))
+        market_session = vietnam_market_session_from_epoch(
+            float(time.time() if now_epoch is None else now_epoch)
+        )
+        freshness = _classify_daily_stock_price_session_freshness(
+            data_date=normalized["date"],
+            requested_date=requested_date,
+            daily_ohlc_date=daily_ohlc_date,
+            provider_session_dates=diagnostics.get("provider_session_dates") or [],
+            market_session=market_session,
+        )
+        normalized.update(freshness)
+        normalized.update(
+            {
+                "data_date": normalized["date"],
+                "requested_date": requested_date,
+                "provider_session_date": normalized["date"],
+                "provider_version": str(row.get("provider_version") or "v3"),
+                "endpoint": str(row.get("source_endpoint") or "securitiesSummary"),
+                "current_market_session": market_session.get("market_session"),
+            }
+        )
 
         for field in DAILY_STOCK_PRICE_ENRICHMENT_FIELDS:
             normalized[field] = _safe_float(row.get(field))
 
         date_match = _date_match_status(daily_ohlc_date, normalized["date"])
+        provider_dates = sorted(
+            value
+            for value in (
+                _valid_date_string(item)
+                for item in (diagnostics.get("provider_session_dates") or [])
+            )
+            if value
+        )
+        if (
+            date_match == "mismatched"
+            and normalized["status"] == "partial"
+            and freshness["freshness_status"] == "stale_history"
+            and (not provider_dates or normalized["date"] == provider_dates[-1])
+        ):
+            # Preserve the established DailyStockPrice block contract; the
+            # independent freshness fields still mark foreign history stale.
+            normalized["status"] = "ok"
         field_coverage = {
             field: normalized.get(field) is not None
             for field in DAILY_STOCK_PRICE_ENRICHMENT_FIELDS
@@ -5366,6 +5498,10 @@ class VietnamMarketService:
             staleness_reason = "DailyStockPrice date differs from DailyOhlc."
         elif date_match == "unknown":
             staleness_reason = "DailyStockPrice date alignment with DailyOhlc is unknown."
+        if freshness["freshness_status"] == "previous_session_during_live_market" and date_match != "mismatched":
+            staleness_reason = "Current session is active; SSI foreign flow is from the latest completed provider session."
+        elif freshness["freshness_status"] == "stale_history" and date_match != "mismatched":
+            staleness_reason = "SSI foreign flow is older than the latest provider-backed session evidence."
 
         safe_diagnostics = dict(diagnostics)
         safe_diagnostics.update(
@@ -5375,11 +5511,15 @@ class VietnamMarketService:
                 "date_match": date_match,
                 "missing_fields": missing_fields,
                 "field_coverage": field_coverage,
+                **freshness,
+                "requested_date": requested_date,
+                "provider_session_date": normalized["date"],
+                "current_market_session": market_session.get("market_session"),
             }
         )
         normalized.update(
             {
-                "quality_status": "partial" if date_match != "matched" or missing_fields else "ok",
+                "quality_status": "partial" if normalized["status"] != "ok" or date_match != "matched" or missing_fields else "ok",
                 "date_match": date_match,
                 "staleness_reason": staleness_reason,
                 "missing_fields": missing_fields,
@@ -5413,6 +5553,17 @@ class VietnamMarketService:
             "source": SSI_DAILY_STOCK_PRICE_SOURCE,
             "reason": reason or SSI_UNAVAILABLE_REASON,
             "date": None,
+            "data_date": None,
+            "requested_date": _valid_date_string(diagnostics.get("to_date")),
+            "provider_session_date": None,
+            "freshness_status": "unavailable",
+            "is_current_session": False,
+            "is_provisional": False,
+            "is_completed_session": False,
+            "is_stale": False,
+            "session_lag": None,
+            "provider_version": "v3",
+            "endpoint": "securitiesSummary",
             "date_match": "unavailable",
             "staleness_reason": "SSI DailyStockPrice enrichment is unavailable.",
             "missing_fields": list(DAILY_STOCK_PRICE_ENRICHMENT_FIELDS),
@@ -7256,6 +7407,7 @@ class VietnamMarketService:
         # Realtime reads the process-local streaming cache directly. Wrapping
         # this call in the generic response cache would hide fresh stream rows.
         read_at = _utc_now()
+        response_market_session = vietnam_market_session_from_epoch(read_at.timestamp()).get("market_session")
         read_error: Optional[Exception] = None
         try:
             payload = self._get_ssi_fetcher().get_realtime_snapshot(tickers)
@@ -7305,9 +7457,16 @@ class VietnamMarketService:
             "last_event_at",
             "event_age_seconds",
             "generation",
+            "transport_health",
+            "parser_health",
+            "symbol_data_health",
+            "current_market_session",
+            "last_valid_trade_at",
+            "dropped_invalid_row_count",
         ):
             if key in payload:
                 response[key] = payload.get(key)
+        response["response_market_session"] = response_market_session
         if status == "ok" and not quotes:
             response["status"] = "unavailable"
             response["error"] = VN_REALTIME_UNAVAILABLE_REASON
@@ -7350,6 +7509,7 @@ class VietnamMarketService:
         force_refresh: bool = False,
     ) -> Dict[str, Any]:
         ticker = vn_ticker(symbol)
+        response_market_session = vietnam_market_session_from_epoch(time.time()).get("market_session")
         safe_limit = max(1, min(int(limit or 100), 500))
         if not ticker:
             return {
@@ -7438,9 +7598,21 @@ class VietnamMarketService:
             },
             "diagnostics": diagnostics,
         }
-        for key in ("stream_state", "last_event_at", "event_age_seconds", "generation"):
+        for key in (
+            "stream_state",
+            "last_event_at",
+            "event_age_seconds",
+            "generation",
+            "transport_health",
+            "parser_health",
+            "symbol_data_health",
+            "current_market_session",
+            "last_valid_trade_at",
+            "dropped_invalid_row_count",
+        ):
             if key in payload:
                 response[key] = payload.get(key)
+        response["response_market_session"] = response_market_session
         if status == "ok" and not trades:
             response["status"] = "unavailable"
             response["error"] = VN_TRADE_TAPE_UNAVAILABLE_REASON
@@ -7492,6 +7664,7 @@ class VietnamMarketService:
         intraday_limit: int = 8,
         include_news: bool = True,
     ) -> Dict[str, Any]:
+        response_market_session = vietnam_market_session_from_epoch(time.time()).get("market_session")
         daily_provider = self.config.daily_data_provider
         ohlcv_key = self._daily_ohlcv_cache_key(
             symbol,
@@ -7950,6 +8123,8 @@ class VietnamMarketService:
         realtime_payload = dict(realtime_result["value"])
         realtime_status_payload = dict(realtime_payload.get("realtime_status") or {})
         realtime_diagnostics = _live_failure_diagnostics(realtime_status_payload.pop("diagnostics", {}))
+        realtime_diagnostics["response_market_session"] = response_market_session
+        realtime_status_payload["response_market_session"] = response_market_session
         realtime_payload["realtime_status"] = realtime_status_payload
         cache_status["realtime_cache"] = realtime_result["status"]
         cache_last_fetched_at["realtime_snapshot"] = _iso(realtime_result["entry"].fetched_at)
@@ -8028,6 +8203,8 @@ class VietnamMarketService:
         )
         trade_tape_status_payload = dict(trade_tape_payload.get("trade_tape_status") or {})
         trade_tape_diagnostics = _live_failure_diagnostics(trade_tape_status_payload.pop("diagnostics", {}))
+        trade_tape_diagnostics["response_market_session"] = response_market_session
+        trade_tape_status_payload["response_market_session"] = response_market_session
         trade_tape_payload["trade_tape_status"] = trade_tape_status_payload
         cache_status["trade_tape_cache"] = trade_tape_result["status"]
         cache_last_fetched_at["trade_tape"] = _iso(trade_tape_result["entry"].fetched_at)

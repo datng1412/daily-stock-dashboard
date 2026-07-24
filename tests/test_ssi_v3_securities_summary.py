@@ -200,7 +200,7 @@ def test_historical_symbol_request_uses_public_rest_transport_and_normalizes() -
         "foreign_value_scale_confidence": "PROVEN",
         "foreign_finality_policy": "stockclock_completed_session_rank_operational",
         "foreign_provider_finality_guaranteed": False,
-        "provisional_row_count": 1,
+        "provisional_row_count": 0,
         "provisional_rows_included": True,
         "finality_contract": "stockclock_completed_session_rank_operational",
     }
@@ -302,12 +302,17 @@ def test_missing_and_explicit_zero_stay_distinct_and_net_families_are_independen
     assert zero["foreign_net_volume"] == 0
     assert (zero["foreign_buy_value"], zero["foreign_sell_value"]) == (0.0, 0.0)
     assert zero["foreign_net_value"] == 0.0
+    assert set(zero["_foreign_field_presence"].values()) == {
+        "FIELD_PRESENT_EXPLICIT_ZERO"
+    }
     assert missing["foreign_buy_volume"] is None
     assert missing["foreign_sell_volume"] == 40
     assert missing["foreign_net_volume"] is None
     assert missing["foreign_buy_value"] == 1000.0
     assert missing["foreign_sell_value"] is None
     assert missing["foreign_net_value"] is None
+    assert missing["_foreign_field_presence"]["foreign_buy_volume"] == "FIELD_NULL"
+    assert missing["_foreign_field_presence"]["foreign_sell_value"] == "FIELD_NULL"
     assert negative["foreign_net_volume"] == -60
     assert negative["foreign_net_value"] == -600.25
 

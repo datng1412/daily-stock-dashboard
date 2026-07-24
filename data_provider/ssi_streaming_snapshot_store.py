@@ -9,6 +9,7 @@ snapshot.
 from __future__ import annotations
 
 import json
+import math
 import os
 import tempfile
 import threading
@@ -17,7 +18,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
 
-SNAPSHOT_SCHEMA_VERSION = 1
+SNAPSHOT_SCHEMA_VERSION = 2
 SNAPSHOT_PROVIDER = "SSI"
 _CONTEXT_NAMES = ("realtime", "order_book", "trades", "foreign_room", "market_index", "session")
 _MAX_TRADE_LIMIT = 50
@@ -33,12 +34,14 @@ _CONTEXT_FIELDS = {
         "price", "open", "high", "low", "change", "change_pct", "volume", "value", "reference_price",
         "ceiling_price", "floor_price", "previous_close", "last_volume", "last_value", "has_last_trade",
         "sequence_if_available", "side_if_available",
+        "event_market_session",
     },
     "order_book": _COMMON_FIELDS | {"bids", "asks"},
     "trades": {
         "ticker", "symbol", "price", "volume", "value", "side", "side_label", "side_if_available",
         "timestamp", "timestamp_display", "time", "source", "sequence", "sequence_if_available",
         "raw_type", "match_type", "id",
+        "event_market_session",
     },
     "foreign_room": _COMMON_FIELDS | {
         "total_room", "current_room", "foreign_buy_volume", "foreign_sell_volume", "foreign_buy_value",
@@ -127,13 +130,30 @@ def _safe_row(context: str, row: Any) -> Optional[Dict[str, Any]]:
         cleaned["ticker"] = key
         cleaned.setdefault("symbol", key)
     if context == "trades":
-        if not isinstance(cleaned.get("price"), (int, float)) or not isinstance(cleaned.get("volume"), (int, float)) or not cleaned.get("timestamp"):
+        if (
+            not isinstance(cleaned.get("price"), (int, float))
+            or not math.isfinite(float(cleaned["price"]))
+            or cleaned["price"] <= 0
+            or not isinstance(cleaned.get("volume"), (int, float))
+            or not math.isfinite(float(cleaned["volume"]))
+            or cleaned["volume"] <= 0
+            or not cleaned.get("timestamp")
+        ):
             return None
     elif context == "order_book":
         if not cleaned.get("bids") and not cleaned.get("asks"):
             return None
     elif context == "realtime":
-        if not isinstance(cleaned.get("price"), (int, float)):
+        if (
+            not isinstance(cleaned.get("price"), (int, float))
+            or not math.isfinite(float(cleaned["price"]))
+            or cleaned["price"] <= 0
+            or cleaned.get("has_last_trade") is not True
+            or not isinstance(cleaned.get("last_volume"), (int, float))
+            or not math.isfinite(float(cleaned["last_volume"]))
+            or cleaned["last_volume"] <= 0
+            or not cleaned.get("stream_timestamp")
+        ):
             return None
     elif context == "foreign_room":
         if not any(isinstance(cleaned.get(field), (int, float)) for field in _CONTEXT_FIELDS[context] - _COMMON_FIELDS):
@@ -335,10 +355,12 @@ class SsiStreamingSnapshotStore:
                         row = _safe_row(context, item)
                         if row is None or row["ticker"] != normalized_key:
                             continue
-                        identity = (row.get("id"), row.get("sequence"), row.get("timestamp"), row.get("price"), row.get("volume"))
-                        if identity in seen:
-                            continue
-                        seen.add(identity)
+                        identity = row.get("id") or row.get("sequence") or row.get("sequence_if_available")
+                        if identity not in (None, ""):
+                            identity_key = str(identity)
+                            if identity_key in seen:
+                                continue
+                            seen.add(identity_key)
                         rows.append(row)
                     if rows:
                         cleaned[context][normalized_key] = rows

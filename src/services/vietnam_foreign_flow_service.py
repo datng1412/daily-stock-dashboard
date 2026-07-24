@@ -7,7 +7,7 @@ from collections import OrderedDict
 from concurrent.futures import Future, ThreadPoolExecutor
 from copy import deepcopy
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 import hashlib
 import logging
@@ -15,7 +15,8 @@ import math
 import re
 from threading import RLock
 from time import perf_counter
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 from data_provider.ssi_provider_protocol import SsiRestProvider
 from data_provider.ssi_provider_router import (
@@ -35,7 +36,7 @@ DEFAULT_LIMIT = 20
 MAX_ROWS = 120
 MAX_DATE_RANGE_DAYS = 168
 MAX_RECENT_LOOKBACK_DAYS = 200
-CACHE_VERSION = "v3"
+CACHE_VERSION = "v5-vn30-decomposition-fallback"
 POSITIVE_CURRENT_TTL_SECONDS = 300
 POSITIVE_COMPLETED_TTL_SECONDS = 3_600
 EMPTY_TTL_SECONDS = 60
@@ -52,6 +53,10 @@ VN30_AGGREGATE_CACHE_TTL_SECONDS = 300
 VN30_AGGREGATE_NEGATIVE_CACHE_TTL_SECONDS = 60
 VN30_AGGREGATE_CACHE_MAX_ENTRIES = 16
 VN30_PUBLIC_SOURCE_ENDPOINT = "DailyStockPrice"
+VN30_CANONICAL_ENDPOINT = "securitiesSummary?index="
+VN30_CANONICAL_MODE = "DIRECT_INDEX_CANONICAL"
+VN30_DECOMPOSITION_MODE = "CURRENT_MEMBERSHIP_DECOMPOSITION"
+VN_TIMEZONE = ZoneInfo("Asia/Ho_Chi_Minh")
 _SAFE_FAILURE_CLASSES = {
     "auth_failed",
     "permission_denied",
@@ -269,10 +274,9 @@ def _normalize_rows(rows: Optional[Iterable[Dict[str, Any]]]) -> Tuple[List[Dict
         if not isinstance(raw, dict):
             stats["rejected_rows"] += 1
             continue
-        # SSI V3 tags current-session and T-1 rows under StockClock's
-        # operational policy.  Completed foreign analytics must not mix these
-        # provisional revisions into historical windows or rankings.
-        if raw.get("foreign_is_provisional") is True:
+        # Exclude only an actual current-session row. The latest provider
+        # session before today is eligible as completed-session data.
+        if raw.get("foreign_finality") == "current_session_provisional":
             stats["rejected_rows"] += 1
             continue
         trading_date = _valid_date(raw.get("date"))
@@ -313,8 +317,19 @@ def _normalize_rows(rows: Optional[Iterable[Dict[str, Any]]]) -> Tuple[List[Dict
             "foreign_buy_value": buy_value,
             "foreign_sell_value": sell_value,
             "foreign_net_value": net_value,
+            "field_presence": deepcopy(raw.get("_foreign_field_presence") or {}),
         }
-        if not any(value is not None for key, value in row.items() if key != "trading_date"):
+        if not any(
+            row.get(name) is not None
+            for name in (
+                "foreign_buy_volume",
+                "foreign_sell_volume",
+                "foreign_net_volume",
+                "foreign_buy_value",
+                "foreign_sell_value",
+                "foreign_net_value",
+            )
+        ):
             stats["rejected_rows"] += 1
             continue
         if trading_date in by_date:
@@ -619,7 +634,11 @@ class VietnamForeignFlowService:
                 owner = False
             else:
                 entry = _CACHE.get(key)
-                if entry is not None and entry.expires_at > now and not force_refresh:
+                if (
+                    entry is not None
+                    and entry.expires_at > now
+                    and not force_refresh
+                ):
                     _CACHE.move_to_end(key)
                     if entry.kind == "positive":
                         _METRICS["cache_hits"] += 1
@@ -1125,18 +1144,22 @@ class VietnamForeignFlowBatchService:
 
 
 class VietnamForeignFlowVn30Service:
-    """Aggregate SSI daily foreign flow for the current SSI-derived VN30 membership."""
+    """Combine canonical SSI VN30 totals with current-basket decomposition."""
 
     def __init__(
         self,
         symbol_service: Optional[VietnamForeignFlowService] = None,
         market_service: Optional[Any] = None,
         *,
+        flow_data_service: Optional[Any] = None,
         max_concurrency: int = BATCH_MAX_CONCURRENCY,
+        now_fn: Optional[Callable[[], datetime]] = None,
     ) -> None:
         self._symbol_service = symbol_service or VietnamForeignFlowService()
         self._market_service = market_service
+        self._flow_data_service = flow_data_service
         self._max_concurrency = max(1, min(int(max_concurrency), BATCH_MAX_CONCURRENCY))
+        self._now_fn = now_fn or (lambda: datetime.now(VN_TIMEZONE))
 
     def _get_market_service(self) -> Any:
         if self._market_service is None:
@@ -1145,11 +1168,56 @@ class VietnamForeignFlowVn30Service:
             self._market_service = VietnamMarketService()
         return self._market_service
 
+    def _get_flow_data_service(self) -> Any:
+        if self._flow_data_service is None:
+            from src.services.vietnam_flow_data_service import VietnamFlowDataService
+
+            provider = None
+            provider_getter = getattr(self._symbol_service, "_get_rest_provider", None)
+            if callable(provider_getter):
+                try:
+                    provider = provider_getter()
+                except Exception:
+                    provider = None
+            self._flow_data_service = VietnamFlowDataService(provider=provider)
+        return self._flow_data_service
+
+    @staticmethod
+    def _previous_weekday(value: date) -> date:
+        candidate = value
+        while candidate.weekday() >= 5:
+            candidate -= timedelta(days=1)
+        return candidate
+
+    @classmethod
+    def _expected_completed_session(cls, now: datetime) -> date:
+        local = now.astimezone(VN_TIMEZONE)
+        if local.weekday() < 5 and local.time() >= time(15, 0):
+            return local.date()
+        return cls._previous_weekday(local.date() - timedelta(days=1))
+
+    @staticmethod
+    def _session_gap(older: Optional[str], newer: Optional[str]) -> Optional[int]:
+        if not older or not newer:
+            return None
+        start = date.fromisoformat(older)
+        end = date.fromisoformat(newer)
+        if start >= end:
+            return 0
+        gap = 0
+        candidate = start + timedelta(days=1)
+        while candidate <= end:
+            if candidate.weekday() < 5:
+                gap += 1
+            candidate += timedelta(days=1)
+        return gap
+
     def get_vn30_aggregate(
         self,
         *,
         top_n: int = BATCH_DEFAULT_TOP_N,
         force_refresh: bool = False,
+        force_capability_refresh: bool = False,
     ) -> Dict[str, Any]:
         requested_top_n = int(top_n)
         if not 1 <= requested_top_n <= BATCH_MAX_TOP_N:
@@ -1160,23 +1228,43 @@ class VietnamForeignFlowVn30Service:
             _metric_add("vn30_force_refresh_requests")
 
         membership_started = perf_counter()
-        membership_payload = self._get_market_service().build_index_components(
-            VN30_INDEX_CODE,
-            force_refresh=force_refresh,
-        )
+        try:
+            membership_payload = self._get_market_service().build_index_components(
+                VN30_INDEX_CODE,
+                force_refresh=force_refresh,
+            )
+        except Exception:
+            membership_payload = {
+                "status": "unavailable",
+                "rows": [],
+                "diagnostics": {
+                    "failure_class": "provider_not_configured",
+                    "cache_status": "unavailable",
+                },
+            }
         membership_ms = max(0, int((perf_counter() - membership_started) * 1000))
         membership = self._normalize_membership(membership_payload)
         membership_hash = hashlib.sha256(
             ",".join(membership["member_tickers"]).encode("ascii", errors="ignore")
         ).hexdigest()[:16]
+        local_now = self._now_fn().astimezone(VN_TIMEZONE)
+        expected_completed = self._expected_completed_session(local_now)
+        requested_to = local_now.date()
+        requested_from = requested_to - timedelta(days=60)
         cache_key = (
             SOURCE,
-            SOURCE_ENDPOINT,
+            "v3",
+            "vn30",
             VN30_INDEX_CODE,
-            membership_hash,
+            VN30_CANONICAL_MODE,
+            VN30_DECOMPOSITION_MODE,
+            requested_from.isoformat(),
+            requested_to.isoformat(),
             VN30_HISTORY_SESSIONS,
+            membership_hash,
             requested_top_n,
             CACHE_VERSION,
+            expected_completed.isoformat(),
         )
         now = _utc_now()
         with _LOCK:
@@ -1189,7 +1277,12 @@ class VietnamForeignFlowVn30Service:
                 cache_status = "coalesced"
             else:
                 entry = _VN30_CACHE.get(cache_key)
-                if entry is not None and entry.expires_at > now and not force_refresh:
+                if (
+                    entry is not None
+                    and entry.expires_at > now
+                    and not force_refresh
+                    and not force_capability_refresh
+                ):
                     _VN30_CACHE.move_to_end(cache_key)
                     metric = "vn30_cache_hits" if entry.kind == "positive" else "vn30_negative_cache_hits"
                     _METRICS[metric] += 1
@@ -1200,7 +1293,13 @@ class VietnamForeignFlowVn30Service:
                 _VN30_WAITERS[cache_key] = 0
                 _METRICS["vn30_active_in_flight"] += 1
                 owner = True
-                cache_status = "refresh" if force_refresh else "miss"
+                cache_status = (
+                    "capability_refresh"
+                    if force_capability_refresh and not force_refresh
+                    else "refresh"
+                    if force_refresh
+                    else "miss"
+                )
         if not owner:
             try:
                 payload = deepcopy(future.result())
@@ -1213,6 +1312,22 @@ class VietnamForeignFlowVn30Service:
         result_state = "unavailable"
         component_counts = {"usable": 0, "stale": 0, "empty": 0, "unavailable": 0}
         try:
+            direct_started = perf_counter()
+            direct = self._get_flow_data_service().foreign_history_by_index(
+                VN30_INDEX_CODE,
+                from_date=requested_from.isoformat(),
+                to_date=requested_to.isoformat(),
+                limit=60,
+                force_capability_refresh=force_capability_refresh,
+            )
+            direct_ms = max(0, int((perf_counter() - direct_started) * 1000))
+            canonical = self._build_canonical(
+                direct,
+                requested_from=requested_from.isoformat(),
+                requested_to=requested_to.isoformat(),
+                expected_completed=expected_completed.isoformat(),
+                now=local_now,
+            )
             if membership["status"] != "ready":
                 _metric_add("vn30_membership_unavailable_results")
                 payload = self._unavailable_payload(
@@ -1221,7 +1336,9 @@ class VietnamForeignFlowVn30Service:
                     membership_ms=membership_ms,
                     total_ms=max(0, int((perf_counter() - request_started) * 1000)),
                 )
-                kind = "negative"
+                payload = self._apply_canonical(payload, canonical, direct_ms)
+                result_state = payload["data_state"]
+                kind = "positive" if canonical["latest"] else "negative"
             else:
                 histories_started = perf_counter()
                 histories = self._load_histories(
@@ -1233,15 +1350,61 @@ class VietnamForeignFlowVn30Service:
                 payload = self._build_aggregate(
                     membership,
                     histories,
+                    canonical,
                     requested_top_n,
                     membership_ms=membership_ms,
+                    direct_ms=direct_ms,
                     histories_ms=histories_ms,
                     build_started=aggregate_started,
                     request_started=request_started,
                 )
                 result_state = payload["data_state"]
                 component_counts = payload["component_counts"]
-                kind = "positive" if component_counts["usable"] > 0 else "negative"
+                kind = (
+                    "positive"
+                    if canonical["latest"] or component_counts["usable"] > 0
+                    else "negative"
+                )
+            payload["cache_key_dimensions"] = {
+                "schema_version": CACHE_VERSION,
+                "provider_version": "v3",
+                "scope": "vn30",
+                "index_code": VN30_INDEX_CODE,
+                "canonical_mode": VN30_CANONICAL_MODE,
+                "decomposition_mode": VN30_DECOMPOSITION_MODE,
+                "requested_from_date": requested_from.isoformat(),
+                "requested_to_date": requested_to.isoformat(),
+                "requested_session_count": VN30_HISTORY_SESSIONS,
+                "membership_identity": membership_hash,
+                "canonical_cache_identity": hashlib.sha256(
+                    repr(
+                        (
+                            "v3",
+                            "vn30",
+                            VN30_CANONICAL_MODE,
+                            requested_from.isoformat(),
+                            requested_to.isoformat(),
+                            VN30_HISTORY_SESSIONS,
+                            CACHE_VERSION,
+                        )
+                    ).encode("ascii")
+                ).hexdigest()[:16],
+                "decomposition_cache_identity": hashlib.sha256(
+                    repr(
+                        (
+                            "v3",
+                            "vn30",
+                            VN30_DECOMPOSITION_MODE,
+                            membership_hash,
+                            requested_from.isoformat(),
+                            requested_to.isoformat(),
+                            VN30_HISTORY_SESSIONS,
+                            CACHE_VERSION,
+                        )
+                    ).encode("ascii")
+                ).hexdigest()[:16],
+                "expected_latest_completed_session": expected_completed.isoformat(),
+            }
             entry = self._store_vn30(cache_key, payload, kind)
             payload = self._with_cache_metadata(payload, entry, cache_status, False)
             future.set_result(deepcopy(payload))
@@ -1348,6 +1511,322 @@ class VietnamForeignFlowVn30Service:
             return {ticker: futures[ticker].result() for ticker in tickers}
 
     @staticmethod
+    def _canonical_window(rows: List[Dict[str, Any]], requested: int) -> Dict[str, Any]:
+        valid = [row for row in rows if row.get("valid_session")]
+        selected = valid[-requested:]
+        considered = rows[-requested:]
+        partial = [row for row in considered if row.get("data_state") == "partial"]
+        suspicious = [row for row in selected if row.get("suspicious_zero_session")]
+        result: Dict[str, Any] = {
+            "requested_sessions": requested,
+            "covered_sessions": len(selected),
+            "valid_sessions": len(selected),
+            "partial_sessions": len(partial),
+            "suspicious_sessions": len(suspicious),
+            "missing_sessions": max(0, requested - len(selected)),
+            "complete": len(selected) == requested and not partial,
+            "start_date": selected[0]["trading_date"] if selected else None,
+            "end_date": selected[-1]["trading_date"] if selected else None,
+            "coverage_mode": "provider_aggregate",
+            "constituent_coverage": "not_applicable",
+        }
+        for family in ("volume", "value"):
+            for side in ("buy", "sell", "net"):
+                values = [
+                    row.get(f"foreign_{side}_{family}")
+                    for row in selected
+                    if row.get(f"foreign_{side}_{family}") is not None
+                ]
+                result[f"foreign_{side}_{family}"] = (
+                    sum(values) if values else None
+                )
+        return result
+
+    @classmethod
+    def _build_canonical(
+        cls,
+        direct: Dict[str, Any],
+        *,
+        requested_from: str,
+        requested_to: str,
+        expected_completed: str,
+        now: datetime,
+    ) -> Dict[str, Any]:
+        metric_names = (
+            "foreign_buy_volume",
+            "foreign_sell_volume",
+            "foreign_buy_value",
+            "foreign_sell_value",
+        )
+        accepted: List[Dict[str, Any]] = []
+        excluded: List[Dict[str, str]] = []
+        latest_returned = None
+        for raw in direct.get("rows") or []:
+            if not isinstance(raw, dict) or not _valid_date(raw.get("trading_date")):
+                continue
+            row = deepcopy(raw)
+            trading_date = row["trading_date"]
+            latest_returned = max(latest_returned or trading_date, trading_date)
+            if trading_date > expected_completed:
+                excluded.append(
+                    {
+                        "trading_date": trading_date,
+                        "reason": "current_session_provisional",
+                    }
+                )
+                continue
+            presence = dict(row.get("field_presence") or {})
+            missing = sum(
+                presence.get(name) in {
+                    "FIELD_ABSENT",
+                    "FIELD_NULL",
+                    "PARSE_FAILURE",
+                    "PROVIDER_ROW_MISSING",
+                }
+                or row.get(name) is None
+                for name in metric_names
+            )
+            explicit_zero = sum(
+                presence.get(name) == "FIELD_PRESENT_EXPLICIT_ZERO"
+                for name in metric_names
+            )
+            row.update(
+                {
+                    "source": SOURCE,
+                    "provider_version": "v3",
+                    "endpoint": VN30_CANONICAL_ENDPOINT,
+                    "finality": "latest_completed_provider_session",
+                    "freshness": None,
+                    "coverage_mode": "provider_aggregate",
+                    "constituent_coverage": "not_applicable",
+                    "missing_field_count": missing,
+                    "explicit_zero_field_count": explicit_zero,
+                    "all_constituents_zero": False,
+                    "suspicious_zero_session": explicit_zero == len(metric_names),
+                    "anomaly": (
+                        "provider_aggregate_explicit_zero"
+                        if explicit_zero == len(metric_names)
+                        else None
+                    ),
+                    "valid_session": missing == 0,
+                    "data_state": "ready" if missing == 0 else "partial",
+                    "state": "ready" if missing == 0 else "partial",
+                }
+            )
+            accepted.append(row)
+        accepted.sort(key=lambda row: row["trading_date"])
+        valid = [row for row in accepted if row["valid_session"]]
+        capability_unsupported = (
+            direct.get("capability_status") == "unsupported"
+            or (
+                bool(accepted)
+                and not valid
+                and all(
+                    all(row.get(name) is None for name in metric_names)
+                    for row in accepted
+                )
+            )
+        )
+        latest = valid[-1] if valid else None
+        selected_date = latest.get("trading_date") if latest else None
+        lag = cls._session_gap(selected_date, expected_completed)
+        if selected_date is None:
+            freshness = "unavailable"
+        elif lag == 0:
+            freshness = "latest_completed_session"
+        elif lag == 1:
+            freshness = "stale_one_session"
+        else:
+            freshness = "stale_multiple_sessions"
+        for row in accepted:
+            row["freshness"] = (
+                freshness if row.get("trading_date") == selected_date else "historical"
+            )
+        status = (
+            "ready"
+            if latest and freshness == "latest_completed_session"
+            else "stale"
+            if latest
+            else "unavailable"
+        )
+        return {
+            "status": status,
+            "capability_status": (
+                "unsupported"
+                if capability_unsupported
+                else "available"
+                if latest
+                else str(direct.get("capability_status") or "unavailable")
+            ),
+            "failure_class": (
+                "DIRECT_INDEX_FOREIGN_FIELDS_UNSUPPORTED"
+                if capability_unsupported
+                else direct.get("failure_class")
+                or (direct.get("diagnostics") or {}).get("failure_class")
+            ),
+            "usable": bool(latest),
+            "mode": VN30_CANONICAL_MODE,
+            "source": SOURCE,
+            "provider_version": "v3",
+            "endpoint": VN30_CANONICAL_ENDPOINT,
+            "aggregation_mode": "provider_aggregate",
+            "coverage_mode": "provider_aggregate",
+            "constituent_coverage": "not_applicable",
+            "trading_date": selected_date,
+            "latest": latest,
+            "windows": {
+                "5": cls._canonical_window(accepted, 5),
+                "20": cls._canonical_window(accepted, 20),
+            },
+            "series": valid[-VN30_HISTORY_SESSIONS:],
+            "diagnostics": {
+                "requested_from_date": requested_from,
+                "requested_to_date": requested_to,
+                "latest_returned_date": latest_returned,
+                "latest_completed_provider_session": expected_completed,
+                "selected_canonical_date": selected_date,
+                "excluded_dates": [item["trading_date"] for item in excluded],
+                "exclusion_reasons": excluded,
+                "session_lag": lag,
+                "source_freshness": freshness,
+                "returned_session_count": len(accepted),
+                "valid_session_count": len(valid),
+                "partial_session_count": sum(
+                    row.get("data_state") == "partial" for row in accepted
+                ),
+                "provider_operation_count": int(
+                    (direct.get("diagnostics") or {}).get(
+                        "provider_operation_count", 0
+                    )
+                ),
+                "required_fields": list(
+                    (direct.get("diagnostics") or {}).get("required_fields")
+                    or (
+                        "totalForeignBuy",
+                        "totalForeignSell",
+                        "totalForeignBuyValue",
+                        "totalForeignSellValue",
+                    )
+                ),
+                "unsupported_fields": list(
+                    (direct.get("diagnostics") or {}).get("unsupported_fields")
+                    or (
+                        (
+                            "totalForeignBuy",
+                            "totalForeignSell",
+                            "totalForeignBuyValue",
+                            "totalForeignSellValue",
+                        )
+                        if capability_unsupported
+                        else ()
+                    )
+                ),
+                "observed_row_count": int(
+                    (direct.get("diagnostics") or {}).get(
+                        "observed_row_count", len(accepted)
+                    )
+                ),
+                "capability_cache_status": (
+                    direct.get("diagnostics") or {}
+                ).get("capability_cache_status"),
+                "capability_checked_at": (
+                    direct.get("diagnostics") or {}
+                ).get("capability_checked_at"),
+                "capability_ttl_seconds": (
+                    direct.get("diagnostics") or {}
+                ).get("capability_ttl_seconds"),
+                "capability_refresh_reason": (
+                    direct.get("diagnostics") or {}
+                ).get("capability_refresh_reason"),
+            },
+        }
+
+    @staticmethod
+    def _apply_canonical(
+        payload: Dict[str, Any], canonical: Dict[str, Any], direct_ms: int
+    ) -> Dict[str, Any]:
+        payload["canonical_source"] = canonical["source"]
+        payload["canonical_provider_version"] = canonical["provider_version"]
+        payload["canonical_endpoint"] = canonical["endpoint"]
+        payload["canonical_aggregation_mode"] = canonical["mode"]
+        payload["canonical_trading_date"] = canonical["trading_date"]
+        payload["canonical"] = canonical
+        decomposition = payload.get("decomposition") or {}
+        decomposition_usable = bool(
+            decomposition.get("latest")
+            and decomposition.get("status") in {"ready", "partial", "stale"}
+        )
+        canonical_usable = bool(canonical.get("latest"))
+        use_decomposition = not canonical_usable and decomposition_usable
+        primary = decomposition if use_decomposition else canonical
+        payload["latest"] = primary.get("latest")
+        payload["windows"] = primary.get("windows") or {}
+        payload["series"] = primary.get("series") or []
+        payload["aggregate_session_dates"] = [
+            row["trading_date"] for row in payload["series"]
+        ]
+        payload["source_endpoint"] = (
+            SOURCE_ENDPOINT if use_decomposition else VN30_CANONICAL_ENDPOINT
+        )
+        payload["aggregation_basis"] = (
+            "current_vn30_membership"
+            if use_decomposition
+            else "direct_index_provider_aggregate"
+        )
+        payload["primary_data_mode"] = (
+            "current_membership_decomposition"
+            if use_decomposition
+            else "direct_index_canonical"
+        )
+        payload["data_state"] = (
+            "ready"
+            if canonical["status"] == "ready"
+            and decomposition.get("status") == "ready"
+            else "stale"
+            if canonical["status"] == "stale" and canonical_usable
+            else "partial"
+            if canonical_usable or decomposition_usable
+            else "unavailable"
+        )
+        payload["status"] = payload["data_state"]
+        payload["usable"] = canonical_usable or decomposition_usable
+        payload["capability_status"] = (
+            "decomposition_ready_canonical_unsupported"
+            if canonical.get("capability_status") == "unsupported"
+            and decomposition_usable
+            else "canonical_unsupported_decomposition_unavailable"
+            if canonical.get("capability_status") == "unsupported"
+            else "canonical_available"
+            if canonical_usable
+            else "unavailable"
+        )
+        membership_ready = payload.get("membership", {}).get("status") == "ready"
+        payload["source_coverage"] = [
+            {
+                "source": "SSI V3 Direct VN30 Foreign Aggregate",
+                "capability_status": canonical.get("capability_status"),
+                "usable": canonical_usable,
+                "failure_class": canonical.get("failure_class"),
+            },
+            {
+                "source": "SSI V3 Symbol Foreign Data",
+                "capability_status": (
+                    "available" if decomposition_usable else "unavailable"
+                ),
+                "usable": decomposition_usable,
+            },
+            {
+                "source": "SSI VN30 Index Components",
+                "capability_status": (
+                    "available" if membership_ready else "unavailable"
+                ),
+                "usable": membership_ready,
+            },
+        ]
+        payload.setdefault("timing", {})["direct_index_ms"] = direct_ms
+        return payload
+
+    @staticmethod
     def _history_rows(history: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
         rows = history.get("rows") if isinstance(history.get("rows"), list) else []
         return {
@@ -1409,6 +1888,57 @@ class VietnamForeignFlowVn30Service:
         result["negative_components"] = result["value_breadth"]["net_sell_count"]
         result["zero_components"] = result["value_breadth"]["zero_count"]
         result["missing_components"] = result["value_breadth"]["unavailable_count"]
+        required_fields = (
+            "foreign_buy_volume",
+            "foreign_sell_volume",
+            "foreign_buy_value",
+            "foreign_sell_value",
+        )
+        explicit_zero_components = 0
+        missing_field_components = 0
+        for ticker in tickers:
+            component_row = rows_by_ticker[ticker].get(trading_date)
+            presence = (
+                dict(component_row.get("field_presence") or {})
+                if component_row
+                else {}
+            )
+            if component_row is None:
+                missing_field_components += 1
+            elif all(
+                presence.get(name) == "FIELD_PRESENT_EXPLICIT_ZERO"
+                for name in required_fields
+            ):
+                explicit_zero_components += 1
+            elif any(
+                presence.get(name)
+                in {
+                    "FIELD_ABSENT",
+                    "FIELD_NULL",
+                    "PARSE_FAILURE",
+                    "PROVIDER_ROW_MISSING",
+                }
+                or component_row.get(name) is None
+                for name in required_fields
+            ):
+                missing_field_components += 1
+        result["all_constituents_zero"] = (
+            bool(tickers) and explicit_zero_components == len(tickers)
+        )
+        result["explicit_zero_component_count"] = explicit_zero_components
+        result["missing_field_component_count"] = missing_field_components
+        result["suspicious_zero_session"] = result["all_constituents_zero"]
+        result["anomaly"] = (
+            "all_constituents_explicit_zero"
+            if result["all_constituents_zero"]
+            else None
+        )
+        result["anomaly_code"] = result["anomaly"]
+        result["anomaly_status"] = (
+            "provider_backed_suspect"
+            if result["all_constituents_zero"]
+            else None
+        )
         contributing = [
             ticker
             for ticker in tickers
@@ -1424,20 +1954,40 @@ class VietnamForeignFlowVn30Service:
             result["data_state"] = "unavailable"
         elif all_stale:
             result["data_state"] = "stale"
-        elif full:
+        elif full and missing_field_components == 0:
             result["data_state"] = "ready"
         else:
             result["data_state"] = "partial"
         result["state"] = result["data_state"]
+        result["valid_session"] = result["data_state"] in {"ready", "stale"}
         return result
 
     @staticmethod
     def _aggregate_window(series: List[Dict[str, Any]], requested_sessions: int, member_count: int) -> Dict[str, Any]:
         selected = series[-requested_sessions:]
+        valid = [row for row in selected if row.get("data_state") == "ready"]
+        partial_count = sum(row.get("data_state") == "partial" for row in selected)
+        suspicious_count = sum(
+            bool(row.get("suspicious_zero_session")) for row in selected
+        )
         result: Dict[str, Any] = {
             "requested_sessions": requested_sessions,
             "covered_sessions": len(selected),
-            "complete": len(selected) == requested_sessions,
+            "valid_sessions": len(valid),
+            "partial_sessions": partial_count,
+            "suspicious_sessions": suspicious_count,
+            "contains_provider_anomaly": suspicious_count > 0,
+            "anomaly_sessions": [
+                row["trading_date"]
+                for row in selected
+                if row.get("suspicious_zero_session")
+            ],
+            "anomaly_count": suspicious_count,
+            "missing_sessions": max(0, requested_sessions - len(selected)),
+            "complete": (
+                len(selected) == requested_sessions
+                and partial_count == 0
+            ),
             "start_date": selected[0]["trading_date"] if selected else None,
             "end_date": selected[-1]["trading_date"] if selected else None,
         }
@@ -1467,12 +2017,38 @@ class VietnamForeignFlowVn30Service:
         global_latest = session_dates[-1] if session_dates else None
         latest = rows_by_date.get(global_latest) if global_latest else None
         own_dates = sorted(rows_by_date)
+        has_same_date = latest is not None
+        has_any_same_date_value = bool(
+            latest
+            and any(
+                latest.get(f"foreign_{side}_{family}") is not None
+                for family in ("volume", "value")
+                for side in ("buy", "sell")
+            )
+        )
+        component_state = (
+            "ready"
+            if has_same_date and has_any_same_date_value
+            else "unavailable"
+        )
+        source_freshness = (
+            "latest_completed_session"
+            if has_same_date
+            else "stale_one_session"
+            if own_dates
+            else "unavailable"
+        )
         result: Dict[str, Any] = {
             "ticker": ticker,
-            "data_state": history.get("data_state") if history.get("data_state") in {"ready", "stale", "empty", "unavailable"} else "unavailable",
-            "freshness": history.get("freshness") if history.get("freshness") in {"fresh", "stale", "empty", "unavailable"} else "unavailable",
+            "data_state": component_state,
+            "freshness": "fresh" if has_same_date else "stale" if own_dates else "unavailable",
+            "source_freshness": source_freshness,
             "failure_class": history.get("failure_class"),
-            "stale_reason": history.get("stale_reason"),
+            "stale_reason": (
+                history.get("stale_reason")
+                if has_same_date
+                else "No component row exists on the decomposition date."
+            ),
             "latest_trading_date": own_dates[-1] if own_dates else None,
             "aggregate_latest_date": global_latest,
         }
@@ -1513,16 +2089,30 @@ class VietnamForeignFlowVn30Service:
         self,
         membership: Dict[str, Any],
         histories: Dict[str, Dict[str, Any]],
+        canonical: Dict[str, Any],
         top_n: int,
         *,
         membership_ms: int,
+        direct_ms: int,
         histories_ms: int,
         build_started: float,
         request_started: float,
     ) -> Dict[str, Any]:
         tickers = membership["member_tickers"]
         rows_by_ticker = {ticker: self._history_rows(histories[ticker]) for ticker in tickers}
-        session_dates = sorted({day for rows in rows_by_ticker.values() for day in rows})[-VN30_HISTORY_SESSIONS:]
+        available_dates = sorted({day for rows in rows_by_ticker.values() for day in rows})
+        canonical_date = canonical.get("trading_date")
+        decomposition_date = (
+            canonical_date
+            if canonical_date
+            else available_dates[-1]
+            if available_dates
+            else None
+        )
+        session_dates = [
+            day for day in available_dates
+            if decomposition_date is None or day <= decomposition_date
+        ][-VN30_HISTORY_SESSIONS:]
         series = [self._aggregate_day(day, tickers, rows_by_ticker, histories) for day in session_dates]
         components = [self._compose_component(ticker, histories[ticker], rows_by_ticker[ticker], session_dates) for ticker in tickers]
         counts = {
@@ -1548,12 +2138,16 @@ class VietnamForeignFlowVn30Service:
             "net_value_20d": self._ranking_pair(components, "foreign_net_value_20d", "window_end_date_20d", top_n),
             "net_volume_20d": self._ranking_pair(components, "foreign_net_volume_20d", "window_end_date_20d", top_n),
         }
+        decomposition_latest = series[-1] if series else None
+        reconciliation = self._reconcile(
+            canonical.get("latest"), decomposition_latest
+        )
         build_ms = max(0, int((perf_counter() - build_started) * 1000))
-        return {
+        payload = {
             "scope": "vn30",
             "index_code": VN30_INDEX_CODE,
             "source": SOURCE,
-            "source_endpoint": VN30_PUBLIC_SOURCE_ENDPOINT,
+            "source_endpoint": VN30_CANONICAL_ENDPOINT,
             "membership_source": "SSI IndexComponents",
             "volume_unit": VOLUME_UNIT,
             "value_unit": VALUE_UNIT,
@@ -1561,26 +2155,105 @@ class VietnamForeignFlowVn30Service:
             "aggregation_basis": "current_vn30_membership",
             "historical_constituent_correct": False,
             "data_state": state,
+            "decomposition_aggregation_mode": VN30_DECOMPOSITION_MODE,
+            "decomposition_universe": "current_vn30_membership",
+            "decomposition_date": decomposition_date,
             "membership": membership,
-            "aggregate_session_dates": session_dates,
-            "latest": latest,
-            "windows": {
-                "5": self._aggregate_window(series, 5, len(tickers)),
-                "20": self._aggregate_window(series, 20, len(tickers)),
-            },
-            "series": series,
+            "aggregate_session_dates": [],
+            "latest": None,
+            "windows": {},
+            "series": [],
             "components": components,
             "component_counts": counts,
             "rankings": rankings,
+            "decomposition": {
+                "status": state,
+                "data_state": state,
+                "usable": bool(decomposition_latest),
+                "mode": VN30_DECOMPOSITION_MODE,
+                "aggregation_mode": VN30_DECOMPOSITION_MODE,
+                "aggregation_basis": "current_vn30_membership",
+                "universe": "current_vn30_membership",
+                "date": decomposition_date,
+                "decomposition_date": decomposition_date,
+                "latest_completed_session": decomposition_date,
+                "membership_source": "SSI IndexComponents",
+                "member_count": len(tickers),
+                "historical_constituent_correct": False,
+                "source": SOURCE,
+                "provider_version": "v3",
+                "series": series,
+                "latest": decomposition_latest,
+                "windows": {
+                    "5": self._aggregate_window(series, 5, len(tickers)),
+                    "20": self._aggregate_window(series, 20, len(tickers)),
+                },
+                "components": components,
+                "component_counts": counts,
+                "rankings": rankings,
+                "reconciliation": reconciliation,
+                "anomaly_sessions": [
+                    row["trading_date"]
+                    for row in series
+                    if row.get("suspicious_zero_session")
+                ],
+                "anomaly_count": sum(
+                    bool(row.get("suspicious_zero_session")) for row in series
+                ),
+            },
             "cache": {},
             "timing": {
                 "membership_ms": membership_ms,
+                "direct_index_ms": direct_ms,
                 "component_histories_ms": histories_ms,
                 "aggregate_build_ms": build_ms,
                 "total_ms": max(0, int((perf_counter() - request_started) * 1000)),
             },
             "fetched_at": _iso_now(),
         }
+        return self._apply_canonical(payload, canonical, direct_ms)
+
+    @staticmethod
+    def _reconcile(
+        direct: Optional[Dict[str, Any]],
+        decomposition: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        direct_date = direct.get("trading_date") if direct else None
+        decomposition_date = decomposition.get("trading_date") if decomposition else None
+        result: Dict[str, Any] = {
+            "direct_index_date": direct_date,
+            "decomposition_date": decomposition_date,
+            "direct_foreign_buy_value": direct.get("foreign_buy_value") if direct else None,
+            "decomposition_foreign_buy_value": decomposition.get("foreign_buy_value") if decomposition else None,
+            "direct_foreign_sell_value": direct.get("foreign_sell_value") if direct else None,
+            "decomposition_foreign_sell_value": decomposition.get("foreign_sell_value") if decomposition else None,
+            "direct_net_value": direct.get("foreign_net_value") if direct else None,
+            "decomposition_net_value": decomposition.get("foreign_net_value") if decomposition else None,
+            "difference_value": None,
+            "difference_ratio": None,
+            "reconciliation_status": "not_comparable",
+        }
+        if not direct or not decomposition:
+            return result
+        if direct_date != decomposition_date:
+            result["reconciliation_status"] = "date_mismatch"
+            return result
+        direct_net = direct.get("foreign_net_value")
+        decomposition_net = decomposition.get("foreign_net_value")
+        if direct_net is None or decomposition_net is None:
+            return result
+        difference = decomposition_net - direct_net
+        result["difference_value"] = difference
+        result["difference_ratio"] = (
+            abs(difference) / abs(direct_net) if direct_net else None
+        )
+        if difference == 0:
+            result["reconciliation_status"] = "exact"
+        elif result["difference_ratio"] is not None and result["difference_ratio"] <= 0.01:
+            result["reconciliation_status"] = "within_tolerance"
+        else:
+            result["reconciliation_status"] = "differs_expected_membership_method"
+        return result
 
     @staticmethod
     def _unavailable_payload(top_n: int, membership: Dict[str, Any], *, membership_ms: int, total_ms: int) -> Dict[str, Any]:
@@ -1613,14 +2286,22 @@ class VietnamForeignFlowVn30Service:
             "scope": "vn30",
             "index_code": VN30_INDEX_CODE,
             "source": SOURCE,
-            "source_endpoint": VN30_PUBLIC_SOURCE_ENDPOINT,
+            "source_endpoint": VN30_CANONICAL_ENDPOINT,
             "membership_source": "SSI IndexComponents",
             "volume_unit": VOLUME_UNIT,
             "value_unit": VALUE_UNIT,
             "finality": FINALITY,
             "aggregation_basis": "current_vn30_membership",
             "historical_constituent_correct": False,
+            "decomposition_aggregation_mode": VN30_DECOMPOSITION_MODE,
+            "decomposition_universe": "current_vn30_membership",
+            "decomposition_date": None,
             "data_state": "unavailable",
+            "status": "unavailable",
+            "usable": False,
+            "capability_status": "unavailable",
+            "primary_data_mode": "current_membership_decomposition",
+            "source_coverage": [],
             "membership": membership,
             "aggregate_session_dates": [],
             "latest": None,
@@ -1635,6 +2316,48 @@ class VietnamForeignFlowVn30Service:
                 "net_volume_5d": deepcopy(empty_pair),
                 "net_value_20d": deepcopy(empty_pair),
                 "net_volume_20d": deepcopy(empty_pair),
+            },
+            "decomposition": {
+                "status": "unavailable",
+                "data_state": "unavailable",
+                "usable": False,
+                "mode": VN30_DECOMPOSITION_MODE,
+                "aggregation_mode": VN30_DECOMPOSITION_MODE,
+                "aggregation_basis": "current_vn30_membership",
+                "universe": "current_vn30_membership",
+                "date": None,
+                "decomposition_date": None,
+                "latest_completed_session": None,
+                "membership_source": "SSI IndexComponents",
+                "member_count": 0,
+                "historical_constituent_correct": False,
+                "source": SOURCE,
+                "provider_version": "v3",
+                "series": [],
+                "latest": None,
+                "windows": {"5": empty_window, "20": window_20},
+                "components": [],
+                "component_counts": {
+                    "usable": 0,
+                    "stale": 0,
+                    "empty": 0,
+                    "unavailable": 0,
+                },
+                "rankings": {
+                    "latest_net_value": deepcopy(empty_pair),
+                    "latest_net_volume": deepcopy(empty_pair),
+                    "net_value_5d": deepcopy(empty_pair),
+                    "net_volume_5d": deepcopy(empty_pair),
+                    "net_value_20d": deepcopy(empty_pair),
+                    "net_volume_20d": deepcopy(empty_pair),
+                },
+                "reconciliation": {
+                    "direct_index_date": None,
+                    "decomposition_date": None,
+                    "reconciliation_status": "not_comparable",
+                },
+                "anomaly_sessions": [],
+                "anomaly_count": 0,
             },
             "cache": {},
             "timing": {"membership_ms": membership_ms, "component_histories_ms": 0, "aggregate_build_ms": 0, "total_ms": total_ms},
@@ -1670,4 +2393,14 @@ class VietnamForeignFlowVn30Service:
             "ttl_seconds": VN30_AGGREGATE_CACHE_TTL_SECONDS if entry.kind == "positive" else VN30_AGGREGATE_NEGATIVE_CACHE_TTL_SECONDS,
             "negative": entry.kind != "positive",
         }
+        canonical = result.get("canonical")
+        if isinstance(canonical, dict):
+            diagnostics = canonical.setdefault("diagnostics", {})
+            diagnostics.update(
+                {
+                    "cache_status": status,
+                    "cache_age_seconds": result["cache"]["age_seconds"],
+                    "cache_ttl_seconds": result["cache"]["ttl_seconds"],
+                }
+            )
         return result

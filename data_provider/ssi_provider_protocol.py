@@ -57,6 +57,17 @@ class SsiRestProvider(Protocol):
         limit: int = 260,
     ) -> ProviderResult: ...
 
+    def get_securities_summary_by_index(
+        self,
+        index_code: str,
+        *,
+        from_date: Optional[str] = None,
+        to_date: Optional[str] = None,
+        page_index: int = 1,
+        page_size: int = 100,
+        limit: int = 260,
+    ) -> ProviderResult: ...
+
     def get_index_list(
         self,
         market: Optional[str] = None,
@@ -76,6 +87,14 @@ class SsiRestProvider(Protocol):
         self,
         board: str,
         index_code: Optional[str] = None,
+        trading_date: Optional[str] = None,
+    ) -> ProviderResult: ...
+
+    def get_market_summary(
+        self,
+        scope: str,
+        identifier: str,
+        *,
         trading_date: Optional[str] = None,
     ) -> ProviderResult: ...
 

@@ -25,6 +25,7 @@ from data_provider.ssi_streaming_realtime import (
     SsiRealtimeStreamClient,
     SsiStreamingRealtimeManager,
     TradeTapeEventCache,
+    vietnam_market_session_from_provider_timestamp,
 )
 from data_provider.ssi_v3_adapter import SsiV3RestSettings, _default_auth_factory
 
@@ -110,7 +111,33 @@ def normalize_v3_streaming_messages(
             if topic.startswith("trade."):
                 price = _optional_number(data.get("p"))
                 last_volume = _optional_number(data.get("q"), integer=True)
-                if price is None or last_volume is None or not timestamp:
+                event_market_session = vietnam_market_session_from_provider_timestamp(timestamp)
+                classification = "valid_trade_execution"
+                if not timestamp:
+                    classification = "missing_timestamp"
+                elif event_market_session is None or price is None or last_volume is None:
+                    classification = "malformed_trade_message"
+                elif price < 0 or last_volume < 0:
+                    classification = "malformed_trade_message"
+                elif price == 0 or last_volume == 0:
+                    classification = "auction_no_match_state"
+                if classification != "valid_trade_execution":
+                    rows.append(
+                        {
+                            "ticker": symbol,
+                            "symbol": symbol,
+                            "stream_data_type": "X-TRADE-DIAGNOSTIC",
+                            "r_type": "X-TRADE-DIAGNOSTIC",
+                            "trade_message_observed": True,
+                            "trade_message_classification": classification,
+                            "zero_price": price == 0,
+                            "zero_volume": last_volume == 0,
+                            "missing_timestamp": not bool(timestamp),
+                            "stream_timestamp": timestamp,
+                            "event_market_session": event_market_session,
+                            "source": "SSI FastConnect V3 WebSocket",
+                        }
+                    )
                     continue
                 base = {
                     "ticker": symbol,
@@ -125,12 +152,15 @@ def normalize_v3_streaming_messages(
                     "stream_timestamp": timestamp,
                     "time": timestamp,
                     "has_last_trade": True,
+                    "trade_message_observed": True,
+                    "trade_message_classification": classification,
+                    "event_market_session": event_market_session,
                     "source": "SSI FastConnect V3 WebSocket",
                 }
                 rows.append(
                     {**base, "stream_data_type": "X-TRADE", "r_type": "X-TRADE"}
                 )
-                rows.append({**base, "stream_data_type": "X", "r_type": "X"})
+                rows.append({**base, "trade_message_observed": False, "stream_data_type": "X", "r_type": "X"})
             elif topic.startswith("quote."):
                 bids = _levels(data, "bid")
                 asks = _levels(data, "ask")
@@ -151,6 +181,32 @@ def normalize_v3_streaming_messages(
                         "source": "SSI FastConnect V3 WebSocket",
                     }
                 )
+            elif topic.startswith("room."):
+                if not timestamp:
+                    continue
+                event_market_session = vietnam_market_session_from_provider_timestamp(timestamp)
+                if event_market_session is None:
+                    continue
+                rows.append(
+                    {
+                        "ticker": symbol,
+                        "symbol": symbol,
+                        "total_room": _optional_number(data.get("tr"), integer=True),
+                        "current_room": _optional_number(data.get("cr"), integer=True),
+                        "foreign_buy_volume": _optional_number(data.get("bq"), integer=True),
+                        "foreign_buy_value": _optional_number(data.get("bv")),
+                        "foreign_sell_volume": _optional_number(data.get("sq"), integer=True),
+                        "foreign_sell_value": _optional_number(data.get("sv")),
+                        "stream_timestamp": timestamp,
+                        "time": timestamp,
+                        "event_market_session": event_market_session,
+                        "stream_data_type": "R",
+                        "r_type": "R",
+                        "update_semantics": "unproven",
+                        "value_semantics_status": "needs_semantics_proof",
+                        "source": "SSI FastConnect V3 WebSocket room stream",
+                    }
+                )
     return rows
 
 
@@ -164,6 +220,8 @@ def _topic_for_channel(channel: str) -> Optional[str]:
         return f"trade.{symbol}"
     if normalized_prefix == "X-QUOTE":
         return f"quote.{symbol}"
+    if normalized_prefix == "R":
+        return f"room.{symbol}"
     return None
 
 
@@ -283,8 +341,12 @@ class OfficialSsiV3RealtimeStreamClient:
         except Exception as exc:  # noqa: BLE001 - converted by manager taxonomy.
             if not self._stop_event.is_set():
                 if not opened and on_subscription_error is not None:
-                    for channel in channels:
-                        on_subscription_error(channel, exc)
+                    # V3 uses one transport and one cohort subscription. A
+                    # pre-open failure (including authorization) therefore
+                    # represents one failed restore attempt, not one failure
+                    # per requested channel. The manager's transport error
+                    # callback marks every enabled context unavailable.
+                    on_subscription_error(channels[0], exc)
                 on_error(exc)
         finally:
             if opened and not self._stop_event.is_set() and on_close is not None:
@@ -382,7 +444,7 @@ def build_v3_streaming_realtime_manager(
         trade_tape_enabled=bool(
             getattr(config, "ssi_fastconnect_trade_tape_enabled", True)
         ),
-        foreign_room_enabled=False,
+        foreign_room_enabled=True,
         market_index_enabled=False,
         market_index_codes=[],
         session_status_enabled=False,

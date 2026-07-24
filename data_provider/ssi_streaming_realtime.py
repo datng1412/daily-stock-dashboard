@@ -9,6 +9,7 @@ connections.
 from __future__ import annotations
 
 import logging
+import math
 import random
 import re
 import threading
@@ -132,6 +133,30 @@ def vietnam_market_session_from_epoch(epoch_seconds: float) -> Dict[str, Any]:
     if minutes < 15 * 60:
         return session("post_close", "Post-close", active=False)
     return session("closed", "Closed", active=False)
+
+
+def vietnam_market_session_from_provider_timestamp(value: Any) -> Optional[str]:
+    """Resolve event-session provenance without replacing provider time."""
+
+    text = str(value or "").strip()
+    if not text:
+        return None
+    parsed: Optional[datetime] = None
+    try:
+        if "T" in text or " " in text:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=VIETNAM_MARKET_TIMEZONE)
+        else:
+            time_part = datetime.strptime(text, "%H:%M:%S").time()
+            parsed = datetime(2026, 7, 20, time_part.hour, time_part.minute, time_part.second, tzinfo=VIETNAM_MARKET_TIMEZONE)
+    except ValueError:
+        return None
+    return str(vietnam_market_session_from_epoch(parsed.timestamp())["market_session"])
+
+
+def _positive_finite_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value)) and float(value) > 0
 
 _SECRET_PATTERNS = (
     re.compile(r"(?i)(authorization\s*[:=]\s*bearer\s+)[^\s,;]+"),
@@ -501,7 +526,21 @@ class RealtimeSnapshotCache:
                 if not isinstance(row, dict):
                     continue
                 symbol = str(row.get("ticker") or row.get("symbol") or "").strip().upper()
-                if not symbol:
+                price = row.get("snapshot_price", row.get("realtime_price", row.get("price")))
+                last_volume = row.get("last_volume")
+                claimed_trade = "has_last_trade" in row or "trade_message_classification" in row
+                if (
+                    not symbol
+                    or not _positive_finite_number(price)
+                    or (
+                        claimed_trade
+                        and (
+                            not row.get("has_last_trade")
+                            or not _positive_finite_number(last_volume)
+                            or not str(row.get("stream_timestamp") or "").strip()
+                        )
+                    )
+                ):
                     continue
                 snapshot = dict(row)
                 snapshot["ticker"] = symbol
@@ -538,15 +577,17 @@ class RealtimeSnapshotCache:
             row, status, age_seconds = self.get(symbol)
             if age_seconds is not None:
                 ages[symbol] = int(age_seconds)
-            if status in {"hit", "persisted_stale"} and row is not None:
+            if status == "hit" and row is not None:
                 rows.append(row)
             elif status in {"stale", "persisted_stale"}:
                 stale_symbols.append(symbol)
+                if row is not None:
+                    rows.append(row)
             else:
                 empty_symbols.append(symbol)
         return {
             "rows": rows,
-            "hit_count": len(rows),
+            "hit_count": sum(not bool(row.get("is_stale")) for row in rows),
             "stale_count": len(stale_symbols),
             "empty_count": len(empty_symbols),
             "stale_symbols": stale_symbols,
@@ -578,17 +619,11 @@ class TradeTapeEventCache:
             self._dedup_keys.clear()
 
     @staticmethod
-    def _dedup_key(trade: Dict[str, Any]) -> Tuple[Any, ...]:
-        sequence = trade.get("sequence_if_available") or trade.get("sequence")
+    def _dedup_key(trade: Dict[str, Any]) -> Optional[Tuple[Any, ...]]:
+        sequence = trade.get("sequence_if_available") or trade.get("sequence") or trade.get("id")
         if sequence not in (None, ""):
             return ("sequence", str(sequence))
-        return (
-            "content",
-            str(trade.get("timestamp") or ""),
-            str(trade.get("price")),
-            str(trade.get("volume")),
-            str(trade.get("side_if_available") or trade.get("side") or ""),
-        )
+        return None
 
     def put_rows(self, rows: Iterable[Dict[str, Any]]) -> int:
         now = float(self._time_func())
@@ -601,7 +636,7 @@ class TradeTapeEventCache:
                 price = row.get("price")
                 volume = row.get("volume")
                 timestamp = str(row.get("timestamp") or "").strip()
-                if not symbol or price is None or volume is None or not timestamp:
+                if not symbol or not _positive_finite_number(price) or not _positive_finite_number(volume) or not timestamp:
                     continue
                 trade = dict(row)
                 trade["ticker"] = symbol
@@ -611,12 +646,12 @@ class TradeTapeEventCache:
                 events = self._rows.setdefault(symbol, [])
                 dedup_key = self._dedup_key(trade)
                 keys = self._dedup_keys.setdefault(symbol, set())
-                if dedup_key in keys:
+                if dedup_key is not None and dedup_key in keys:
                     continue
                 events.insert(0, CachedTradeTapeEvent(symbol=symbol, trade=trade, received_at=now))
                 del events[self.max_rows_per_symbol :]
                 keys.clear()
-                keys.update(self._dedup_key(event.trade) for event in events)
+                keys.update(key for event in events if (key := self._dedup_key(event.trade)) is not None)
                 written += 1
         return written
 
@@ -1297,6 +1332,16 @@ class SsiStreamingRealtimeManager:
         self._foreign_room_rows_observed = 0
         self._market_index_rows_observed = 0
         self._trade_rows_observed = 0
+        self._raw_trade_messages_observed = 0
+        self._valid_trade_rows_observed = 0
+        self._zero_price_trade_rows_dropped = 0
+        self._zero_volume_trade_rows_dropped = 0
+        self._non_trade_messages_dropped = 0
+        self._malformed_trade_rows_dropped = 0
+        self._missing_timestamp_rows_dropped = 0
+        self._last_raw_trade_message_at: Optional[str] = None
+        self._last_valid_trade_at: Optional[str] = None
+        self._symbol_trade_health: Dict[str, str] = {}
         self._session_status_rows_observed = 0
         self._bootstrap_status: Optional[str] = None
         self._bootstrap_reason: Optional[str] = None
@@ -1737,13 +1782,19 @@ class SsiStreamingRealtimeManager:
                 if isinstance(row, dict)
                 and str(row.get("ticker") or row.get("symbol") or row.get("index_code") or "").strip().upper() in requested_set
             ]
-            session_rows = [row for row in filtered_rows if self._is_session_status_row(row)]
-            order_book_rows = [row for row in filtered_rows if self._is_order_book_row(row)]
-            foreign_room_rows = [row for row in filtered_rows if self._is_foreign_room_row(row)]
-            market_index_rows = [row for row in filtered_rows if self._is_market_index_row(row)]
+            diagnostic_trade_rows = [
+                row for row in filtered_rows
+                if row.get("trade_message_observed")
+                and str(row.get("trade_message_classification") or "") != "valid_trade_execution"
+            ]
+            market_rows = [row for row in filtered_rows if row not in diagnostic_trade_rows]
+            session_rows = [row for row in market_rows if self._is_session_status_row(row)]
+            order_book_rows = [row for row in market_rows if self._is_order_book_row(row)]
+            foreign_room_rows = [row for row in market_rows if self._is_foreign_room_row(row)]
+            market_index_rows = [row for row in market_rows if self._is_market_index_row(row)]
             snapshot_rows = [
                 row
-                for row in filtered_rows
+                for row in market_rows
                 if not self._is_session_status_row(row)
                 and not self._is_order_book_row(row)
                 and not self._is_foreign_room_row(row)
@@ -1769,12 +1820,13 @@ class SsiStreamingRealtimeManager:
                 if owned_generation != self._generation or self._shutdown_requested:
                     self._ignore_stale_callback_locked(owned_generation)
                     return
-                written = self.cache.put_rows(snapshot_rows)
+                valid_trade_rows = rows_by_context["x_trade"]
+                written = self.cache.put_rows(rows_by_context["x"])
                 order_book_written = self.order_book_cache.put_rows(order_book_rows)
                 foreign_room_written = self.foreign_room_cache.put_rows(foreign_room_rows)
                 market_index_written = self.market_index_cache.put_rows(market_index_rows)
                 trade_written = self.trade_tape_cache.put_rows(
-                    self._trade_events_from_streaming_rows(snapshot_rows)
+                    self._trade_events_from_streaming_rows(valid_trade_rows)
                 )
                 session_written = self.session_status_cache.put_rows(session_rows)
                 if any((written, order_book_written, foreign_room_written, market_index_written, trade_written, session_written)):
@@ -1787,10 +1839,46 @@ class SsiStreamingRealtimeManager:
                 self._foreign_room_rows_observed += foreign_room_written
                 self._market_index_rows_observed += market_index_written
                 self._trade_rows_observed += trade_written
+                raw_trade_rows = [
+                    row for row in filtered_rows
+                    if row.get("trade_message_observed")
+                ]
+                self._raw_trade_messages_observed += len(raw_trade_rows)
+                self._valid_trade_rows_observed += trade_written
+                self._zero_price_trade_rows_dropped += sum(bool(row.get("zero_price")) for row in diagnostic_trade_rows)
+                self._zero_volume_trade_rows_dropped += sum(bool(row.get("zero_volume")) for row in diagnostic_trade_rows)
+                self._missing_timestamp_rows_dropped += sum(bool(row.get("missing_timestamp")) for row in diagnostic_trade_rows)
+                self._malformed_trade_rows_dropped += sum(
+                    str(row.get("trade_message_classification") or "") == "malformed_trade_message"
+                    for row in diagnostic_trade_rows
+                )
+                self._non_trade_messages_dropped += sum(
+                    str(row.get("trade_message_classification") or "") in {
+                        "auction_no_match_state", "control_or_heartbeat_message", "quote_without_execution",
+                    }
+                    for row in diagnostic_trade_rows
+                )
                 self._session_status_rows_observed += session_written
                 now = float(self._time_func())
                 self._last_message_epoch = now
                 self._last_message_at = _utc_iso_from_epoch(now)
+                if raw_trade_rows:
+                    self._last_raw_trade_message_at = self._last_message_at
+                if trade_written:
+                    self._last_valid_trade_at = self._last_message_at
+                current_session = vietnam_market_session_from_epoch(now)
+                for row in diagnostic_trade_rows:
+                    symbol = str(row.get("ticker") or row.get("symbol") or "").strip().upper()
+                    if symbol:
+                        self._symbol_trade_health[symbol] = (
+                            "auction_waiting_for_match"
+                            if current_session.get("market_session_is_auction")
+                            else "waiting_for_first_valid_trade"
+                        )
+                for row in valid_trade_rows:
+                    symbol = str(row.get("ticker") or row.get("symbol") or "").strip().upper()
+                    if symbol:
+                        self._symbol_trade_health[symbol] = "live"
                 self._is_idle = False
                 self._idle_since = None
                 self._idle_since_epoch = None
@@ -1989,6 +2077,8 @@ class SsiStreamingRealtimeManager:
                 "raw_type": raw_type,
                 "match_type": raw_side,
                 "id": row.get("sequence_if_available"),
+                "event_market_session": row.get("event_market_session")
+                or vietnam_market_session_from_provider_timestamp(timestamp),
             }
             events.append(event)
         return events
@@ -2031,6 +2121,27 @@ class SsiStreamingRealtimeManager:
             "streaming_data_types": ["X"],
         }
         status = self.status()
+        requested_health = {
+            symbol: self._symbol_trade_health.get(symbol, "waiting_for_first_valid_trade")
+            for symbol in requested
+        }
+        symbol_data_health = (
+            next(iter(requested_health.values()))
+            if len(requested_health) == 1
+            else "live"
+            if requested_health and all(value == "live" for value in requested_health.values())
+            else "partial"
+        )
+        base.update(
+            {
+                "transport_health": "healthy" if status.get("connected") else "unavailable",
+                "parser_health": "healthy" if not status.get("latest_error") else "degraded",
+                "symbol_data_health": symbol_data_health,
+                "current_market_session": status.get("market_session"),
+                "last_valid_trade_at": status.get("last_valid_trade_at"),
+                "dropped_invalid_row_count": status.get("dropped_invalid_row_count", 0),
+            }
+        )
         manager_state = status["manager_state"]
         diagnostics = dict(status)
         diagnostics.update(self._context_status_metadata("x"))
@@ -2090,22 +2201,24 @@ class SsiStreamingRealtimeManager:
         )
         if cache_result["rows"]:
             persisted_only = all(row.get("snapshot_source") == "persisted" for row in cache_result["rows"])
+            stale_rows_present = any(bool(row.get("is_stale")) for row in cache_result["rows"])
             after_hours = not diagnostics.get("market_session_active")
             reason = (
                 "Market closed — showing last known data."
-                if persisted_only and after_hours
+                if stale_rows_present and after_hours
                 else "Waiting for live SSI updates — showing last known data."
-                if persisted_only
+                if stale_rows_present
                 else None
             )
             return {
                 **base,
-                "status": "stale" if persisted_only else "ok",
+                "symbol_data_health": "after_hours_stale" if stale_rows_present and after_hours else "stale" if stale_rows_present else "live",
+                "status": "stale" if stale_rows_present else "ok",
                 "reason": reason,
                 "quotes": cache_result["rows"],
                 "count": len(cache_result["rows"]),
-                "streaming_status": "after_hours_stale" if persisted_only and after_hours else "persisted_stale" if persisted_only else "cache_hit",
-                "cache_status": "persisted_stale" if persisted_only else "hit",
+                "streaming_status": "after_hours_stale" if stale_rows_present and after_hours else "persisted_stale" if persisted_only else "cache_stale" if stale_rows_present else "cache_hit",
+                "cache_status": "persisted_stale" if persisted_only else "stale" if stale_rows_present else "hit",
                 "manager_state": manager_state,
                 "parsed_streaming_rows": diagnostics["parser_rows_observed"],
                 "diagnostics": diagnostics,
@@ -2125,6 +2238,14 @@ class SsiStreamingRealtimeManager:
                 else "Market closed — no live realtime snapshot expected."
             )
             streaming_status = "after_hours_stale" if cache_result["stale_count"] > 0 else diagnostics.get("stream_health")
+            base["symbol_data_health"] = "after_hours_stale"
+        elif diagnostics.get("market_session_is_auction") and any(
+            self._symbol_trade_health.get(symbol) == "auction_waiting_for_match"
+            for symbol in requested
+        ):
+            reason = "Waiting for auction match."
+            streaming_status = "ato_waiting_for_match" if diagnostics.get("market_session") == "ato" else "atc_waiting_for_match"
+            base["symbol_data_health"] = "auction_waiting_for_match"
         diagnostics["streaming_status"] = streaming_status
         return {
             **base,
@@ -2713,12 +2834,19 @@ class SsiStreamingRealtimeManager:
             "candidate_endpoints": [],
             "rest_status": "unsupported",
             **self._context_status_metadata("x_trade"),
+            "transport_health": "healthy" if status.get("connected") else "unavailable",
+            "parser_health": "healthy" if not status.get("latest_error") else "degraded",
+            "symbol_data_health": self._symbol_trade_health.get(requested_symbol, "waiting_for_first_valid_trade"),
+            "current_market_session": status.get("market_session"),
+            "last_valid_trade_at": status.get("last_valid_trade_at"),
+            "dropped_invalid_row_count": status.get("dropped_invalid_row_count", 0),
         }
 
         if not requested_symbol:
             diagnostics["failure_class"] = "missing_symbol"
             return {
                 **base,
+                "symbol_data_health": "after_hours_stale" if after_hours else "stale" if persisted_only or cache_result["status"] == "stale" else "live",
                 "status": "unavailable",
                 "reason": "No symbol requested",
                 "streaming_status": "missing_symbol",
@@ -2873,6 +3001,11 @@ class SsiStreamingRealtimeManager:
                 else "Market closed — no live trade rows expected."
             )
             diagnostics["streaming_status"] = "after_hours_stale" if cache_result["status"] == "stale" else diagnostics.get("stream_health")
+            base["symbol_data_health"] = "after_hours_stale"
+        elif diagnostics.get("market_session_is_auction") and self._symbol_trade_health.get(requested_symbol) == "auction_waiting_for_match":
+            reason = "Waiting for auction match."
+            diagnostics["streaming_status"] = "ato_waiting_for_match" if diagnostics.get("market_session") == "ato" else "atc_waiting_for_match"
+            base["symbol_data_health"] = "auction_waiting_for_match"
         return {
             **base,
             "status": "unavailable",
@@ -3272,6 +3405,20 @@ class SsiStreamingRealtimeManager:
                 "foreign_room_rows_observed": self._foreign_room_rows_observed,
                 "market_index_rows_observed": self._market_index_rows_observed,
                 "trade_rows_observed": self._trade_rows_observed,
+                "raw_trade_messages_observed": self._raw_trade_messages_observed,
+                "valid_trade_rows_observed": self._valid_trade_rows_observed,
+                "zero_price_trade_rows_dropped": self._zero_price_trade_rows_dropped,
+                "zero_volume_trade_rows_dropped": self._zero_volume_trade_rows_dropped,
+                "non_trade_messages_dropped": self._non_trade_messages_dropped,
+                "malformed_trade_rows_dropped": self._malformed_trade_rows_dropped,
+                "missing_timestamp_rows_dropped": self._missing_timestamp_rows_dropped,
+                "last_raw_trade_message_at": self._last_raw_trade_message_at,
+                "last_valid_trade_at": self._last_valid_trade_at,
+                "dropped_invalid_row_count": (
+                    self._non_trade_messages_dropped
+                    + self._malformed_trade_rows_dropped
+                    + self._missing_timestamp_rows_dropped
+                ),
                 "session_status_rows_observed": self._session_status_rows_observed,
                 "bootstrap_status": self._bootstrap_status,
                 "bootstrap_reason": self._bootstrap_reason,

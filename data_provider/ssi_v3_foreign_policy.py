@@ -6,9 +6,9 @@ adapter therefore resolves the exact symbol's board before applying this
 single, explicit normalization boundary.
 
 The scales below are StockClock-validated operational units, not a claim that
-SSI's public contract guarantees these units. Current-session and the latest
-completed provider session remain provisional. Older returned sessions are
-completed-history candidates only; provider-guaranteed finality remains
+SSI's public contract guarantees these units. A current-session row remains
+provisional. The latest returned session before ``as_of`` is eligible as the
+latest completed provider session, while provider-guaranteed finality remains
 unavailable.
 """
 
@@ -22,7 +22,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 SSI_V3_FOREIGN_VOLUME_UNIT = "shares"
 SSI_V3_FOREIGN_VALUE_UNIT = "VND"
 SSI_V3_FOREIGN_FINALITY_POLICY = "stockclock_completed_session_rank_operational"
-SSI_V3_FOREIGN_COMPLETED_MIN_SESSION_RANK = 2
+SSI_V3_FOREIGN_COMPLETED_MIN_SESSION_RANK = 1
 SSI_V3_IMPLIED_PRICE_TOLERANCE = Decimal("0.05")
 SSI_V3_VALUE_SCALE_CANDIDATES: Tuple[int, ...] = (1, 1_000, 1_000_000)
 
@@ -109,11 +109,9 @@ def foreign_row_finality(
                 "historical foreign-flow row requires a positive completed-session rank"
             )
         effective_rank = int(completed_session_rank)
-        is_provisional = (
-            effective_rank < SSI_V3_FOREIGN_COMPLETED_MIN_SESSION_RANK
-        )
+        is_provisional = False
     if parsed < as_of and effective_rank == 1:
-        state = "t_minus_1_provisional"
+        state = "latest_completed_session"
     elif parsed < as_of:
         state = "t_minus_2_or_older_completed_candidate"
     return {
