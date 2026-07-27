@@ -19,7 +19,7 @@ from data_provider.ssi_provider_router import (
 
 _VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 _MAX_SYMBOLS = 30
-_MAX_RANGE_DAYS = 31
+_MAX_RANGE_DAYS = 120
 _SOURCE = "ssi_fastconnect"
 _PROVIDER_VERSION = "v3"
 _PROP_CACHE_LOCK = RLock()
@@ -134,7 +134,15 @@ class VietnamFlowDataService:
             raise ValueError("from_date must not be after to_date")
         if (end - start).days + 1 > _MAX_RANGE_DAYS:
             raise ValueError(f"date range cannot exceed {_MAX_RANGE_DAYS} calendar days")
-        return [(start + timedelta(days=offset)).isoformat() for offset in range((end - start).days + 1)]
+        # The V3 indexSummary contract accepts one provider date per request.
+        # Skip weekends to keep long explorer windows bounded without inventing
+        # sessions; exchange holidays remain provider-empty and are reported.
+        return [
+            candidate.isoformat()
+            for offset in range((end - start).days + 1)
+            for candidate in [start + timedelta(days=offset)]
+            if candidate.weekday() < 5
+        ]
 
     def foreign_history_by_index(
         self,
@@ -430,6 +438,7 @@ class VietnamFlowDataService:
         *,
         from_date: Optional[str] = None,
         to_date: Optional[str] = None,
+        force_refresh: bool = False,
     ) -> Dict[str, Any]:
         normalized_scope = str(scope or "").strip().lower()
         normalized_identifier = str(identifier or "").strip().upper()
@@ -452,6 +461,8 @@ class VietnamFlowDataService:
                 "provider_version": _PROVIDER_VERSION,
                 "endpoint": "indexSummary",
                 "unsupported_scopes": ["symbol", "icb_industry"],
+                "fetched_at": datetime.now(tz=ZoneInfo("UTC")).isoformat(),
+                "cache": {"status": "unavailable", "age_seconds": None},
                 "diagnostics": {"failure_class": "provider_not_configured"},
             }
         rows: List[Dict[str, Any]] = []
@@ -463,7 +474,7 @@ class VietnamFlowDataService:
             now = time.monotonic()
             with _PROP_CACHE_LOCK:
                 cached = _PROP_CACHE.get(cache_key)
-                if cached and cached[0] > now:
+                if cached and cached[0] > now and not force_refresh:
                     result = deepcopy(cached[1])
                     cache_hits += 1
                 else:
@@ -519,10 +530,18 @@ class VietnamFlowDataService:
             "provider_version": _PROVIDER_VERSION,
             "endpoint": "indexSummary",
             "unsupported_scopes": ["symbol", "icb_industry"],
+            "requested_from_date": from_date,
+            "requested_to_date": to_date,
+            "fetched_at": datetime.now(tz=ZoneInfo("UTC")).isoformat(),
+            "cache": {
+                "status": "refresh" if force_refresh else "hit" if cache_hits and provider_operations == 0 else "partial_hit" if cache_hits else "miss",
+                "age_seconds": None,
+            },
             "diagnostics": {
                 "provider_operation_count": provider_operations,
                 "cache_hit_count": cache_hits,
                 "failed_operation_count": failures,
+                "requested_provider_dates": len(requested_dates),
             },
         }
 
@@ -558,6 +577,10 @@ class VietnamFlowDataService:
                 "proprietary_industry_status": "unsupported",
                 "source": _SOURCE,
                 "provider_version": _PROVIDER_VERSION,
+                "requested_from_date": start,
+                "requested_to_date": end,
+                "fetched_at": datetime.now(tz=ZoneInfo("UTC")).isoformat(),
+                "cache": {"status": "unavailable", "age_seconds": None},
                 "diagnostics": {
                     "failure_class": "provider_not_configured",
                     "provider_operation_count": 0,
@@ -722,6 +745,10 @@ class VietnamFlowDataService:
             "proprietary_industry_status": "unsupported",
             "source": _SOURCE,
             "provider_version": _PROVIDER_VERSION,
+            "requested_from_date": start,
+            "requested_to_date": end,
+            "fetched_at": datetime.now(tz=ZoneInfo("UTC")).isoformat(),
+            "cache": {"status": "miss", "age_seconds": None},
             "diagnostics": {
                 "provider_operation_count": provider_operations,
                 "reconciliation": reconciliation,

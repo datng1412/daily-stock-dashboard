@@ -438,7 +438,7 @@ def remove_from_watchlist(
     description="Return data-quality metadata for the Vietnam watchlist.",
 )
 def get_vietnam_watchlist_health(
-    tickers: Optional[str] = Query(None, description="Comma-separated VN tickers. Defaults to FPT,VPB,MSB,SCS,ACV,ACB"),
+    tickers: Optional[str] = Query(None, description="Optional comma-separated VN tickers. An omitted value returns an empty user-controlled scope."),
 ) -> VietnamWatchlistHealthResponse:
     try:
         symbols = [item.strip().upper() for item in tickers.split(",") if item.strip()] if tickers else None
@@ -459,7 +459,7 @@ def get_vietnam_watchlist_health(
     description="Return Vietnam watchlist monitoring data from SSI-backed VN market data. News is disabled by default; the production Vnstock selector returns a terms-gated unavailable status, while personal Vnstock mode is local-only and optional.",
 )
 def get_vietnam_watchlist(
-    tickers: Optional[str] = Query(None, description="Comma-separated VN tickers. Defaults to FPT,VPB,MSB,SCS,ACV,ACB"),
+    tickers: Optional[str] = Query(None, description="Optional comma-separated VN tickers. An omitted value returns an empty user-controlled watchlist."),
     force_refresh: bool = Query(False, description="Bypass VN in-memory cache and refresh configured VN provider data"),
     include_intraday: bool = Query(True, description="Include current intraday candle pulse data when available"),
     intraday_timeframe: str = Query("1h", description="Requested SSI IntradayOhlc timeframe hint. Actual returned granularity is reported separately."),
@@ -877,6 +877,7 @@ def get_vietnam_proprietary_flow(
     identifier: str = Query(...),
     from_date: Optional[str] = Query(None),
     to_date: Optional[str] = Query(None),
+    force_refresh: bool = Query(False, description="Bypass only the matching proprietary-flow cache entries."),
 ) -> VietnamProprietaryFlowResponse:
     service = VietnamFlowDataService()
     try:
@@ -885,6 +886,7 @@ def get_vietnam_proprietary_flow(
             identifier,
             from_date=from_date,
             to_date=to_date,
+            force_refresh=force_refresh,
         ))
     except ValueError as exc:
         raise HTTPException(status_code=422, detail={"error": "vn_proprietary_flow_invalid_request", "message": str(exc)}) from exc
@@ -933,7 +935,7 @@ def get_vietnam_observability(response: Response = None) -> VietnamObservability
     description="Return explicitly sourced Vietnam corporate-action events when a verified provider is configured.",
 )
 def get_vietnam_corporate_actions(
-    tickers: Optional[str] = Query(None, description="Comma-separated VN tickers. Defaults to FPT,VPB,MSB,SCS,ACV,ACB"),
+    tickers: Optional[str] = Query(None, description="Optional comma-separated VN tickers. An omitted value returns an empty user-controlled scope."),
     months_back: int = Query(6, ge=1, le=24, description="Recent historical window in months"),
 ) -> VietnamCorporateActionsResponse:
     try:

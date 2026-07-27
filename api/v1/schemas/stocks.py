@@ -669,6 +669,12 @@ class VietnamCompanyProfile(BaseModel):
     listed_shares: Optional[int] = None
     listed_date: Optional[str] = None
     source: Optional[str] = None
+    source_endpoint: Optional[str] = None
+    provider_version: Optional[str] = None
+    fetched_at: Optional[str] = None
+    cache_status: Optional[str] = None
+    data_state: Literal["ready", "partial", "unavailable"] = "unavailable"
+    failure_class: Optional[str] = None
     status: str = "missing"
     quality_status: Optional[str] = None
     completeness: Optional[float] = None
@@ -807,6 +813,9 @@ class VietnamCompanyResearchResponse(BaseModel):
     realtime_status: Dict[str, Any] = Field(default_factory=dict)
     trade_tape: List[Dict[str, Any]] = Field(default_factory=list)
     trade_tape_status: Dict[str, Any] = Field(default_factory=dict)
+    order_book_source: Optional[str] = None
+    order_book: Optional[Dict[str, Any]] = None
+    order_book_status: Dict[str, Any] = Field(default_factory=dict)
     diagnostics: Dict[str, Any] = Field(default_factory=dict)
     source_coverage: List[VietnamCompanySourceCoverageItem] = Field(default_factory=list)
     news: VietnamCompanyPlaceholderBlock
@@ -1351,16 +1360,16 @@ class VietnamVn30ForeignFlowDaily(BaseModel):
 
 
 class VietnamVn30ForeignFlowWindow(BaseModel):
-    requested_sessions: Literal[5, 20]
-    covered_sessions: int = Field(ge=0, le=20)
+    requested_sessions: Literal[5, 20, 60]
+    covered_sessions: int = Field(ge=0, le=60)
     complete: bool
-    valid_sessions: Optional[int] = Field(None, ge=0, le=20)
-    partial_sessions: Optional[int] = Field(None, ge=0, le=20)
-    suspicious_sessions: Optional[int] = Field(None, ge=0, le=20)
+    valid_sessions: Optional[int] = Field(None, ge=0, le=60)
+    partial_sessions: Optional[int] = Field(None, ge=0, le=60)
+    suspicious_sessions: Optional[int] = Field(None, ge=0, le=60)
     contains_provider_anomaly: bool = False
-    anomaly_sessions: List[str] = Field(default_factory=list, max_length=20)
-    anomaly_count: int = Field(0, ge=0, le=20)
-    missing_sessions: Optional[int] = Field(None, ge=0, le=20)
+    anomaly_sessions: List[str] = Field(default_factory=list, max_length=60)
+    anomaly_count: int = Field(0, ge=0, le=60)
+    missing_sessions: Optional[int] = Field(None, ge=0, le=60)
     start_date: Optional[str] = None
     end_date: Optional[str] = None
     foreign_buy_volume: Optional[int] = None
@@ -1369,16 +1378,16 @@ class VietnamVn30ForeignFlowWindow(BaseModel):
     foreign_buy_value: Optional[int] = None
     foreign_sell_value: Optional[int] = None
     foreign_net_value: Optional[int] = None
-    volume_component_sessions: Optional[int] = Field(None, ge=0, le=600)
+    volume_component_sessions: Optional[int] = Field(None, ge=0, le=1800)
     volume_coverage_ratio: Optional[float] = Field(None, ge=0, le=1)
     volume_complete: Optional[bool] = None
-    value_component_sessions: Optional[int] = Field(None, ge=0, le=600)
+    value_component_sessions: Optional[int] = Field(None, ge=0, le=1800)
     value_coverage_ratio: Optional[float] = Field(None, ge=0, le=1)
     value_complete: Optional[bool] = None
-    positive_component_sessions: Optional[int] = Field(None, ge=0, le=600)
-    negative_component_sessions: Optional[int] = Field(None, ge=0, le=600)
-    zero_component_sessions: Optional[int] = Field(None, ge=0, le=600)
-    missing_component_sessions: Optional[int] = Field(None, ge=0, le=600)
+    positive_component_sessions: Optional[int] = Field(None, ge=0, le=1800)
+    negative_component_sessions: Optional[int] = Field(None, ge=0, le=1800)
+    zero_component_sessions: Optional[int] = Field(None, ge=0, le=1800)
+    missing_component_sessions: Optional[int] = Field(None, ge=0, le=1800)
     coverage_mode: Optional[str] = None
     constituent_coverage: Optional[str] = None
 
@@ -1410,6 +1419,12 @@ class VietnamVn30ForeignFlowComponent(BaseModel):
     foreign_buy_value_20d: Optional[int] = None
     foreign_sell_value_20d: Optional[int] = None
     foreign_net_value_20d: Optional[int] = None
+    foreign_buy_volume_60d: Optional[int] = None
+    foreign_sell_volume_60d: Optional[int] = None
+    foreign_net_volume_60d: Optional[int] = None
+    foreign_buy_value_60d: Optional[int] = None
+    foreign_sell_value_60d: Optional[int] = None
+    foreign_net_value_60d: Optional[int] = None
     volume_covered_sessions_5d: int = Field(ge=0, le=5)
     volume_complete_5d: bool
     value_covered_sessions_5d: int = Field(ge=0, le=5)
@@ -1420,6 +1435,11 @@ class VietnamVn30ForeignFlowComponent(BaseModel):
     value_covered_sessions_20d: int = Field(ge=0, le=20)
     value_complete_20d: bool
     window_end_date_20d: Optional[str] = None
+    volume_covered_sessions_60d: int = Field(0, ge=0, le=60)
+    volume_complete_60d: bool = False
+    value_covered_sessions_60d: int = Field(0, ge=0, le=60)
+    value_complete_60d: bool = False
+    window_end_date_60d: Optional[str] = None
 
 
 class VietnamVn30ForeignFlowRankingEntry(BaseModel):
@@ -1441,6 +1461,8 @@ class VietnamVn30ForeignFlowRankings(BaseModel):
     net_volume_5d: VietnamVn30ForeignFlowRankingPair
     net_value_20d: VietnamVn30ForeignFlowRankingPair
     net_volume_20d: VietnamVn30ForeignFlowRankingPair
+    net_value_60d: VietnamVn30ForeignFlowRankingPair = Field(default_factory=VietnamVn30ForeignFlowRankingPair)
+    net_volume_60d: VietnamVn30ForeignFlowRankingPair = Field(default_factory=VietnamVn30ForeignFlowRankingPair)
 
 
 class VietnamVn30ForeignFlowComponentCounts(BaseModel):
@@ -1498,10 +1520,10 @@ class VietnamVn30ForeignFlowResponse(BaseModel):
     decomposition_date: Optional[str] = None
     data_state: Literal["ready", "partial", "stale", "unavailable"]
     membership: VietnamVn30ForeignFlowMembership
-    aggregate_session_dates: List[str] = Field(default_factory=list, max_length=20)
+    aggregate_session_dates: List[str] = Field(default_factory=list, max_length=60)
     latest: Optional[VietnamVn30ForeignFlowDaily] = None
-    windows: Dict[Literal["5", "20"], VietnamVn30ForeignFlowWindow]
-    series: List[VietnamVn30ForeignFlowDaily] = Field(default_factory=list, max_length=20)
+    windows: Dict[Literal["5", "20", "60"], VietnamVn30ForeignFlowWindow]
+    series: List[VietnamVn30ForeignFlowDaily] = Field(default_factory=list, max_length=60)
     components: List[VietnamVn30ForeignFlowComponent] = Field(default_factory=list, max_length=30)
     component_counts: VietnamVn30ForeignFlowComponentCounts
     rankings: VietnamVn30ForeignFlowRankings
@@ -1770,6 +1792,10 @@ class VietnamProprietaryFlowResponse(BaseModel):
     provider_version: str
     endpoint: str
     unsupported_scopes: List[str] = Field(default_factory=list)
+    requested_from_date: Optional[str] = None
+    requested_to_date: Optional[str] = None
+    fetched_at: Optional[str] = None
+    cache: Dict[str, Any] = Field(default_factory=dict)
     diagnostics: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -1795,4 +1821,8 @@ class VietnamIndustryFlowResponse(BaseModel):
     proprietary_industry_status: Literal["unsupported"] = "unsupported"
     source: str
     provider_version: str
+    requested_from_date: Optional[str] = None
+    requested_to_date: Optional[str] = None
+    fetched_at: Optional[str] = None
+    cache: Dict[str, Any] = Field(default_factory=dict)
     diagnostics: Dict[str, Any] = Field(default_factory=dict)

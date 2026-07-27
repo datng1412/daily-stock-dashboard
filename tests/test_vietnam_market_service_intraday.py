@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
+import pandas as pd
+
 from src.services.vietnam_market_service import (
     VietnamDashboardConfig,
     VietnamMarketService,
     clear_vietnam_cache,
+    normalize_intraday_candles,
 )
 from src.services.vietnam_company_research_service import VietnamCompanyResearchService
 
@@ -136,6 +139,23 @@ class FakeSsiFetcher:
 
     def get_securities(self, **kwargs):
         return self.get_securities_details(symbol="FPT")
+
+
+def test_intraday_normalization_orders_deduplicates_and_preserves_equal_time_events():
+    rows = normalize_intraday_candles(pd.DataFrame([
+        {"event_id": "2", "date_time": "2026-06-30T10:01:00+07:00", "open": 11, "high": 12, "low": 10, "close": 11.5, "volume": 2},
+        {"event_id": "1", "date_time": "2026-06-30T10:00:00+07:00", "open": 10, "high": 11, "low": 9, "close": 10.5, "volume": 1},
+        {"event_id": "1", "date_time": "2026-06-30T10:00:00+07:00", "open": 99, "high": 99, "low": 99, "close": 99, "volume": 99},
+        {"date_time": "2026-06-30T10:01:00+07:00", "open": 12, "high": 13, "low": 11, "close": 12.5, "volume": 3},
+        {"date_time": "2026-06-30T10:02:00+07:00", "open": 0, "high": 1, "low": 0, "close": 0, "volume": 0},
+    ]), limit=20)
+
+    assert [row["date_time"] for row in rows] == [
+        "2026-06-30T10:00:00+07:00",
+        "2026-06-30T10:01:00+07:00",
+        "2026-06-30T10:01:00+07:00",
+    ]
+    assert [row["close"] for row in rows] == [10.5, 11.5, 12.5]
 
 
 def _service(fetcher: FakeSsiFetcher, *, intraday_enabled: bool = True) -> VietnamMarketService:

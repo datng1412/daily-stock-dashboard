@@ -155,15 +155,14 @@ def test_vietnam_company_research_endpoint_returns_phase_one_contract(monkeypatc
     assert coverage["Trade tape"]["source"] == "SSI trade-tape contract"
     assert coverage["Trade tape"]["status"] == "ok"
     assert coverage["News"]["source"] == "NewsProvider future"
-    assert coverage["Financials"]["source"] == "external provider future"
-    assert coverage["Corporate actions"]["source"] == "external provider future"
+    assert "Financials" not in coverage
+    assert "Corporate actions" not in coverage
     assert payload["intraday"]["status"] == "ok"
     assert payload["realtime_status"]["status"] == "ok"
     assert payload["realtime_snapshot"]["price"] == 124.8
     assert payload["trade_tape_status"]["status"] == "ok"
     assert payload["trade_tape"][0]["price"] == 124.8
     assert coverage["News"]["status"] == "not_implemented"
-    assert coverage["Financials"]["status"] == "not_implemented"
     assert payload["news"]["items"] == []
     assert payload["news"]["status"] == "not_implemented"
     assert payload["news"]["source"] != "SSI"

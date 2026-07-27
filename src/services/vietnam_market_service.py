@@ -84,7 +84,6 @@ VN_INTRADAY_CHART_CURRENT_STALE_MAX_SECONDS = 5 * 60
 VN_INTRADAY_CHART_CURRENT_SNAPSHOT_FRESH_SECONDS = 30
 VN_INTRADAY_CHART_CURRENT_STALE_THRESHOLD_SECONDS = 90
 VN_INTRADAY_CHART_CACHE_MAX_ENTRIES = 500
-VN_WATCHLIST = ("FPT", "VPB", "MSB", "SCS", "ACV", "ACB")
 VN_PRICE_LIMIT_PCT = {
     "HOSE": 7.0,
     "HNX": 10.0,
@@ -596,7 +595,7 @@ def normalize_vietnam_tickers(values: Optional[Iterable[str]]) -> List[str]:
     symbols: List[str] = []
     seen = set()
     duplicate_count = 0
-    for value in values or VN_WATCHLIST:
+    for value in values or ():
         ticker = vn_ticker(str(value).strip().upper())
         if not ticker or not ticker.replace(".", "").isalnum() or len(ticker) > 10:
             continue
@@ -2855,7 +2854,12 @@ def _intraday_detail(label: str, severity: str, reason: str, inputs: Optional[Di
 
 
 def normalize_intraday_candles(df: Optional[pd.DataFrame], limit: int = 8) -> List[Dict[str, Any]]:
-    """Normalize intraday OHLCV rows for API output."""
+    """Normalize provider intraday OHLCV rows without filling or synthetic bars.
+
+    Exact duplicate provider events are removed by their explicit event/sequence
+    identifier when present, otherwise by timestamp plus the complete OHLCV
+    tuple. Equal-time rows with different provider values remain distinct.
+    """
     if df is None or df.empty:
         return []
 
@@ -2867,26 +2871,57 @@ def normalize_intraday_candles(df: Optional[pd.DataFrame], limit: int = 8) -> Li
         except (TypeError, ValueError):
             return False
 
-    rows = []
-    for raw in df.tail(limit).to_dict("records"):
+    rows: List[Dict[str, Any]] = []
+    seen: set[Tuple[Any, ...]] = set()
+    for occurrence, raw in enumerate(df.to_dict("records")):
         timestamp = raw.get("timestamp")
         date_time = raw.get("date_time") or raw.get("datetime") or raw.get("date")
+        open_value = _safe_float(raw.get("open"))
+        high_value = _safe_float(raw.get("high"))
+        low_value = _safe_float(raw.get("low"))
         close = _safe_float(raw.get("close"))
-        if (is_missing_intraday_value(timestamp) and is_missing_intraday_value(date_time)) or close is None:
+        volume = _safe_float(raw.get("volume"))
+        prices = (open_value, high_value, low_value, close)
+        if (
+            (is_missing_intraday_value(timestamp) and is_missing_intraday_value(date_time))
+            or any(value is None or not math.isfinite(value) or value <= 0 for value in prices)
+            or (volume is not None and (not math.isfinite(volume) or volume < 0))
+        ):
             continue
+        event_id = raw.get("event_id") or raw.get("eventId") or raw.get("sequence") or raw.get("seq")
+        identity = (
+            ("provider_event", str(event_id))
+            if event_id not in (None, "")
+            else ("ohlcv", timestamp, str(date_time), *prices, volume)
+        )
+        if identity in seen:
+            continue
+        seen.add(identity)
+        parsed_time = pd.to_datetime(date_time, errors="coerce")
+        sort_value = (
+            parsed_time.value
+            if not pd.isna(parsed_time)
+            else _safe_float(timestamp)
+            if _safe_float(timestamp) is not None
+            else float("inf")
+        )
         rows.append(
             {
                 "timestamp": timestamp,
                 "date_time": date_time,
-                "open": _safe_float(raw.get("open")),
-                "high": _safe_float(raw.get("high")),
-                "low": _safe_float(raw.get("low")),
+                "open": open_value,
+                "high": high_value,
+                "low": low_value,
                 "close": close,
-                "volume": _safe_float(raw.get("volume")),
+                "volume": volume,
                 "ticker": raw.get("ticker"),
+                "_sort": (sort_value, occurrence),
             }
         )
-    return rows
+    rows.sort(key=lambda row: row["_sort"])
+    for row in rows:
+        row.pop("_sort", None)
+    return rows[-max(1, int(limit)) :]
 
 
 def _intraday_candle_vn_date(candle: Dict[str, Any]) -> Optional[str]:
@@ -5593,6 +5628,10 @@ class VietnamMarketService:
             "listed_shares": _safe_int(row.get("listed_shares")),
             "listed_date": row.get("listed_date"),
             "source": source_label,
+            "source_endpoint": str((diagnostics or {}).get("endpoint") or "securitiesByBoard?symbol="),
+            "provider_version": "v3",
+            "fetched_at": _iso(_utc_now()),
+            "failure_class": None,
         }
         field_coverage = {
             field: normalized.get(field) not in (None, "")
@@ -5614,6 +5653,7 @@ class VietnamMarketService:
         normalized.update(
             {
                 "quality_status": "complete" if not missing_fields else "partial" if normalized["symbol"] else "unknown",
+                "data_state": "ready" if not missing_fields else "partial" if normalized["symbol"] else "unavailable",
                 "completeness": round(
                     sum(1 for available in field_coverage.values() if available) / len(SYMBOL_METADATA_FIELDS),
                     4,
@@ -5645,6 +5685,11 @@ class VietnamMarketService:
             "quality_status": "unavailable",
             "completeness": 0.0,
             "source": SSI_SECURITIES_DETAILS_SOURCE,
+            "source_endpoint": str(diagnostics.get("endpoint") or "securitiesByBoard?symbol="),
+            "provider_version": "v3",
+            "fetched_at": _iso(_utc_now()),
+            "data_state": "unavailable",
+            "failure_class": str(diagnostics.get("failure_class") or "provider_unavailable"),
             "reason": reason or SSI_UNAVAILABLE_REASON,
             "symbol": None,
             "exchange": None,
@@ -5683,18 +5728,18 @@ class VietnamMarketService:
         details_payload = provider.get_security_metadata(symbol=normalized_symbol)
         details_rows = details_payload.get("rows") if isinstance(details_payload, dict) else None
         details_row_count = len(details_rows) if isinstance(details_rows, list) else 0
-        attempted_endpoints = ["SecuritiesDetails"]
+        attempted_endpoints = ["securitiesByBoard?symbol="]
         row = self._matching_ssi_metadata_row(details_payload, normalized_symbol)
         if row:
             return self._normalize_ssi_symbol_metadata(
                 row,
                 SSI_SECURITIES_DETAILS_SOURCE,
                 diagnostics={
-                    "endpoint": "SecuritiesDetails",
+                    "endpoint": "securitiesByBoard?symbol=",
                     "attempted_endpoints": attempted_endpoints,
                     "requested_symbol": normalized_symbol,
                     "normalized_row_count": details_row_count,
-                    "endpoint_row_counts": {"SecuritiesDetails": details_row_count},
+                    "endpoint_row_counts": {"securitiesByBoard?symbol=": details_row_count},
                 },
             )
 
@@ -5713,12 +5758,12 @@ class VietnamMarketService:
         return self._unavailable_ssi_symbol_metadata(
             reason=reason,
             diagnostics={
-                "endpoint": "SecuritiesDetails",
+                "endpoint": "securitiesByBoard?symbol=",
                 "attempted_endpoints": attempted_endpoints,
                 "requested_symbol": normalized_symbol,
                 "normalized_row_count": 0,
                 "endpoint_row_counts": {
-                    "SecuritiesDetails": details_row_count,
+                    "securitiesByBoard?symbol=": details_row_count,
                 },
                 "failure_class": failure_class,
             },
@@ -5739,14 +5784,17 @@ class VietnamMarketService:
             )
             value = result["value"]
             if isinstance(value, dict):
-                return value
+                normalized = dict(value)
+                normalized["cache_status"] = result["status"]
+                normalized["fetched_at"] = _iso(result["entry"].fetched_at)
+                return normalized
         except Exception:
             logger.debug("SSI symbol metadata unavailable for %s", symbol)
         return self._unavailable_ssi_symbol_metadata(
             reason=SSI_UNAVAILABLE_REASON,
             diagnostics={
-                "endpoint": "SecuritiesDetails",
-                "attempted_endpoints": ["SecuritiesDetails"],
+                "endpoint": "securitiesByBoard?symbol=",
+                "attempted_endpoints": ["securitiesByBoard?symbol="],
                 "requested_symbol": vn_ticker(symbol),
                 "normalized_row_count": 0,
                 "failure_class": "service_error",

@@ -212,7 +212,7 @@ def test_vn30_aggregate_cache_and_force_refresh_are_deterministic():
     assert second["cache"]["status"] == "hit"
     assert refreshed["cache"]["status"] == "refresh"
     assert len(symbol_service.calls) == 4
-    assert all(call[1] == 20 for call in symbol_service.calls)
+    assert all(call[1] == 60 for call in symbol_service.calls)
     assert symbol_service.calls[-1][2] is True
 
 

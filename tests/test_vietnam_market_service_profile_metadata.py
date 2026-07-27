@@ -177,7 +177,12 @@ def test_securities_details_complete_metadata_is_source_labeled_and_sanitized():
     assert metadata["listed_shares"] == 1_471_000_000
     assert metadata["listed_date"] == "2006-12-13"
     assert metadata["missing_fields"] == []
-    assert metadata["diagnostics"]["endpoint"] == "SecuritiesDetails"
+    assert metadata["diagnostics"]["endpoint"] == "securitiesByBoard?symbol="
+    assert metadata["source_endpoint"] == "securitiesByBoard?symbol="
+    assert metadata["provider_version"] == "v3"
+    assert metadata["fetched_at"]
+    assert metadata["data_state"] == "ready"
+    assert metadata["failure_class"] is None
     assert metadata["diagnostics"]["requested_symbol"] == "FPT"
     assert metadata["diagnostics"]["normalized_row_count"] == 1
     assert metadata["diagnostics"]["selected_row_source"] == "SSI SecuritiesDetails"
@@ -246,7 +251,7 @@ def test_metadata_does_not_guess_a_board_after_exact_symbol_lookup_fails():
     assert metadata["status"] == "unavailable"
     assert metadata["exchange"] is None
     assert metadata["market"] is None
-    assert metadata["diagnostics"]["attempted_endpoints"] == ["SecuritiesDetails"]
+    assert metadata["diagnostics"]["attempted_endpoints"] == ["securitiesByBoard?symbol="]
     assert fetcher.details_calls == 1
     assert fetcher.securities_calls == 0
     assert item["fallback_used"] is False

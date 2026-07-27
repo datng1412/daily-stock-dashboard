@@ -17,6 +17,7 @@ NOT_IMPLEMENTED_MESSAGE = "News provider is not implemented yet."
 SSI_DAILY_OHLC_SOURCE = "SSI DailyOhlc"
 SSI_DAILY_STOCK_PRICE_SOURCE = "SSI DailyStockPrice"
 SSI_SECURITIES_DETAILS_SOURCE = "SSI SecuritiesDetails"
+SSI_SECURITIES_ENDPOINT = "securitiesByBoard?symbol="
 SSI_INTRADAY_SOURCE = "SSI IntradayOhlc"
 SSI_REALTIME_SOURCE = "SSI realtime contract"
 SSI_TRADE_TAPE_SOURCE = "SSI trade-tape contract"
@@ -109,6 +110,18 @@ class VietnamCompanyResearchService:
             "listed_shares": _first_present(row.get("listed_shares"), metadata.get("listed_shares")),
             "listed_date": _first_present(row.get("listed_date"), metadata.get("listed_date")),
             "source": _first_present(metadata.get("source_label"), metadata.get("source")) or SSI_SECURITIES_DETAILS_SOURCE,
+            "source_endpoint": metadata.get("source_endpoint") or SSI_SECURITIES_ENDPOINT,
+            "provider_version": metadata.get("provider_version") or "v3",
+            "fetched_at": metadata.get("fetched_at"),
+            "cache_status": metadata.get("cache_status"),
+            "data_state": (
+                "ready"
+                if profile_status == "ok" and profile_quality == "complete"
+                else "partial"
+                if profile_status == "ok"
+                else "unavailable"
+            ),
+            "failure_class": metadata.get("failure_class"),
             "status": profile_status,
             "quality_status": profile_quality,
             "completeness": metadata.get("completeness"),
@@ -122,6 +135,7 @@ class VietnamCompanyResearchService:
         reference_price = _first_present(daily_stock_price.get("reference_price"), row.get("ssi_reference_price"), price_limit.get("reference_price"))
         ceiling_price = _first_present(daily_stock_price.get("ceiling_price"), row.get("ssi_ceiling_price"), price_limit.get("ceiling_price"))
         floor_price = _first_present(daily_stock_price.get("floor_price"), row.get("ssi_floor_price"), price_limit.get("floor_price"))
+        latest_price_source = row.get("latest_price_source") or SSI_DAILY_OHLC_SOURCE
         price_date = _first_present(row.get("latest_price_date"), row.get("price_date"), row.get("ohlcv_date"), row.get("date"))
         price = {
             "latest_price": row.get("latest_price"),
@@ -130,8 +144,8 @@ class VietnamCompanyResearchService:
             "ceiling_price": ceiling_price,
             "floor_price": floor_price,
             "price_date": price_date,
-            "source": SSI_DAILY_OHLC_SOURCE,
-            "canonical_source": SSI_DAILY_OHLC_SOURCE,
+            "source": latest_price_source,
+            "canonical_source": latest_price_source,
             "reference_source": SSI_DAILY_STOCK_PRICE_SOURCE,
             "status": _status_for(row.get("latest_price"), row.get("daily_close"), reference_price, ceiling_price, floor_price),
         }
@@ -271,6 +285,18 @@ class VietnamCompanyResearchService:
             "status": trade_tape_status.get("status") or _dict(trade_tape_payload).get("status") or "unavailable",
             "message": trade_tape_status.get("message"),
         }
+        order_book_status = dict(_dict(row.get("order_book_status")))
+        order_book_payload = row.get("order_book")
+        order_book = dict(order_book_payload) if isinstance(order_book_payload, dict) else None
+        order_book_diagnostics = _dict(row_diagnostics.get("order_book")) or _dict(
+            order_book_status.pop("diagnostics", None)
+        )
+        order_book_status = {
+            **order_book_status,
+            "source": order_book_status.get("source") or "SSI X-QUOTE",
+            "status": order_book_status.get("status") or "unavailable",
+            "message": order_book_status.get("message"),
+        }
 
         source_coverage = self._source_coverage(
             profile,
@@ -305,9 +331,13 @@ class VietnamCompanyResearchService:
             "realtime_status": realtime_status,
             "trade_tape": trade_tape,
             "trade_tape_status": trade_tape_status,
+            "order_book_source": row.get("order_book_source") or order_book_status.get("source"),
+            "order_book": order_book,
+            "order_book_status": order_book_status,
             "diagnostics": {
                 "realtime": realtime_diagnostics,
                 "trade_tape": trade_tape_diagnostics,
+                "order_book": order_book_diagnostics,
             },
             "source_coverage": self._source_coverage(
                 profile,
@@ -372,8 +402,6 @@ class VietnamCompanyResearchService:
                 "source": _dict(news).get("source") or NEWS_FUTURE_SOURCE,
                 "status": _dict(news).get("status") or "not_implemented",
             },
-            {"block": "Financials", "source": EXTERNAL_FUTURE_SOURCE, "status": "not_implemented"},
-            {"block": "Corporate actions", "source": EXTERNAL_FUTURE_SOURCE, "status": "not_implemented"},
         ]
 
     def _placeholder(self, status: str, source: Optional[str], message: Optional[str] = None) -> Dict[str, Any]:
@@ -410,6 +438,12 @@ class VietnamCompanyResearchService:
             "listed_shares": None,
             "listed_date": None,
             "source": SSI_SECURITIES_DETAILS_SOURCE,
+            "source_endpoint": SSI_SECURITIES_ENDPOINT,
+            "provider_version": "v3",
+            "fetched_at": None,
+            "cache_status": "unavailable",
+            "data_state": "unavailable",
+            "failure_class": "provider_unavailable",
             "status": "unavailable",
             "quality_status": "unavailable",
             "completeness": 0.0,
@@ -533,9 +567,17 @@ class VietnamCompanyResearchService:
             "realtime_status": missing_realtime_status,
             "trade_tape": [],
             "trade_tape_status": missing_trade_tape_status,
+            "order_book_source": "SSI X-QUOTE",
+            "order_book": None,
+            "order_book_status": {
+                "source": "SSI X-QUOTE",
+                "status": "unavailable",
+                "message": "SSI order book unavailable.",
+            },
             "diagnostics": {
                 "realtime": {},
                 "trade_tape": {},
+                "order_book": {},
             },
             "source_coverage": self._source_coverage(
                 profile,

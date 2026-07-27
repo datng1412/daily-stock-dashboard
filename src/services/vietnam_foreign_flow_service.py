@@ -48,7 +48,7 @@ BATCH_DEFAULT_TOP_N = 5
 BATCH_MAX_TOP_N = 10
 BATCH_MAX_CONCURRENCY = 4
 VN30_INDEX_CODE = "VN30"
-VN30_HISTORY_SESSIONS = 20
+VN30_HISTORY_SESSIONS = 60
 VN30_AGGREGATE_CACHE_TTL_SECONDS = 300
 VN30_AGGREGATE_NEGATIVE_CACHE_TTL_SECONDS = 60
 VN30_AGGREGATE_CACHE_MAX_ENTRIES = 16
@@ -1250,7 +1250,7 @@ class VietnamForeignFlowVn30Service:
         local_now = self._now_fn().astimezone(VN_TIMEZONE)
         expected_completed = self._expected_completed_session(local_now)
         requested_to = local_now.date()
-        requested_from = requested_to - timedelta(days=60)
+        requested_from = requested_to - timedelta(days=120)
         cache_key = (
             SOURCE,
             "v3",
@@ -1317,7 +1317,7 @@ class VietnamForeignFlowVn30Service:
                 VN30_INDEX_CODE,
                 from_date=requested_from.isoformat(),
                 to_date=requested_to.isoformat(),
-                limit=60,
+                limit=120,
                 force_capability_refresh=force_capability_refresh,
             )
             direct_ms = max(0, int((perf_counter() - direct_started) * 1000))
@@ -1677,6 +1677,7 @@ class VietnamForeignFlowVn30Service:
             "windows": {
                 "5": cls._canonical_window(accepted, 5),
                 "20": cls._canonical_window(accepted, 20),
+                "60": cls._canonical_window(accepted, 60),
             },
             "series": valid[-VN30_HISTORY_SESSIONS:],
             "diagnostics": {
@@ -2055,7 +2056,7 @@ class VietnamForeignFlowVn30Service:
         for family in ("volume", "value"):
             for side in ("buy", "sell", "net"):
                 result[f"foreign_{side}_{family}"] = latest.get(f"foreign_{side}_{family}") if latest else None
-        for size, suffix in ((5, "5d"), (20, "20d")):
+        for size, suffix in ((5, "5d"), (20, "20d"), (60, "60d")):
             selected_dates = session_dates[-size:]
             selected_rows = [rows_by_date[day] for day in selected_dates if day in rows_by_date]
             for family in ("volume", "value"):
@@ -2137,6 +2138,8 @@ class VietnamForeignFlowVn30Service:
             "net_volume_5d": self._ranking_pair(components, "foreign_net_volume_5d", "window_end_date_5d", top_n),
             "net_value_20d": self._ranking_pair(components, "foreign_net_value_20d", "window_end_date_20d", top_n),
             "net_volume_20d": self._ranking_pair(components, "foreign_net_volume_20d", "window_end_date_20d", top_n),
+            "net_value_60d": self._ranking_pair(components, "foreign_net_value_60d", "window_end_date_60d", top_n),
+            "net_volume_60d": self._ranking_pair(components, "foreign_net_volume_60d", "window_end_date_60d", top_n),
         }
         decomposition_latest = series[-1] if series else None
         reconciliation = self._reconcile(
@@ -2187,6 +2190,7 @@ class VietnamForeignFlowVn30Service:
                 "windows": {
                     "5": self._aggregate_window(series, 5, len(tickers)),
                     "20": self._aggregate_window(series, 20, len(tickers)),
+                    "60": self._aggregate_window(series, 60, len(tickers)),
                 },
                 "components": components,
                 "component_counts": counts,
@@ -2282,6 +2286,7 @@ class VietnamForeignFlowVn30Service:
             "missing_component_sessions": 0,
         }
         window_20 = dict(empty_window, requested_sessions=20)
+        window_60 = dict(empty_window, requested_sessions=60)
         return {
             "scope": "vn30",
             "index_code": VN30_INDEX_CODE,
@@ -2305,7 +2310,7 @@ class VietnamForeignFlowVn30Service:
             "membership": membership,
             "aggregate_session_dates": [],
             "latest": None,
-            "windows": {"5": empty_window, "20": window_20},
+            "windows": {"5": empty_window, "20": window_20, "60": window_60},
             "series": [],
             "components": [],
             "component_counts": {"usable": 0, "stale": 0, "empty": 0, "unavailable": 0},
@@ -2316,6 +2321,8 @@ class VietnamForeignFlowVn30Service:
                 "net_volume_5d": deepcopy(empty_pair),
                 "net_value_20d": deepcopy(empty_pair),
                 "net_volume_20d": deepcopy(empty_pair),
+                "net_value_60d": deepcopy(empty_pair),
+                "net_volume_60d": deepcopy(empty_pair),
             },
             "decomposition": {
                 "status": "unavailable",
@@ -2335,7 +2342,7 @@ class VietnamForeignFlowVn30Service:
                 "provider_version": "v3",
                 "series": [],
                 "latest": None,
-                "windows": {"5": empty_window, "20": window_20},
+                "windows": {"5": empty_window, "20": window_20, "60": window_60},
                 "components": [],
                 "component_counts": {
                     "usable": 0,
@@ -2350,6 +2357,8 @@ class VietnamForeignFlowVn30Service:
                     "net_volume_5d": deepcopy(empty_pair),
                     "net_value_20d": deepcopy(empty_pair),
                     "net_volume_20d": deepcopy(empty_pair),
+                    "net_value_60d": deepcopy(empty_pair),
+                    "net_volume_60d": deepcopy(empty_pair),
                 },
                 "reconciliation": {
                     "direct_index_date": None,
