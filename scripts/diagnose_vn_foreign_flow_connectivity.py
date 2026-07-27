@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import replace
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 import importlib.metadata
 import json
 import os
@@ -370,6 +370,66 @@ def _latest_completed_weekday(now: datetime) -> datetime:
     return candidate
 
 
+def select_completed_session(
+    now: datetime,
+    *,
+    provider_latest_date: Optional[str] = None,
+) -> tuple[date, str]:
+    """Prefer proven provider freshness, else use the prior Vietnam weekday."""
+
+    if provider_latest_date:
+        return date.fromisoformat(provider_latest_date), "explicit_provider_latest"
+    return _latest_completed_weekday(now).date(), "latest_completed_weekday"
+
+
+def _proprietary_provider_summary(
+    result: Mapping[str, Any],
+    *,
+    selected_date: date,
+    elapsed_ms: int,
+) -> dict[str, Any]:
+    fields = (
+        "proprietary_buy_volume",
+        "proprietary_sell_volume",
+        "proprietary_net_volume",
+        "proprietary_buy_value",
+        "proprietary_sell_value",
+        "proprietary_net_value",
+    )
+    rows = result.get("rows")
+    safe_rows = rows if isinstance(rows, list) else []
+    present = [
+        field
+        for field in fields
+        if any(isinstance(row, Mapping) and row.get(field) is not None for row in safe_rows)
+    ]
+    latest_session = next(
+        (
+            row.get("date") or row.get("trading_date")
+            for row in reversed(safe_rows)
+            if isinstance(row, Mapping)
+        ),
+        None,
+    )
+    diagnostics = result.get("diagnostics")
+    safe_diagnostics = diagnostics if isinstance(diagnostics, Mapping) else {}
+    return {
+        "capability": "index_summary",
+        "provider_endpoint": "indexSummary?index=",
+        "selected_date": selected_date.isoformat(),
+        "request_attempted": True,
+        "status": result.get("status"),
+        "row_count": len(safe_rows),
+        "proprietary_fields_present": present,
+        "proprietary_fields_missing": [field for field in fields if field not in present],
+        "latest_provider_session": latest_session,
+        "failure_class": result.get("failure_class"),
+        "http_status": safe_diagnostics.get("http_status"),
+        "exception_class": safe_diagnostics.get("exception_class"),
+        "elapsed_ms": elapsed_ms,
+    }
+
+
 def _skipped_capability(capability: str, endpoint: str) -> dict[str, Any]:
     return {
         "capability": capability,
@@ -424,6 +484,116 @@ def _trust_store() -> dict[str, Any]:
     except ImportError:
         result["certifi_cafile"] = None
     return result
+
+
+def run_index_summary_only(*, provider_latest_date: str) -> int:
+    """Run authentication plus exactly one bounded indexSummary provider call."""
+
+    started = time.monotonic()
+    setup_env()
+    Config.reset_instance()
+    settings = SsiV3RestSettings.from_config(get_config())
+    selected_date, selection_basis = select_completed_session(
+        datetime.now(_VN_TZ),
+        provider_latest_date=provider_latest_date,
+    )
+    _emit(
+        "selection",
+        selected_date=selected_date.isoformat(),
+        selection_basis=selection_basis,
+        holiday_calendar_used=False,
+    )
+    if not settings.enabled or settings.missing_required_names:
+        _emit(
+            "final",
+            authentication_count=0,
+            total_provider_requests=0,
+            failure_class=(
+                "credentials_missing"
+                if settings.missing_required_names
+                else "environment_configuration"
+            ),
+            elapsed_ms=max(0, int((time.monotonic() - started) * 1000)),
+        )
+        return 2
+
+    bounded_settings = replace(
+        settings,
+        request_timeout=min(
+            max(int(settings.request_timeout), 1),
+            SDK_REQUEST_TIMEOUT_SECONDS,
+        ),
+        max_retries=0,
+    )
+    adapter: Optional[SsiFastConnectV3Adapter] = None
+    request_count = 0
+    try:
+        adapter = SsiFastConnectV3Adapter(bounded_settings)
+        auth_ok, auth_value, auth_elapsed = _bounded_call(
+            adapter.initialize_rest_access,
+            AUTH_TIMEOUT_SECONDS,
+        )
+        auth_result = (
+            auth_value
+            if auth_ok
+            else {
+                "status": "unavailable",
+                "failure_class": classify_exception(auth_value, stage="auth"),
+            }
+        )
+        _emit(
+            "authentication",
+            request_attempted=True,
+            credentials_present=True,
+            status=auth_result.get("status"),
+            failure_class=auth_result.get("failure_class"),
+            elapsed_ms=auth_elapsed,
+        )
+        if auth_result.get("status") != "ok":
+            _emit(
+                "final",
+                authentication_count=1,
+                total_provider_requests=0,
+                failure_class=auth_result.get("failure_class"),
+                elapsed_ms=max(0, int((time.monotonic() - started) * 1000)),
+            )
+            return 2
+
+        request_count = 1
+        ok, value, elapsed_ms = _bounded_call(
+            lambda: adapter.get_index_summary(
+                "HOSE",
+                index_code="VN30",
+                trading_date=selected_date.isoformat(),
+            ),
+            PROVIDER_TIMEOUT_SECONDS,
+        )
+        result = (
+            value
+            if ok
+            else {
+                "status": "unavailable",
+                "failure_class": classify_exception(value, stage="provider"),
+                "diagnostics": {"exception_class": type(value).__name__},
+            }
+        )
+        summary = _proprietary_provider_summary(
+            result,
+            selected_date=selected_date,
+            elapsed_ms=elapsed_ms,
+        )
+        _emit("capability", **summary)
+        _emit(
+            "final",
+            authentication_count=1,
+            total_provider_requests=request_count,
+            failure_class=summary.get("failure_class"),
+            elapsed_ms=max(0, int((time.monotonic() - started) * 1000)),
+        )
+        return 0
+    finally:
+        if adapter is not None:
+            adapter.close()
 
 
 def run(*, live: bool) -> int:
@@ -563,7 +733,7 @@ def run(*, live: bool) -> int:
         )
 
         now = datetime.now(_VN_TZ)
-        to_date = _latest_completed_weekday(now).date()
+        to_date, _selection_basis = select_completed_session(now)
         from_date = to_date - timedelta(days=30)
         operations: dict[str, Callable[[], Mapping[str, Any]]] = {
             "exact_security_lookup": lambda: adapter.get_security_basic_info("FPT"),
@@ -649,12 +819,28 @@ def run(*, live: bool) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument(
         "--live",
         action="store_true",
         help="Permit the single bounded SSI connectivity/capability run.",
     )
+    modes.add_argument(
+        "--index-summary-only",
+        action="store_true",
+        help="Permit authentication plus one bounded indexSummary request only.",
+    )
+    parser.add_argument(
+        "--provider-latest-date",
+        help="Explicit proven provider session in YYYY-MM-DD format.",
+    )
     args = parser.parse_args()
+    if args.index_summary_only:
+        if not args.provider_latest_date:
+            parser.error("--index-summary-only requires --provider-latest-date")
+        return run_index_summary_only(
+            provider_latest_date=args.provider_latest_date,
+        )
     return run(live=args.live)
 
 

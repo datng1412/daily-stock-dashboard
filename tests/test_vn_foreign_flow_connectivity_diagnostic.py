@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 
 import httpx
+import pytest
 
 from scripts import diagnose_vn_foreign_flow_connectivity as diagnostic
 
@@ -213,3 +214,57 @@ def test_latest_completed_weekday_skips_weekend() -> None:
     assert diagnostic._latest_completed_weekday(
         datetime(2026, 7, 24, 9, 0)
     ).date().isoformat() == "2026-07-23"
+
+
+@pytest.mark.parametrize(
+    ("now", "expected"),
+    [
+        (datetime(2026, 7, 27, 9, 0), "2026-07-24"),
+        (datetime(2026, 7, 28, 9, 0), "2026-07-27"),
+        (datetime(2026, 7, 29, 9, 0), "2026-07-28"),
+        (datetime(2026, 7, 30, 9, 0), "2026-07-29"),
+        (datetime(2026, 7, 31, 9, 0), "2026-07-30"),
+        (datetime(2026, 8, 1, 9, 0), "2026-07-31"),
+        (datetime(2026, 8, 2, 9, 0), "2026-07-31"),
+    ],
+)
+def test_completed_session_fallback_uses_prior_weekday(
+    now: datetime,
+    expected: str,
+) -> None:
+    selected, basis = diagnostic.select_completed_session(now)
+
+    assert selected.isoformat() == expected
+    assert basis == "latest_completed_weekday"
+
+
+def test_completed_session_prefers_explicit_provider_latest_date() -> None:
+    selected, basis = diagnostic.select_completed_session(
+        datetime(2026, 7, 27, 9, 0),
+        provider_latest_date="2026-07-24",
+    )
+
+    assert selected == date(2026, 7, 24)
+    assert basis == "explicit_provider_latest"
+
+
+def test_proprietary_provider_summary_reports_presence_without_values() -> None:
+    summary = diagnostic._proprietary_provider_summary(
+        {
+            "status": "ok",
+            "rows": [
+                {
+                    "date": "2026-07-24",
+                    "proprietary_buy_volume": 10,
+                    "proprietary_sell_volume": None,
+                }
+            ],
+        },
+        selected_date=date(2026, 7, 24),
+        elapsed_ms=9,
+    )
+
+    assert summary["row_count"] == 1
+    assert summary["proprietary_fields_present"] == ["proprietary_buy_volume"]
+    assert "proprietary_sell_volume" in summary["proprietary_fields_missing"]
+    assert "10" not in repr(summary)

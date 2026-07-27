@@ -8,26 +8,48 @@ headers, credentials, or provider payloads.
 from __future__ import annotations
 
 import json
+import argparse
+from collections import deque
+from datetime import date, datetime, timedelta
+import http.client
 import os
 from pathlib import Path
+import re
 import socket
 import subprocess
 import sys
+import threading
 import time
-from datetime import date, timedelta
 from typing import Any
-from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
-from urllib.request import Request, urlopen
+from zoneinfo import ZoneInfo
 
 
 ROOT = Path(__file__).resolve().parents[1]
 TMP = ROOT / ".tmp"
-READINESS_SECONDS = 45.0
+READINESS_SECONDS = 20.0
+READINESS_REQUEST_SECONDS = 2.0
+READINESS_POLL_SECONDS = 0.25
 REQUEST_SECONDS = 15.0
 GLOBAL_SECONDS = 120.0
 CLEANUP_RESERVE_SECONDS = 8.0
 MAX_BODY_BYTES = 1_000_000
+MAX_LOG_BYTES = 64 * 1024
+MAX_LOG_TAIL_LINES = 20
+_VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
+_HOST_PORT_KEYS = frozenset({"host", "port", "webui_host", "webui_port"})
+_SENSITIVE_LOG_VALUE = re.compile(
+    r"(?i)\b(api[_-]?key|api[_-]?secret|authorization|bearer|"
+    r"access[_-]?token|refresh[_-]?token|accountId)\b(\s*[:=]\s*)\S+"
+)
+_PROPRIETARY_FIELDS = (
+    "proprietary_buy_volume",
+    "proprietary_sell_volume",
+    "proprietary_net_volume",
+    "proprietary_buy_value",
+    "proprietary_sell_value",
+    "proprietary_net_value",
+)
 
 
 def _emit(**values: Any) -> None:
@@ -40,21 +62,117 @@ def _free_port() -> int:
         return int(listener.getsockname()[1])
 
 
-def _deduplicated_environment(port: int) -> dict[str, str]:
+def _deduplicated_environment() -> dict[str, str]:
     by_lower_name: dict[str, tuple[str, str]] = {}
     for name, value in os.environ.items():
+        if name.lower() in _HOST_PORT_KEYS:
+            continue
         by_lower_name[name.lower()] = (name, value)
     environment = {name: value for name, value in by_lower_name.values()}
-    environment["PORT"] = str(port)
     environment["SSI_STREAMING_REALTIME_ENABLED"] = "false"
+    environment["SSI_V3_MAX_RETRIES"] = "0"
     environment["PYTHONUTF8"] = "1"
     return environment
+
+
+def _child_command(port: int) -> list[str]:
+    return [
+        sys.executable,
+        "main.py",
+        "--serve-only",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        str(port),
+    ]
+
+
+def _creation_flags() -> int:
+    return subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
+
+
+class _BoundedLogCapture:
+    """Continuously drain one child stream while retaining only a bounded tail."""
+
+    def __init__(self, path: Path, *, max_bytes: int = MAX_LOG_BYTES) -> None:
+        self.path = path
+        self.max_bytes = max_bytes
+        self._chunks: deque[bytes] = deque()
+        self._size = 0
+        self._lock = threading.Lock()
+        self._thread: threading.Thread | None = None
+
+    def start(self, stream: Any) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.touch(exist_ok=True)
+        self._thread = threading.Thread(
+            target=self._drain,
+            args=(stream,),
+            name=f"bounded-log-{self.path.stem}",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def _drain(self, stream: Any) -> None:
+        try:
+            while True:
+                chunk = stream.read(4096)
+                if not chunk:
+                    break
+                with self._lock:
+                    self._chunks.append(bytes(chunk))
+                    self._size += len(chunk)
+                    snapshot = b"".join(self._chunks)[-self.max_bytes :]
+                    self._chunks = deque([snapshot])
+                    self._size = len(snapshot)
+                self.path.write_bytes(snapshot)
+        finally:
+            stream.close()
+
+    def join(self, timeout: float = 2.0) -> None:
+        if self._thread is not None:
+            self._thread.join(timeout=timeout)
+
+    def tail(self) -> list[str]:
+        try:
+            text = self.path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return []
+        safe = _SENSITIVE_LOG_VALUE.sub(r"\1\2[REDACTED]", text)
+        return safe.splitlines()[-MAX_LOG_TAIL_LINES:]
 
 
 def _read_json(response: Any) -> dict[str, Any]:
     raw = response.read(MAX_BODY_BYTES)
     parsed = json.loads(raw.decode("utf-8"))
     return parsed if isinstance(parsed, dict) else {}
+
+
+def _local_request(
+    *,
+    port: int,
+    path: str,
+    timeout: float,
+    method: str = "GET",
+    body: dict[str, Any] | None = None,
+) -> tuple[int, dict[str, Any]]:
+    encoded = (
+        json.dumps(body, separators=(",", ":")).encode("utf-8")
+        if body is not None
+        else None
+    )
+    headers = {"Content-Type": "application/json"} if encoded is not None else {}
+    connection = http.client.HTTPConnection(
+        "127.0.0.1",
+        port,
+        timeout=max(0.1, timeout),
+    )
+    try:
+        connection.request(method, path, body=encoded, headers=headers)
+        response = connection.getresponse()
+        return int(response.status), _read_json(response)
+    finally:
+        connection.close()
 
 
 def _last_row(payload: dict[str, Any]) -> dict[str, Any]:
@@ -67,6 +185,7 @@ def _last_row(payload: dict[str, Any]) -> dict[str, Any]:
 def _summary(
     *,
     mode: str,
+    method: str,
     path: str,
     http_status: int | None,
     payload: dict[str, Any],
@@ -107,7 +226,8 @@ def _summary(
     )
     first_item = items[0] if items and isinstance(items[0], dict) else {}
 
-    row_count = len(items) if mode == "watchlist" else len(series) if mode == "vn30" else len(rows)
+    row_count = len(series) if mode == "vn30" else len(rows)
+    item_count = len(items)
     latest_session = (
         decomposition.get("latest_completed_session")
         if mode == "vn30"
@@ -150,111 +270,186 @@ def _summary(
     failure_class = payload.get("failure_class")
     if failure_class is None and mode == "vn30":
         failure_class = canonical.get("failure_class")
+    proprietary_fields_present = [
+        field
+        for field in _PROPRIETARY_FIELDS
+        if any(
+            isinstance(row, dict) and row.get(field) is not None
+            for row in rows
+        )
+    ]
+    industry_codes = {
+        str(row.get("icb_code"))
+        for row in rows
+        if isinstance(row, dict) and row.get("icb_code")
+    }
 
     return {
         "mode": mode,
+        "method": method,
         "request_path": path,
         "http_status": http_status,
         "status": payload.get("status"),
         "data_state": payload.get("data_state"),
         "usable": payload.get("usable"),
         "failure_class": failure_class,
-        "row_item_count": row_count,
+        "row_count": row_count,
+        "item_count": item_count,
         "latest_session": latest_session,
         "requested_sessions": requested_sessions,
         "actual_sessions": actual_sessions,
         "source_freshness": source_freshness,
         "cache_state": payload.get("cache_state") or cache.get("status"),
-        "provider_endpoint": payload.get("source_endpoint") or payload.get("endpoint"),
+        "source_endpoint": payload.get("source_endpoint") or payload.get("endpoint"),
+        "industry_count": len(industry_codes) if mode == "industry" else None,
+        "member_count": (
+            payload.get("requested_symbol_count") if mode == "industry" else None
+        ),
+        "covered_member_count": (
+            payload.get("classified_symbol_count") if mode == "industry" else None
+        ),
+        "selected_session": (
+            payload.get("requested_to_date") if mode == "proprietary" else None
+        ),
+        "proprietary_field_count": (
+            len(proprietary_fields_present) if mode == "proprietary" else None
+        ),
+        "required_fields_present": (
+            proprietary_fields_present if mode == "proprietary" else None
+        ),
+        "ready_count": (
+            payload.get("ready_symbol_count") if mode == "watchlist" else None
+        ),
+        "partial_count": (
+            payload.get("partial_symbol_count") if mode == "watchlist" else None
+        ),
+        "unavailable_count": (
+            payload.get("unavailable_symbol_count") if mode == "watchlist" else None
+        ),
         "elapsed_ms": elapsed_ms,
     }
 
 
 def _request_once(
     *,
-    base_url: str,
+    port: int,
     mode: str,
     path: str,
     deadline: float,
     method: str = "GET",
     body: dict[str, Any] | None = None,
-) -> bool:
+) -> dict[str, Any]:
     started = time.monotonic()
     remaining = deadline - started - CLEANUP_RESERVE_SECONDS
     if remaining <= 0:
-        _emit(
-            **_summary(
-                mode=mode,
-                path=path,
-                http_status=None,
-                payload={"status": "unavailable", "failure_class": "timeout"},
-                elapsed_ms=0,
-            )
-        )
-        return False
-
-    encoded = None
-    headers: dict[str, str] = {}
-    if body is not None:
-        encoded = json.dumps(body, separators=(",", ":")).encode("utf-8")
-        headers["Content-Type"] = "application/json"
-    request = Request(base_url + path, data=encoded, headers=headers, method=method)
-    http_status: int | None = None
-    payload: dict[str, Any] = {}
-    try:
-        with urlopen(request, timeout=min(REQUEST_SECONDS, remaining)) as response:
-            http_status = int(response.status)
-            payload = _read_json(response)
-    except HTTPError as exc:
-        http_status = int(exc.code)
-        try:
-            payload = _read_json(exc)
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            payload = {}
-    except (TimeoutError, URLError, OSError):
-        payload = {"status": "unavailable", "failure_class": "timeout"}
-
-    _emit(
-        **_summary(
+        summary = _summary(
             mode=mode,
-            path=path,
-            http_status=http_status,
-            payload=payload,
-            elapsed_ms=max(0, int((time.monotonic() - started) * 1000)),
-        )
-    )
-    return http_status == 200
-
-
-def _wait_until_ready(base_url: str, deadline: float) -> bool:
-    readiness_deadline = min(time.monotonic() + READINESS_SECONDS, deadline - CLEANUP_RESERVE_SECONDS)
-    path = "/api/health"
-    started = time.monotonic()
-    while time.monotonic() < readiness_deadline:
-        try:
-            with urlopen(base_url + path, timeout=min(2.0, readiness_deadline - time.monotonic())) as response:
-                payload = _read_json(response)
-                if response.status == 200:
-                    _emit(
-                        **_summary(
-                            mode="health",
-                            path=path,
-                            http_status=200,
-                            payload=payload,
-                            elapsed_ms=max(0, int((time.monotonic() - started) * 1000)),
-                        )
-                    )
-                    return True
-        except (HTTPError, TimeoutError, URLError, OSError, json.JSONDecodeError):
-            time.sleep(0.25)
-    _emit(
-        **_summary(
-            mode="health",
+            method=method,
             path=path,
             http_status=None,
             payload={"status": "unavailable", "failure_class": "timeout"},
-            elapsed_ms=max(0, int((time.monotonic() - started) * 1000)),
+            elapsed_ms=0,
         )
+        _emit(**summary)
+        return summary
+
+    http_status: int | None = None
+    payload: dict[str, Any] = {}
+    try:
+        http_status, payload = _local_request(
+            port=port,
+            path=path,
+            timeout=min(REQUEST_SECONDS, remaining),
+            method=method,
+            body=body,
+        )
+    except (TimeoutError, OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+        payload = {
+            "status": "unavailable",
+            "failure_class": (
+                "timeout" if isinstance(exc, (TimeoutError, socket.timeout)) else "network_error"
+            ),
+        }
+
+    summary = _summary(
+        mode=mode,
+        method=method,
+        path=path,
+        http_status=http_status,
+        payload=payload,
+        elapsed_ms=max(0, int((time.monotonic() - started) * 1000)),
+    )
+    _emit(**summary)
+    return summary
+
+
+def _wait_until_ready(
+    *,
+    port: int,
+    deadline: float,
+    process: subprocess.Popen[bytes],
+    stdout_capture: _BoundedLogCapture,
+    stderr_capture: _BoundedLogCapture,
+) -> bool:
+    readiness_deadline = min(time.monotonic() + READINESS_SECONDS, deadline - CLEANUP_RESERVE_SECONDS)
+    path = "/api/health"
+    started = time.monotonic()
+    last_error_class: str | None = None
+    last_http_status: int | None = None
+    while time.monotonic() < readiness_deadline:
+        if process.poll() is not None:
+            last_error_class = "child_exited"
+            break
+        try:
+            last_http_status, payload = _local_request(
+                port=port,
+                path=path,
+                timeout=min(
+                    READINESS_REQUEST_SECONDS,
+                    max(0.1, readiness_deadline - time.monotonic()),
+                ),
+            )
+            if last_http_status == 200 and payload.get("status") == "ok":
+                _emit(
+                    **_summary(
+                        mode="health",
+                        method="GET",
+                        path=path,
+                        http_status=200,
+                        payload=payload,
+                        elapsed_ms=max(0, int((time.monotonic() - started) * 1000)),
+                    )
+                )
+                return True
+            last_error_class = "health_not_ok"
+        except (TimeoutError, OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+            last_error_class = type(exc).__name__
+        time.sleep(READINESS_POLL_SECONDS)
+    _emit(
+        mode="health",
+        method="GET",
+        request_path=path,
+        probe_url=f"http://127.0.0.1:{port}{path}",
+        http_status=last_http_status,
+        status="unavailable",
+        data_state=None,
+        usable=False,
+        failure_class="readiness_timeout",
+        last_error_class=last_error_class,
+        child_pid=process.pid,
+        child_alive=process.poll() is None,
+        requested_port=port,
+        row_count=0,
+        item_count=0,
+        latest_session=None,
+        requested_sessions=None,
+        actual_sessions=None,
+        source_freshness=None,
+        cache_state=None,
+        source_endpoint=None,
+        stdout_tail=stdout_capture.tail(),
+        stderr_tail=stderr_capture.tail(),
+        elapsed_ms=max(0, int((time.monotonic() - started) * 1000)),
     )
     return False
 
@@ -267,35 +462,28 @@ def _port_is_listening(port: int) -> bool:
         return False
 
 
-def main() -> int:
-    started = time.monotonic()
-    deadline = started + GLOBAL_SECONDS
-    port = _free_port()
-    base_url = f"http://127.0.0.1:{port}"
-    TMP.mkdir(parents=True, exist_ok=True)
-    stamp = time.strftime("%Y%m%d-%H%M%S")
-    stdout_path = TMP / f"m24c-r1-python-{stamp}.stdout.log"
-    stderr_path = TMP / f"m24c-r1-python-{stamp}.stderr.log"
-    process: subprocess.Popen[bytes] | None = None
+def _completed_session(value: str | None, *, now: datetime | None = None) -> date:
+    if value:
+        return date.fromisoformat(value)
+    current = now or datetime.now(_VN_TZ)
+    candidate = current.date() - timedelta(days=1)
+    while candidate.weekday() >= 5:
+        candidate -= timedelta(days=1)
+    return candidate
 
-    today = date.today()
-    from_date = today - timedelta(days=90)
+
+def _routes(completed_session: date) -> list[tuple[str, str, str, dict[str, Any] | None]]:
+    from_date = completed_session - timedelta(days=90)
     date_query = urlencode(
         {
             "from_date": from_date.isoformat(),
-            "to_date": today.isoformat(),
+            "to_date": completed_session.isoformat(),
             "limit": 60,
         }
     )
-    routes: list[tuple[str, str, str, dict[str, Any] | None]] = [
+    return [
         ("ticker", "/api/v1/stocks/vn/foreign-flow/symbol/FPT?limit=20", "GET", None),
         ("vn30", "/api/v1/stocks/vn/foreign-flow/vn30", "GET", None),
-        (
-            "vn30_direct",
-            f"/api/v1/stocks/vn/foreign-flow/index/VN30?{date_query}",
-            "GET",
-            None,
-        ),
         (
             "industry",
             "/api/v1/stocks/vn/industry-flow",
@@ -303,7 +491,7 @@ def main() -> int:
             {
                 "index_code": "VN30",
                 "from_date": from_date.isoformat(),
-                "to_date": today.isoformat(),
+                "to_date": completed_session.isoformat(),
             },
         ),
         (
@@ -313,8 +501,8 @@ def main() -> int:
                 {
                     "scope": "index",
                     "identifier": "VN30",
-                    "from_date": from_date.isoformat(),
-                    "to_date": today.isoformat(),
+                    "from_date": completed_session.isoformat(),
+                    "to_date": completed_session.isoformat(),
                 }
             ),
             "GET",
@@ -327,40 +515,173 @@ def main() -> int:
             "GET",
             None,
         ),
+        (
+            "vn30_direct",
+            f"/api/v1/stocks/vn/foreign-flow/index/VN30?{date_query}",
+            "GET",
+            None,
+        ),
     ]
 
+
+def _select_observed_session(
+    fallback: date,
+    summaries: list[dict[str, Any]],
+    *,
+    explicit_fallback: bool,
+) -> tuple[date, str, str | None]:
+    observed: list[date] = []
+    for summary in summaries:
+        value = summary.get("latest_session")
+        if not isinstance(value, str):
+            continue
+        try:
+            observed.append(date.fromisoformat(value))
+        except ValueError:
+            continue
+    if observed:
+        latest = max(observed)
+        return latest, "latest_completed_provider_session_observed", latest.isoformat()
+    return (
+        fallback,
+        (
+            "previously_proven_completed_session"
+            if explicit_fallback
+            else "latest_completed_weekday"
+        ),
+        None,
+    )
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--completed-session",
+        help="Explicit latest completed provider session in YYYY-MM-DD format.",
+    )
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = _parse_args()
+    started = time.monotonic()
+    deadline = started + GLOBAL_SECONDS
+    port = _free_port()
+    TMP.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    stdout_path = TMP / f"m24c-r31-python-{stamp}.stdout.log"
+    stderr_path = TMP / f"m24c-r31-python-{stamp}.stderr.log"
+    process: subprocess.Popen[bytes] | None = None
+    completed_session = _completed_session(args.completed_session)
+    stdout_capture = _BoundedLogCapture(stdout_path)
+    stderr_capture = _BoundedLogCapture(stderr_path)
+
     try:
-        with stdout_path.open("wb") as stdout_log, stderr_path.open("wb") as stderr_log:
-            process = subprocess.Popen(
-                [
-                    sys.executable,
-                    "main.py",
-                    "--serve-only",
-                    "--host",
-                    "127.0.0.1",
-                    "--port",
-                    str(port),
-                ],
-                cwd=ROOT,
-                env=_deduplicated_environment(port),
-                stdin=subprocess.DEVNULL,
-                stdout=stdout_log,
-                stderr=stderr_log,
-                shell=False,
+        process = subprocess.Popen(
+            _child_command(port),
+            cwd=ROOT,
+            env=_deduplicated_environment(),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            shell=False,
+            creationflags=_creation_flags(),
+        )
+        assert process.stdout is not None
+        assert process.stderr is not None
+        stdout_capture.start(process.stdout)
+        stderr_capture.start(process.stderr)
+        _emit(
+            mode="startup",
+            method=None,
+            request_path=None,
+            http_status=None,
+            status="child_started",
+            data_state=None,
+            usable=None,
+            failure_class=None,
+            child_pid=process.pid,
+            python_executable=sys.executable,
+            working_directory=str(ROOT),
+            requested_host="127.0.0.1",
+            requested_port=port,
+            probe_url=f"http://127.0.0.1:{port}/api/health",
+            completed_session=completed_session.isoformat(),
+            completed_session_basis=(
+                "previously_proven_completed_session"
+                if args.completed_session
+                else "latest_completed_weekday"
+            ),
+            row_count=0,
+            item_count=0,
+            latest_session=None,
+            requested_sessions=None,
+            actual_sessions=None,
+            source_freshness=None,
+            cache_state=None,
+            source_endpoint=None,
+            elapsed_ms=max(0, int((time.monotonic() - started) * 1000)),
+        )
+        if not _wait_until_ready(
+            port=port,
+            deadline=deadline,
+            process=process,
+            stdout_capture=stdout_capture,
+            stderr_capture=stderr_capture,
+        ):
+            return 2
+        initial_summaries: list[dict[str, Any]] = []
+        for mode, path, method, body in _routes(completed_session)[:2]:
+            initial_summaries.append(_request_once(
+                port=port,
+                mode=mode,
+                path=path,
+                deadline=deadline,
+                method=method,
+                body=body,
+            ))
+            if time.monotonic() >= deadline - CLEANUP_RESERVE_SECONDS:
+                break
+        selected_session, selection_basis, latest_provider_session = (
+            _select_observed_session(
+                completed_session,
+                initial_summaries,
+                explicit_fallback=bool(args.completed_session),
             )
-            if not _wait_until_ready(base_url, deadline):
-                return 2
-            for mode, path, method, body in routes:
-                _request_once(
-                    base_url=base_url,
-                    mode=mode,
-                    path=path,
-                    deadline=deadline,
-                    method=method,
-                    body=body,
-                )
-                if time.monotonic() >= deadline - CLEANUP_RESERVE_SECONDS:
-                    break
+        )
+        _emit(
+            mode="session_selection",
+            method=None,
+            request_path=None,
+            http_status=None,
+            status="selected",
+            data_state=None,
+            usable=None,
+            failure_class=None,
+            selected_session=selected_session.isoformat(),
+            selection_basis=selection_basis,
+            latest_provider_session=latest_provider_session,
+            row_count=0,
+            item_count=0,
+            latest_session=latest_provider_session,
+            requested_sessions=None,
+            actual_sessions=None,
+            source_freshness=None,
+            cache_state=None,
+            source_endpoint=None,
+            elapsed_ms=max(0, int((time.monotonic() - started) * 1000)),
+        )
+        for mode, path, method, body in _routes(selected_session)[2:]:
+            _request_once(
+                port=port,
+                mode=mode,
+                path=path,
+                deadline=deadline,
+                method=method,
+                body=body,
+            )
+            if time.monotonic() >= deadline - CLEANUP_RESERVE_SECONDS:
+                break
         return 0
     finally:
         if process is not None and process.poll() is None:
@@ -378,24 +699,28 @@ def main() -> int:
                 process.wait(timeout=min(3.0, max(0.1, deadline - time.monotonic())))
             except subprocess.TimeoutExpired:
                 process.kill()
+        stdout_capture.join()
+        stderr_capture.join()
         verify_deadline = min(deadline, time.monotonic() + 2.0)
         while _port_is_listening(port) and time.monotonic() < verify_deadline:
             time.sleep(0.1)
         _emit(
             mode="cleanup",
+            method=None,
             request_path=f"127.0.0.1:{port}",
             http_status=None,
             status="port_still_listening" if _port_is_listening(port) else "port_released",
             data_state=None,
             usable=None,
             failure_class=None,
-            row_item_count=0,
+            row_count=0,
+            item_count=0,
             latest_session=None,
             requested_sessions=None,
             actual_sessions=None,
             source_freshness=None,
             cache_state=None,
-            provider_endpoint=None,
+            source_endpoint=None,
             elapsed_ms=max(0, int((time.monotonic() - started) * 1000)),
         )
 
