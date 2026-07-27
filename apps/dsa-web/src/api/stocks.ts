@@ -877,7 +877,7 @@ export type VietnamVn30ForeignFlowDaily = {
 };
 
 export type VietnamVn30ForeignFlowWindow = {
-  requestedSessions: 5 | 20;
+  requestedSessions: 5 | 20 | 60;
   coveredSessions: number;
   complete: boolean;
   validSessions?: number | null;
@@ -922,6 +922,12 @@ export type VietnamVn30ForeignFlowComponent = Omit<
   foreignSellVolume20d?: number | null;
   foreignBuyValue20d?: number | null;
   foreignSellValue20d?: number | null;
+  foreignBuyVolume60d?: number | null;
+  foreignSellVolume60d?: number | null;
+  foreignNetVolume60d?: number | null;
+  foreignBuyValue60d?: number | null;
+  foreignSellValue60d?: number | null;
+  foreignNetValue60d?: number | null;
   volumeCoveredSessions5d: number;
   volumeComplete5d: boolean;
   valueCoveredSessions5d: number;
@@ -930,6 +936,11 @@ export type VietnamVn30ForeignFlowComponent = Omit<
   volumeComplete20d: boolean;
   valueCoveredSessions20d: number;
   valueComplete20d: boolean;
+  volumeCoveredSessions60d?: number;
+  volumeComplete60d?: boolean;
+  valueCoveredSessions60d?: number;
+  valueComplete60d?: boolean;
+  windowEndDate60d?: string | null;
 };
 
 export type VietnamVn30ForeignFlowResponse = {
@@ -977,7 +988,7 @@ export type VietnamVn30ForeignFlowResponse = {
   };
   aggregateSessionDates: string[];
   latest?: VietnamVn30ForeignFlowDaily | null;
-  windows: { '5': VietnamVn30ForeignFlowWindow; '20': VietnamVn30ForeignFlowWindow };
+  windows: { '5': VietnamVn30ForeignFlowWindow; '20': VietnamVn30ForeignFlowWindow; '60'?: VietnamVn30ForeignFlowWindow };
   series: VietnamVn30ForeignFlowDaily[];
   components: VietnamVn30ForeignFlowComponent[];
   componentCounts: { usable: number; stale: number; empty: number; unavailable: number };
@@ -988,7 +999,7 @@ export type VietnamVn30ForeignFlowResponse = {
     failureClass?: string | null;
     usable: boolean;
     latest?: VietnamVn30ForeignFlowDaily | null;
-    windows: { '5': VietnamVn30ForeignFlowWindow; '20': VietnamVn30ForeignFlowWindow };
+    windows: { '5': VietnamVn30ForeignFlowWindow; '20': VietnamVn30ForeignFlowWindow; '60'?: VietnamVn30ForeignFlowWindow };
     series: VietnamVn30ForeignFlowDaily[];
     diagnostics: Record<string, unknown>;
   };
@@ -1007,7 +1018,7 @@ export type VietnamVn30ForeignFlowResponse = {
     date?: string | null;
     series: VietnamVn30ForeignFlowDaily[];
     latest?: VietnamVn30ForeignFlowDaily | null;
-    windows: { '5': VietnamVn30ForeignFlowWindow; '20': VietnamVn30ForeignFlowWindow };
+    windows: { '5': VietnamVn30ForeignFlowWindow; '20': VietnamVn30ForeignFlowWindow; '60'?: VietnamVn30ForeignFlowWindow };
     reconciliation: Record<string, unknown>;
     anomalySessions: string[];
     anomalyCount: number;
@@ -1021,9 +1032,12 @@ type VietnamVn30ForeignFlowCamelComponent = Omit<VietnamVn30ForeignFlowComponent
   | 'foreignNetVolume5d' | 'foreignNetValue5d' | 'foreignNetVolume20d' | 'foreignNetValue20d'
   | 'foreignBuyVolume5d' | 'foreignSellVolume5d' | 'foreignBuyValue5d' | 'foreignSellValue5d'
   | 'foreignBuyVolume20d' | 'foreignSellVolume20d' | 'foreignBuyValue20d' | 'foreignSellValue20d'
+  | 'foreignNetVolume60d' | 'foreignNetValue60d'
+  | 'foreignBuyVolume60d' | 'foreignSellVolume60d' | 'foreignBuyValue60d' | 'foreignSellValue60d'
   | 'volumeCoveredSessions5d' | 'volumeComplete5d' | 'valueCoveredSessions5d' | 'valueComplete5d'
   | 'volumeCoveredSessions20d' | 'volumeComplete20d' | 'valueCoveredSessions20d' | 'valueComplete20d'
-  | 'windowEndDate5d' | 'windowEndDate20d'
+  | 'volumeCoveredSessions60d' | 'volumeComplete60d' | 'valueCoveredSessions60d' | 'valueComplete60d'
+  | 'windowEndDate5d' | 'windowEndDate20d' | 'windowEndDate60d'
 > & Record<string, unknown>;
 
 type VietnamVn30ForeignFlowCamelResponse = Omit<VietnamVn30ForeignFlowResponse, 'components' | 'rankings'> & {
@@ -1051,6 +1065,12 @@ const normalizeVietnamVn30ForeignFlowResponse = (
       foreignBuyValue20d: row.foreignBuyValue20D ?? null,
       foreignSellValue20d: row.foreignSellValue20D ?? null,
       foreignNetValue20d: row.foreignNetValue20D ?? null,
+      foreignBuyVolume60d: row.foreignBuyVolume60D ?? null,
+      foreignSellVolume60d: row.foreignSellVolume60D ?? null,
+      foreignNetVolume60d: row.foreignNetVolume60D ?? null,
+      foreignBuyValue60d: row.foreignBuyValue60D ?? null,
+      foreignSellValue60d: row.foreignSellValue60D ?? null,
+      foreignNetValue60d: row.foreignNetValue60D ?? null,
       volumeCoveredSessions5d: Number(row.volumeCoveredSessions5D ?? 0),
       volumeComplete5d: Boolean(row.volumeComplete5D),
       valueCoveredSessions5d: Number(row.valueCoveredSessions5D ?? 0),
@@ -1059,8 +1079,13 @@ const normalizeVietnamVn30ForeignFlowResponse = (
       volumeComplete20d: Boolean(row.volumeComplete20D),
       valueCoveredSessions20d: Number(row.valueCoveredSessions20D ?? 0),
       valueComplete20d: Boolean(row.valueComplete20D),
+      volumeCoveredSessions60d: Number(row.volumeCoveredSessions60D ?? 0),
+      volumeComplete60d: Boolean(row.volumeComplete60D),
+      valueCoveredSessions60d: Number(row.valueCoveredSessions60D ?? 0),
+      valueComplete60d: Boolean(row.valueComplete60D),
       windowEndDate5d: (row.windowEndDate5D as string | null | undefined) ?? null,
       windowEndDate20d: (row.windowEndDate20D as string | null | undefined) ?? null,
+      windowEndDate60d: (row.windowEndDate60D as string | null | undefined) ?? null,
     } as VietnamVn30ForeignFlowComponent;
   }),
   rankings: data.rankings ?? {},
@@ -1295,6 +1320,12 @@ export type VietnamCompanyProfile = {
   listedShares?: number | null;
   listedDate?: string | null;
   source?: string | null;
+  sourceEndpoint?: string | null;
+  providerVersion?: string | null;
+  fetchedAt?: string | null;
+  cacheStatus?: string | null;
+  dataState?: 'ready' | 'partial' | 'unavailable' | string | null;
+  failureClass?: string | null;
   status: 'ok' | 'unavailable' | 'missing' | string;
   qualityStatus?: 'complete' | 'partial' | 'unavailable' | 'unknown' | string | null;
   completeness?: number | null;
@@ -1375,6 +1406,19 @@ export type VietnamFlowDataResponse = {
   status: 'ok' | 'partial' | 'unavailable';
   source: string;
   providerVersion: string;
+  scope?: string | null;
+  identifier?: string | null;
+  universe?: string | null;
+  endpoint?: string | null;
+  requestedFromDate?: string | null;
+  requestedToDate?: string | null;
+  fetchedAt?: string | null;
+  cache?: { status?: string | null; ageSeconds?: number | null };
+  unsupportedScopes?: string[];
+  requestedSymbolCount?: number | null;
+  classifiedSymbolCount?: number | null;
+  unclassifiedSymbolCount?: number | null;
+  currentSessionStatus?: string | null;
   rows?: Array<Record<string, unknown>>;
   diagnostics?: Record<string, unknown>;
 };
@@ -1876,16 +1920,25 @@ export const stocksApi = {
 
   async getVietnamForeignFlowSymbolHistory(
     rawTicker: string,
-    options?: { limit?: number; forceRefresh?: boolean; signal?: AbortSignal },
+    options?: {
+      limit?: number;
+      fromDate?: string;
+      toDate?: string;
+      forceRefresh?: boolean;
+      signal?: AbortSignal;
+    },
   ): Promise<VietnamForeignFlowSymbolHistoryResponse> {
     const ticker = normalizeVietnamTicker(rawTicker);
     if (!/^[A-Z0-9]{1,10}$/.test(ticker) || ticker === 'ALL') {
       throw new Error(`Invalid Vietnam ticker: ${rawTicker}`);
     }
-    const limit = Math.min(60, Math.max(1, Math.trunc(options?.limit ?? 60)));
+    const limit = Math.min(120, Math.max(1, Math.trunc(options?.limit ?? 60)));
+    const hasDateBounds = Boolean(options?.fromDate && options?.toDate);
     const response = await apiClient.get(`/api/v1/stocks/vn/foreign-flow/symbol/${ticker}`, {
       params: {
-        limit,
+        ...(hasDateBounds
+          ? { from_date: options?.fromDate, to_date: options?.toDate }
+          : { limit }),
         ...(options?.forceRefresh ? { force_refresh: true } : {}),
       },
       timeout: 120000,
@@ -1934,7 +1987,7 @@ export const stocksApi = {
   async getVietnamProprietaryFlow(
     scope: 'board' | 'index',
     identifier: string,
-    options?: { fromDate?: string; toDate?: string; signal?: AbortSignal },
+    options?: { fromDate?: string; toDate?: string; forceRefresh?: boolean; signal?: AbortSignal },
   ): Promise<VietnamFlowDataResponse> {
     const response = await apiClient.get('/api/v1/stocks/vn/proprietary-flow', {
       params: {
@@ -1942,6 +1995,7 @@ export const stocksApi = {
         identifier: identifier.trim().toUpperCase(),
         ...(options?.fromDate ? { from_date: options.fromDate } : {}),
         ...(options?.toDate ? { to_date: options.toDate } : {}),
+        ...(options?.forceRefresh ? { force_refresh: true } : {}),
       },
       timeout: 180000,
       signal: options?.signal,

@@ -328,10 +328,9 @@ describe('VietnamCompanyResearchPage', () => {
     expect(screen.getByText('Trades loaded')).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Time' })).toBeInTheDocument();
     expect(screen.getAllByText('10:16:00').length).toBeGreaterThan(0);
-    expect(screen.getByRole('heading', { name: 'News' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Financials' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Events' })).toBeInTheDocument();
-    expect(screen.getAllByText('Not implemented yet').length).toBeGreaterThanOrEqual(3);
+    expect(screen.queryByRole('heading', { name: 'News' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Financials' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Events' })).not.toBeInTheDocument();
 
     await waitFor(() => {
       expect(stocksApi.getVietnamCompanyResearch).toHaveBeenCalledWith('FPT', false);

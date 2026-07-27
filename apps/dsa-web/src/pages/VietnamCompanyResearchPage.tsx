@@ -423,17 +423,6 @@ const MetricGrid: React.FC<{ rows: MetricRow[] }> = ({ rows }) => (
   </dl>
 );
 
-const PlaceholderSection: React.FC<{
-  title: string;
-  block: VietnamCompanyResearchResponse['news'];
-}> = ({ title, block }) => (
-  <SectionShell title={title} source={block.source} status={block.status}>
-    <p className="text-sm text-secondary-text">
-      {block.message || 'Not implemented yet.'}
-    </p>
-  </SectionShell>
-);
-
 const newsText = (item: Record<string, unknown>, key: string) => {
   const value = item[key];
   return typeof value === 'string' && value.trim() ? value.trim() : null;
@@ -841,6 +830,10 @@ const VietnamCompanyResearchPage: React.FC = () => {
       <section className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
         <SectionShell title="Company profile" source={snapshot.profile.source} status={profileQualityStatus}>
           <MetricGrid rows={profileRows} />
+          <p className="mt-3 text-xs text-secondary-text">
+            Endpoint: {snapshot.profile.sourceEndpoint ?? '—'} · Provider: {snapshot.profile.providerVersion ?? '—'} ·
+            {' '}Fetched: {snapshot.profile.fetchedAt ?? '—'} · Cache: {snapshot.profile.cacheStatus ?? '—'}
+          </p>
           {profileQualityStatus === 'partial' ? (
             <p className="mt-3 text-xs text-secondary-text">Profile partial. Some metadata is unavailable.</p>
           ) : profileQualityStatus === 'unavailable' ? (
@@ -932,11 +925,11 @@ const VietnamCompanyResearchPage: React.FC = () => {
           )}
         </SectionShell>
       </section>
-      <section className="grid gap-4 lg:grid-cols-3">
-        <CompanyNewsSection block={snapshot.news} />
-        <PlaceholderSection title="Financials" block={snapshot.financials} />
-        <PlaceholderSection title="Events" block={snapshot.events} />
-      </section>
+      {snapshot.news.status === 'ok' || snapshot.news.items.length ? (
+        <section className="grid gap-4 lg:grid-cols-3">
+          <CompanyNewsSection block={snapshot.news} />
+        </section>
+      ) : null}
       <CompanyDiagnosticsPanel snapshot={snapshot} />
     </AppPage>
   );
