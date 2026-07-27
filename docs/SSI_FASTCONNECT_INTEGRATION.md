@@ -1,5 +1,13 @@
 # SSI FastConnect Integration
 
+## M2.4C watchlist foreign-flow screener
+
+The screener adds `GET /api/v1/stocks/vn/foreign-flow/watchlist` on top of the existing V3 DailyStockPrice symbol-history service. One request accepts 1–30 normalized unique tickers and returns both value and volume families for 1/5/20/60 completed sessions. The frontend requests 60 sessions once; presentation changes do not refetch.
+
+The service reuses the process-local raw-history cache and coalescing path. Watchlist concurrency is capped at four, per-ticker classification is bounded to 20 seconds, total response time is bounded to 45 seconds, and output order follows normalized input order. One timeout or provider failure yields an unavailable item while completed symbols remain usable. Authentication/authorization/provider failures are not labelled unsupported, and no error detail, credential, or raw provider payload enters the response.
+
+This phase does not enable current-session foreign flow, infer room-stream deltas, add another provider, alter DailyOhlc price ownership, or automatically load a fixed ticker/VN30 list.
+
 ## M2.4 Vietnam product mapping and Explorer contract
 
 Company profile metadata is read through the exact-symbol V3 `securitiesByBoard?symbol=` adapter contract. Only returned name, board/exchange, ICB, lot-size, listing-date, and listed-share fields are eligible; unsupported security type, issuer, description, estimates, financials, and events are not inferred. The public profile includes provider endpoint/version, fetched time, cache status, data state, and sanitized failure class.

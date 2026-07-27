@@ -4,6 +4,16 @@
 
 This document defines the public data contract for the VN dashboard and company research page. It is intentionally data-quality-first: valid daily SSI data should remain visible even when optional live or enrichment sections are unavailable.
 
+## Watchlist Foreign Flow Screener (Phase SSI-V3-M2.4C)
+
+`GET /api/v1/stocks/vn/foreign-flow/watchlist` is the user-controlled 1–30 symbol completed-session screener contract. The frontend loads one 60-session batch and derives Value/Volume display, 1D/5D/20D/60D selection, search, filtering, sorting, and CSV locally. It never creates one frontend history request per ticker. The existing raw symbol-history cache remains authoritative and its key retains provider/schema version, ticker, session capacity/date bounds, and source endpoint.
+
+Each window requires the stated number of actual accepted provider sessions and complete non-null values for the requested field; incomplete window metrics remain null. Calendar gaps are not filled. Streaks use daily `foreign_net_value`, count backward from the latest accepted completed session, stop at null, and break at zero. They describe historical flow only and are not recommendations. Explicit provider zero remains zero and may carry anomaly metadata independently of availability.
+
+Top-level and per-symbol availability use `ready`, `partial`, and `unavailable`. Source freshness (`latest_completed`, `stale`, `unknown`), cache state (`hit`, `miss`, `refresh`, `stale_hit`, `unavailable`), data quality, and failure class remain independent. `source_session_lag` is an observed-date rank within the returned batch, not a fabricated holiday-aware trading calendar. Different latest dates render as `mixed source sessions`; monetary totals are not presented as one common-date aggregate.
+
+The versioned browser key `stockclock.vn.foreignFlowWatchlist.v1` stores only normalized symbols and safe UI preferences. It stores no provider response. URL tickers take precedence, then local state, then an empty list. SSI-derived VN30 membership loads only after explicit user action.
+
 ## On-demand symbol foreign-flow analytics (Phase 4.12E-3)
 
 `GET /api/v1/stocks/vn/foreign-flow/symbol/{ticker}?limit=60` keeps its existing rows, windows, latest, request, coverage, source, finality, freshness, and failure fields and additively exposes optional `analytics`. Analytics use only the last 60 normalized accepted SSI DailyStockPrice rows and keep value and volume families separate. Each family contains latest, 5/20/60 windows, accepted-row current streak, latest adjacent nonzero reversal, 20/60 comparison statistics, and extrema; `rolling_series` contains null-aware 5/20 sums.

@@ -1,6 +1,8 @@
 # Project State
 
-Last updated: 2026-07-24
+Last updated: 2026-07-27
+
+- SSI-V3-M2.4C adds a user-controlled Foreign Flow Watchlist mode and bounded 1–30 symbol GET screener contract. One 60-session V3 DailyStockPrice batch supplies value/volume 1/5/20/60 metrics, per-symbol state/freshness/cache/failure/anomaly metadata, neutral streaks, local filters/sort/search, CSV, and Explorer deep links. The list starts empty unless URL/local state exists; SSI VN30 is explicit only. No current-session claim, provider fallback, alerts, recommendations, or price-source change.
 
 ## Purpose
 

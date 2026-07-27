@@ -1,5 +1,11 @@
 ﻿# VN Dashboard Roadmap
 
+## Phase SSI-V3-M2.4C - Watchlist Foreign Flow Screener (2026-07-27)
+
+- Added an integrated Watchlist mode to Foreign Flow Explorer with an empty default, URL-over-local precedence, add/paste/remove/clear editing, explicit SSI-derived VN30 preset, 30-symbol cap, search, neutral filters, deterministic sorting, Value/Volume and 1D/5D/20D/60D local controls, summary counts, mixed-session disclosure, raw CSV, and ticker deep links.
+- Added one typed `GET /api/v1/stocks/vn/foreign-flow/watchlist` request. It reuses V3 DailyStockPrice history/cache, returns both metric families, preserves order and null/zero truth, isolates symbol failures, caps concurrency at four, and bounds per-symbol/total wait.
+- Current-session foreign flow, room-stream semantics, alerts, recommendations, backend watchlist accounts, cloud synchronization, hardcoded VN30 membership, and new providers remain out of scope.
+
 ## Phase SSI-V3-M2.4A+B - Vietnam product data fixes and Foreign Flow Explorer v1 (2026-07-24)
 
 - Exact-symbol `securitiesByBoard?symbol=` metadata exposes only proven V3 fields plus endpoint/version/fetch/cache/data-state/failure lineage. Missing profile values remain null. Company order book uses SSI X-QUOTE pass-through, and canonical price labels follow the actual selected SSI daily source.

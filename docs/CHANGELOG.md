@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [new feature] Add a user-controlled Foreign Flow Watchlist screener with 1D/5D/20D/60D value and volume comparison, filters, sorting, CSV, and ticker deep links.
+- [new feature] Add one bounded SSI V3 watchlist foreign-flow GET contract for 1–30 symbols with cache reuse, capped concurrency, timeout isolation, and typed per-symbol states.
+- [test] Cover watchlist normalization, completed-session windows, null/zero and anomaly behavior, cache reuse, request bounds, local persistence, request-free controls, refresh preservation, and explicit VN30 loading.
 - [new feature] Add a four-mode SSI V3 Foreign Flow Explorer for ticker, current VN30 basket, ICB industry, and supported proprietary scopes with completed-session windows and CSV export.
 - [fix] Correct Vietnam profile provenance, company order-book pass-through, canonical price labelling, intraday ordering/deduplication, and empty user-controlled ticker defaults.
 - [improvement] Hide unsupported company financial/event placeholders and expose source session, fetched time, cache, freshness, coverage, and anomaly states separately.

@@ -11,6 +11,12 @@ Global rules:
 - KBS is legacy optional only and disabled by default.
 - News is disabled until a separate provider exists.
 
+## `GET /api/v1/stocks/vn/foreign-flow/watchlist`
+
+Returns one bounded foreign-flow screener response for 1–30 user-controlled, normalized unique symbols. Query parameters are `tickers=FPT,SSI,HPG`, `sessions=1|5|20|60` (the product requests 60 once), and optional `force_refresh=true`. The response preserves normalized input order, isolates per-symbol failures, and returns completed-session buy/sell/net value and volume metrics for 1/5/20/60 sessions without history arrays.
+
+Top-level status is `ready`, `partial`, or `unavailable`; per-symbol availability, source freshness, cache state/age, failure class, session coverage, streak basis, and explicit-zero anomaly metadata remain separate. Authentication, authorization, timeout, and provider failures are never reclassified as unsupported. Missing metrics remain null and provider-backed zero remains zero. Worker concurrency is capped at four, each ticker is bounded to 20 seconds, and the total request is bounded to 45 seconds. This endpoint does not claim current-session foreign flow.
+
 ## Symbol foreign-flow history and analytics
 
 `GET /api/v1/stocks/vn/foreign-flow/symbol/{ticker}` accepts the existing recent-session or paired date-range request. The frontend inspection path uses `limit=60`. The response additively includes optional `analytics` with separate value/volume 5/20/60 statistics and date-aligned rolling 5/20 series. Existing clients may ignore the field. Cache, single-flight, force-refresh, stale-if-error, sanitization, and provider ownership remain unchanged; there is no new endpoint and no current-session or polling behavior.
