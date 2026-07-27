@@ -1,5 +1,40 @@
 # SSI FastConnect Integration
 
+## M2.4C-R3 foreign-flow connectivity result
+
+One bounded, secret-safe run on 2026-07-27 separated the provider layers without
+printing credentials, tokens, headers, or raw responses:
+
+- The configured V3 REST host is `https://api.ssi.com.vn` with `/api/v3`
+  endpoint paths. DNS returned IPv4, TCP/443 connected, and the default Python
+  trust path verified a TLS 1.3 certificate. No proxy or custom CA environment
+  variable was active.
+- V3 authentication succeeded with the configured API key/secret; Client ID
+  remained empty and optional. Exact FPT metadata returned one row, FPT
+  DailyStockPrice returned 20 completed-session rows through 2026-07-24, SSI
+  VN30 membership returned 30 rows, and direct VN30 securities summary returned
+  20 rows through 2026-07-24.
+- The single `indexSummary` diagnostic request targeted Sunday 2026-07-26 and
+  normalized as `malformed_response` with no usable row. It was not retried.
+  The maintained diagnostic now chooses the latest completed weekday for future
+  runs; this is a diagnostic correction, not evidence that proprietary data
+  recovered.
+- The earlier generic local `network_error` is not reproducible in the approved
+  network context and is not evidence of a repository base-URL, credential,
+  proxy, TLS, auth, or shared-client defect. REST remains independent from the
+  unprobed streaming host.
+
+Use `python scripts/diagnose_vn_foreign_flow_connectivity.py --live` only as a
+single bounded operational check. It uses zero SDK retries, one authentication
+lifecycle, and at most one request per documented capability.
+
+A separate direct-process application smoke reached lifespan completion,
+Uvicorn socket readiness, and an internal `/api/health` HTTP 200 in about four
+seconds. The parent smoke harness nevertheless failed to observe readiness
+before 45 seconds, terminated its exact child tree, and verified port release.
+It made no Foreign Flow route calls, so no application-route recovery is
+claimed from that run.
+
 ## M2.4C watchlist foreign-flow screener
 
 The screener adds `GET /api/v1/stocks/vn/foreign-flow/watchlist` on top of the existing V3 DailyStockPrice symbol-history service. One request accepts 1–30 normalized unique tickers and returns both value and volume families for 1/5/20/60 completed sessions. The frontend requests 60 sessions once; presentation changes do not refetch.

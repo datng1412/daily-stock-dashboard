@@ -1,5 +1,13 @@
 ﻿# VN Dashboard Roadmap
 
+## Phase SSI-V3-M2.4C-R3 - Foreign Flow connectivity recovery (2026-07-27)
+
+- One zero-retry, secret-safe live diagnostic proved the configured official V3 REST host, DNS, TCP/443, verified TLS 1.3, authentication, exact FPT metadata, 20-session FPT DailyStockPrice history, 30-member VN30 membership, and a 20-row direct VN30 securities summary.
+- The earlier local `network_error` was not reproduced in the approved network context. No repository base-URL, credential-selection, proxy, CA, auth-client, shared-session, or REST/stream coupling defect was found, so product/provider code was not changed.
+- The sole proprietary `indexSummary` probe used a non-trading Sunday and returned no usable normalized row. The diagnostic now chooses the latest completed weekday, but the live call was not repeated and proprietary recovery is not claimed.
+- The direct-process application smoke completed backend startup and an internal health 200, while its parent readiness probe timed out and terminated the owned process before product routes ran. Application-route acceptance therefore remains pending a future bounded harness run; no provider retry or alternate launch path was used.
+- Current-session foreign flow, historically exact membership, new providers, fallback, fabricated data, alerts, and recommendations remain out of scope.
+
 ## Phase SSI-V3-M2.4C - Watchlist Foreign Flow Screener (2026-07-27)
 
 - Added an integrated Watchlist mode to Foreign Flow Explorer with an empty default, URL-over-local precedence, add/paste/remove/clear editing, explicit SSI-derived VN30 preset, 30-symbol cap, search, neutral filters, deterministic sorting, Value/Volume and 1D/5D/20D/60D local controls, summary counts, mixed-session disclosure, raw CSV, and ticker deep links.

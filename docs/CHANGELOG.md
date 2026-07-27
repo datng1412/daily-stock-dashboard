@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [test] Add a zero-retry SSI V3 Foreign Flow connectivity diagnostic covering secret-safe config provenance, DNS, TCP, verified TLS, authentication, and one request per bounded capability.
+- [documentation] Record successful SSI V3 REST connectivity and partial capability proof, the non-trading-date index-summary limitation, and current Docker/Render V3 configuration names.
 - [fix] Separate valid Industry foreign-flow provider failures from request validation and return typed unavailable responses.
 - [fix] Render normalized Foreign Flow unavailable, empty, and partial states while preserving independent per-mode usable data and failed-refresh results.
 - [fix] Give explicit FastAPI CLI host and port values precedence over environment bind settings without changing no-CLI deployment defaults.
