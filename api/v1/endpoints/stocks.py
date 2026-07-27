@@ -35,6 +35,7 @@ from api.v1.schemas.stocks import (
     VietnamDailyIndexResponse,
     VietnamForeignFlowBatchRequest,
     VietnamForeignFlowBatchResponse,
+    VietnamForeignFlowWatchlistResponse,
     VietnamForeignFlowSymbolHistoryResponse,
     VietnamForeignIndexFlowResponse,
     VietnamCurrentForeignFlowResponse,
@@ -750,6 +751,42 @@ def get_vietnam_foreign_flow_symbol_history(
         raise HTTPException(
             status_code=500,
             detail={"error": "vn_foreign_flow_failed", "message": "Vietnam foreign-flow request failed"},
+        ) from exc
+
+
+@router.get(
+    "/vn/foreign-flow/watchlist",
+    response_model=VietnamForeignFlowWatchlistResponse,
+    summary="Bounded Vietnam watchlist foreign-flow screener",
+)
+def get_vietnam_foreign_flow_watchlist(
+    tickers: str = Query(
+        default="",
+        description="Comma-separated user-controlled Vietnam tickers; 1–30 unique symbols.",
+    ),
+    sessions: int = Query(default=60),
+    force_refresh: bool = Query(default=False),
+) -> VietnamForeignFlowWatchlistResponse:
+    try:
+        payload = VietnamForeignFlowBatchService().get_watchlist(
+            tickers.split(",") if tickers else [],
+            sessions=sessions,
+            force_refresh=force_refresh,
+        )
+        return VietnamForeignFlowWatchlistResponse(**payload)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "vn_foreign_flow_watchlist_invalid_request", "message": str(exc)},
+        ) from exc
+    except Exception as exc:
+        logger.error("Vietnam foreign-flow watchlist failed")
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "vn_foreign_flow_watchlist_failed",
+                "message": "Vietnam foreign-flow watchlist request failed",
+            },
         ) from exc
 
 

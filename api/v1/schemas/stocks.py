@@ -1058,6 +1058,8 @@ class VietnamForeignFlowRow(BaseModel):
     foreign_buy_value: Optional[int] = None
     foreign_sell_value: Optional[int] = None
     foreign_net_value: Optional[int] = None
+    suspicious_zero_session: bool = False
+    anomaly_code: Optional[str] = None
 
 
 class VietnamForeignFlowWindow(BaseModel):
@@ -1204,6 +1206,9 @@ class VietnamForeignFlowSymbolHistoryResponse(BaseModel):
     fetched_at: str
     stale_reason: Optional[str] = None
     failure_class: Optional[str] = None
+    provider_version: Literal["v3"] = "v3"
+    cache_state: Literal["hit", "miss", "refresh", "stale_hit", "unavailable"] = "unavailable"
+    cache_age_seconds: Optional[float] = Field(default=None, ge=0)
 
 
 class VietnamForeignFlowBatchRequest(BaseModel):
@@ -1289,6 +1294,94 @@ class VietnamForeignFlowBatchResponse(BaseModel):
     rows: List[VietnamForeignFlowBatchSymbol] = Field(max_length=30)
     rankings: VietnamForeignFlowRankings
     fetched_at: str
+
+
+VietnamForeignFlowAvailability = Literal["ready", "partial", "unavailable"]
+VietnamForeignFlowSourceFreshness = Literal["current", "latest_completed", "stale", "unknown"]
+VietnamForeignFlowCacheState = Literal["hit", "miss", "refresh", "stale_hit", "unavailable"]
+VietnamForeignFlowFailureClass = Literal[
+    "validation",
+    "authentication",
+    "authorization",
+    "timeout",
+    "provider_unavailable",
+    "package_unavailable",
+    "unsupported",
+    "unknown",
+]
+
+
+class VietnamForeignFlowWatchlistItem(BaseModel):
+    """One truthful, completed-session watchlist screener row."""
+
+    ticker: str
+    availability: VietnamForeignFlowAvailability
+    data_state: VietnamForeignFlowAvailability
+    failure_class: Optional[VietnamForeignFlowFailureClass] = None
+    latest_session: Optional[str] = None
+    source_freshness: VietnamForeignFlowSourceFreshness
+    source_session_lag: Optional[int] = Field(default=None, ge=0)
+    fetched_at: str
+    cache_state: VietnamForeignFlowCacheState
+    cache_age_seconds: Optional[float] = Field(default=None, ge=0)
+    actual_session_count: int = Field(ge=0, le=60)
+    requested_session_count: Literal[1, 5, 20, 60]
+    complete: bool
+    buy_value_1d: Optional[int] = None
+    sell_value_1d: Optional[int] = None
+    net_value_1d: Optional[int] = None
+    buy_value_5d: Optional[int] = None
+    sell_value_5d: Optional[int] = None
+    net_value_5d: Optional[int] = None
+    buy_value_20d: Optional[int] = None
+    sell_value_20d: Optional[int] = None
+    net_value_20d: Optional[int] = None
+    buy_value_60d: Optional[int] = None
+    sell_value_60d: Optional[int] = None
+    net_value_60d: Optional[int] = None
+    buy_volume_1d: Optional[int] = None
+    sell_volume_1d: Optional[int] = None
+    net_volume_1d: Optional[int] = None
+    buy_volume_5d: Optional[int] = None
+    sell_volume_5d: Optional[int] = None
+    net_volume_5d: Optional[int] = None
+    buy_volume_20d: Optional[int] = None
+    sell_volume_20d: Optional[int] = None
+    net_volume_20d: Optional[int] = None
+    buy_volume_60d: Optional[int] = None
+    sell_volume_60d: Optional[int] = None
+    net_volume_60d: Optional[int] = None
+    buy_streak: Optional[int] = Field(default=None, ge=0, le=60)
+    sell_streak: Optional[int] = Field(default=None, ge=0, le=60)
+    streak_metric_basis: Literal["foreign_net_value"]
+    contains_provider_anomaly: bool
+    anomaly_sessions: List[str] = Field(default_factory=list, max_length=60)
+    anomaly_count: int = Field(ge=0, le=60)
+    source: Literal["ssi_fastconnect"] = "ssi_fastconnect"
+    source_endpoint: Literal["daily_stock_price"] = "daily_stock_price"
+
+
+class VietnamForeignFlowWatchlistResponse(BaseModel):
+    """Bounded 1–30 symbol foreign-flow screener contract."""
+
+    status: VietnamForeignFlowAvailability
+    data_state: VietnamForeignFlowAvailability
+    usable: bool
+    requested_tickers: List[str] = Field(min_length=1, max_length=120)
+    normalized_tickers: List[str] = Field(min_length=1, max_length=30)
+    duplicate_tickers_removed: int = Field(ge=0, le=119)
+    expected_symbol_count: int = Field(ge=1, le=30)
+    ready_symbol_count: int = Field(ge=0, le=30)
+    partial_symbol_count: int = Field(ge=0, le=30)
+    unavailable_symbol_count: int = Field(ge=0, le=30)
+    requested_session_count: Literal[1, 5, 20, 60]
+    fetched_at: str
+    provider: Literal["ssi_fastconnect"] = "ssi_fastconnect"
+    provider_version: Literal["v3"] = "v3"
+    cache_state: Literal["hit", "miss", "refresh", "stale_hit", "unavailable", "mixed"]
+    cache_age_seconds: Optional[float] = Field(default=None, ge=0)
+    failure_class: Optional[VietnamForeignFlowFailureClass] = None
+    items: List[VietnamForeignFlowWatchlistItem] = Field(min_length=1, max_length=30)
 
 
 class VietnamVn30ForeignFlowMembership(BaseModel):

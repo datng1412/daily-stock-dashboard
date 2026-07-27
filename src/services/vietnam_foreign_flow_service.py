@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
@@ -47,6 +47,10 @@ BATCH_MAX_TICKERS = 30
 BATCH_DEFAULT_TOP_N = 5
 BATCH_MAX_TOP_N = 10
 BATCH_MAX_CONCURRENCY = 4
+WATCHLIST_ALLOWED_SESSIONS = frozenset({1, 5, 20, 60})
+WATCHLIST_PER_TICKER_TIMEOUT_SECONDS = 20.0
+WATCHLIST_TOTAL_TIMEOUT_SECONDS = 45.0
+PROVIDER_VERSION = "v3"
 VN30_INDEX_CODE = "VN30"
 VN30_HISTORY_SESSIONS = 60
 VN30_AGGREGATE_CACHE_TTL_SECONDS = 300
@@ -259,6 +263,29 @@ def _safe_failure_class(value: Any) -> str:
     return normalized if normalized in _SAFE_FAILURE_CLASSES else "provider_unavailable"
 
 
+def _public_failure_class(value: Any) -> Optional[str]:
+    normalized = str(value or "").strip().lower()
+    if not normalized:
+        return None
+    aliases = {
+        "auth_failed": "authentication",
+        "authentication": "authentication",
+        "permission_denied": "authorization",
+        "authorization": "authorization",
+        "timeout": "timeout",
+        "package_unavailable": "package_unavailable",
+        "unsupported": "unsupported",
+        "network_error": "provider_unavailable",
+        "rate_limited": "provider_unavailable",
+        "parse_failed": "provider_unavailable",
+        "empty_response": "provider_unavailable",
+        "provider_exception": "provider_unavailable",
+        "provider_unavailable": "provider_unavailable",
+        "validation": "validation",
+    }
+    return aliases.get(normalized, "unknown")
+
+
 def _normalize_rows(rows: Optional[Iterable[Dict[str, Any]]]) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
     by_date: Dict[str, Dict[str, Any]] = {}
     stats = {
@@ -319,6 +346,18 @@ def _normalize_rows(rows: Optional[Iterable[Dict[str, Any]]]) -> Tuple[List[Dict
             "foreign_net_value": net_value,
             "field_presence": deepcopy(raw.get("_foreign_field_presence") or {}),
         }
+        gross_fields = (
+            "foreign_buy_volume",
+            "foreign_sell_volume",
+            "foreign_buy_value",
+            "foreign_sell_value",
+        )
+        explicit_zero = all(
+            row["field_presence"].get(name) == "FIELD_PRESENT_EXPLICIT_ZERO"
+            for name in gross_fields
+        )
+        row["suspicious_zero_session"] = explicit_zero
+        row["anomaly_code"] = "all_foreign_gross_fields_explicit_zero" if explicit_zero else None
         if not any(
             row.get(name) is not None
             for name in (
@@ -646,7 +685,10 @@ class VietnamForeignFlowService:
                         _METRICS["empty_cache_hits"] += 1
                     else:
                         _METRICS["negative_cache_hits"] += 1
-                    return deepcopy(entry.payload)
+                    cached = deepcopy(entry.payload)
+                    cached["cache_state"] = "hit"
+                    cached["cache_age_seconds"] = max(0.0, (now - entry.fetched_at).total_seconds())
+                    return cached
                 _METRICS["cache_misses"] += 1
                 future = Future()
                 _IN_FLIGHT[key] = future
@@ -678,6 +720,8 @@ class VietnamForeignFlowService:
                     freshness="stale",
                     stale_reason="SSI DailyStockPrice refresh was unavailable; showing bounded cached history.",
                     failure_class=payload.get("failure_class"),
+                    cache_state="stale_hit",
+                    cache_age_seconds=max(0.0, (now - stale_entry.fetched_at).total_seconds()),
                 )
                 payload = stale_payload
                 kind = "stale"
@@ -765,11 +809,13 @@ class VietnamForeignFlowService:
                 if failure_class == "empty_response":
                     _metric_add("provider_empty_results")
                     payload = self._build_payload(ticker, mode, requested_limit, parsed_from, parsed_to, [], "empty", "empty", None)
+                    payload.update(cache_state=cache_outcome, cache_age_seconds=0.0)
                     self._finish_provider_metrics(started, ticker, mode, requested_limit, parsed_from, parsed_to, "empty", 0, failure_class, attempts, pages_used, cache_outcome)
                     return payload, "empty"
                 _metric_add("provider_failures")
                 _metric_add("unavailable_results")
                 payload = self._build_payload(ticker, mode, requested_limit, parsed_from, parsed_to, [], "unavailable", "unavailable", failure_class)
+                payload.update(cache_state=cache_outcome, cache_age_seconds=0.0)
                 failure_cache_outcome = "stale_recovery" if stale_available else cache_outcome
                 self._finish_provider_metrics(started, ticker, mode, requested_limit, parsed_from, parsed_to, "unavailable", 0, failure_class, attempts, pages_used, failure_cache_outcome)
                 return payload, "negative"
@@ -788,6 +834,7 @@ class VietnamForeignFlowService:
                 _METRICS["last_success_at"] = _iso_now()
                 _METRICS["last_failure_class"] = None
             payload = self._build_payload(ticker, mode, requested_limit, parsed_from, parsed_to, rows, state, "fresh", None)
+            payload.update(cache_state=cache_outcome, cache_age_seconds=0.0)
             self._finish_provider_metrics(started, ticker, mode, requested_limit, parsed_from, parsed_to, state, len(rows), None, attempts, pages_used, cache_outcome)
             return payload, "positive" if rows else "empty"
         except Exception:
@@ -797,6 +844,7 @@ class VietnamForeignFlowService:
             with _LOCK:
                 _METRICS["last_failure_class"] = failure_class
             payload = self._build_payload(ticker, mode, requested_limit, parsed_from, parsed_to, [], "unavailable", "unavailable", failure_class)
+            payload.update(cache_state=cache_outcome, cache_age_seconds=0.0)
             failure_cache_outcome = "stale_recovery" if stale_available else cache_outcome
             self._finish_provider_metrics(started, ticker, mode, requested_limit, parsed_from, parsed_to, "unavailable", 0, failure_class, attempts, pages_used, failure_cache_outcome)
             return payload, "negative"
@@ -886,6 +934,9 @@ class VietnamForeignFlowService:
             "fetched_at": _iso_now(),
             "stale_reason": None,
             "failure_class": failure_class,
+            "provider_version": PROVIDER_VERSION,
+            "cache_state": "unavailable",
+            "cache_age_seconds": None,
         }
 
 
@@ -897,9 +948,16 @@ class VietnamForeignFlowBatchService:
         symbol_service: Optional[VietnamForeignFlowService] = None,
         *,
         max_concurrency: int = BATCH_MAX_CONCURRENCY,
+        per_ticker_timeout_seconds: float = WATCHLIST_PER_TICKER_TIMEOUT_SECONDS,
+        total_timeout_seconds: float = WATCHLIST_TOTAL_TIMEOUT_SECONDS,
     ) -> None:
         self._symbol_service = symbol_service or VietnamForeignFlowService()
         self._max_concurrency = max(1, min(int(max_concurrency), BATCH_MAX_CONCURRENCY))
+        self._per_ticker_timeout_seconds = max(0.01, float(per_ticker_timeout_seconds))
+        self._total_timeout_seconds = max(
+            self._per_ticker_timeout_seconds,
+            float(total_timeout_seconds),
+        )
 
     def get_batch(
         self,
@@ -995,6 +1053,268 @@ class VietnamForeignFlowBatchService:
                 },
             )
 
+    def get_watchlist(
+        self,
+        tickers: Iterable[str],
+        *,
+        sessions: int = 60,
+        force_refresh: bool = False,
+    ) -> Dict[str, Any]:
+        requested_tickers, normalized_tickers = normalize_vietnam_foreign_flow_tickers(tickers)
+        requested_sessions = int(sessions)
+        if requested_sessions not in WATCHLIST_ALLOWED_SESSIONS:
+            allowed = ", ".join(str(value) for value in sorted(WATCHLIST_ALLOWED_SESSIONS))
+            raise ValueError(f"sessions must be one of: {allowed}")
+
+        histories = self._load_watchlist_histories(
+            normalized_tickers,
+            sessions=requested_sessions,
+            force_refresh=force_refresh,
+        )
+        items = [
+            self._compose_watchlist_item(ticker, histories[ticker], requested_sessions)
+            for ticker in normalized_tickers
+        ]
+        self._add_observed_session_lag(items)
+        ready_count = sum(item["availability"] == "ready" for item in items)
+        partial_count = sum(item["availability"] == "partial" for item in items)
+        unavailable_count = sum(item["availability"] == "unavailable" for item in items)
+        usable = ready_count + partial_count > 0
+        status = (
+            "ready"
+            if ready_count == len(items)
+            else "partial"
+            if usable
+            else "unavailable"
+        )
+        cache_states = {str(item["cache_state"]) for item in items}
+        cache_ages = [
+            float(item["cache_age_seconds"])
+            for item in items
+            if item["cache_age_seconds"] is not None
+        ]
+        failure_classes = [
+            item["failure_class"] for item in items if item["failure_class"]
+        ]
+        return {
+            "status": status,
+            "data_state": status,
+            "usable": usable,
+            "requested_tickers": requested_tickers,
+            "normalized_tickers": normalized_tickers,
+            "duplicate_tickers_removed": len(requested_tickers) - len(normalized_tickers),
+            "expected_symbol_count": len(normalized_tickers),
+            "ready_symbol_count": ready_count,
+            "partial_symbol_count": partial_count,
+            "unavailable_symbol_count": unavailable_count,
+            "requested_session_count": requested_sessions,
+            "fetched_at": _iso_now(),
+            "provider": SOURCE,
+            "provider_version": PROVIDER_VERSION,
+            "cache_state": next(iter(cache_states)) if len(cache_states) == 1 else "mixed",
+            "cache_age_seconds": max(cache_ages) if cache_ages else None,
+            "failure_class": (
+                failure_classes[0]
+                if status == "unavailable" and len(set(failure_classes)) == 1
+                else None
+            ),
+            "items": items,
+        }
+
+    def _load_watchlist_histories(
+        self,
+        tickers: List[str],
+        *,
+        sessions: int,
+        force_refresh: bool,
+    ) -> Dict[str, Dict[str, Any]]:
+        started_at: Dict[str, float] = {}
+        started_lock = RLock()
+
+        def load(ticker: str) -> Dict[str, Any]:
+            with started_lock:
+                started_at[ticker] = perf_counter()
+            try:
+                return self._symbol_service.get_symbol_history(
+                    ticker,
+                    limit=sessions,
+                    force_refresh=force_refresh,
+                )
+            except Exception:
+                return self._unavailable_history(
+                    ticker,
+                    requested_sessions=sessions,
+                    failure_class="provider_exception",
+                )
+
+        executor = ThreadPoolExecutor(
+            max_workers=min(self._max_concurrency, len(tickers)),
+            thread_name_prefix="vn-foreign-watchlist",
+        )
+        future_to_ticker = {executor.submit(load, ticker): ticker for ticker in tickers}
+        pending = set(future_to_ticker)
+        results: Dict[str, Dict[str, Any]] = {}
+        batch_deadline = perf_counter() + self._total_timeout_seconds
+        try:
+            while pending:
+                now = perf_counter()
+                for future in list(pending):
+                    ticker = future_to_ticker[future]
+                    task_started = started_at.get(ticker)
+                    if (
+                        task_started is not None
+                        and now - task_started >= self._per_ticker_timeout_seconds
+                    ):
+                        pending.remove(future)
+                        future.cancel()
+                        results[ticker] = self._unavailable_history(
+                            ticker,
+                            requested_sessions=sessions,
+                            failure_class="timeout",
+                        )
+                if not pending or now >= batch_deadline:
+                    break
+                done, _ = wait(
+                    pending,
+                    timeout=min(0.05, max(0.0, batch_deadline - now)),
+                    return_when=FIRST_COMPLETED,
+                )
+                for future in done:
+                    pending.remove(future)
+                    ticker = future_to_ticker[future]
+                    try:
+                        results[ticker] = future.result()
+                    except Exception:
+                        results[ticker] = self._unavailable_history(
+                            ticker,
+                            requested_sessions=sessions,
+                            failure_class="provider_exception",
+                        )
+            for future in pending:
+                ticker = future_to_ticker[future]
+                future.cancel()
+                results[ticker] = self._unavailable_history(
+                    ticker,
+                    requested_sessions=sessions,
+                    failure_class="timeout",
+                )
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
+        return {ticker: results[ticker] for ticker in tickers}
+
+    @staticmethod
+    def _complete_sum(rows: List[Dict[str, Any]], field: str, sessions: int) -> Optional[int]:
+        selected = rows[-sessions:]
+        if len(selected) != sessions:
+            return None
+        values = [row.get(field) for row in selected]
+        if any(value is None for value in values):
+            return None
+        return sum(int(value) for value in values)
+
+    @classmethod
+    def _compose_watchlist_item(
+        cls,
+        ticker: str,
+        history: Dict[str, Any],
+        requested_sessions: int,
+    ) -> Dict[str, Any]:
+        rows = history.get("rows") if isinstance(history.get("rows"), list) else []
+        rows = [row for row in rows if isinstance(row, dict)][-60:]
+        actual_count = len(rows)
+        source_state = str(history.get("data_state") or "unavailable")
+        usable_history = source_state in {"ready", "stale"} and bool(rows)
+        metrics: Dict[str, Optional[int]] = {}
+        for window in (1, 5, 20, 60):
+            for family in ("value", "volume"):
+                for side in ("buy", "sell", "net"):
+                    field = f"foreign_{side}_{family}"
+                    metrics[f"{side}_{family}_{window}d"] = (
+                        cls._complete_sum(rows, field, window)
+                        if usable_history
+                        else None
+                    )
+        requested_metric_names = [
+            f"{side}_{family}_{requested_sessions}d"
+            for family in ("value", "volume")
+            for side in ("buy", "sell", "net")
+        ]
+        complete = actual_count >= requested_sessions
+        requested_metrics_complete = all(metrics[name] is not None for name in requested_metric_names)
+        if not usable_history:
+            availability = "unavailable"
+        elif complete and requested_metrics_complete:
+            availability = "ready"
+        else:
+            availability = "partial"
+
+        streak = _current_streak(rows, "foreign_net_value")
+        direction = streak.get("direction")
+        anomaly_sessions = [
+            str(row["trading_date"])
+            for row in rows
+            if row.get("suspicious_zero_session")
+        ]
+        raw_cache_state = str(history.get("cache_state") or "unavailable")
+        cache_state = raw_cache_state if raw_cache_state in {
+            "hit", "miss", "refresh", "stale_hit", "unavailable"
+        } else "unavailable"
+        source_freshness = (
+            "stale"
+            if source_state == "stale" or history.get("freshness") == "stale"
+            else "latest_completed"
+            if usable_history
+            else "unknown"
+        )
+        return {
+            "ticker": ticker,
+            "availability": availability,
+            "data_state": availability,
+            "failure_class": _public_failure_class(history.get("failure_class")),
+            "latest_session": rows[-1].get("trading_date") if rows else None,
+            "source_freshness": source_freshness,
+            "source_session_lag": None,
+            "fetched_at": history.get("fetched_at") or _iso_now(),
+            "cache_state": cache_state,
+            "cache_age_seconds": history.get("cache_age_seconds"),
+            "actual_session_count": actual_count,
+            "requested_session_count": requested_sessions,
+            "complete": complete and requested_metrics_complete,
+            **metrics,
+            "buy_streak": (
+                int(streak.get("sessions") or 0)
+                if direction == "net_buy"
+                else 0
+                if direction in {"net_sell", "zero", "none"}
+                else None
+            ),
+            "sell_streak": (
+                int(streak.get("sessions") or 0)
+                if direction == "net_sell"
+                else 0
+                if direction in {"net_buy", "zero", "none"}
+                else None
+            ),
+            "streak_metric_basis": "foreign_net_value",
+            "contains_provider_anomaly": bool(anomaly_sessions),
+            "anomaly_sessions": anomaly_sessions,
+            "anomaly_count": len(anomaly_sessions),
+            "source": history.get("source") or SOURCE,
+            "source_endpoint": history.get("source_endpoint") or SOURCE_ENDPOINT,
+        }
+
+    @staticmethod
+    def _add_observed_session_lag(items: List[Dict[str, Any]]) -> None:
+        dates = sorted({
+            str(item["latest_session"])
+            for item in items
+            if item.get("latest_session")
+        }, reverse=True)
+        lag_by_date = {value: index for index, value in enumerate(dates)}
+        for item in items:
+            latest = item.get("latest_session")
+            item["source_session_lag"] = lag_by_date.get(str(latest)) if latest else None
+
     def _load_histories(self, tickers: List[str], *, force_refresh: bool) -> Dict[str, Dict[str, Any]]:
         def load(ticker: str) -> Dict[str, Any]:
             try:
@@ -1014,18 +1334,25 @@ class VietnamForeignFlowBatchService:
             return {ticker: futures[ticker].result() for ticker in tickers}
 
     @staticmethod
-    def _unavailable_history(ticker: str) -> Dict[str, Any]:
-        return VietnamForeignFlowService._build_payload(
+    def _unavailable_history(
+        ticker: str,
+        *,
+        requested_sessions: int = 20,
+        failure_class: str = "provider_exception",
+    ) -> Dict[str, Any]:
+        payload = VietnamForeignFlowService._build_payload(
             ticker,
             "recent_sessions",
-            20,
+            requested_sessions,
             None,
             None,
             [],
             "unavailable",
             "unavailable",
-            "provider_exception",
+            failure_class,
         )
+        payload.update(cache_state="unavailable", cache_age_seconds=None)
+        return payload
 
     @staticmethod
     def _compose_symbol(ticker: str, history: Dict[str, Any]) -> Dict[str, Any]:
