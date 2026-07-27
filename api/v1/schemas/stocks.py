@@ -1905,6 +1905,9 @@ class VietnamIndustryFlowResponse(BaseModel):
     """Provider-backed ICB industry foreign flow and matched turnover."""
 
     status: Literal["ok", "partial", "unavailable"]
+    data_state: Literal["ready", "partial", "unavailable"] = "unavailable"
+    usable: bool = False
+    failure_class: Optional[str] = None
     universe: str
     requested_symbol_count: int = Field(ge=0)
     classified_symbol_count: int = Field(ge=0)

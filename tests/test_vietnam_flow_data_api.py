@@ -55,6 +55,9 @@ class FakeFlowService:
     def industry_history(self, **kwargs):
         return {
             "status": "partial",
+            "data_state": "partial",
+            "usable": True,
+            "failure_class": None,
             "universe": "custom_symbols",
             "requested_symbol_count": 2,
             "classified_symbol_count": 1,
@@ -112,3 +115,93 @@ def test_flow_routes_are_registered_in_openapi(monkeypatch):
     assert "/api/v1/stocks/vn/foreign-flow/current/{ticker}" in paths
     assert "/api/v1/stocks/vn/proprietary-flow" in paths
     assert "/api/v1/stocks/vn/industry-flow" in paths
+
+
+def test_industry_invalid_request_remains_validation_error(monkeypatch):
+    class ValidatingService(FakeFlowService):
+        def industry_history(self, **kwargs):
+            from src.services.vietnam_flow_data_service import (
+                ForeignFlowRequestValidationError,
+            )
+
+            raise ForeignFlowRequestValidationError(
+                "provide exactly one of symbols or index_code"
+            )
+
+    monkeypatch.setattr(stocks, "VietnamFlowDataService", ValidatingService)
+    app = FastAPI()
+    app.include_router(stocks.router, prefix="/api/v1/stocks")
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/stocks/vn/industry-flow",
+        json={
+            "symbols": ["FPT"],
+            "index_code": "VN30",
+            "from_date": "2026-07-01",
+            "to_date": "2026-07-23",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["error"] == "vn_industry_flow_invalid_request"
+
+
+def test_industry_provider_unavailable_is_typed_http_200(monkeypatch):
+    class ProviderUnavailableService(FakeFlowService):
+        def industry_history(self, **kwargs):
+            return {
+                "status": "unavailable",
+                "data_state": "unavailable",
+                "usable": False,
+                "failure_class": "network_error",
+                "universe": "index:VN30",
+                "requested_symbol_count": 0,
+                "classified_symbol_count": 0,
+                "unclassified_symbol_count": 0,
+                "rows": [],
+                "current_session_status": "CURRENT_FOREIGN_STREAM_BLOCKED_SEMANTICS",
+                "proprietary_industry_status": "unsupported",
+                "source": "ssi_fastconnect",
+                "provider_version": "v3",
+                "diagnostics": {"failure_class": "network_error"},
+            }
+
+    monkeypatch.setattr(stocks, "VietnamFlowDataService", ProviderUnavailableService)
+    app = FastAPI()
+    app.include_router(stocks.router, prefix="/api/v1/stocks")
+    response = TestClient(app).post(
+        "/api/v1/stocks/vn/industry-flow",
+        json={
+            "index_code": "VN30",
+            "from_date": "2026-07-01",
+            "to_date": "2026-07-23",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data_state"] == "unavailable"
+    assert response.json()["usable"] is False
+    assert response.json()["failure_class"] == "network_error"
+
+
+def test_industry_unexpected_service_failure_is_not_validation(monkeypatch):
+    class BrokenService(FakeFlowService):
+        def industry_history(self, **kwargs):
+            raise RuntimeError("internal invariant detail")
+
+    monkeypatch.setattr(stocks, "VietnamFlowDataService", BrokenService)
+    app = FastAPI()
+    app.include_router(stocks.router, prefix="/api/v1/stocks")
+    response = TestClient(app, raise_server_exceptions=False).post(
+        "/api/v1/stocks/vn/industry-flow",
+        json={
+            "index_code": "VN30",
+            "from_date": "2026-07-01",
+            "to_date": "2026-07-23",
+        },
+    )
+
+    assert response.status_code == 500
+    body = response.json()
+    assert body["detail"]["error"] == "vn_industry_flow_internal_error"
+    assert "invariant detail" not in body["detail"]["message"]

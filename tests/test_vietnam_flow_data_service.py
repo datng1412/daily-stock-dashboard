@@ -309,6 +309,82 @@ def test_index_industry_history_reuses_direct_membership_and_summary_operations(
     assert {row["icb_code"] for row in payload["rows"]} == {"9530", "8770"}
 
 
+@pytest.mark.parametrize(
+    ("provider_result", "failure_class"),
+    [
+        (
+            {
+                "status": "unavailable",
+                "rows": [],
+                "failure_class": "authentication_failed",
+            },
+            "authentication_failed",
+        ),
+        (
+            {
+                "status": "unavailable",
+                "rows": [],
+                "diagnostics": {"failure_class": "network_error"},
+            },
+            "network_error",
+        ),
+        (
+            {
+                "status": "unavailable",
+                "rows": [],
+                "failure_class": "request_timeout",
+            },
+            "request_timeout",
+        ),
+        (
+            {
+                "status": "unavailable",
+                "rows": [],
+                "failure_class": "internal_error",
+            },
+            "provider_unavailable",
+        ),
+    ],
+)
+def test_index_industry_membership_failure_is_typed_not_unsupported(
+    provider_result, failure_class
+) -> None:
+    class UnavailableMembershipProvider(FakeProvider):
+        def get_securities_by_index(self, index_code: str) -> Dict[str, Any]:
+            return provider_result
+
+    payload = VietnamFlowDataService(
+        UnavailableMembershipProvider()
+    ).industry_history(
+        index_code="VN30",
+        from_date="2026-07-01",
+        to_date="2026-07-23",
+    )
+
+    assert payload["status"] == "unavailable"
+    assert payload["data_state"] == "unavailable"
+    assert payload["usable"] is False
+    assert payload["failure_class"] == failure_class
+    assert payload["rows"] == []
+    assert "unsupported" not in failure_class
+
+
+def test_index_industry_empty_membership_is_typed_unavailable() -> None:
+    class EmptyMembershipProvider(FakeProvider):
+        def get_securities_by_index(self, index_code: str) -> Dict[str, Any]:
+            return {"status": "ok", "rows": []}
+
+    payload = VietnamFlowDataService(EmptyMembershipProvider()).industry_history(
+        index_code="VN30",
+        from_date="2026-07-01",
+        to_date="2026-07-23",
+    )
+
+    assert payload["status"] == "unavailable"
+    assert payload["failure_class"] == "membership_unavailable"
+    assert payload["diagnostics"]["provider_operation_count"] == 1
+
+
 def test_proprietary_scope_is_board_or_index_and_unsupported_symbol_is_explicit() -> None:
     payload = VietnamFlowDataService(FakeProvider()).proprietary_flow("board", "HOSE")
 

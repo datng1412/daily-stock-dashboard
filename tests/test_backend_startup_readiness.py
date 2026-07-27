@@ -210,8 +210,21 @@ def test_explicit_invalid_render_port_fails_clearly(value):
         main.resolve_api_server_port(environ={"PORT": value})
 
 
-def test_render_port_takes_precedence_over_cli_port():
-    assert main.resolve_api_server_port(9000, {"PORT": "10000"}) == 10000
+def test_explicit_cli_port_takes_precedence_over_render_port():
+    assert main.resolve_api_server_port(9000, {"PORT": "10000"}) == 9000
+
+
+def test_explicit_cli_host_takes_precedence_over_environment_host():
+    assert (
+        main.resolve_api_server_host("127.0.0.1", {"WEBUI_HOST": "0.0.0.0"})
+        == "127.0.0.1"
+    )
+
+
+def test_host_resolution_preserves_render_and_local_defaults():
+    assert main.resolve_api_server_host(environ={"PORT": "10000"}) == "0.0.0.0"
+    assert main.resolve_api_server_host(environ={"WEBUI_HOST": "127.0.0.1"}) == "127.0.0.1"
+    assert main.resolve_api_server_host(environ={}) == "0.0.0.0"
 
 
 def test_readiness_retries_connection_refusal_and_uses_bound_port(monkeypatch):
@@ -363,7 +376,7 @@ def test_serve_only_returns_failure_instead_of_sleeping_after_server_error(monke
     assert main.main() == 1
 
 
-def test_render_port_forces_external_bind_and_reaches_server_launcher(monkeypatch):
+def test_render_port_without_cli_bind_reaches_server_launcher(monkeypatch):
     args = SimpleNamespace(
         debug=False,
         check_notify=False,
@@ -372,8 +385,8 @@ def test_render_port_forces_external_bind_and_reaches_server_launcher(monkeypatc
         webui_only=False,
         serve=False,
         serve_only=True,
-        host="127.0.0.1",
-        port=9000,
+        host=None,
+        port=None,
     )
     config = SimpleNamespace(
         log_dir="logs",
@@ -410,8 +423,8 @@ def test_invalid_render_port_fails_before_server_launch(monkeypatch):
         webui_only=False,
         serve=False,
         serve_only=True,
-        host="0.0.0.0",
-        port=8000,
+        host=None,
+        port=None,
     )
     config = SimpleNamespace(
         log_dir="logs",

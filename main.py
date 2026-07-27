@@ -363,14 +363,14 @@ Examples:
     parser.add_argument(
         '--port',
         type=int,
-        default=8000,
+        default=None,
         help='FastAPI service port; default 8000'
     )
 
     parser.add_argument(
         '--host',
         type=str,
-        default='0.0.0.0',
+        default=None,
         help='FastAPI service listen address; default 0.0.0.0'
     )
 
@@ -690,21 +690,23 @@ def run_full_analysis(
 
 
 def resolve_api_server_port(
-    cli_port: int = _API_SERVER_LOCAL_DEFAULT_PORT,
+    cli_port: Optional[int] = None,
     environ: Optional[Dict[str, str]] = None,
 ) -> int:
     """Resolve and validate the single runtime port used by Uvicorn and readiness."""
     env = os.environ if environ is None else environ
-    source = "command line"
-    raw_port: Any = cli_port
-
-    if "PORT" in env:
+    if cli_port is not None:
+        source = "command line"
+        raw_port: Any = cli_port
+    elif "PORT" in env:
         source = "PORT"
         raw_port = env["PORT"]
-    elif cli_port == _API_SERVER_LOCAL_DEFAULT_PORT:
-        if "WEBUI_PORT" in env:
-            source = "WEBUI_PORT"
-            raw_port = env["WEBUI_PORT"]
+    elif "WEBUI_PORT" in env:
+        source = "WEBUI_PORT"
+        raw_port = env["WEBUI_PORT"]
+    else:
+        source = "application default"
+        raw_port = _API_SERVER_LOCAL_DEFAULT_PORT
 
     try:
         port = int(raw_port)
@@ -714,6 +716,24 @@ def resolve_api_server_port(
     if not 1 <= port <= 65535:
         raise ValueError(f"{source} must be between 1 and 65535")
     return port
+
+
+def resolve_api_server_host(
+    cli_host: Optional[str] = None,
+    environ: Optional[Dict[str, str]] = None,
+) -> str:
+    """Resolve the bind host without allowing environment to replace explicit CLI."""
+    env = os.environ if environ is None else environ
+    if cli_host is not None:
+        host = str(cli_host).strip()
+        if not host:
+            raise ValueError("command line host must not be empty")
+        return host
+    if "PORT" in env:
+        # Preserve Render's no-CLI externally reachable bind behavior.
+        return "0.0.0.0"
+    configured_host = str(env.get("WEBUI_HOST") or "").strip()
+    return configured_host or "0.0.0.0"
 
 
 def _api_readiness_url(port: int) -> str:
@@ -1064,11 +1084,7 @@ def main() -> int:
     # Resolve one bind contract for both Uvicorn and the loopback readiness probe.
     if start_serve:
         try:
-            if "PORT" in os.environ:
-                # Render's dynamic-port contract must be externally reachable.
-                args.host = "0.0.0.0"
-            elif args.host == "0.0.0.0" and os.getenv("WEBUI_HOST"):
-                args.host = os.environ["WEBUI_HOST"]
+            args.host = resolve_api_server_host(args.host)
             args.port = resolve_api_server_port(args.port)
         except ValueError as exc:
             logger.error("Invalid FastAPI bind configuration: %s", exc)

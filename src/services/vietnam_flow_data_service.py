@@ -41,6 +41,10 @@ _DIRECT_INDEX_CAPABILITY_CACHE: Dict[
 ] = {}
 
 
+class ForeignFlowRequestValidationError(ValueError):
+    """The caller supplied an invalid foreign-flow request."""
+
+
 def reset_vietnam_flow_data_capability_cache() -> None:
     """Reset the process-local direct-index capability cache for tests."""
     with _DIRECT_INDEX_CAPABILITY_LOCK:
@@ -106,6 +110,25 @@ def _paired_net(
         if buy is not None and sell is not None:
             values.append(buy - sell)
     return sum(values) if values else None
+
+
+def _provider_failure_class(result: Mapping[str, Any]) -> str:
+    """Preserve a provider's safe machine-readable failure classification."""
+    diagnostics = result.get("diagnostics")
+    diagnostic_failure = (
+        diagnostics.get("failure_class")
+        if isinstance(diagnostics, Mapping)
+        else None
+    )
+    failure_class = str(
+        result.get("failure_class")
+        or diagnostic_failure
+        or "provider_unavailable"
+    )
+    # Once a failure originates at a provider call boundary, an adapter's
+    # generic internal bucket is provider-unavailable to this product surface,
+    # not a caller validation error or a proven unsupported capability.
+    return "provider_unavailable" if failure_class == "internal_error" else failure_class
 
 
 class VietnamFlowDataService:
@@ -553,21 +576,40 @@ class VietnamFlowDataService:
         from_date: str,
         to_date: str,
     ) -> Dict[str, Any]:
-        if bool(symbols) == bool(index_code):
-            raise ValueError("provide exactly one of symbols or index_code")
-        start = _iso_date(from_date, "from_date")
-        end = _iso_date(to_date, "to_date")
-        if date.fromisoformat(start) > date.fromisoformat(end):
-            raise ValueError("from_date must not be after to_date")
-        if self._provider is None:
+        try:
+            if bool(symbols) == bool(index_code):
+                raise ValueError("provide exactly one of symbols or index_code")
+            start = _iso_date(from_date, "from_date")
+            end = _iso_date(to_date, "to_date")
+            if date.fromisoformat(start) > date.fromisoformat(end):
+                raise ValueError("from_date must not be after to_date")
+            normalized_symbols = _symbols(symbols or []) if symbols else None
+            normalized_index = (
+                str(index_code or "").strip().upper() if index_code else None
+            )
+            if normalized_index is not None and (
+                not normalized_index.isalnum() or len(normalized_index) > 20
+            ):
+                raise ValueError("index_code must be a valid SSI index identifier")
+        except ValueError as exc:
+            raise ForeignFlowRequestValidationError(str(exc)) from exc
+
+        def unavailable(
+            failure_class: str,
+            *,
+            requested_count: int = 0,
+            provider_operations: int = 0,
+        ) -> Dict[str, Any]:
             universe = (
-                f"index:{str(index_code).strip().upper()}"
-                if index_code
+                f"index:{normalized_index}"
+                if normalized_index
                 else "custom_symbols"
             )
-            requested_count = len(_symbols(symbols or [])) if symbols else 0
             return {
                 "status": "unavailable",
+                "data_state": "unavailable",
+                "usable": False,
+                "failure_class": failure_class,
                 "universe": universe,
                 "requested_symbol_count": requested_count,
                 "classified_symbol_count": 0,
@@ -582,30 +624,85 @@ class VietnamFlowDataService:
                 "fetched_at": datetime.now(tz=ZoneInfo("UTC")).isoformat(),
                 "cache": {"status": "unavailable", "age_seconds": None},
                 "diagnostics": {
-                    "failure_class": "provider_not_configured",
-                    "provider_operation_count": 0,
+                    "failure_class": failure_class,
+                    "provider_operation_count": provider_operations,
                 },
             }
-        if index_code:
-            index = str(index_code).strip().upper()
-            membership_result = self._provider.get_securities_by_index(index)
+
+        if self._provider is None:
+            return unavailable(
+                "provider_not_configured",
+                requested_count=len(normalized_symbols or []),
+            )
+        provider_failures: List[str] = []
+
+        def provider_result(call: Any) -> Dict[str, Any]:
+            try:
+                result = call()
+            except (TimeoutError, OSError, ValueError) as exc:
+                failure_class = (
+                    "request_timeout"
+                    if isinstance(exc, TimeoutError)
+                    else "network_error"
+                    if isinstance(exc, OSError)
+                    else "provider_unavailable"
+                )
+                provider_failures.append(failure_class)
+                return {
+                    "status": "unavailable",
+                    "rows": [],
+                    "failure_class": failure_class,
+                }
+            if result.get("status") not in {"ok", "partial"}:
+                provider_failures.append(_provider_failure_class(result))
+            return result
+
+        if normalized_index:
+            index = normalized_index
+            membership_result = provider_result(
+                lambda: self._provider.get_securities_by_index(index)
+            )
+            if membership_result.get("status") != "ok":
+                return unavailable(
+                    _provider_failure_class(membership_result),
+                    provider_operations=1,
+                )
             member_rows = [
                 row for row in membership_result.get("rows") or []
                 if isinstance(row, Mapping)
             ]
-            ticker_list = _symbols(row.get("symbol") for row in member_rows)
+            if not member_rows:
+                return unavailable(
+                    "membership_unavailable",
+                    provider_operations=1,
+                )
+            try:
+                ticker_list = _symbols(row.get("symbol") for row in member_rows)
+            except ValueError:
+                return unavailable(
+                    "membership_unavailable",
+                    provider_operations=1,
+                )
             universe = f"index:{index}"
             metadata = {
                 str(row.get("symbol") or "").strip().upper(): dict(row)
                 for row in member_rows
                 if row.get("symbol")
             }
-            summary_result = self._provider.get_securities_summary_by_index(
-                index,
-                from_date=start,
-                to_date=end,
-                limit=3000,
+            summary_result = provider_result(
+                lambda: self._provider.get_securities_summary_by_index(
+                    index,
+                    from_date=start,
+                    to_date=end,
+                    limit=3000,
+                )
             )
+            if summary_result.get("status") not in {"ok", "partial"}:
+                return unavailable(
+                    _provider_failure_class(summary_result),
+                    requested_count=len(ticker_list),
+                    provider_operations=2,
+                )
             history: Dict[str, List[Mapping[str, Any]]] = {
                 ticker: [] for ticker in ticker_list
             }
@@ -620,8 +717,10 @@ class VietnamFlowDataService:
             provider_operations = 2
             if not direct_member_rows:
                 for ticker in ticker_list:
-                    summary = self._provider.get_daily_stock_price(
-                        ticker, from_date=start, to_date=end, limit=260
+                    summary = provider_result(
+                        lambda ticker=ticker: self._provider.get_daily_stock_price(
+                            ticker, from_date=start, to_date=end, limit=260
+                        )
                     )
                     provider_operations += 1
                     history[ticker] = [
@@ -629,19 +728,23 @@ class VietnamFlowDataService:
                         if isinstance(row, Mapping)
                     ]
         else:
-            ticker_list = _symbols(symbols or [])
+            ticker_list = normalized_symbols or []
             universe = "custom_symbols"
         if not index_code:
             metadata = {}
             history = {}
             provider_operations = 0
             for ticker in ticker_list:
-                info = self._provider.get_security_basic_info(ticker)
+                info = provider_result(
+                    lambda ticker=ticker: self._provider.get_security_basic_info(ticker)
+                )
                 provider_operations += 1
                 info_row = next((row for row in info.get("rows") or [] if isinstance(row, Mapping)), {})
                 metadata[ticker] = dict(info_row)
-                summary = self._provider.get_daily_stock_price(
-                    ticker, from_date=start, to_date=end, limit=260
+                summary = provider_result(
+                    lambda ticker=ticker: self._provider.get_daily_stock_price(
+                        ticker, from_date=start, to_date=end, limit=260
+                    )
                 )
                 provider_operations += 1
                 history[ticker] = [
@@ -734,8 +837,22 @@ class VietnamFlowDataService:
                     else None
                 ),
             }
+        if not aggregate_rows and provider_failures:
+            return unavailable(
+                provider_failures[0],
+                requested_count=len(ticker_list),
+                provider_operations=provider_operations,
+            )
+        complete_result = (
+            bool(aggregate_rows)
+            and not provider_failures
+            and all(row["status"] == "ok" for row in aggregate_rows)
+        )
         return {
-            "status": "ok" if aggregate_rows and all(row["status"] == "ok" for row in aggregate_rows) else ("partial" if aggregate_rows else "unavailable"),
+            "status": "ok" if complete_result else ("partial" if aggregate_rows else "unavailable"),
+            "data_state": "ready" if complete_result else ("partial" if aggregate_rows else "unavailable"),
+            "usable": bool(aggregate_rows),
+            "failure_class": None if aggregate_rows else "provider_empty",
             "universe": universe,
             "requested_symbol_count": len(ticker_list),
             "classified_symbol_count": len(ticker_list) - len(unclassified_symbols),
@@ -751,6 +868,7 @@ class VietnamFlowDataService:
             "cache": {"status": "miss", "age_seconds": None},
             "diagnostics": {
                 "provider_operation_count": provider_operations,
+                "failed_operation_count": len(provider_failures),
                 "reconciliation": reconciliation,
             },
         }

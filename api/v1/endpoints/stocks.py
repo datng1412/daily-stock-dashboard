@@ -73,7 +73,10 @@ from src.services.vietnam_foreign_flow_service import (
     VietnamForeignFlowVn30Service,
     normalize_vietnam_foreign_flow_tickers,
 )
-from src.services.vietnam_flow_data_service import VietnamFlowDataService
+from src.services.vietnam_flow_data_service import (
+    ForeignFlowRequestValidationError,
+    VietnamFlowDataService,
+)
 from src.services.vietnam_market_service import VietnamMarketService, vietnam_intraday_chart_health_snapshot
 from src.services.vietnam_observability import vietnam_observability_snapshot
 from data_provider.base import normalize_stock_code
@@ -947,8 +950,17 @@ def post_vietnam_industry_flow(
             from_date=request.from_date,
             to_date=request.to_date,
         ))
-    except ValueError as exc:
+    except ForeignFlowRequestValidationError as exc:
         raise HTTPException(status_code=422, detail={"error": "vn_industry_flow_invalid_request", "message": str(exc)}) from exc
+    except Exception as exc:
+        logger.error("Vietnam industry-flow invariant failure: %s", type(exc).__name__)
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "vn_industry_flow_internal_error",
+                "message": "Vietnam industry flow could not be processed.",
+            },
+        ) from exc
     finally:
         service.close()
 
