@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [test] Live-prove the post-fix Foreign Flow Industry and Proprietary application routes with one bounded child while retaining provider publication-lag semantics.
+- [fix] Keep the process-shared SSI V3 adapter alive across request-scoped router closure and route index proprietary flow through the proven direct index-summary adapter contract.
+- [test] Harden the bounded Foreign Flow application diagnostic with strict loopback readiness, explicit completed-session dates, bounded redacted logs, owned process-tree cleanup, and offline lifecycle coverage.
+- [documentation] Record the R3.1 application-route acceptance evidence, one-shot proprietary proof, shared-adapter lifecycle defect, and post-fix live-verification boundary.
 - [test] Add a zero-retry SSI V3 Foreign Flow connectivity diagnostic covering secret-safe config provenance, DNS, TCP, verified TLS, authentication, and one request per bounded capability.
 - [documentation] Record successful SSI V3 REST connectivity and partial capability proof, the non-trading-date index-summary limitation, and current Docker/Render V3 configuration names.
 - [fix] Separate valid Industry foreign-flow provider failures from request validation and return typed unavailable responses.

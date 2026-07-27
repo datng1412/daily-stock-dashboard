@@ -1072,3 +1072,55 @@ industries.
 - Source coverage separates the unsupported direct index fields from available symbol foreign data and available SSI VN30 membership. The optional unsupported source does not create a whole-feature outage while decomposition remains usable.
 - Provider-backed all-zero sessions remain valid values. Series rows expose `anomaly_code=all_constituents_explicit_zero`, `anomaly_status=provider_backed_suspect`, explicit-zero and missing-field counts; windows expose `contains_provider_anomaly`, dates, and count. Completeness remains based on field/session coverage, not on whether the values appear economically unusual.
 - Completed-session rules are unchanged. Latest prior provider data remains usable; no current-session or realtime foreign-flow claim is made without proven same-session symbol rows or separately proven room-stream semantics.
+
+## SSI-V3-M2.4C-R3.1 Application Route Acceptance
+
+The R3.1 diagnostic corrected the parent readiness path without changing FastAPI
+startup. It now owns one direct `subprocess.Popen` child, removes inherited bind
+variables, passes explicit loopback host/port arguments, probes the exact port
+with direct local HTTP, requires HTTP 200 plus `status=ok`, retains bounded
+redacted stdout/stderr tails, and always terminates the owned Windows process
+tree. Readiness is capped at 20 seconds, each route call at 15 seconds, and the
+whole run at 120 seconds.
+
+The single accepted run used provider session 2026-07-24. FPT history returned
+20 ready rows, the current-membership VN30 decomposition was partial and usable,
+the direct VN30 foreign-field capability remained the negatively cached
+`DIRECT_INDEX_FOREIGN_FIELDS_UNSUPPORTED`, and the three-symbol watchlist
+remained partial and usable. A separate one-shot `indexSummary?index=` request
+returned one 2026-07-24 row with all six normalized proprietary fields.
+
+Industry and Proprietary were unavailable in that same application run because
+the preceding direct-index service closed the process-shared V3 adapter and
+later request-scoped routers reused the closed instance. Factory-created
+routers are now non-owning references to the shared adapter; explicitly
+injected providers retain close-on-router-close behavior. Index proprietary
+flow also uses the same direct `get_index_summary` adapter operation proven by
+the one-shot provider check. The live budget was intentionally not repeated
+after these fixes, so their post-fix application results are offline-tested but
+not yet live-confirmed.
+
+## SSI-V3-M2.4C-R3.1B Post-Fix Application Smoke
+
+The one permitted post-fix run started one directly owned Python child on a
+dynamic loopback port, required a typed healthy response, issued each acceptance
+request once with provider retries disabled, and terminated the exact Windows
+process tree in `finally`. Readiness completed in 3.28 seconds, the entire run
+completed in 23.62 seconds, and the port was confirmed released.
+
+The application results live-confirm both R3.1 repairs. Industry returned HTTP
+200 with ready/usable data: 806 industry-session rows, 13 industries, and all 30
+current VN30 members classified, with no closed-adapter or false 422 failure.
+Proprietary returned HTTP 200 from the direct `indexSummary` operation with one
+2026-07-24 row and all six required buy, sell, and net volume/value fields.
+
+The surrounding contracts remained stable. FPT returned 20 ready sessions
+through 2026-07-24; current-membership VN30 decomposition returned 60
+partial/usable sessions; the three-symbol watchlist returned three ready items;
+and the direct VN30 foreign-field capability remained the secondary negatively
+cached `DIRECT_INDEX_FOREIGN_FIELDS_UNSUPPORTED`. The latest provider session
+observed by both FPT and VN30 was 2026-07-24. Because the provider had not
+published a newer completed session, the remaining gap is classified as
+provider publication lag rather than an application outage. No current-session,
+historically exact membership, fallback-provider, or direct canonical VN30
+foreign-flow claim is added.

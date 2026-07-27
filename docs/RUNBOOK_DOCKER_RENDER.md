@@ -20,6 +20,7 @@ store.
 - `/home/dsa/.longbridge`, `/app/data/cache`, `/app/logs`, and `/app/reports` are created and owned during the image build; the entrypoint fails clearly if a runtime mount makes one unwritable.
 - Startup readiness uses the local, provider-independent `http://127.0.0.1:$PORT/api/health` endpoint and the same resolved port used by Uvicorn.
 - Pre-bind startup does not import the optional LiteLLM analyzer path. Logs emit one bounded `fastapi_startup stage=...` sequence from `FASTAPI_THREAD_ENTERED` through `UVICORN_SOCKET_READY`; a timeout reports `last_lifecycle_stage` so app import, required local initialization, and optional background scheduling can be distinguished.
+- For a one-shot local Foreign Flow application acceptance, use `python scripts\diagnose_vn_foreign_flow_runtime.py --completed-session YYYY-MM-DD`. The tool chooses a free loopback port, requires `/api/health` HTTP 200 with `status=ok`, prints only compact normalized response metadata, bounds child logs, terminates its exact child tree, and verifies port release. Supply a proven completed provider session; the weekday fallback is not an exchange-holiday calendar.
 - The Vite frontend is built inside the Docker image and copied to `static/`.
 - FastAPI serves `static/index.html` and `/assets/*` through the existing web UI flow.
 - Vietnam market-data routes use the official `ssi-sdk==3.0.5` V3 REST and

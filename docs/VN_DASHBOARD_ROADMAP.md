@@ -1,5 +1,13 @@
 ﻿# VN Dashboard Roadmap
 
+## Phase SSI-V3-M2.4C-R3.1B - Post-fix Foreign Flow application smoke (2026-07-27)
+
+- One bounded, zero-retry application child accepted health plus all six Foreign Flow routes, then terminated its exact process tree and released the dynamic loopback port in 23.62 seconds.
+- The lifecycle repair is live-proven: Industry returned 806 industry-session rows across 13 industries with all 30 current VN30 members classified, and no closed-adapter failure or false request-validation response remained.
+- The direct proprietary path is live-proven: one 2026-07-24 `indexSummary` row contained all six required normalized proprietary fields.
+- FPT history, partial/usable current-membership VN30 decomposition, the secondary negatively cached direct-index unsupported result, and the three-ready-row watchlist remained coherent. The newest provider session was 2026-07-24, so the remaining date gap is provider publication lag, not an application-route failure.
+- No product code, provider contract, schema, frontend behavior, retry policy, or fallback changed during the post-fix smoke.
+
 ## Phase SSI-V3-M2.4C-R3 - Foreign Flow connectivity recovery (2026-07-27)
 
 - One zero-retry, secret-safe live diagnostic proved the configured official V3 REST host, DNS, TCP/443, verified TLS 1.3, authentication, exact FPT metadata, 20-session FPT DailyStockPrice history, 30-member VN30 membership, and a 20-row direct VN30 securities summary.
@@ -7,6 +15,12 @@
 - The sole proprietary `indexSummary` probe used a non-trading Sunday and returned no usable normalized row. The diagnostic now chooses the latest completed weekday, but the live call was not repeated and proprietary recovery is not claimed.
 - The direct-process application smoke completed backend startup and an internal health 200, while its parent readiness probe timed out and terminated the owned process before product routes ran. Application-route acceptance therefore remains pending a future bounded harness run; no provider retry or alternate launch path was used.
 - Current-session foreign flow, historically exact membership, new providers, fallback, fabricated data, alerts, and recommendations remain out of scope.
+
+## Phase SSI-V3-M2.4C-R3.1 - Foreign Flow application route acceptance (2026-07-27)
+
+- One bounded application-route acceptance used an explicit dynamic loopback port. FPT history, partial/usable current-membership VN30 decomposition, the secondary direct-index unsupported classification, and partial/usable watchlist behavior were observed.
+- The run proved a request-scoped router could close the process-shared V3 adapter before later Industry/Proprietary routes. Shared lifecycle ownership and index proprietary routing are repaired offline.
+- A later single bounded acceptance should confirm post-fix Industry and Proprietary output without repeating the broader connectivity matrix.
 
 ## Phase SSI-V3-M2.4C - Watchlist Foreign Flow Screener (2026-07-27)
 
