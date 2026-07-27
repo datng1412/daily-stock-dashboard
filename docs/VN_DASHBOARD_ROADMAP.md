@@ -1,5 +1,14 @@
 ﻿# VN Dashboard Roadmap
 
+## Phase SSI-V3-M2.4A+B - Vietnam product data fixes and Foreign Flow Explorer v1 (2026-07-24)
+
+- Exact-symbol `securitiesByBoard?symbol=` metadata exposes only proven V3 fields plus endpoint/version/fetch/cache/data-state/failure lineage. Missing profile values remain null. Company order book uses SSI X-QUOTE pass-through, and canonical price labels follow the actual selected SSI daily source.
+- Intraday rows are ascending, provider-event-ID deduplicated, and value-identical fallback deduplicated only when no event ID exists. Equal-time distinct rows survive; invalid prices/volumes are excluded; no bar is forward-filled or synthesized.
+- Fundamentally unsupported financial/event cards are hidden. News renders only with provider-backed items. Omitted watchlist symbols produce an empty user-controlled scope; no fixed five-symbol default is used.
+- Foreign Flow Explorer v1 uses one page with Ticker, Current VN30 basket, Industry, and Proprietary modes. Shared controls provide 1D/5D/20D/60D/custom completed-session windows, value/volume selection, scoped force refresh, sort controls, provenance, coverage/anomaly status, and UTF-8 export of already loaded raw values.
+- VN30 uses current SSI IndexComponents membership decomposition as the usable product, retains `historical_constituent_correct=false`, and shows direct aggregate unsupported only as secondary diagnostics. Industry mode is bounded to the selected current VN30 universe and labels turnover separately. Proprietary choices are limited to proven VNINDEX, VN30, and HOSE board/index scopes.
+- Current-session foreign flow, current-session industry flow, historically exact VN30 membership, new providers, fallback, persistence, alerts, and broad chart redesign remain deferred.
+
 ## Phase SSI-V3-M2.3 - Foreign-session and auction integrity repaired (2026-07-24)
 
 - DailyStockPrice now exposes the actual provider data date plus current/provisional/completed/stale session metadata. During an active session, a latest provider row from the prior completed session is `partial` with `previous_session_during_live_market`; it is no longer presented as current-session foreign flow.

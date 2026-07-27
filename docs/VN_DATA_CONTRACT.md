@@ -487,7 +487,7 @@ Before any live news adapter is implemented, the provider must have written enti
 
 ## Future Module Contract
 
-Future enrichment modules such as financials, corporate actions, events, ownership, and richer profile details may appear as placeholder sections while implementation is pending. If they are exposed before implementation, their status may be:
+Future enrichment modules such as financials, corporate actions, events, ownership, and richer profile details may remain typed compatibility fields while implementation is pending. Fundamentally unsupported empty cards are hidden from the company page. If a future module is exposed, its status may be:
 
 ```text
 disabled
@@ -588,10 +588,11 @@ The metadata block exposes nullable `symbol`, `exchange`, `market`, `name`, `nam
 * `completeness`: covered-field ratio from `0` to `1`.
 * `missing_fields`: normalized optional fields with no SSI value.
 * `field_coverage`: per-field boolean coverage.
-* `source`: the selected SSI endpoint.
+* `source`: the selected SSI provider label.
+* `source_endpoint`, `provider_version`, `fetched_at`, `cache_status`, `data_state`, and `failure_class`: sanitized exact-symbol provenance and availability.
 * `diagnostics`: sanitized endpoint attempts, row counts, selection source, and failure class.
 
-`SecuritiesDetails` is attempted first. `Securities` is an allowed same-provider fallback. A row is usable only when its normalized symbol exactly matches the requested ticker. Do not infer missing names, industry, sector, issuer, or listing fields from the ticker, exchange, prices, or another provider.
+V3 exact-symbol `securitiesByBoard?symbol=` is the metadata source. A row is usable only when its normalized symbol exactly matches the requested ticker. Do not infer missing names, industry, sector, issuer, or listing fields from the ticker, exchange, prices, or another provider.
 
 ### DailyStockPrice Enrichment Contract
 
@@ -629,7 +630,9 @@ The endpoint uses a dedicated bounded process-local cache and same-key coalescin
 
 `POST /api/v1/stocks/vn/foreign-flow/batch` implements the Phase 4.12D-1 daily watchlist slice. It accepts 1-30 normalized unique tickers, `top_n` from 1-10, and optional force refresh. It calls the Phase 4.12B symbol service with a 20-session target, preserves normalized request order, isolates each symbol failure, and returns no history arrays. Each result exposes the latest daily buy/sell/net volume and value, 5-session/20-session cumulative net volume/value, coverage/completeness, data state, freshness, source, and `daily_available` finality.
 
-`GET /api/v1/stocks/vn/foreign-flow/vn30` implements Phase 4.12E-2. Membership is exact, ordered, normalized SSI IndexComponents `VN30`; unavailable, empty, or mismatched membership returns no component history calls, rows, series, or rankings. Usable component histories are resolved with concurrency at most four and aligned to the union of provider trading dates capped to the latest 20. Missing component-date rows do not contribute and reduce coverage; explicit zero contributes and is neutral breadth. Latest/5/20 windows use that same date axis. Buy, sell, and net fields are summed independently for value and volume; value is never inferred from volume and price. Daily `value_coverage`/`volume_coverage` and `value_breadth`/`volume_breadth` are separate. The basis is `current_vn30_membership`, `historical_constituent_correct=false`, finality is `daily_available`, values are VND, and volumes are shares.
+`GET /api/v1/stocks/vn/foreign-flow/vn30` implements the current-membership VN30 decomposition. Membership is exact, ordered, normalized SSI IndexComponents `VN30`; unavailable, empty, or mismatched membership returns no component history calls, rows, series, or rankings. Usable component histories are resolved with concurrency at most four and aligned to the union of provider trading dates capped to the latest 60. Missing component-date rows do not contribute and reduce coverage; explicit zero contributes and is neutral breadth. Latest/5/20/60 windows use that same date axis. Buy, sell, and net fields are summed independently for value and volume; value is never inferred from volume and price. Daily `value_coverage`/`volume_coverage` and `value_breadth`/`volume_breadth` are separate. The basis is `current_vn30_membership`, `historical_constituent_correct=false`, finality is `daily_available`, values are VND, and volumes are shares. A proven direct-index unsupported capability remains secondary rather than blanking usable decomposition.
+
+Foreign Flow Explorer v1 applies a shared completed-session selection contract to ticker, current VN30 basket, current-VN30 ICB industry, and supported proprietary VNINDEX/VN30/HOSE scopes. 1D/5D/20D/60D select distinct returned provider sessions; custom bounds are inclusive and limited to 120 calendar days. Metric selection is presentation-only and does not refetch when both value and volume already exist. Source session, fetched time, cache state/age, freshness, coverage, and anomaly are separate. CSV contains only selected loaded rows with raw numeric values. Current-session foreign/industry flow remains unavailable.
 
 Top-level `fresh_count`, `stale_count`, `empty_count`, and `unavailable_count` partition normalized symbols. `usable_count` is fresh plus stale; `coverage_ratio=usable_count/normalized_count`. State precedence is: all fresh usable is `ready`; all usable stale is `stale`; all empty is `empty`; mixed usable/non-usable is `partial`; otherwise provider failure is `unavailable`. Rankings are limited to the requested watchlist and contain latest/5-session/20-session top buys and sells. Null and zero values are excluded; signed net value determines direction; ticker breaks ties; stale or incomplete eligible rows remain marked rather than being dropped. No batch field changes SSI DailyOhlc ownership of `latest_price`.
 

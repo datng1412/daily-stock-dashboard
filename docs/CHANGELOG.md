@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [new feature] Add a four-mode SSI V3 Foreign Flow Explorer for ticker, current VN30 basket, ICB industry, and supported proprietary scopes with completed-session windows and CSV export.
+- [fix] Correct Vietnam profile provenance, company order-book pass-through, canonical price labelling, intraday ordering/deduplication, and empty user-controlled ticker defaults.
+- [improvement] Hide unsupported company financial/event placeholders and expose source session, fetched time, cache, freshness, coverage, and anomaly states separately.
+- [test] Cover provider-only profile fields, intraday event identity, 60-session VN30 hydration, Explorer window/null/zero/CSV semantics, and four-mode rendering.
 - [fix] Return the VN30 foreign-flow route as partial and usable when current-membership decomposition is ready but direct SSI V3 index foreign fields are unsupported.
 - [improvement] Negatively cache the proven direct VN30 field-level capability absence for one day while keeping auth, timeout, and explicit capability-refresh behavior separate.
 - [fix] Present current-basket VN30 decomposition as the primary dataset and retain explicit all-zero provider sessions with visible anomaly metadata.

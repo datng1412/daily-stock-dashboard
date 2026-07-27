@@ -1,5 +1,22 @@
 # SSI FastConnect Integration
 
+## M2.4 Vietnam product mapping and Explorer contract
+
+Company profile metadata is read through the exact-symbol V3 `securitiesByBoard?symbol=` adapter contract. Only returned name, board/exchange, ICB, lot-size, listing-date, and listed-share fields are eligible; unsupported security type, issuer, description, estimates, financials, and events are not inferred. The public profile includes provider endpoint/version, fetched time, cache status, data state, and sanitized failure class.
+
+Company order book is the optional SSI X-QUOTE snapshot already normalized by the streaming layer. Bid prices/quantities remain paired independently from ask prices/quantities, sparse levels stay null, and the company service passes the snapshot through without merging it with a different daily quote. Canonical daily price labels follow the market service's actual SSI source selection.
+
+Compact intraday normalization sorts chronologically and never fills gaps. Provider event/sequence IDs are the preferred deduplication key; without one, only an identical timestamp plus complete OHLCV tuple is collapsed. Equal-time rows with different provider values remain. Non-positive OHLC, negative volume, malformed time, previous-session/current-session classification, provider-session time, and cache read time retain separate handling.
+
+Foreign Flow Explorer v1 reuses the existing V3 completed-session contracts:
+
+- ticker history from `daily_stock_price`;
+- current-membership VN30 decomposition from SSI IndexComponents plus symbol histories;
+- current-VN30 ICB aggregation and turnover from the bounded industry service;
+- proprietary VNINDEX/VN30 index and HOSE board summaries from `indexSummary`.
+
+The UI selects the latest 1, 5, 20, or 60 distinct returned provider sessions, or an inclusive custom range bounded to 120 calendar days. It does not divide by calendar days or convert missing values to zero. Source session, fetched time, cache state/age, source freshness, coverage, and anomaly state are displayed separately. Force refresh is scoped to the active capability; value/volume changes reuse the loaded payload. CSV export uses only the selected loaded rows and raw numbers. Direct VN30 unsupported remains secondary, `historical_constituent_correct=false`, and current-session foreign/industry flow remains unavailable pending independent semantics proof.
+
 ## V3 foreign-session and auction integrity
 
 DailyStockPrice keeps its actual `data_date` and adds `requested_date`, `provider_session_date`, `freshness_status`, current/provisional/completed/stale flags, provider-session lag, provider version, and endpoint provenance. A prior completed-session row during active trading is valid historical provider data but is `partial`, not current or live. Outside active trading, the newest provider-backed completed row may be `latest_completed_session`; older returned-session history remains explicitly stale.
