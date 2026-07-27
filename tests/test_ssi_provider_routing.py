@@ -169,3 +169,26 @@ def test_factory_constructs_only_shared_v3_provider(monkeypatch) -> None:
     validate.assert_called_once_with(settings)
     shared.assert_called_once_with(settings)
     assert router.provider is provider
+    router.close()
+    assert provider.close_calls == 0
+
+
+def test_factory_injected_provider_retains_owned_close_behavior(monkeypatch) -> None:
+    provider = RecordingProvider()
+    settings = SimpleNamespace()
+    monkeypatch.setattr(
+        "data_provider.ssi_provider_router.SsiV3RestSettings.from_config",
+        lambda config: settings,
+    )
+    monkeypatch.setattr(
+        "data_provider.ssi_provider_router.validate_v3_selection",
+        lambda value: None,
+    )
+
+    router = create_ssi_rest_provider_router(
+        config=object(),
+        v3_provider=provider,
+    )
+    router.close()
+
+    assert provider.close_calls == 1

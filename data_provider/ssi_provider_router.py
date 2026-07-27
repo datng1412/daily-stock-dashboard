@@ -85,8 +85,11 @@ class SsiRestProviderRouter:
     def __init__(
         self,
         provider: SsiRestProvider,
+        *,
+        close_provider: bool = True,
     ) -> None:
         self._provider = provider
+        self._close_provider = close_provider
         self._closed = False
 
     @property
@@ -297,7 +300,8 @@ class SsiRestProviderRouter:
         if self._closed:
             return
         self._closed = True
-        self._provider.close()
+        if self._close_provider:
+            self._provider.close()
 
 
 def create_ssi_rest_provider_router(
@@ -313,6 +317,10 @@ def create_ssi_rest_provider_router(
         config = get_config()
     settings = SsiV3RestSettings.from_config(config)
     validate_v3_selection(settings)
-    if v3_provider is None:
+    uses_shared_provider = v3_provider is None
+    if uses_shared_provider:
         v3_provider = _get_shared_v3_adapter(settings)
-    return SsiRestProviderRouter(v3_provider)
+    return SsiRestProviderRouter(
+        v3_provider,
+        close_provider=not uses_shared_provider,
+    )

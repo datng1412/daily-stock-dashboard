@@ -505,10 +505,18 @@ class VietnamFlowDataService:
                     if cached:
                         _PROP_CACHE.pop(cache_key, None)
             if result is None:
-                result = self._provider.get_market_summary(
-                    normalized_scope,
-                    normalized_identifier,
-                    trading_date=requested_date,
+                result = (
+                    self._provider.get_index_summary(
+                        normalized_identifier,
+                        index_code=normalized_identifier,
+                        trading_date=requested_date,
+                    )
+                    if normalized_scope == "index"
+                    else self._provider.get_market_summary(
+                        normalized_scope,
+                        normalized_identifier,
+                        trading_date=requested_date,
+                    )
                 )
                 provider_operations += 1
                 if result.get("status") == "ok" and result.get("rows"):

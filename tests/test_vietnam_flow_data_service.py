@@ -88,6 +88,18 @@ class FakeProvider:
             }],
         }
 
+    def get_index_summary(
+        self,
+        board: str,
+        index_code: Optional[str] = None,
+        trading_date: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        return self.get_market_summary(
+            "index",
+            index_code or board,
+            trading_date=trading_date,
+        )
+
 
 def test_index_foreign_history_uses_only_direct_provider_aggregate() -> None:
     payload = VietnamFlowDataService(FakeProvider()).foreign_history_by_index(
@@ -405,6 +417,53 @@ def test_completed_proprietary_summary_is_reused_without_provider_failure_poison
     assert first["diagnostics"]["provider_operation_count"] == 1
     assert second["diagnostics"]["provider_operation_count"] == 0
     assert second["diagnostics"]["cache_hit_count"] == 1
+
+
+def test_index_proprietary_flow_uses_proven_direct_index_summary_path() -> None:
+    class RecordingIndexProvider(FakeProvider):
+        index_calls = []
+        market_calls = []
+
+        def get_index_summary(
+            self,
+            board: str,
+            index_code: Optional[str] = None,
+            trading_date: Optional[str] = None,
+        ) -> Dict[str, Any]:
+            self.index_calls.append((board, index_code, trading_date))
+            return FakeProvider.get_market_summary(
+                self,
+                "index",
+                index_code or board,
+                trading_date=trading_date,
+            )
+
+        def get_market_summary(
+            self,
+            scope: str,
+            identifier: str,
+            *,
+            trading_date: Optional[str] = None,
+        ) -> Dict[str, Any]:
+            self.market_calls.append((scope, identifier, trading_date))
+            return super().get_market_summary(
+                scope,
+                identifier,
+                trading_date=trading_date,
+            )
+
+    provider = RecordingIndexProvider()
+    payload = VietnamFlowDataService(provider).proprietary_flow(
+        "index",
+        "VN30",
+        from_date="2026-07-24",
+        to_date="2026-07-24",
+        force_refresh=True,
+    )
+
+    assert payload["status"] == "ok"
+    assert provider.index_calls == [("VN30", "VN30", "2026-07-24")]
+    assert provider.market_calls == []
 
 
 def test_current_foreign_does_not_promote_previous_session_or_blend_stream() -> None:
