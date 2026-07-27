@@ -180,4 +180,115 @@ describe('ForeignFlowPage', () => {
       expect.objectContaining({ forceRefresh: true }),
     ));
   });
+
+  it('renders ticker network failure as unavailable instead of empty chart content', async () => {
+    symbolHistory.mockResolvedValue({
+      ...tickerPayload(),
+      dataState: 'unavailable',
+      freshness: 'unavailable',
+      failureClass: 'network_error',
+      rows: [],
+    });
+
+    renderPage('/foreign-flow?mode=ticker&ticker=FPT');
+
+    expect(await screen.findByRole('heading', { name: 'Dữ liệu hiện không khả dụng' })).toBeInTheDocument();
+    expect(screen.getByText(/Không thể kết nối tới nguồn dữ liệu/)).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Selected window summary' })).not.toBeInTheDocument();
+  });
+
+  it('keeps successful empty ticker response distinct from provider failure', async () => {
+    symbolHistory.mockResolvedValue({
+      ...tickerPayload(),
+      dataState: 'empty',
+      freshness: 'empty',
+      rows: [],
+      failureClass: null,
+    });
+
+    renderPage('/foreign-flow?mode=ticker&ticker=FPT');
+
+    expect(await screen.findByText('No completed-session records')).toBeInTheDocument();
+    expect(screen.queryByText('Dữ liệu hiện không khả dụng')).not.toBeInTheDocument();
+  });
+
+  it('renders VN30, Industry, and Proprietary typed unavailable states explicitly', async () => {
+    vn30.mockResolvedValue({
+      ...vn30Payload(),
+      status: 'unavailable',
+      dataState: 'unavailable',
+      usable: false,
+      sourceCoverage: [{
+        source: 'ssi_fastconnect',
+        capabilityStatus: 'unavailable',
+        usable: false,
+        failureClass: 'network_error',
+      }],
+      decomposition: {
+        ...vn30Payload().decomposition,
+        status: 'unavailable',
+        dataState: 'unavailable',
+        usable: false,
+        series: [],
+      },
+    } as unknown as VietnamVn30ForeignFlowResponse);
+    const unavailableAggregate = {
+      status: 'unavailable' as const,
+      dataState: 'unavailable' as const,
+      usable: false,
+      failureClass: 'network_error',
+      source: 'ssi_fastconnect',
+      providerVersion: 'v3',
+      endpoint: 'securitiesSummary',
+      fetchedAt: '2026-07-21T09:00:00Z',
+      cache: { status: 'unavailable', ageSeconds: null },
+      rows: [],
+    };
+    industry.mockResolvedValue(unavailableAggregate);
+    proprietary.mockResolvedValue(unavailableAggregate);
+
+    const view = renderPage('/foreign-flow?mode=vn30');
+    expect(await screen.findByRole('region', { name: 'vn30 foreign flow unavailable' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Industry' }));
+    expect(await screen.findByRole('region', { name: 'industry foreign flow unavailable' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Proprietary' }));
+    expect(await screen.findByRole('region', { name: 'proprietary foreign flow unavailable' })).toBeInTheDocument();
+    view.unmount();
+  });
+
+  it('preserves usable mode data and avoids refetch when revisiting a mode', async () => {
+    renderPage('/foreign-flow?mode=ticker&ticker=FPT');
+    await waitFor(() => expect(symbolHistory).toHaveBeenCalledTimes(1));
+    expect(screen.getByText('2026-07-21T09:00:00Z')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Current VN30 basket' }));
+    await waitFor(() => expect(vn30).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('button', { name: 'Ticker' }));
+
+    await waitFor(() => expect(screen.getByText('2026-07-21T09:00:00Z')).toBeInTheDocument());
+    expect(symbolHistory).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves same-mode usable data when a force refresh becomes unavailable', async () => {
+    symbolHistory
+      .mockResolvedValueOnce(tickerPayload())
+      .mockResolvedValueOnce({
+        ...tickerPayload(),
+        dataState: 'unavailable',
+        freshness: 'unavailable',
+        failureClass: 'network_error',
+        rows: [],
+      });
+    renderPage('/foreign-flow?mode=ticker&ticker=FPT');
+    await waitFor(() => expect(symbolHistory).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByRole('button', { name: /Force Refresh/ }));
+
+    await waitFor(() => expect(symbolHistory).toHaveBeenCalledTimes(2));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Không thể kết nối');
+    expect(screen.getByRole('region', { name: 'Selected window summary' })).toBeInTheDocument();
+    expect(screen.queryByText('Dữ liệu hiện không khả dụng')).not.toBeInTheDocument();
+  });
 });

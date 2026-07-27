@@ -12,6 +12,13 @@ import { ForeignFlowSymbolHistoryChart, type SymbolForeignFlowChartMode } from '
 import { ForeignFlowSymbolHistoryTable } from '../components/foreign-flow/ForeignFlowSymbolHistoryTable';
 import { ForeignFlowWatchlistScreener } from '../components/foreign-flow/ForeignFlowWatchlistScreener';
 import {
+  mapIndustryFlowViewState,
+  mapProprietaryFlowViewState,
+  mapTickerFlowViewState,
+  mapVn30FlowViewState,
+  type FlowViewState,
+} from '../components/foreign-flow/foreignFlowViewState';
+import {
   buildForeignFlowCsv,
   downloadForeignFlowCsv,
   explorerDateBounds,
@@ -29,6 +36,14 @@ type ExplorerData =
   | { mode: 'ticker'; payload: VietnamForeignFlowSymbolHistoryResponse }
   | { mode: 'vn30'; payload: VietnamVn30ForeignFlowResponse }
   | { mode: 'industry' | 'proprietary'; payload: VietnamFlowDataResponse };
+type DataMode = Exclude<ForeignFlowExplorerMode, 'watchlist'>;
+type ModeRequestState = {
+  data: ExplorerData | null;
+  loading: boolean;
+  error: string | null;
+  scopeKey: string | null;
+};
+type ModeStateMap = Record<DataMode, ModeRequestState>;
 
 type FlowRow = Record<string, unknown> & {
   tradingDate?: string;
@@ -57,6 +72,15 @@ const MODES: Array<{ value: ForeignFlowExplorerMode; label: string }> = [
 const WINDOWS: ForeignFlowExplorerWindow[] = ['1', '5', '20', '60', 'custom'];
 const STORAGE_KEY = 'stockclock.vn.foreignFlowExplorer.preferences.v1';
 const TICKER_RE = /^[A-Z0-9]{1,10}$/;
+const DATA_MODES: DataMode[] = ['ticker', 'vn30', 'industry', 'proprietary'];
+const initialModeStates = (): ModeStateMap => Object.fromEntries(
+  DATA_MODES.map((item) => [item, {
+    data: null,
+    loading: false,
+    error: null,
+    scopeKey: null,
+  }]),
+) as ModeStateMap;
 
 const readPreference = <T extends string>(key: string, allowed: readonly T[], fallback: T): T => {
   try {
@@ -146,6 +170,31 @@ const formatMetric = (value: number | null, metric: ForeignFlowExplorerMetric) =
   metric === 'value' ? formatForeignFlowValue(value) : formatForeignFlowVolume(value)
 );
 
+const viewStateFor = (data: ExplorerData | null): FlowViewState | null => {
+  if (!data) return null;
+  if (data.mode === 'ticker') return mapTickerFlowViewState(data.payload);
+  if (data.mode === 'vn30') return mapVn30FlowViewState(data.payload);
+  if (data.mode === 'industry') return mapIndustryFlowViewState(data.payload);
+  return mapProprietaryFlowViewState(data.payload);
+};
+
+const safeFailureMessage = (failureClass: string | null) => {
+  if (failureClass === 'network_error' || failureClass === 'dns_error'
+    || failureClass === 'connection_refused' || failureClass === 'proxy_error'
+    || failureClass === 'tls_error') {
+    return 'Không thể kết nối tới nguồn dữ liệu. Vui lòng thử lại sau.';
+  }
+  if (failureClass === 'request_timeout' || failureClass === 'connect_timeout'
+    || failureClass === 'read_timeout') {
+    return 'Nguồn dữ liệu phản hồi quá chậm. Vui lòng thử lại sau.';
+  }
+  if (failureClass === 'authentication_failed' || failureClass === 'authentication'
+    || failureClass === 'entitlement_unavailable' || failureClass === 'authorization') {
+    return 'Quyền truy cập nguồn dữ liệu hiện không khả dụng.';
+  }
+  return 'Nguồn dữ liệu hiện chưa thể cung cấp kết quả cho yêu cầu này.';
+};
+
 const ForeignFlowPage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedMode = searchParams.get('mode');
@@ -178,11 +227,35 @@ const ForeignFlowPage = () => {
   const [customTo, setCustomTo] = useState(today);
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   const [chartMode, setChartMode] = useState<SymbolForeignFlowChartMode>('net');
-  const [data, setData] = useState<ExplorerData | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const requestId = useRef(0);
-  const abortRef = useRef<AbortController | null>(null);
+  const [modeStates, setModeStates] = useState<ModeStateMap>(initialModeStates);
+  const modeStatesRef = useRef(modeStates);
+  const requestIds = useRef<Record<DataMode, number>>({
+    ticker: 0,
+    vn30: 0,
+    industry: 0,
+    proprietary: 0,
+  });
+  const abortRefs = useRef<Record<DataMode, AbortController | null>>({
+    ticker: null,
+    vn30: null,
+    industry: null,
+    proprietary: null,
+  });
+  const activeState = mode === 'watchlist' ? null : modeStates[mode];
+  const data = activeState?.data ?? null;
+  const loading = activeState?.loading ?? false;
+  const error = activeState?.error ?? null;
+  const viewState = useMemo(() => viewStateFor(data), [data]);
+
+  const updateModeState = useCallback((
+    targetMode: DataMode,
+    update: (current: ModeRequestState) => ModeRequestState,
+  ) => {
+    setModeStates((current) => ({
+      ...current,
+      [targetMode]: update(current[targetMode]),
+    }));
+  }, []);
 
   useEffect(() => {
     document.title = 'Foreign Flow Explorer';
@@ -191,6 +264,10 @@ const ForeignFlowPage = () => {
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ mode, window, metric, ticker }));
   }, [metric, mode, ticker, window]);
+
+  useEffect(() => {
+    modeStatesRef.current = modeStates;
+  }, [modeStates]);
 
   const validationError = useMemo(() => {
     if (mode === 'watchlist') return null;
@@ -206,33 +283,46 @@ const ForeignFlowPage = () => {
   }, [customFrom, customTo, mode, tickerDraft, window]);
 
   const load = useCallback(async (forceRefresh = false) => {
-    if (mode === 'watchlist') {
-      setData(null);
-      setError(null);
-      return;
-    }
+    if (mode === 'watchlist') return;
+    const requestMode = mode;
     if (mode === 'ticker' && !ticker) {
-      setData(null);
-      setError(null);
+      updateModeState('ticker', (current) => ({ ...current, error: null }));
       return;
     }
     let bounds: { fromDate: string; toDate: string };
     try {
       bounds = explorerDateBounds(window, customFrom, customTo);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Invalid date range.');
+      updateModeState(requestMode, (current) => ({
+        ...current,
+        error: caught instanceof Error ? caught.message : 'Invalid date range.',
+      }));
       return;
     }
-    requestId.current += 1;
-    const currentRequest = requestId.current;
-    abortRef.current?.abort();
+    const scopeKey = requestMode === 'ticker'
+      ? `${ticker}:${window}:${bounds.fromDate}:${bounds.toDate}`
+      : requestMode === 'vn30'
+        ? 'VN30'
+        : requestMode === 'industry'
+          ? `VN30:${bounds.fromDate}:${bounds.toDate}`
+          : `${proprietaryTarget}:${bounds.fromDate}:${bounds.toDate}`;
+    const previous = modeStatesRef.current[requestMode];
+    if (!forceRefresh && previous.scopeKey === scopeKey && viewStateFor(previous.data)?.usable) {
+      return;
+    }
+    requestIds.current[requestMode] += 1;
+    const currentRequest = requestIds.current[requestMode];
+    abortRefs.current[requestMode]?.abort();
     const controller = new AbortController();
-    abortRef.current = controller;
-    setLoading(true);
-    setError(null);
+    abortRefs.current[requestMode] = controller;
+    updateModeState(requestMode, (current) => ({
+      ...current,
+      loading: true,
+      error: null,
+    }));
     try {
       let next: ExplorerData;
-      if (mode === 'ticker') {
+      if (requestMode === 'ticker') {
         const payload = await stocksApi.getVietnamForeignFlowSymbolHistory(ticker, {
           ...(window === 'custom'
             ? { fromDate: bounds.fromDate, toDate: bounds.toDate }
@@ -240,19 +330,19 @@ const ForeignFlowPage = () => {
           forceRefresh,
           signal: controller.signal,
         });
-        next = { mode, payload };
-      } else if (mode === 'vn30') {
+        next = { mode: requestMode, payload };
+      } else if (requestMode === 'vn30') {
         next = {
-          mode,
+          mode: requestMode,
           payload: await stocksApi.getVietnamVn30ForeignFlow({
             topN: 10,
             forceRefresh,
             signal: controller.signal,
           }),
         };
-      } else if (mode === 'industry') {
+      } else if (requestMode === 'industry') {
         next = {
-          mode,
+          mode: requestMode,
           payload: await stocksApi.getVietnamIndustryFlow({
             indexCode: 'VN30',
             fromDate: bounds.fromDate,
@@ -262,7 +352,7 @@ const ForeignFlowPage = () => {
       } else {
         const [scope, identifier] = proprietaryTarget.split(':') as ['board' | 'index', string];
         next = {
-          mode,
+          mode: requestMode,
           payload: await stocksApi.getVietnamProprietaryFlow(scope, identifier, {
             fromDate: bounds.fromDate,
             toDate: bounds.toDate,
@@ -271,19 +361,57 @@ const ForeignFlowPage = () => {
           }),
         };
       }
-      if (currentRequest === requestId.current && !controller.signal.aborted) setData(next);
+      if (
+        currentRequest === requestIds.current[requestMode]
+        && !controller.signal.aborted
+      ) {
+        const nextViewState = viewStateFor(next);
+        updateModeState(requestMode, (current) => {
+          const preserveUsable = forceRefresh
+            && current.scopeKey === scopeKey
+            && Boolean(viewStateFor(current.data)?.usable)
+            && nextViewState?.availability === 'unavailable';
+          return preserveUsable
+            ? {
+              ...current,
+              loading: false,
+              error: safeFailureMessage(nextViewState.failureClass),
+            }
+            : {
+              data: next,
+              loading: false,
+              error: null,
+              scopeKey,
+            };
+        });
+      }
     } catch (caught) {
-      if (controller.signal.aborted || currentRequest !== requestId.current) return;
-      setError(caught instanceof Error ? caught.message : 'Foreign-flow data is unavailable.');
+      if (
+        controller.signal.aborted
+        || currentRequest !== requestIds.current[requestMode]
+      ) return;
+      updateModeState(requestMode, (current) => ({
+        ...current,
+        error: caught instanceof Error ? caught.message : 'Foreign-flow data is unavailable.',
+      }));
     } finally {
-      if (currentRequest === requestId.current) setLoading(false);
+      if (currentRequest === requestIds.current[requestMode]) {
+        updateModeState(requestMode, (current) => ({ ...current, loading: false }));
+      }
     }
-  }, [customFrom, customTo, mode, proprietaryTarget, ticker, window]);
+  }, [customFrom, customTo, mode, proprietaryTarget, ticker, updateModeState, window]);
 
   useEffect(() => {
     void load(false);
-    return () => abortRef.current?.abort();
-  }, [load]);
+    if (mode === 'watchlist') return undefined;
+    const requestMode = mode;
+    const modeAbortRefs = abortRefs.current;
+    const modeRequestIds = requestIds.current;
+    return () => {
+      modeAbortRefs[requestMode]?.abort();
+      modeRequestIds[requestMode] += 1;
+    };
+  }, [load, mode]);
 
   const rawRows = useMemo(() => toFlowRows(data), [data]);
   const selection = useMemo(
@@ -303,7 +431,7 @@ const ForeignFlowPage = () => {
       source: data.payload.source,
       endpoint: data.payload.sourceEndpoint,
       fetchedAt: data.payload.fetchedAt,
-      cache: 'not exposed',
+      cache: `${data.payload.cacheState ?? 'unknown'} · ${data.payload.cacheAgeSeconds ?? '—'}s`,
       freshness: data.payload.freshness,
       state: data.payload.dataState,
     };
@@ -365,7 +493,10 @@ const ForeignFlowPage = () => {
   const applyTicker = () => {
     const normalized = normalizeVietnamTicker(tickerDraft);
     if (!TICKER_RE.test(normalized)) {
-      setError('Ticker must contain 1–10 letters or digits.');
+      updateModeState('ticker', (current) => ({
+        ...current,
+        error: 'Ticker must contain 1–10 letters or digits.',
+      }));
       return;
     }
     setTicker(normalized);
@@ -407,8 +538,8 @@ const ForeignFlowPage = () => {
             <button key={item.value} type="button" aria-pressed={mode === item.value}
               className={`rounded-lg px-3 py-2 text-sm font-medium ${mode === item.value ? 'bg-cyan/15 text-cyan' : 'bg-elevated/40 text-secondary-text hover:text-foreground'}`}
               onClick={() => {
+                if (mode === item.value) return;
                 setMode(item.value);
-                setData(null);
                 setSearchParams((current) => {
                   const next = new URLSearchParams(current);
                   next.set('mode', item.value);
@@ -473,7 +604,40 @@ const ForeignFlowPage = () => {
       {loading && !data ? <div className="h-32 animate-pulse rounded-xl bg-elevated/50" aria-label="Loading foreign flow" /> : null}
       {error ? <div role="alert" className="rounded-lg border border-danger/30 bg-danger/10 p-3 text-sm text-danger">{error}</div> : null}
 
-      {data ? (
+      {data && viewState?.availability === 'unavailable' && !viewState.usable ? (
+        <section
+          className="rounded-xl border border-warning/30 bg-warning/10 p-5"
+          aria-label={`${mode} foreign flow unavailable`}
+        >
+          <p className="text-xs font-medium uppercase tracking-wide text-secondary-text">
+            {MODES.find((item) => item.value === mode)?.label ?? mode}
+          </p>
+          <h2 className="mt-1 text-lg font-semibold">Dữ liệu hiện không khả dụng</h2>
+          <p className="mt-2 text-sm text-secondary-text">
+            {safeFailureMessage(viewState.failureClass)}
+          </p>
+          <dl className="mt-4 grid gap-2 text-sm sm:grid-cols-3">
+            <div><dt className="text-secondary-text">Source</dt><dd>{provenance?.source ?? '—'}</dd></div>
+            <div><dt className="text-secondary-text">Fetched at</dt><dd>{provenance?.fetchedAt ?? '—'}</dd></div>
+            <div><dt className="text-secondary-text">Cache</dt><dd>{provenance?.cache ?? '—'}</dd></div>
+          </dl>
+        </section>
+      ) : null}
+
+      {data && viewState?.availability !== 'unavailable' && !viewState?.usable ? (
+        <EmptyState
+          title="No completed-session records"
+          description="The provider request succeeded, but no records were returned for this selection."
+        />
+      ) : null}
+
+      {data && viewState?.usable && viewState.availability === 'partial' ? (
+        <div className="rounded-lg border border-warning/30 bg-warning/10 p-3 text-sm" role="status">
+          Partial data is available. Missing coverage remains visible and is not converted to zero.
+        </div>
+      ) : null}
+
+      {data && viewState?.usable ? (
         <>
           <section className="grid gap-2 rounded-xl border border-border/70 bg-card p-4 text-sm md:grid-cols-3 xl:grid-cols-6" aria-label="Provenance and freshness">
             <div><span className="text-secondary-text">Source</span><p>{provenance?.source}</p></div>

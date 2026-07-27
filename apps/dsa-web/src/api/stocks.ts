@@ -657,6 +657,9 @@ export type VietnamForeignFlowSymbolHistoryResponse = {
   fetchedAt: string;
   staleReason?: string | null;
   failureClass?: string | null;
+  providerVersion?: 'v3';
+  cacheState?: 'hit' | 'miss' | 'refresh' | 'stale_hit' | 'unavailable';
+  cacheAgeSeconds?: number | null;
 };
 
 type VietnamForeignFlowSymbolHistoryCamelResponse = Omit<VietnamForeignFlowSymbolHistoryResponse, 'analytics'> & {
@@ -1521,6 +1524,9 @@ export type VietnamCompanyTechnical = {
 
 export type VietnamFlowDataResponse = {
   status: 'ok' | 'partial' | 'unavailable';
+  dataState?: 'ready' | 'partial' | 'unavailable';
+  usable?: boolean;
+  failureClass?: string | null;
   source: string;
   providerVersion: string;
   scope?: string | null;

@@ -24,6 +24,7 @@ import {
 } from './foreignFlowExplorerModel';
 import { foreignFlowSignTextClass } from '../../utils/foreignFlowSign';
 import { formatForeignFlowValue, formatForeignFlowVolume } from '../../utils/vietnamNumberFormat';
+import { mapWatchlistFlowViewState } from './foreignFlowViewState';
 
 const windowOptions: VietnamForeignFlowWatchlistWindow[] = [1, 5, 20, 60];
 
@@ -119,7 +120,9 @@ export const ForeignFlowWatchlistScreener = () => {
       if (controller.signal.aborted || requestId !== requestIdRef.current) return;
       const previous = dataRef.current;
       const sameScope = previous?.normalizedTickers.join(',') === scopeKey;
-      if (forceRefresh && sameScope && previous?.usable && !response.usable) {
+      const previousState = previous ? mapWatchlistFlowViewState(previous) : null;
+      const responseState = mapWatchlistFlowViewState(response);
+      if (forceRefresh && sameScope && previousState?.usable && !responseState.usable) {
         setError('Refresh returned no usable rows. Previous usable data is preserved.');
       } else {
         setData(response);
