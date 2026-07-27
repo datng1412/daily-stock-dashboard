@@ -4,6 +4,14 @@
 
 This document defines the public data contract for the VN dashboard and company research page. It is intentionally data-quality-first: valid daily SSI data should remain visible even when optional live or enrichment sections are unavailable.
 
+## Foreign Flow Explorer Runtime States (Phase SSI-V3-M2.4C-R2)
+
+Ticker, current-VN30, Industry, Proprietary, and Watchlist payloads are normalized by one frontend view-state contract: availability (`ready`, `partial`, `unavailable`), usability, source freshness, data quality, failure class, and row presence remain separate. Partial usable responses render their available content with a warning. Provider-unavailable responses render an explicit unavailable state and never an empty chart or table. A successful provider response with zero completed-session records remains a distinct empty-data state.
+
+`POST /api/v1/stocks/vn/industry-flow` additively returns `data_state`, `usable`, and `failure_class`. Invalid dates, identifiers, or mutually exclusive universe inputs remain HTTP 422. Membership, authorization, network, timeout, or other provider unavailability returns HTTP 200 with `status=data_state=unavailable`, `usable=false`, empty rows, and sanitized provenance. Unsupported is used only for a capability absence proven by a successful provider request. Unexpected service failures return a sanitized HTTP 500 response and are not labelled as user validation.
+
+Explorer modes retain their own last usable response and error. Switching tabs does not erase another mode, revisiting an unchanged usable scope does not refetch solely because of the tab switch, and a failed force refresh preserves the previous same-scope usable response. Abort and request-generation guards continue to prevent obsolete responses from replacing current state.
+
 ## Watchlist Foreign Flow Screener (Phase SSI-V3-M2.4C)
 
 `GET /api/v1/stocks/vn/foreign-flow/watchlist` is the user-controlled 1–30 symbol completed-session screener contract. The frontend loads one 60-session batch and derives Value/Volume display, 1D/5D/20D/60D selection, search, filtering, sorting, and CSV locally. It never creates one frontend history request per ticker. The existing raw symbol-history cache remains authoritative and its key retains provider/schema version, ticker, session capacity/date bounds, and source endpoint.

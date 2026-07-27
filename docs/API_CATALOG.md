@@ -11,6 +11,12 @@ Global rules:
 - KBS is legacy optional only and disabled by default.
 - News is disabled until a separate provider exists.
 
+## `POST /api/v1/stocks/vn/industry-flow`
+
+Accepts exactly one bounded universe selector: `symbols` or `index_code`, plus ISO `from_date` and `to_date`. Valid provider-backed ready and partial responses retain their existing rows. The response also exposes `data_state`, `usable`, and a sanitized `failure_class`.
+
+Request-shape, identifier, and date validation errors return HTTP 422. Provider or membership unavailability returns HTTP 200 typed unavailable with empty rows and explicit SSI provenance; it is not reclassified as invalid input or unsupported. Unexpected service invariants use sanitized HTTP 500 behavior.
+
 ## `GET /api/v1/stocks/vn/foreign-flow/watchlist`
 
 Returns one bounded foreign-flow screener response for 1–30 user-controlled, normalized unique symbols. Query parameters are `tickers=FPT,SSI,HPG`, `sessions=1|5|20|60` (the product requests 60 once), and optional `force_refresh=true`. The response preserves normalized input order, isolates per-symbol failures, and returns completed-session buy/sell/net value and volume metrics for 1/5/20/60 sessions without history arrays.

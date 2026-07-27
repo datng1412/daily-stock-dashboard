@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [fix] Separate valid Industry foreign-flow provider failures from request validation and return typed unavailable responses.
+- [fix] Render normalized Foreign Flow unavailable, empty, and partial states while preserving independent per-mode usable data and failed-refresh results.
+- [fix] Give explicit FastAPI CLI host and port values precedence over environment bind settings without changing no-CLI deployment defaults.
+- [test] Cover Industry failure taxonomy, bind precedence, shared FlowViewState mapping, unavailable rendering, mode preservation, and failed refresh.
 - [new feature] Add a user-controlled Foreign Flow Watchlist screener with 1D/5D/20D/60D value and volume comparison, filters, sorting, CSV, and ticker deep links.
 - [new feature] Add one bounded SSI V3 watchlist foreign-flow GET contract for 1–30 symbols with cache reuse, capped concurrency, timeout isolation, and typed per-symbol states.
 - [test] Cover watchlist normalization, completed-session windows, null/zero and anomaly behavior, cache reuse, request bounds, local persistence, request-free controls, refresh preservation, and explicit VN30 loading.
