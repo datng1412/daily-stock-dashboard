@@ -10,6 +10,7 @@ import {
 import { AppPage, Badge, Button, EmptyState, Input, PageHeader, Select } from '../components/common';
 import { ForeignFlowSymbolHistoryChart, type SymbolForeignFlowChartMode } from '../components/foreign-flow/ForeignFlowSymbolHistoryChart';
 import { ForeignFlowSymbolHistoryTable } from '../components/foreign-flow/ForeignFlowSymbolHistoryTable';
+import { ForeignFlowWatchlistScreener } from '../components/foreign-flow/ForeignFlowWatchlistScreener';
 import {
   buildForeignFlowCsv,
   downloadForeignFlowCsv,
@@ -47,6 +48,7 @@ type FlowRow = Record<string, unknown> & {
 type RankedRow = { label: string; net: number | null; turnover?: number | null; coverage?: number | null };
 
 const MODES: Array<{ value: ForeignFlowExplorerMode; label: string }> = [
+  { value: 'watchlist', label: 'Watchlist · Danh sách theo dõi' },
   { value: 'ticker', label: 'Ticker' },
   { value: 'vn30', label: 'Current VN30 basket' },
   { value: 'industry', label: 'Industry' },
@@ -146,12 +148,23 @@ const formatMetric = (value: number | null, metric: ForeignFlowExplorerMetric) =
 
 const ForeignFlowPage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
-  const initialMode = searchParams.get('mode') === 'vn30' || searchParams.get('scope') === 'vn30'
-    ? 'vn30'
-    : readPreference('mode', MODES.map((item) => item.value), 'ticker');
+  const requestedMode = searchParams.get('mode');
+  const initialMode = MODES.some((item) => item.value === requestedMode)
+    ? requestedMode as ForeignFlowExplorerMode
+    : searchParams.get('scope') === 'vn30'
+      ? 'vn30'
+      : readPreference('mode', MODES.map((item) => item.value), 'watchlist');
   const [mode, setMode] = useState<ForeignFlowExplorerMode>(initialMode);
-  const [window, setWindow] = useState<ForeignFlowExplorerWindow>(() => readPreference('window', WINDOWS, '20'));
-  const [metric, setMetric] = useState<ForeignFlowExplorerMetric>(() => readPreference('metric', ['value', 'volume'], 'value'));
+  const [window, setWindow] = useState<ForeignFlowExplorerWindow>(() => {
+    const requested = searchParams.get('window') as ForeignFlowExplorerWindow | null;
+    return requested && WINDOWS.includes(requested) ? requested : readPreference('window', WINDOWS, '20');
+  });
+  const [metric, setMetric] = useState<ForeignFlowExplorerMetric>(() => {
+    const requested = searchParams.get('metric');
+    return requested === 'volume' || requested === 'value'
+      ? requested
+      : readPreference('metric', ['value', 'volume'], 'value');
+  });
   const initialTicker = normalizeVietnamTicker(searchParams.get('ticker') ?? readTickerPreference());
   const [tickerDraft, setTickerDraft] = useState(initialTicker);
   const [ticker, setTicker] = useState(TICKER_RE.test(initialTicker) ? initialTicker : '');
@@ -180,6 +193,7 @@ const ForeignFlowPage = () => {
   }, [metric, mode, ticker, window]);
 
   const validationError = useMemo(() => {
+    if (mode === 'watchlist') return null;
     if (mode === 'ticker' && tickerDraft && !TICKER_RE.test(normalizeVietnamTicker(tickerDraft))) {
       return 'Ticker must contain 1–10 letters or digits.';
     }
@@ -192,6 +206,11 @@ const ForeignFlowPage = () => {
   }, [customFrom, customTo, mode, tickerDraft, window]);
 
   const load = useCallback(async (forceRefresh = false) => {
+    if (mode === 'watchlist') {
+      setData(null);
+      setError(null);
+      return;
+    }
     if (mode === 'ticker' && !ticker) {
       setData(null);
       setError(null);
@@ -370,7 +389,7 @@ const ForeignFlowPage = () => {
         eyebrow="Vietnam · SSI FastConnect V3"
         title="Foreign Flow Explorer"
         description="Inspect provider-backed completed-session foreign and proprietary flow without converting missing values to zero."
-        actions={(
+        actions={mode === 'watchlist' ? undefined : (
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={() => void load(true)} isLoading={loading} disabled={Boolean(validationError) || (mode === 'ticker' && !ticker)}>
               <RefreshCw className="h-4 w-4" /> Force Refresh
@@ -400,7 +419,7 @@ const ForeignFlowPage = () => {
             </button>
           ))}
         </div>
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {mode !== 'watchlist' ? <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           {mode === 'ticker' ? (
             <Input label="Ticker" value={tickerDraft} placeholder="Enter ticker"
               onChange={(event) => setTickerDraft(normalizeVietnamTicker(event.target.value))}
@@ -424,8 +443,8 @@ const ForeignFlowPage = () => {
               { value: 'buy-sell', label: 'Gross buy / sell' },
               { value: 'cumulative', label: 'Cumulative net' },
             ]} />
-        </div>
-        <div className="flex flex-wrap gap-3">
+        </div> : null}
+        {mode !== 'watchlist' ? <div className="flex flex-wrap gap-3">
           <div className="inline-flex rounded-lg border border-border/70 p-1" role="group" aria-label="Time window">
             {WINDOWS.map((item) => <button key={item} type="button" aria-pressed={window === item}
               className={`rounded-md px-3 py-1.5 text-sm ${window === item ? 'bg-cyan/15 text-cyan' : 'text-secondary-text'}`}
@@ -442,8 +461,10 @@ const ForeignFlowPage = () => {
               <Input aria-label="Custom end date" type="date" value={customTo} min={customFrom} max={today} onChange={(event) => setCustomTo(event.target.value)} />
             </>
           ) : null}
-        </div>
+        </div> : null}
       </section>
+
+      {mode === 'watchlist' ? <ForeignFlowWatchlistScreener /> : null}
 
       {mode === 'ticker' && !ticker ? (
         <EmptyState icon={<Search className="h-8 w-8" />} title="Enter a ticker"

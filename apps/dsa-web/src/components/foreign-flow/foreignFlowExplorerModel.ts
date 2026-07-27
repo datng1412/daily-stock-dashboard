@@ -1,4 +1,4 @@
-export type ForeignFlowExplorerMode = 'ticker' | 'vn30' | 'industry' | 'proprietary';
+export type ForeignFlowExplorerMode = 'watchlist' | 'ticker' | 'vn30' | 'industry' | 'proprietary';
 export type ForeignFlowExplorerWindow = '1' | '5' | '20' | '60' | 'custom';
 export type ForeignFlowExplorerMetric = 'value' | 'volume';
 

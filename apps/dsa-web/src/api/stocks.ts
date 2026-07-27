@@ -783,6 +783,123 @@ export type VietnamForeignFlowBatchResponse = {
   fetchedAt: string;
 };
 
+export type VietnamForeignFlowWatchlistAvailability = 'ready' | 'partial' | 'unavailable';
+export type VietnamForeignFlowWatchlistWindow = 1 | 5 | 20 | 60;
+
+export type VietnamForeignFlowWatchlistItem = {
+  ticker: string;
+  availability: VietnamForeignFlowWatchlistAvailability;
+  dataState: VietnamForeignFlowWatchlistAvailability;
+  failureClass?: string | null;
+  latestSession?: string | null;
+  sourceFreshness: 'current' | 'latest_completed' | 'stale' | 'unknown';
+  sourceSessionLag?: number | null;
+  fetchedAt: string;
+  cacheState: 'hit' | 'miss' | 'refresh' | 'stale_hit' | 'unavailable';
+  cacheAgeSeconds?: number | null;
+  actualSessionCount: number;
+  requestedSessionCount: VietnamForeignFlowWatchlistWindow;
+  complete: boolean;
+  buyValue1d?: number | null;
+  sellValue1d?: number | null;
+  netValue1d?: number | null;
+  buyValue5d?: number | null;
+  sellValue5d?: number | null;
+  netValue5d?: number | null;
+  buyValue20d?: number | null;
+  sellValue20d?: number | null;
+  netValue20d?: number | null;
+  buyValue60d?: number | null;
+  sellValue60d?: number | null;
+  netValue60d?: number | null;
+  buyVolume1d?: number | null;
+  sellVolume1d?: number | null;
+  netVolume1d?: number | null;
+  buyVolume5d?: number | null;
+  sellVolume5d?: number | null;
+  netVolume5d?: number | null;
+  buyVolume20d?: number | null;
+  sellVolume20d?: number | null;
+  netVolume20d?: number | null;
+  buyVolume60d?: number | null;
+  sellVolume60d?: number | null;
+  netVolume60d?: number | null;
+  buyStreak?: number | null;
+  sellStreak?: number | null;
+  streakMetricBasis: 'foreign_net_value';
+  containsProviderAnomaly: boolean;
+  anomalySessions: string[];
+  anomalyCount: number;
+  source: 'ssi_fastconnect';
+  sourceEndpoint: 'daily_stock_price';
+};
+
+export type VietnamForeignFlowWatchlistResponse = {
+  status: VietnamForeignFlowWatchlistAvailability;
+  dataState: VietnamForeignFlowWatchlistAvailability;
+  usable: boolean;
+  requestedTickers: string[];
+  normalizedTickers: string[];
+  duplicateTickersRemoved: number;
+  expectedSymbolCount: number;
+  readySymbolCount: number;
+  partialSymbolCount: number;
+  unavailableSymbolCount: number;
+  requestedSessionCount: VietnamForeignFlowWatchlistWindow;
+  fetchedAt: string;
+  provider: 'ssi_fastconnect';
+  providerVersion: 'v3';
+  cacheState: 'hit' | 'miss' | 'refresh' | 'stale_hit' | 'unavailable' | 'mixed';
+  cacheAgeSeconds?: number | null;
+  failureClass?: string | null;
+  items: VietnamForeignFlowWatchlistItem[];
+};
+
+type VietnamForeignFlowWatchlistRawItem = Omit<
+  VietnamForeignFlowWatchlistItem,
+  | 'buyValue1d' | 'sellValue1d' | 'netValue1d'
+  | 'buyValue5d' | 'sellValue5d' | 'netValue5d'
+  | 'buyValue20d' | 'sellValue20d' | 'netValue20d'
+  | 'buyValue60d' | 'sellValue60d' | 'netValue60d'
+  | 'buyVolume1d' | 'sellVolume1d' | 'netVolume1d'
+  | 'buyVolume5d' | 'sellVolume5d' | 'netVolume5d'
+  | 'buyVolume20d' | 'sellVolume20d' | 'netVolume20d'
+  | 'buyVolume60d' | 'sellVolume60d' | 'netVolume60d'
+> & Record<string, unknown>;
+
+const normalizeForeignFlowWatchlistItem = (
+  row: VietnamForeignFlowWatchlistRawItem,
+): VietnamForeignFlowWatchlistItem => {
+  const value = (key: string) => typeof row[key] === 'number' ? row[key] as number : null;
+  return {
+    ...row,
+    buyValue1d: value('buyValue1D'),
+    sellValue1d: value('sellValue1D'),
+    netValue1d: value('netValue1D'),
+    buyValue5d: value('buyValue5D'),
+    sellValue5d: value('sellValue5D'),
+    netValue5d: value('netValue5D'),
+    buyValue20d: value('buyValue20D'),
+    sellValue20d: value('sellValue20D'),
+    netValue20d: value('netValue20D'),
+    buyValue60d: value('buyValue60D'),
+    sellValue60d: value('sellValue60D'),
+    netValue60d: value('netValue60D'),
+    buyVolume1d: value('buyVolume1D'),
+    sellVolume1d: value('sellVolume1D'),
+    netVolume1d: value('netVolume1D'),
+    buyVolume5d: value('buyVolume5D'),
+    sellVolume5d: value('sellVolume5D'),
+    netVolume5d: value('netVolume5D'),
+    buyVolume20d: value('buyVolume20D'),
+    sellVolume20d: value('sellVolume20D'),
+    netVolume20d: value('netVolume20D'),
+    buyVolume60d: value('buyVolume60D'),
+    sellVolume60d: value('sellVolume60D'),
+    netVolume60d: value('netVolume60D'),
+  };
+};
+
 type VietnamForeignFlowCamelCaseBatchSymbol = Omit<
   VietnamForeignFlowBatchSymbol,
   | 'foreignNetVolume5d'
@@ -1893,6 +2010,48 @@ export const stocksApi = {
     return normalizeVietnamForeignFlowBatchResponse(
       toCamelCase<VietnamForeignFlowCamelCaseBatchResponse>(response.data),
     );
+  },
+
+  async getVietnamForeignFlowWatchlist(
+    tickers: string[],
+    options?: {
+      sessions?: VietnamForeignFlowWatchlistWindow;
+      forceRefresh?: boolean;
+      signal?: AbortSignal;
+    },
+  ): Promise<VietnamForeignFlowWatchlistResponse> {
+    const normalizedTickers: string[] = [];
+    const seen = new Set<string>();
+    for (const raw of tickers) {
+      const ticker = normalizeVietnamTicker(raw);
+      if (!/^[A-Z0-9]{1,10}$/.test(ticker) || ticker === 'ALL') {
+        throw new Error(`Invalid Vietnam ticker: ${raw}`);
+      }
+      if (seen.has(ticker)) continue;
+      seen.add(ticker);
+      normalizedTickers.push(ticker);
+    }
+    if (!normalizedTickers.length) throw new Error('At least one Vietnam ticker is required.');
+    if (normalizedTickers.length > VIETNAM_WATCHLIST_MAX_SIZE) {
+      throw new Error(`Watchlist is limited to ${VIETNAM_WATCHLIST_MAX_SIZE} tickers.`);
+    }
+    const response = await apiClient.get('/api/v1/stocks/vn/foreign-flow/watchlist', {
+      params: {
+        tickers: normalizedTickers.join(','),
+        sessions: options?.sessions ?? 60,
+        force_refresh: options?.forceRefresh ?? false,
+      },
+      timeout: 90000,
+      signal: options?.signal,
+    });
+    const { toCamelCase } = await import('./utils');
+    const data = toCamelCase<Omit<VietnamForeignFlowWatchlistResponse, 'items'> & {
+      items?: VietnamForeignFlowWatchlistRawItem[];
+    }>(response.data);
+    return {
+      ...data,
+      items: (data.items ?? []).map(normalizeForeignFlowWatchlistItem),
+    };
   },
 
   async getVietnamVn30ForeignFlow(

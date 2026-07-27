@@ -14,6 +14,8 @@ vi.mock('../../api/stocks', () => ({
     getVietnamVn30ForeignFlow: vi.fn(),
     getVietnamIndustryFlow: vi.fn(),
     getVietnamProprietaryFlow: vi.fn(),
+    getVietnamForeignFlowWatchlist: vi.fn(),
+    getVietnamIndexComponents: vi.fn(),
   },
 }));
 
@@ -113,15 +115,16 @@ beforeEach(() => {
 });
 
 describe('ForeignFlowPage', () => {
-  it('starts with a user-controlled empty ticker and no provider request', () => {
+  it('starts with a user-controlled empty watchlist and no provider request', () => {
     renderPage();
-    expect(screen.getByRole('heading', { name: 'Enter a ticker' })).toBeInTheDocument();
-    expect(screen.getByText('No fixed ticker or watchlist is loaded automatically.')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Create a foreign-flow watchlist' })).toBeInTheDocument();
+    expect(screen.getByText(/No symbols are loaded by default/)).toBeInTheDocument();
     expect(symbolHistory).not.toHaveBeenCalled();
   });
 
   it('loads a validated ticker and keeps value/volume selection request-free', async () => {
     renderPage();
+    fireEvent.click(screen.getByRole('button', { name: 'Ticker' }));
     fireEvent.change(screen.getByLabelText('Ticker'), { target: { value: 'fpt' } });
     fireEvent.click(screen.getByRole('button', { name: 'Load ticker' }));
     await waitFor(() => expect(symbolHistory).toHaveBeenCalledTimes(1));
