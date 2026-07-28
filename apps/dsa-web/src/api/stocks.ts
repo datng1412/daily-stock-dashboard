@@ -391,6 +391,8 @@ export type VietnamWatchItem = {
     adjustment?: Record<string, unknown> | null;
     liveChannels?: Record<string, unknown> | null;
     dailyStockPriceCapabilities?: Record<string, unknown> | null;
+    foreignFlow?: Record<string, unknown> | null;
+    intraday?: Record<string, unknown> | null;
     profile?: Record<string, unknown> | null;
     qualityIssues?: Array<Record<string, unknown>> | null;
     realtime?: Record<string, unknown> | null;
@@ -489,7 +491,21 @@ export type VietnamDailyStockPrice = {
   missingFields?: string[];
   fieldCoverage?: Record<string, boolean>;
   units?: Record<string, string>;
+  foreignFieldPresence?: Record<string, string>;
+  foreignFieldAliases?: Record<string, string>;
+  normalizationIssues?: Array<{ field?: string; issue?: string }>;
+  foreignFlowValueState?: 'explicit_zero' | 'nonzero' | 'partial' | 'unavailable';
+  capabilities?: VietnamDailyStockPriceCapabilities;
   diagnostics?: Record<string, unknown>;
+};
+
+export type VietnamDailyStockPriceCapabilities = {
+  priceLimitsStatus: 'ready' | 'partial' | 'unavailable';
+  matchedStatsStatus: 'ready' | 'partial' | 'unavailable';
+  putThroughStatus: 'ready' | 'partial' | 'unavailable';
+  foreignFlowStatus: 'ready' | 'partial' | 'unavailable';
+  sessionMetadataStatus: 'ready' | 'partial' | 'unavailable';
+  overallStatus: 'ready' | 'partial' | 'unavailable';
 };
 
 export type VietnamCacheMetadata = {
@@ -1555,6 +1571,11 @@ export type VietnamCompanyForeignFlow = {
   valueUnit?: string | null;
   source?: string | null;
   status: 'ok' | 'missing' | string;
+  capabilityStatus?: 'ready' | 'partial' | 'unavailable';
+  valueState?: 'explicit_zero' | 'nonzero' | 'partial' | 'unavailable';
+  fieldPresence?: Record<string, string>;
+  fieldAliases?: Record<string, string>;
+  normalizationIssues?: Array<{ field?: string; issue?: string }>;
 };
 
 export type VietnamCompanyTechnical = {
@@ -1642,6 +1663,8 @@ export type VietnamCompanyIntraday = {
     latestIntradayClose?: number | null;
     intradayChange?: number | null;
     intradayChangePercent?: number | null;
+    intradayChangeBaseline?: 'first_session_candle_open' | string | null;
+    intradayChangeBaselineValue?: number | null;
     latestIntradayVolume?: number | null;
     sessionVolumeFromIntraday?: number | null;
     intradayRequestedTimeframe?: string | null;
@@ -1657,6 +1680,7 @@ export type VietnamCompanyIntraday = {
   actualGranularitySeconds?: number | null;
   granularityLabel?: string | null;
   cadenceStatus?: string | null;
+  capabilityStatus?: 'ready' | 'partial' | 'no_data' | 'unavailable' | 'error';
   latestDate?: string | null;
   dailyPriceDate?: string | null;
   targetSessionDate?: string | null;
@@ -1744,6 +1768,8 @@ export type VietnamCompanyResearchResponse = {
     adjustment?: Record<string, unknown> | null;
     liveChannels?: Record<string, unknown> | null;
     dailyStockPriceCapabilities?: Record<string, unknown> | null;
+    foreignFlow?: Record<string, unknown> | null;
+    intraday?: Record<string, unknown> | null;
     profile?: Record<string, unknown> | null;
     qualityIssues?: Array<Record<string, unknown>> | null;
     realtime?: Record<string, unknown> | null;

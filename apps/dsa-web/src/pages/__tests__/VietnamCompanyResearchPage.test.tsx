@@ -109,6 +109,23 @@ const makeCompanySnapshot = (): VietnamCompanyResearchResponse => ({
     foreignBuyValue: 1_000_000_000,
     foreignSellValue: 800_000_000,
     foreignNetValue: 200_000_000,
+    foreignFlowValueState: 'nonzero',
+    foreignFieldPresence: {
+      foreign_buy_volume: 'FIELD_PRESENT_NONZERO',
+      foreign_sell_volume: 'FIELD_PRESENT_NONZERO',
+      foreign_net_volume: 'DERIVED_FROM_PRESENT_INPUTS',
+      foreign_buy_value: 'FIELD_PRESENT_NONZERO',
+      foreign_sell_value: 'FIELD_PRESENT_NONZERO',
+      foreign_net_value: 'DERIVED_FROM_PRESENT_INPUTS',
+    },
+    capabilities: {
+      priceLimitsStatus: 'ready',
+      matchedStatsStatus: 'ready',
+      putThroughStatus: 'ready',
+      foreignFlowStatus: 'ready',
+      sessionMetadataStatus: 'ready',
+      overallStatus: 'ready',
+    },
     missingFields: [],
     units: {
       matchedVolume: 'shares',
@@ -128,6 +145,16 @@ const makeCompanySnapshot = (): VietnamCompanyResearchResponse => ({
     valueUnit: 'VND',
     source: 'SSI DailyStockPrice',
     status: 'ok',
+    capabilityStatus: 'ready',
+    valueState: 'nonzero',
+    fieldPresence: {
+      foreign_buy_volume: 'FIELD_PRESENT_NONZERO',
+      foreign_sell_volume: 'FIELD_PRESENT_NONZERO',
+      foreign_net_volume: 'DERIVED_FROM_PRESENT_INPUTS',
+      foreign_buy_value: 'FIELD_PRESENT_NONZERO',
+      foreign_sell_value: 'FIELD_PRESENT_NONZERO',
+      foreign_net_value: 'DERIVED_FROM_PRESENT_INPUTS',
+    },
   },
   technical: {
     ma20: 120000,
@@ -160,6 +187,10 @@ const makeCompanySnapshot = (): VietnamCompanyResearchResponse => ({
   intraday: {
     source: 'SSI IntradayOhlc',
     status: 'ok',
+    capabilityStatus: 'ready',
+    requestedTimeframe: '1h',
+    actualGranularity: '1m',
+    cadenceStatus: 'matched',
     message: null,
     candles: [
       { dateTime: '2026-06-17T10:00:00+07:00', open: 123, high: 125, low: 122, close: 124, volume: 1000 },
@@ -170,6 +201,13 @@ const makeCompanySnapshot = (): VietnamCompanyResearchResponse => ({
       latest1hChangePercent: 0.81,
       latest1hVolume: 1000,
       sessionVolumeFrom1H: 1000,
+      latestIntradayClose: 124,
+      intradayChange: 1,
+      intradayChangePercent: 0.81,
+      intradayChangeBaseline: 'first_session_candle_open',
+      intradayChangeBaselineValue: 123,
+      latestIntradayVolume: 1000,
+      sessionVolumeFromIntraday: 1000,
       direction: 'up',
     },
   },
@@ -239,6 +277,18 @@ const makeCompanySnapshot = (): VietnamCompanyResearchResponse => ({
     realtime: {},
     tradeTape: {},
     orderBook: {},
+    foreignFlow: {
+      capabilityStatus: 'ready',
+      valueState: 'nonzero',
+    },
+    intraday: {
+      capabilityStatus: 'ready',
+      requestedTimeframe: '1h',
+      actualGranularity: '1m',
+      cadenceStatus: 'matched',
+      changeBaseline: 'first_session_candle_open',
+      changeBaselineValue: 123,
+    },
   },
   dataQualitySummary: {
     overallStatus: 'ok',
@@ -733,7 +783,7 @@ describe('VietnamCompanyResearchPage', () => {
     expect(await screen.findByRole('heading', { name: 'Technical snapshot' })).toBeInTheDocument();
     expect(screen.getByText('52W high (VND)')).toBeInTheDocument();
     expect(screen.getByText('Avg volume 10D')).toBeInTheDocument();
-    expect(screen.getAllByText('Unavailable').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('\u2014').length).toBeGreaterThan(0);
     expect(screen.getAllByText('insufficient').length).toBeGreaterThan(0);
   });
 
@@ -877,7 +927,77 @@ describe('VietnamCompanyResearchPage', () => {
     expect(screen.getAllByText('SSI DailyOhlc').length).toBeGreaterThan(0);
   });
 
-  it('hides null optional DailyStockPrice metrics instead of rendering zero', async () => {
+  it('keeps DailyStockPrice capability states independent when price limits are unavailable', async () => {
+    const snapshot = makeCompanySnapshot();
+    snapshot.dailyStockPrice = {
+      ...snapshot.dailyStockPrice,
+      qualityStatus: 'partial',
+      referencePrice: null,
+      ceilingPrice: null,
+      floorPrice: null,
+      capabilities: {
+        priceLimitsStatus: 'unavailable',
+        matchedStatsStatus: 'ready',
+        putThroughStatus: 'ready',
+        foreignFlowStatus: 'ready',
+        sessionMetadataStatus: 'ready',
+        overallStatus: 'partial',
+      },
+    };
+    vi.mocked(stocksApi.getVietnamCompanyResearch).mockResolvedValue(snapshot);
+
+    renderPage();
+
+    const section = (await screen.findByRole('heading', { name: 'DailyStockPrice enrichment' })).closest('section');
+    if (!section) throw new Error('DailyStockPrice section not found');
+    const capabilities = within(section).getByLabelText('DailyStockPrice capability states');
+    expect(within(within(capabilities).getByText('Matched statistics').closest('div') as HTMLElement).getByText('ready')).toBeInTheDocument();
+    expect(within(within(capabilities).getByText('Put-through statistics').closest('div') as HTMLElement).getByText('ready')).toBeInTheDocument();
+    expect(within(within(capabilities).getByText('Price limits').closest('div') as HTMLElement).getByText('unavailable')).toBeInTheDocument();
+    expect(within(within(capabilities).getByText('Foreign flow').closest('div') as HTMLElement).getByText('ready')).toBeInTheDocument();
+    expect(within(within(capabilities).getByText('Session metadata').closest('div') as HTMLElement).getByText('ready')).toBeInTheDocument();
+    expect(within(section).getByText('partial')).toBeInTheDocument();
+    expect(within(section).getByText('2026-06-17')).toBeInTheDocument();
+    expect(within(section).queryByText('Reference price (VND)')).not.toBeInTheDocument();
+  });
+
+  it('renders explicit provider foreign zero as zero with compact lineage', async () => {
+    const snapshot = makeCompanySnapshot();
+    snapshot.dailyStockPrice = {
+      ...snapshot.dailyStockPrice,
+      foreignBuyVolume: 0,
+      foreignSellVolume: 0,
+      foreignNetVolume: 0,
+      foreignBuyValue: 0,
+      foreignSellValue: 0,
+      foreignNetValue: 0,
+      foreignFlowValueState: 'explicit_zero',
+    };
+    snapshot.foreignFlow = {
+      ...snapshot.foreignFlow,
+      foreignBuyVolume: 0,
+      foreignSellVolume: 0,
+      foreignNetVolume: 0,
+      foreignBuyValue: 0,
+      foreignSellValue: 0,
+      foreignNetValue: 0,
+      capabilityStatus: 'ready',
+      valueState: 'explicit_zero',
+    };
+    vi.mocked(stocksApi.getVietnamCompanyResearch).mockResolvedValue(snapshot);
+
+    renderPage();
+
+    const section = (await screen.findByRole('heading', { name: 'Foreign flow' })).closest('section');
+    if (!section) throw new Error('Foreign flow section not found');
+    const foreignFlow = within(section);
+    expect(foreignFlow.getByText('Provider explicitly reported zero foreign totals; net values are derived only from complete gross pairs.')).toBeInTheDocument();
+    expect(foreignFlow.getAllByText('0')).toHaveLength(6);
+    expect(foreignFlow.getByText('ready')).toBeInTheDocument();
+    expect(foreignFlow.queryByText('unavailable')).not.toBeInTheDocument();
+  });
+
+  it('renders missing foreign values as dashes and never as zero', async () => {
     const snapshot = makeCompanySnapshot();
     snapshot.dailyStockPrice = {
       status: 'ok',
@@ -892,6 +1012,15 @@ describe('VietnamCompanyResearchPage', () => {
       putThroughValue: null,
       foreignNetVolume: null,
       foreignNetValue: null,
+      foreignFlowValueState: 'unavailable',
+      capabilities: {
+        priceLimitsStatus: 'partial',
+        matchedStatsStatus: 'unavailable',
+        putThroughStatus: 'unavailable',
+        foreignFlowStatus: 'unavailable',
+        sessionMetadataStatus: 'ready',
+        overallStatus: 'partial',
+      },
     };
     snapshot.foreignFlow = {
       source: 'SSI DailyStockPrice',
@@ -906,6 +1035,8 @@ describe('VietnamCompanyResearchPage', () => {
       foreignBuyValue: null,
       foreignSellValue: null,
       foreignNetValue: null,
+      capabilityStatus: 'unavailable',
+      valueState: 'unavailable',
     };
     vi.mocked(stocksApi.getVietnamCompanyResearch).mockResolvedValue(snapshot);
 
@@ -914,8 +1045,126 @@ describe('VietnamCompanyResearchPage', () => {
     expect(await screen.findByRole('heading', { name: 'DailyStockPrice enrichment' })).toBeInTheDocument();
     expect(screen.queryByText('Matched volume (shares)')).not.toBeInTheDocument();
     expect(screen.queryByText('Put-through value (VND)')).not.toBeInTheDocument();
-    expect(screen.queryByText('Foreign net volume (shares)')).not.toBeInTheDocument();
-    expect(screen.getByText('SSI DailyStockPrice foreign flow unavailable.')).toBeInTheDocument();
+    const section = screen.getByRole('heading', { name: 'Foreign flow' }).closest('section');
+    if (!section) throw new Error('Foreign flow section not found');
+    const foreignFlow = within(section);
+    expect(foreignFlow.getByText('Provider foreign-flow fields were not supplied.')).toBeInTheDocument();
+    expect(foreignFlow.getByText('Foreign net volume (shares)')).toBeInTheDocument();
+    expect(foreignFlow.getAllByText('\u2014')).toHaveLength(6);
+    expect(foreignFlow.queryByText('0')).not.toBeInTheDocument();
+    expect(foreignFlow.getByText('unavailable')).toBeInTheDocument();
+  });
+
+  it('renders mixed foreign field coverage as partial', async () => {
+    const snapshot = makeCompanySnapshot();
+    snapshot.foreignFlow = {
+      ...snapshot.foreignFlow,
+      foreignBuyVolume: 100_000,
+      foreignSellVolume: null,
+      foreignNetVolume: null,
+      foreignBuyValue: 1_000_000_000,
+      foreignSellValue: null,
+      foreignNetValue: null,
+      capabilityStatus: 'partial',
+      valueState: 'partial',
+    };
+    vi.mocked(stocksApi.getVietnamCompanyResearch).mockResolvedValue(snapshot);
+
+    renderPage();
+
+    const section = (await screen.findByRole('heading', { name: 'Foreign flow' })).closest('section');
+    if (!section) throw new Error('Foreign flow section not found');
+    const foreignFlow = within(section);
+    expect(foreignFlow.getByText('Some provider foreign-flow fields are unavailable.')).toBeInTheDocument();
+    expect(foreignFlow.getByText('partial')).toBeInTheDocument();
+    expect(foreignFlow.getAllByText('\u2014')).toHaveLength(4);
+    expect(foreignFlow.queryByText('0')).not.toBeInTheDocument();
+  });
+
+  it('renders irregular intraday cadence as partial with an explicit change baseline', async () => {
+    const snapshot = makeCompanySnapshot();
+    snapshot.intraday = {
+      ...snapshot.intraday,
+      status: 'ok',
+      capabilityStatus: 'partial',
+      cadenceStatus: 'irregular',
+      requestedTimeframe: '1h',
+      actualGranularity: 'irregular',
+    };
+    vi.mocked(stocksApi.getVietnamCompanyResearch).mockResolvedValue(snapshot);
+
+    renderPage();
+
+    const section = (await screen.findByRole('heading', { name: 'Intraday pulse' })).closest('section');
+    if (!section) throw new Error('Intraday section not found');
+    const intraday = within(section);
+    expect(intraday.getByText('partial')).toBeInTheDocument();
+    expect(intraday.queryByText('ok')).not.toBeInTheDocument();
+    expect(intraday.getByText('Change vs first session candle open')).toBeInTheDocument();
+    expect(intraday.getByText('Candles loaded')).toBeInTheDocument();
+    expect(intraday.getByText('1')).toBeInTheDocument();
+  });
+
+  it('distinguishes a missing intraday baseline from a valid zero change', async () => {
+    const missing = makeCompanySnapshot();
+    missing.intraday = {
+      ...missing.intraday,
+      status: 'ok',
+      pulse: {
+        ...missing.intraday?.pulse,
+        intradayChange: null,
+        intradayChangePercent: null,
+        intradayChangeBaseline: null,
+        intradayChangeBaselineValue: null,
+        latest1hChange: 1,
+        latest1hChangePercent: 0.81,
+      },
+    };
+    vi.mocked(stocksApi.getVietnamCompanyResearch).mockResolvedValueOnce(missing);
+    const firstRender = renderPage();
+
+    let section = (await screen.findByRole('heading', { name: 'Intraday pulse' })).closest('section');
+    if (!section) throw new Error('Intraday section not found');
+    let intraday = within(section);
+    expect(within(intraday.getByText('Change (baseline unavailable)').closest('div') as HTMLElement).getByText('\u2014')).toBeInTheDocument();
+    expect(within(intraday.getByText('Change % (baseline unavailable)').closest('div') as HTMLElement).getByText('\u2014')).toBeInTheDocument();
+
+    firstRender.unmount();
+    const zero = makeCompanySnapshot();
+    zero.intraday = {
+      ...zero.intraday,
+      status: 'ok',
+      pulse: {
+        ...zero.intraday?.pulse,
+        intradayChange: 0,
+        intradayChangePercent: 0,
+        intradayChangeBaseline: 'first_session_candle_open',
+        intradayChangeBaselineValue: 123,
+      },
+    };
+    vi.mocked(stocksApi.getVietnamCompanyResearch).mockResolvedValueOnce(zero);
+    renderPage();
+
+    section = (await screen.findByRole('heading', { name: 'Intraday pulse' })).closest('section');
+    if (!section) throw new Error('Intraday section not found');
+    intraday = within(section);
+    expect(within(intraday.getByText('Change vs first session candle open').closest('div') as HTMLElement).getByText('0')).toBeInTheDocument();
+    expect(within(intraday.getByText('Change % vs first session candle open').closest('div') as HTMLElement).getByText('0%')).toBeInTheDocument();
+  });
+
+  it('keeps technical coverage in the collapsed details disclosure', async () => {
+    renderPage();
+
+    const section = (await screen.findByRole('heading', { name: 'Technical snapshot' })).closest('section');
+    if (!section) throw new Error('Technical snapshot section not found');
+    const details = within(section).getByText('Technical details and coverage').closest('details');
+    if (!details) throw new Error('Technical details disclosure not found');
+    expect(within(details).getByText('52W coverage')).toBeInTheDocument();
+    expect(within(details).getByText('3M volume coverage')).toBeInTheDocument();
+    expect(within(details).getByText('Price vs reference %')).toBeInTheDocument();
+    expect(within(section).getByText('MA20')).toBeInTheDocument();
+    expect(within(section).getByText('MA50')).toBeInTheDocument();
+    expect(within(section).getByText('RSI14')).toBeInTheDocument();
   });
 
   it('separates core profile readiness from optional metadata completeness', async () => {
