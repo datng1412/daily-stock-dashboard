@@ -995,6 +995,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
   beforeEach(() => {
     vi.useRealTimers();
     Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
+    window.history.replaceState({}, '', '/vietnam');
     localStorage.clear();
     localStorage.setItem(customWatchlistStorageKey, JSON.stringify(defaultTickers));
     mockedGetVietnamWatchlist.mockReset();
@@ -1064,6 +1065,29 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(screen.getByTestId('selected-ticker-empty-state')).toHaveTextContent('No ticker selected');
     expect(screen.getByTestId('selected-ticker-empty-state')).toHaveTextContent('Choose a preset or enter tickers to start.');
     expect(screen.getByTestId('active-watchlist-empty-state')).toHaveTextContent('No active watchlist yet.');
+  });
+
+  it('gives an explicit URL watchlist precedence over the saved browser watchlist', async () => {
+    window.history.replaceState({}, '', '/vietnam?watchlist=SSI,HPG&ticker=HPG');
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(['SSI', 'HPG'], false));
+    expect(screen.getByTestId('selected-ticker-hero')).toHaveTextContent('HPG');
+    expect(JSON.parse(localStorage.getItem(customWatchlistStorageKey) ?? '[]')).toEqual(defaultTickers);
+  });
+
+  it('loads a query-selected ticker without inserting it into an empty watchlist', async () => {
+    localStorage.clear();
+    window.history.replaceState({}, '', '/vietnam?ticker=SSI');
+
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(['SSI'], false));
+    expect(screen.getByTestId('selected-ticker-hero')).toHaveTextContent('SSI');
+    expect(screen.getByTestId('active-watchlist-empty-state')).toHaveTextContent('No active watchlist yet');
+    expect(screen.getByTestId('watchlist-management-disclosure')).toHaveAttribute('open');
+    expect(localStorage.getItem(customWatchlistStorageKey)).toBeNull();
   });
 
   it('keeps fresh empty start clean without preloading VN30 members', async () => {
@@ -2917,39 +2941,21 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(mockedGetVietnamWatchlist).toHaveBeenCalledWith(['FPT'], false);
   });
 
-  it('refetches pending trade tape until X-TRADE rows arrive and then renders rows first', async () => {
-    let callCount = 0;
-    mockedGetVietnamRealtimeTrades.mockImplementation(async (symbol) => {
-      callCount += 1;
-      if (callCount === 1) {
-        return {
-          ...makeTradesResponse(symbol),
-          status: 'unavailable',
-          reasonCode: 'stream_cache_empty',
-          classification: 'stream_cache_empty',
-          statusMessage: 'No SSI trade rows available yet.',
-          trades: [],
-          diagnostics: {
-            streamingStatus: 'running',
-            managerState: 'running',
-            tradeTapeSubscriptionStatus: 'subscribed',
-            tradeTapeBufferRowCount: 0,
-          },
-        };
-      }
-      return {
-        ...makeTradesResponse(symbol),
-        status: 'unavailable',
-        reasonCode: 'buffered_rows_available',
-        classification: 'buffered_rows_available',
-        statusMessage: 'SSI trade tape ready.',
-        diagnostics: {
-          streamingStatus: 'cache_stale',
-          cacheStatus: 'stale',
-          tradeTapeReturnedRowCount: 1,
-        },
-      };
-    });
+  it('treats typed unavailable Trade Tape as terminal without startup refetch churn', async () => {
+    mockedGetVietnamRealtimeTrades.mockImplementation(async (symbol) => ({
+      ...makeTradesResponse(symbol),
+      status: 'unavailable',
+      reasonCode: 'stream_cache_empty',
+      classification: 'stream_cache_empty',
+      statusMessage: 'No SSI trade rows available yet.',
+      trades: [],
+      diagnostics: {
+        streamingStatus: 'running',
+        managerState: 'running',
+        tradeTapeSubscriptionStatus: 'subscribed',
+        tradeTapeBufferRowCount: 0,
+      },
+    }));
 
     render(<VietnamDashboardPage />);
 
@@ -2959,15 +2965,11 @@ describe('VietnamDashboardPage watchlist loading', () => {
     const trade = within(tradeCard);
 
     await waitFor(() => expect(mockedGetVietnamRealtimeTrades).toHaveBeenCalledWith('FPT', 100));
-    expect(trade.getByText('Loading SSI trade tape...')).toBeInTheDocument();
-
-    await waitFor(() => expect(mockedGetVietnamRealtimeTrades.mock.calls.length).toBeGreaterThanOrEqual(2), { timeout: 6500 });
-
-    expect(trade.getByRole('columnheader', { name: 'Time' })).toBeInTheDocument();
-    expect(trade.getByText('10:16:00')).toBeInTheDocument();
+    expect(trade.getByText('SSI trade tape unavailable.')).toBeInTheDocument();
     expect(trade.queryByText('Loading SSI trade tape...')).not.toBeInTheDocument();
-    expect(trade.queryByText('SSI trade tape unavailable.')).not.toBeInTheDocument();
-  }, 10_000);
+    expect(trade.queryByRole('table')).not.toBeInTheDocument();
+    expect(mockedGetVietnamRealtimeTrades).toHaveBeenCalledTimes(1);
+  });
 
   it('renders a compact selected ticker header with distinct source labels', async () => {
     render(<VietnamDashboardPage />);
@@ -3400,6 +3402,147 @@ describe('VietnamDashboardPage watchlist loading', () => {
 
     expect(Boolean(indicator.compareDocumentPosition(selected) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
     expect(Boolean(selected.compareDocumentPosition(diagnostics) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+  });
+
+  it('renders the scan-first overview hierarchy with secondary controls collapsed', async () => {
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('FPT', '6M'));
+
+    const marketStrip = screen.getByTestId('vietnam-market-session-strip');
+    const scan = screen.getByTestId('watchlist-scan-surface');
+    const hero = screen.getByTestId('selected-ticker-hero');
+    const chart = screen.getByTestId('inspect-chart-card');
+    const live = screen.getByTestId('vietnam-live-market-summary');
+    const diagnostics = screen.getByRole('heading', { name: 'Data status' }).closest('section') as HTMLElement;
+
+    expect(marketStrip).toHaveTextContent('Latest completed');
+    expect(Boolean(scan.compareDocumentPosition(hero) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    expect(Boolean(hero.compareDocumentPosition(chart) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    expect(Boolean(chart.compareDocumentPosition(live) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    expect(Boolean(live.compareDocumentPosition(diagnostics) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    expect(screen.getByTestId('refresh-settings-disclosure')).not.toHaveAttribute('open');
+    expect(screen.getByTestId('watchlist-management-disclosure')).not.toHaveAttribute('open');
+    expect(screen.getByTestId('dashboard-supporting-modules')).not.toHaveAttribute('open');
+    expect(screen.getByTestId('dashboard-formulas-disclosure')).not.toHaveAttribute('open');
+    expect(dataStatusDiagnostics()).not.toHaveAttribute('open');
+    expect(screen.getByTestId('selected-ticker-quick-facts').querySelectorAll(':scope > div')).toHaveLength(4);
+  });
+
+  it('preserves selected-ticker deep links when a scan row is selected', async () => {
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('FPT', '6M'));
+    let hero = within(screen.getByTestId('selected-ticker-hero'));
+    expect(hero.getByRole('link', { name: 'Open Company Research' })).toHaveAttribute('href', '/vietnam/company/FPT');
+    expect(hero.getByRole('link', { name: 'Open Foreign Flow' })).toHaveAttribute('href', '/foreign-flow?mode=ticker&ticker=FPT');
+
+    clickTickerRow('VPB');
+
+    await waitFor(() => expect(screen.getByTestId('selected-ticker-hero')).toHaveTextContent('VPB'));
+    hero = within(screen.getByTestId('selected-ticker-hero'));
+    expect(hero.getByRole('link', { name: 'Open Company Research' })).toHaveAttribute('href', '/vietnam/company/VPB');
+    expect(hero.getByRole('link', { name: 'Open Foreign Flow' })).toHaveAttribute('href', '/foreign-flow?mode=ticker&ticker=VPB');
+  });
+
+  it('selects a scan row with the keyboard and exposes its selected state', async () => {
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('FPT', '6M'));
+    const row = screen.getByTestId('indicator-row-VPB');
+
+    fireEvent.keyDown(row, { key: 'Enter' });
+
+    await waitFor(() => expect(row).toHaveAttribute('aria-selected', 'true'));
+    expect(screen.getByTestId('selected-ticker-hero')).toHaveTextContent('VPB');
+  });
+
+  it('opens local overview disclosures without issuing new watchlist or chart requests', async () => {
+    render(<VietnamDashboardPage />);
+
+    await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('FPT', '6M'));
+    const watchlistCalls = mockedGetVietnamWatchlist.mock.calls.length;
+    const chartCalls = mockedGetVietnamChart.mock.calls.length;
+
+    fireEvent.click(within(screen.getByTestId('vietnam-live-market-summary')).getByRole('button', { name: 'Show live details' }));
+    expect(screen.getByTestId('selected-disclosure-live-context')).toHaveAttribute('open');
+    fireEvent.click(within(screen.getByTestId('indicator-filter-controls')).getByText('Filter and sort options'));
+    fireEvent.click(within(screen.getByTestId('dashboard-supporting-modules')).getByText('Supporting watchlist context'));
+    fireEvent.click(screen.getByTestId('dashboard-formulas-disclosure').querySelector('summary') as HTMLElement);
+    fireEvent.click(dataStatusDiagnostics().querySelector('summary') as HTMLElement);
+
+    expect(mockedGetVietnamWatchlist).toHaveBeenCalledTimes(watchlistCalls);
+    expect(mockedGetVietnamChart).toHaveBeenCalledTimes(chartCalls);
+  });
+
+  it('lets typed Trade Tape unavailable override an unresolved request without blanking daily data', async () => {
+    const response = makeResponse(defaultTickers);
+    response.watchlist = response.watchlist.map((item) => ({
+      ...item,
+      tradeTape: [],
+      tradeTapeStatus: {
+        status: 'unavailable',
+        source: 'SSI X-TRADE',
+        message: 'SSI trade tape unavailable.',
+        reasonCode: 'unavailable_provider_error',
+      },
+      dataQualitySummary: {
+        ...item.dataQualitySummary!,
+        checks: {
+          ...item.dataQualitySummary!.checks,
+          tradeTape: 'unavailable',
+        },
+      },
+    }));
+    mockedGetVietnamWatchlist.mockResolvedValue(response);
+    mockedGetVietnamRealtimeTrades.mockImplementation(() => new Promise(() => undefined));
+
+    render(<VietnamDashboardPage />);
+
+    await screen.findByRole('heading', { name: 'Indicator table' });
+    const liveSummary = screen.getByTestId('vietnam-live-market-summary');
+    const tradeChannel = within(liveSummary).getByText('Trade tape').closest('div') as HTMLElement;
+    expect(within(tradeChannel).getByText('unavailable')).toBeInTheDocument();
+    expect(within(tradeChannel).getByText('SSI trade tape unavailable.')).toBeInTheDocument();
+    expect(within(tradeChannel).queryByText('loading')).not.toBeInTheDocument();
+    expect(await screen.findByTestId('vietnam-lightweight-chart')).toHaveAttribute('data-points-count', '70');
+    expect(screen.getAllByText('Daily close').length).toBeGreaterThan(0);
+  });
+
+  it('preserves ready Trade Tape rows and marks them stale when refresh returns unavailable', async () => {
+    render(<VietnamDashboardPage />);
+
+    await screen.findByText('10:16:00');
+    mockedGetVietnamRealtimeTrades.mockResolvedValueOnce({
+      ...makeTradesResponse('FPT'),
+      status: 'unavailable',
+      error: 'SSI trade tape unavailable',
+      trades: [],
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /refresh realtime/i }));
+
+    await waitFor(() => expect(mockedGetVietnamRealtimeTrades).toHaveBeenCalledTimes(2));
+    const liveSummary = screen.getByTestId('vietnam-live-market-summary');
+    const tradeChannel = within(liveSummary).getByText('Trade tape').closest('div') as HTMLElement;
+    expect(await within(tradeChannel).findByText('stale')).toBeInTheDocument();
+    expect(within(tradeChannel).getByText('Showing last known trades')).toBeInTheDocument();
+    expect(screen.getByText('10:16:00')).toBeInTheDocument();
+  });
+
+  it('preserves ready Trade Tape rows when refresh rejects', async () => {
+    render(<VietnamDashboardPage />);
+
+    await screen.findByText('10:16:00');
+    mockedGetVietnamRealtimeTrades.mockRejectedValueOnce(new Error('provider request failed'));
+
+    fireEvent.click(screen.getByRole('button', { name: /refresh realtime/i }));
+
+    await waitFor(() => expect(mockedGetVietnamRealtimeTrades).toHaveBeenCalledTimes(2));
+    const liveSummary = screen.getByTestId('vietnam-live-market-summary');
+    const tradeChannel = within(liveSummary).getByText('Trade tape').closest('div') as HTMLElement;
+    expect(await within(tradeChannel).findByText('stale')).toBeInTheDocument();
+    expect(screen.getByText('10:16:00')).toBeInTheDocument();
   });
 
   it('handles missing selected ticker data quality summary gracefully', async () => {
@@ -5642,9 +5785,9 @@ describe('VietnamDashboardPage watchlist loading', () => {
     await waitFor(() => expect(mockedGetVietnamChart).toHaveBeenCalledWith('FPT', '6M'));
 
     expect(screen.getByRole('heading', { name: 'Indicator table' })).toBeInTheDocument();
-    const detail = within(screen.getByText('Stock detail').closest('section') as HTMLElement);
-    expect(detail.getByText('Chart data unavailable')).toBeInTheDocument();
-    expect(detail.getByText('Chart endpoint unavailable: chart failed')).toBeInTheDocument();
+    const chart = inspectChartCard();
+    expect(chart.getByText('Chart data unavailable')).toBeInTheDocument();
+    expect(chart.getByText('Chart endpoint unavailable: chart failed')).toBeInTheDocument();
   });
 
   it('renders SSI intraday pulse and SSI realtime volume labels while preserving numeric values', async () => {
@@ -6299,7 +6442,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     render(<VietnamDashboardPage />);
 
     expect(await screen.findAllByText('SSI realtime unavailable. Daily SSI data is still available.')).not.toHaveLength(0);
-    expect(screen.getByText('SSI trade tape unavailable.')).toBeInTheDocument();
+    expect(screen.getAllByText('SSI trade tape unavailable.').length).toBeGreaterThan(0);
     expect(screen.queryByText('Trade tape unavailable: SSI realtime provider timeout')).not.toBeInTheDocument();
     expect(screen.queryByText(/è¿žæŽ¥ä¸Šæ¸¸æœåŠ¡è¶…æ—¶/)).not.toBeInTheDocument();
   });
