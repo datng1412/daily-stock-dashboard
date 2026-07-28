@@ -1,5 +1,12 @@
 ﻿# VN Dashboard Roadmap
 
+## Phase SSI-V3-M2.5A - Foreign Flow visual simplification and Overview (2026-07-28)
+
+- Made Overview the default Foreign Flow mode with four primary KPIs, one completed-session chart, five-row bought/sold rankings, compact Industry leaders, a bounded saved-watchlist snapshot, and one compact SSI V3 quality strip.
+- Preserved explicit ticker and mode deep links plus the detailed Stocks, Industries, Watchlist, and Proprietary workflows. Added Data Details for provider, endpoint, source session, fetched/cache/freshness, coverage, failure, anomaly, direct-index, membership, and aggregation diagnostics.
+- Value/Volume and loaded 1D/5D/20D/60D changes remain local. Missing values remain `—`, real zero remains zero, partial data stays usable with a compact disclosure, an unavailable Industry section does not blank VN30 Overview, and no fixed symbols are injected.
+- Browser inspection at 1366x768, 1024x768, and 390x844 confirmed four KPIs, one primary chart, readable stacked layouts, and no page-level horizontal overflow. No backend/API/provider contract, current-session claim, provider capability, or data ownership changed.
+
 ## Phase SSI-V3-M2.4C-R3.1B - Post-fix Foreign Flow application smoke (2026-07-27)
 
 - One bounded, zero-retry application child accepted health plus all six Foreign Flow routes, then terminated its exact process tree and released the dynamic loopback port in 23.62 seconds.

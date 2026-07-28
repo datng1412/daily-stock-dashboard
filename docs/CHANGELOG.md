@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [improvement] Make Foreign Flow Overview the default with four primary signals, one completed-session chart, compact rankings, Industry and watchlist summaries, and dedicated detailed modes.
+- [test] Cover Foreign Flow Overview hierarchy, null-versus-zero truthfulness, partial and unavailable section isolation, request-free controls, deep links, and responsive browser layouts.
 - [test] Live-prove the post-fix Foreign Flow Industry and Proprietary application routes with one bounded child while retaining provider publication-lag semantics.
 - [fix] Keep the process-shared SSI V3 adapter alive across request-scoped router closure and route index proprietary flow through the proven direct index-summary adapter contract.
 - [test] Harden the bounded Foreign Flow application diagnostic with strict loopback readiness, explicit completed-session dates, bounded redacted logs, owned process-tree cleanup, and offline lifecycle coverage.
