@@ -1,5 +1,13 @@
 ﻿# VN Dashboard Roadmap
 
+## Phase SSI-V3-M2.5D - Company Research capability-state and zero-lineage audit (2026-07-28)
+
+- Added independent DailyStockPrice readiness for price limits, matched statistics, put-through statistics, foreign flow, session metadata, and overall enrichment. Missing V3 price limits remain null/unavailable without downgrading the other usable groups.
+- Audited V3 `securitiesSummary` foreign aliases end to end. Numeric zero remains zero; null, absent, blank, and malformed values remain null; malformed audited values carry typed issues; and net volume/value derive only from complete gross pairs. One bounded FPT read for `2026-07-28` confirmed four explicit-zero gross values and two derived-zero net values.
+- Classified usable irregular/request-mismatched intraday cadence as partial. Public intraday change now states `first_session_candle_open` as its baseline; missing baselines stay null and valid equal values stay zero. No bars are filled, resampled, or synthesized.
+- Kept technical signals in the primary grid while moving coverage, price-versus-reference detail, and calculation provenance into a collapsed disclosure. The compact three-group quality summary, provider-only profile fields, DailyOhlc canonical price, Order Book, Trade Tape, dashboard, and Foreign Flow behavior remain unchanged.
+- Deterministic validation passed 140 focused backend tests and 36 Company Research tests, plus TypeScript, ESLint, and Vite. Linked frontend coverage passed apart from two load-sensitive dashboard cases that timed out at five seconds and passed when isolated with a 15-second bound. The full backend suite returned the established 69 failures and 4 skips with no new failure. One owned 21.93-second Vite/Chrome harness accepted eight fixtures at 1366x768 and 390x844, found no horizontal overflow, and released all processes and its dynamic port. Final outcome: `M2_5D_COMPANY_RESEARCH_CAPABILITY_AND_ZERO_LINEAGE_READY`.
+
 ## Phase SSI-V3-M2.5C - Vietnam Dashboard scan-first overview (2026-07-28)
 
 - M2.5C-R1 closed the remaining Trade Tape terminal-state regression. One 20-second lifecycle is owned per selected ticker/subscription generation; same-generation polls do not reset it, and request loading cannot override typed unavailable, disabled, or error evidence.

@@ -4,6 +4,16 @@
 
 This document defines the public data contract for the VN dashboard and company research page. It is intentionally data-quality-first: valid daily SSI data should remain visible even when optional live or enrichment sections are unavailable.
 
+## Company Research capability and zero-lineage contract (Phase SSI-V3-M2.5D)
+
+`daily_stock_price.capabilities` classifies `price_limits_status`, `matched_stats_status`, `put_through_status`, `foreign_flow_status`, `session_metadata_status`, and `overall_status` independently as `ready`, `partial`, or `unavailable`. An unavailable optional price-limit family can make the overall enrichment partial, but it does not invalidate provider-backed matched statistics, put-through statistics, foreign flow, or session metadata. Reference, ceiling, and floor remain null unless SSI supplies them.
+
+Foreign-flow normalization preserves provider meaning across the adapter, service, schema, JSON, and UI. Provider numeric zero remains numeric zero; null, absent, blank, and malformed fields remain null. Malformed audited fields add a typed normalization issue. Net volume/value are derived only when both corresponding gross inputs are present. `foreign_flow_value_state` distinguishes `explicit_zero`, `nonzero`, `partial`, and `unavailable`; field presence and raw aliases remain in sanitized diagnostics. A single bounded FPT read for completed session `2026-07-28` confirmed the four V3 gross fields were present strings containing numeric zero; the two net fields were derived zero from those complete pairs.
+
+Company intraday has a separate `capability_status`. Usable candles with matched cadence are ready; usable irregular or request-mismatched cadence is partial; empty or invalid data does not become ready. `intraday_change` and `intraday_change_percent` use `first_session_candle_open` only when `intraday_change_baseline` and its numeric value are available. A missing baseline produces null, while equal valid values produce real zero. No candle is resampled, synthesized, or gap-filled.
+
+The primary Technical Snapshot retains MA20, MA50, RSI14, Bollinger values, 52-week high/low, average-volume context, and daily range. Coverage counts/states, price-versus-reference state/value, and calculation provenance remain available in the collapsed technical-details disclosure and diagnostics. The compact quality summary remains limited to Daily data, Live market, and Company metadata.
+
 ## Company Research session and availability contract (Phase SSI-V3-M2.5B)
 
 `GET /api/v1/stocks/vn/company/{ticker}` additively separates completed daily and live-event context. `session_context.completed_session_date` identifies the provider-backed DailyOhlc session; `live_session_date` is populated only from provider event provenance such as X-QUOTE trading date or a parseable stream timestamp. These dates may differ normally. `source_freshness` uses `current`, `latest_completed`, `publication_lag`, `stale`, or `unknown`; cache age remains a separate transport/cache observation and never determines source freshness by itself. The market-session helper is explicitly holiday-unaware.

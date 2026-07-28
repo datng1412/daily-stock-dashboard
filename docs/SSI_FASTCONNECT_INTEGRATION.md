@@ -734,11 +734,15 @@ Company research current behavior:
 
 * `/api/v1/stocks/vn/company/{ticker}` exposes a company research snapshot contract for one VN ticker.
 * The endpoint reuses the SSI-backed watchlist row for profile, price, trading stats, foreign flow, and derived technical blocks.
+* DailyStockPrice capabilities are independent: price limits, matched statistics, put-through statistics, foreign flow, and session metadata each use ready/partial/unavailable state, while an additive overall state summarizes the family. Missing reference/ceiling/floor values do not invalidate other usable capabilities and are never inferred.
+* V3 foreign gross aliases are `totalForeignBuy`, `totalForeignSell`, `totalForeignBuyValue`, and `totalForeignSellValue`. Numeric zero remains zero; null/absent/blank/malformed values remain null; malformed audited values retain a typed issue. Net volume/value derive only from complete gross pairs, with presence, alias, raw-type class, and derived lineage kept secret-safe. One bounded FPT `2026-07-28` read observed all four gross aliases as explicit-zero strings and both net fields as derived zero.
 * Completed DailyOhlc session context is separate from current provider event context. Previous-session EOD data during the next active session is `latest_completed`; cache age does not make it stale.
 * Live state is channel-specific for last-price snapshot, X-QUOTE order book, X-TRADE tape, and IntradayOhlc. A ready order book keeps the live block partial/usable when another optional channel is empty or unavailable.
 * Active-session IntradayOhlc freshness targets the current Vietnam date. Outside active windows it targets the latest completed daily session. This classifier is holiday-unaware and does not fabricate missing bars.
+* Intraday capability is ready only when usable cadence matches the request; usable irregular or request-mismatched cadence is partial. Company intraday change is latest close minus first session candle open and exposes that baseline explicitly; a missing baseline remains null and an equal valid baseline remains real zero.
 * V3 securities summary currently normalizes reference, ceiling, and floor as null. The company contract uses only explicit DailyStockPrice compatibility fields for those values and never uses the exchange-derived `price_limit` calculation, daily close, bid, or ask as a substitute.
 * Source coverage is grouped as Prices, Live market, Company, and News. Core profile readiness is separate from optional metadata completeness; provider-only Sector and Industry stay null when absent.
+* Technical coverage, history counts, price-versus-reference state/value, and calculation provenance remain available in a collapsed details disclosure and diagnostics rather than occupying primary metric tiles.
 * News, financials, and corporate-action events retain their existing gating/placeholder behavior.
 * The endpoint does not scrape Mozyfin, call FC Trading, infer corporate actions, or use Mozyfin/KBS fallback for SSI-owned market-data blocks.
 

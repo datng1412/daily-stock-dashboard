@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [fix] Preserve SSI V3 foreign-flow explicit zero versus missing/malformed lineage and derive net values only from complete gross pairs.
+- [improvement] Add independent Company Research DailyStockPrice capability states, partial irregular-intraday state, explicit change baseline, and compact technical details.
+- [test] Cover Company Research zero lineage, capability independence, cadence/baseline states, null-versus-zero rendering, regressions, and bounded desktop/mobile acceptance.
 - [improvement] Make the Vietnam dashboard scan-first with a primary keyboard-selectable watchlist, compact selected-ticker context, canonical chart, independent live-channel summary, deep links, and collapsed secondary diagnostics.
 - [test] Cover Vietnam dashboard hierarchy, URL-over-local watchlist precedence, transient query-ticker inspection, keyboard selection, request-free disclosures, and linked chart/research/foreign-flow regressions.
 - [fix] Bound Trade Tape startup per ticker and subscription generation so polling cannot reset the deadline, typed terminal states override request loading, and prior rows survive failed refreshes.
