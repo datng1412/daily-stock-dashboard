@@ -848,6 +848,97 @@ def test_ohlc_rejects_non_finite_and_malformed_dates(row: Any, failure_class: st
     assert result["failure_class"] == failure_class
 
 
+@pytest.mark.parametrize("raw_zero", [0, 0.0, "0"])
+def test_securities_summary_preserves_explicit_foreign_zero_lineage(
+    raw_zero: Any,
+) -> None:
+    row = SsiFastConnectV3Adapter._summary_row(
+        {
+            "symbol": "FPT",
+            "tradingDate": "2026/07/28",
+            "totalForeignBuy": raw_zero,
+            "totalForeignSell": raw_zero,
+            "totalForeignBuyValue": raw_zero,
+            "totalForeignSellValue": raw_zero,
+        },
+        expected_symbol="FPT",
+    )
+
+    assert [row[field] for field in (
+        "foreign_buy_volume",
+        "foreign_sell_volume",
+        "foreign_net_volume",
+        "foreign_buy_value",
+        "foreign_sell_value",
+        "foreign_net_value",
+    )] == [0, 0, 0, 0.0, 0.0, 0.0]
+    assert all(
+        row["_foreign_field_presence"][field]
+        == "FIELD_PRESENT_EXPLICIT_ZERO"
+        for field in (
+            "foreign_buy_volume",
+            "foreign_sell_volume",
+            "foreign_buy_value",
+            "foreign_sell_value",
+        )
+    )
+    assert row["_foreign_field_presence"]["foreign_net_volume"] == "DERIVED_FROM_PRESENT_INPUTS"
+    assert row["_foreign_field_presence"]["foreign_net_value"] == "DERIVED_FROM_PRESENT_INPUTS"
+    assert row["_foreign_net_volume_source"] == "derived"
+    assert row["_foreign_net_value_source"] == "derived"
+    assert row["_foreign_normalization_issues"] == []
+
+
+@pytest.mark.parametrize(
+    ("foreign_value", "expected_presence"),
+    [
+        (None, "FIELD_NULL"),
+        ("", "FIELD_NULL"),
+        ("   ", "FIELD_NULL"),
+    ],
+)
+def test_securities_summary_keeps_null_and_empty_foreign_fields_null(
+    foreign_value: Any,
+    expected_presence: str,
+) -> None:
+    row = SsiFastConnectV3Adapter._summary_row(
+        {
+            "symbol": "FPT",
+            "tradingDate": "2026/07/28",
+            "totalForeignBuy": foreign_value,
+        },
+        expected_symbol="FPT",
+    )
+
+    assert row["foreign_buy_volume"] is None
+    assert row["foreign_net_volume"] is None
+    assert row["_foreign_field_presence"]["foreign_buy_volume"] == expected_presence
+    assert row["_foreign_field_presence"]["foreign_sell_volume"] == "FIELD_ABSENT"
+    assert row["_foreign_field_presence"]["foreign_net_volume"] == "DERIVATION_UNAVAILABLE"
+
+
+def test_securities_summary_marks_malformed_foreign_field_without_fabricating_zero() -> None:
+    row = SsiFastConnectV3Adapter._summary_row(
+        {
+            "symbol": "FPT",
+            "tradingDate": "2026/07/28",
+            "totalForeignBuy": "not-a-number",
+            "totalForeignSell": 0,
+        },
+        expected_symbol="FPT",
+    )
+
+    assert row["foreign_buy_volume"] is None
+    assert row["foreign_net_volume"] is None
+    assert row["_foreign_field_presence"]["foreign_buy_volume"] == "PARSE_FAILURE"
+    assert row["_foreign_normalization_issues"] == [
+        {
+            "field": "totalForeignBuy",
+            "issue": "NON_NUMERIC_PROVIDER_FIELD",
+        }
+    ]
+
+
 def test_ohlc_limit_is_bounded() -> None:
     adapter, _auth, _market, _data = make_adapter()
     assert adapter.get_daily_ohlcv("FPT", limit=0)["failure_class"] == "validation_error"

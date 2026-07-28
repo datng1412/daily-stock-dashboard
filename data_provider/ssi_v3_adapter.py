@@ -171,6 +171,68 @@ def _field_presence(row: Any, name: str, normalized: Any) -> str:
     )
 
 
+def _audited_number(
+    row: Any,
+    name: str,
+    *,
+    integer: bool = False,
+) -> Tuple[Optional[Any], str, Optional[Dict[str, str]]]:
+    """Normalize one audited provider numeric without fabricating a fallback."""
+
+    if isinstance(row, Mapping):
+        if name not in row:
+            return None, "FIELD_ABSENT", None
+        raw = row[name]
+    elif not hasattr(row, name):
+        return None, "FIELD_ABSENT", None
+    else:
+        raw = getattr(row, name)
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return None, "FIELD_NULL", None
+    try:
+        normalized = _number(raw, integer=integer)
+    except SsiV3MalformedResponse:
+        return (
+            None,
+            "PARSE_FAILURE",
+            {
+                "field": name,
+                "issue": "NON_NUMERIC_PROVIDER_FIELD",
+            },
+        )
+    return (
+        normalized,
+        "FIELD_PRESENT_EXPLICIT_ZERO"
+        if normalized == 0
+        else "FIELD_PRESENT_NONZERO",
+        None,
+    )
+
+
+def _audited_raw_type(row: Any, name: str) -> str:
+    """Describe an audited provider field without exposing its raw value."""
+
+    if isinstance(row, Mapping):
+        if name not in row:
+            return "missing"
+        raw = row[name]
+    elif not hasattr(row, name):
+        return "missing"
+    else:
+        raw = getattr(row, name)
+    if raw is None:
+        return "null"
+    if isinstance(raw, bool):
+        return "boolean"
+    if isinstance(raw, int):
+        return "integer"
+    if isinstance(raw, float):
+        return "float"
+    if isinstance(raw, str):
+        return "string"
+    return "other"
+
+
 def _enum_text(value: Any) -> Optional[str]:
     if value is None:
         return None
@@ -661,27 +723,31 @@ class SsiFastConnectV3Adapter:
         if expected_symbol is not None and symbol != expected_symbol:
             raise SsiV3MalformedResponse("securities summary symbol does not match request")
 
-        foreign_buy_volume = _number(
-            _value(item, "totalForeignBuy"), integer=True
-        )
-        foreign_sell_volume = _number(
-            _value(item, "totalForeignSell"), integer=True
-        )
-        foreign_buy_value = _number(_value(item, "totalForeignBuyValue"))
-        foreign_sell_value = _number(_value(item, "totalForeignSellValue"))
+        (
+            foreign_buy_volume,
+            foreign_buy_volume_presence,
+            foreign_buy_volume_issue,
+        ) = _audited_number(item, "totalForeignBuy", integer=True)
+        (
+            foreign_sell_volume,
+            foreign_sell_volume_presence,
+            foreign_sell_volume_issue,
+        ) = _audited_number(item, "totalForeignSell", integer=True)
+        (
+            foreign_buy_value,
+            foreign_buy_value_presence,
+            foreign_buy_value_issue,
+        ) = _audited_number(item, "totalForeignBuyValue")
+        (
+            foreign_sell_value,
+            foreign_sell_value_presence,
+            foreign_sell_value_issue,
+        ) = _audited_number(item, "totalForeignSellValue")
         foreign_field_presence = {
-            "foreign_buy_volume": _field_presence(
-                item, "totalForeignBuy", foreign_buy_volume
-            ),
-            "foreign_sell_volume": _field_presence(
-                item, "totalForeignSell", foreign_sell_volume
-            ),
-            "foreign_buy_value": _field_presence(
-                item, "totalForeignBuyValue", foreign_buy_value
-            ),
-            "foreign_sell_value": _field_presence(
-                item, "totalForeignSellValue", foreign_sell_value
-            ),
+            "foreign_buy_volume": foreign_buy_volume_presence,
+            "foreign_sell_volume": foreign_sell_volume_presence,
+            "foreign_buy_value": foreign_buy_value_presence,
+            "foreign_sell_value": foreign_sell_value_presence,
         }
         foreign_net_volume = (
             foreign_buy_volume - foreign_sell_volume
@@ -693,6 +759,30 @@ class SsiFastConnectV3Adapter:
             if foreign_buy_value is not None and foreign_sell_value is not None
             else None
         )
+        foreign_field_presence.update(
+            {
+                "foreign_net_volume": (
+                    "DERIVED_FROM_PRESENT_INPUTS"
+                    if foreign_net_volume is not None
+                    else "DERIVATION_UNAVAILABLE"
+                ),
+                "foreign_net_value": (
+                    "DERIVED_FROM_PRESENT_INPUTS"
+                    if foreign_net_value is not None
+                    else "DERIVATION_UNAVAILABLE"
+                ),
+            }
+        )
+        foreign_normalization_issues = [
+            issue
+            for issue in (
+                foreign_buy_volume_issue,
+                foreign_sell_volume_issue,
+                foreign_buy_value_issue,
+                foreign_sell_value_issue,
+            )
+            if issue is not None
+        ]
         return {
             "symbol": symbol,
             "date": _parse_date_value(_value(item, "tradingDate")),
@@ -732,6 +822,23 @@ class SsiFastConnectV3Adapter:
                 "derived" if foreign_net_value is not None else None
             ),
             "_foreign_field_presence": foreign_field_presence,
+            "_foreign_field_aliases": {
+                "foreign_buy_volume": "totalForeignBuy",
+                "foreign_sell_volume": "totalForeignSell",
+                "foreign_net_volume": "derived: totalForeignBuy - totalForeignSell",
+                "foreign_buy_value": "totalForeignBuyValue",
+                "foreign_sell_value": "totalForeignSellValue",
+                "foreign_net_value": "derived: totalForeignBuyValue - totalForeignSellValue",
+            },
+            "_foreign_field_raw_types": {
+                "foreign_buy_volume": _audited_raw_type(item, "totalForeignBuy"),
+                "foreign_sell_volume": _audited_raw_type(item, "totalForeignSell"),
+                "foreign_net_volume": "derived",
+                "foreign_buy_value": _audited_raw_type(item, "totalForeignBuyValue"),
+                "foreign_sell_value": _audited_raw_type(item, "totalForeignSellValue"),
+                "foreign_net_value": "derived",
+            },
+            "_foreign_normalization_issues": foreign_normalization_issues,
             "source": SSI_V3_SOURCE,
             "source_version": "v3",
         }

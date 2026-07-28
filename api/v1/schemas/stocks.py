@@ -128,6 +128,17 @@ class VietnamChartPoint(BaseModel):
     bb_lower: Optional[float] = None
 
 
+class VietnamDailyStockPriceCapabilities(BaseModel):
+    """Independent SSI DailyStockPrice capability readiness."""
+
+    price_limits_status: Literal["ready", "partial", "unavailable"] = "unavailable"
+    matched_stats_status: Literal["ready", "partial", "unavailable"] = "unavailable"
+    put_through_status: Literal["ready", "partial", "unavailable"] = "unavailable"
+    foreign_flow_status: Literal["ready", "partial", "unavailable"] = "unavailable"
+    session_metadata_status: Literal["ready", "partial", "unavailable"] = "unavailable"
+    overall_status: Literal["ready", "partial", "unavailable"] = "unavailable"
+
+
 class VietnamDailyStockPrice(BaseModel):
     """SSI DailyStockPrice enrichment row for Vietnam dashboard detail fields."""
 
@@ -173,6 +184,15 @@ class VietnamDailyStockPrice(BaseModel):
     missing_fields: List[str] = Field(default_factory=list)
     field_coverage: Dict[str, bool] = Field(default_factory=dict)
     units: Dict[str, str] = Field(default_factory=dict)
+    foreign_field_presence: Dict[str, str] = Field(default_factory=dict)
+    foreign_field_aliases: Dict[str, str] = Field(default_factory=dict)
+    normalization_issues: List[Dict[str, str]] = Field(default_factory=list)
+    foreign_flow_value_state: Literal[
+        "explicit_zero", "nonzero", "partial", "unavailable"
+    ] = "unavailable"
+    capabilities: VietnamDailyStockPriceCapabilities = Field(
+        default_factory=VietnamDailyStockPriceCapabilities
+    )
     diagnostics: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -736,6 +756,13 @@ class VietnamCompanyForeignFlow(BaseModel):
     value_unit: Optional[str] = None
     source: Optional[str] = None
     status: str = "missing"
+    capability_status: Literal["ready", "partial", "unavailable"] = "unavailable"
+    value_state: Literal[
+        "explicit_zero", "nonzero", "partial", "unavailable"
+    ] = "unavailable"
+    field_presence: Dict[str, str] = Field(default_factory=dict)
+    field_aliases: Dict[str, str] = Field(default_factory=dict)
+    normalization_issues: List[Dict[str, str]] = Field(default_factory=list)
 
 
 class VietnamCompanyTechnical(BaseModel):
@@ -781,6 +808,9 @@ class VietnamCompanyIntraday(BaseModel):
     actual_granularity_seconds: Optional[float] = None
     granularity_label: Optional[str] = None
     cadence_status: Optional[str] = None
+    capability_status: Literal[
+        "ready", "partial", "no_data", "unavailable", "error"
+    ] = "unavailable"
     latest_date: Optional[str] = None
     daily_price_date: Optional[str] = None
     target_session_date: Optional[str] = None

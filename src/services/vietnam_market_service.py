@@ -979,6 +979,15 @@ DAILY_STOCK_PRICE_ENRICHMENT_FIELDS = (
     "adjusted_close",
 )
 
+DAILY_STOCK_PRICE_FOREIGN_FIELDS = (
+    "foreign_buy_volume",
+    "foreign_sell_volume",
+    "foreign_net_volume",
+    "foreign_buy_value",
+    "foreign_sell_value",
+    "foreign_net_value",
+)
+
 DAILY_STOCK_PRICE_FIELD_UNITS = {
     "reference_price": "VND",
     "ceiling_price": "VND",
@@ -995,6 +1004,112 @@ DAILY_STOCK_PRICE_FIELD_UNITS = {
     "foreign_net_value": "VND",
     "adjusted_close": "VND",
 }
+
+
+def _capability_status(values: Iterable[Any]) -> str:
+    present = [value is not None for value in values]
+    if all(present):
+        return "ready"
+    if any(present):
+        return "partial"
+    return "unavailable"
+
+
+def _normalized_foreign_field_presence(
+    row: Dict[str, Any],
+    normalized: Dict[str, Any],
+) -> Dict[str, str]:
+    provider_presence = row.get("_foreign_field_presence")
+    presence = (
+        dict(provider_presence)
+        if isinstance(provider_presence, dict)
+        else {}
+    )
+    for field in DAILY_STOCK_PRICE_FOREIGN_FIELDS:
+        if field in presence:
+            continue
+        value = normalized.get(field)
+        if field not in row:
+            presence[field] = "FIELD_ABSENT"
+        elif value is None:
+            presence[field] = (
+                "FIELD_NULL"
+                if row.get(field) in (None, "")
+                else "PARSE_FAILURE"
+            )
+        else:
+            presence[field] = (
+                "FIELD_PRESENT_EXPLICIT_ZERO"
+                if value == 0
+                else "FIELD_PRESENT_NONZERO"
+            )
+    return presence
+
+
+def _foreign_flow_value_state(
+    normalized: Dict[str, Any],
+    presence: Dict[str, str],
+) -> str:
+    values = [normalized.get(field) for field in DAILY_STOCK_PRICE_FOREIGN_FIELDS]
+    available_count = sum(value is not None for value in values)
+    if available_count == 0:
+        return "unavailable"
+    if available_count != len(values):
+        return "partial"
+    if any(value != 0 for value in values):
+        return "nonzero"
+    gross_fields = (
+        "foreign_buy_volume",
+        "foreign_sell_volume",
+        "foreign_buy_value",
+        "foreign_sell_value",
+    )
+    if all(
+        presence.get(field) == "FIELD_PRESENT_EXPLICIT_ZERO"
+        for field in gross_fields
+    ):
+        return "explicit_zero"
+    return "partial"
+
+
+def _daily_stock_price_capabilities(
+    normalized: Dict[str, Any],
+    *,
+    foreign_flow_value_state: str,
+) -> Dict[str, str]:
+    capabilities = {
+        "price_limits_status": _capability_status(
+            normalized.get(field)
+            for field in ("reference_price", "ceiling_price", "floor_price")
+        ),
+        "matched_stats_status": _capability_status(
+            normalized.get(field)
+            for field in ("matched_volume", "matched_value")
+        ),
+        "put_through_status": _capability_status(
+            normalized.get(field)
+            for field in ("put_through_volume", "put_through_value")
+        ),
+        "foreign_flow_status": (
+            "ready"
+            if foreign_flow_value_state in {"explicit_zero", "nonzero"}
+            else "partial"
+            if foreign_flow_value_state == "partial"
+            else "unavailable"
+        ),
+        "session_metadata_status": (
+            "ready" if normalized.get("date") else "unavailable"
+        ),
+    }
+    states = list(capabilities.values())
+    capabilities["overall_status"] = (
+        "ready"
+        if all(state == "ready" for state in states)
+        else "partial"
+        if any(state in {"ready", "partial"} for state in states)
+        else "unavailable"
+    )
+    return capabilities
 
 SYMBOL_METADATA_FIELDS = (
     "symbol",
@@ -3089,6 +3204,8 @@ def calculate_intraday_pulse(candles: List[Dict[str, Any]]) -> Dict[str, Any]:
             "latest_intraday_volume": None,
             "intraday_change": None,
             "intraday_change_percent": None,
+            "intraday_change_baseline": None,
+            "intraday_change_baseline_value": None,
             "session_high_from_intraday": None,
             "session_low_from_intraday": None,
             "session_range_pct_from_intraday": None,
@@ -3102,13 +3219,23 @@ def calculate_intraday_pulse(candles: List[Dict[str, Any]]) -> Dict[str, Any]:
     latest_low = _safe_float(latest.get("low"))
     latest_close = _safe_float(latest.get("close"))
     latest_volume = _safe_float(latest.get("volume"))
-    latest_change = latest_close - latest_open if latest_close is not None and latest_open is not None else None
-    latest_change_pct = latest_change / latest_open * 100 if latest_change is not None and latest_open else None
     session_candles = _latest_vn_session_candles(candles)
     session_highs = [_safe_float(candle.get("high")) for candle in session_candles]
     session_lows = [_safe_float(candle.get("low")) for candle in session_candles]
     session_volumes = [_safe_float(candle.get("volume")) for candle in session_candles]
     session_open = _safe_float(session_candles[0].get("open")) if session_candles else None
+    latest_change = latest_close - latest_open if latest_close is not None and latest_open is not None else None
+    latest_change_pct = latest_change / latest_open * 100 if latest_change is not None and latest_open else None
+    intraday_change = (
+        latest_close - session_open
+        if latest_close is not None and session_open is not None
+        else None
+    )
+    intraday_change_pct = (
+        intraday_change / session_open * 100
+        if intraday_change is not None and session_open
+        else None
+    )
     session_high = max(value for value in session_highs if value is not None) if any(value is not None for value in session_highs) else None
     session_low = min(value for value in session_lows if value is not None) if any(value is not None for value in session_lows) else None
     session_volume = sum(value for value in session_volumes if value is not None) if any(value is not None for value in session_volumes) else None
@@ -3152,8 +3279,12 @@ def calculate_intraday_pulse(candles: List[Dict[str, Any]]) -> Dict[str, Any]:
             "latest_intraday_high": pulse["latest_1h_high"],
             "latest_intraday_low": pulse["latest_1h_low"],
             "latest_intraday_volume": pulse["latest_1h_volume"],
-            "intraday_change": pulse["latest_1h_change"],
-            "intraday_change_percent": pulse["latest_1h_change_percent"],
+            "intraday_change": _round_optional(intraday_change),
+            "intraday_change_percent": _round_optional(intraday_change_pct, 2),
+            "intraday_change_baseline": (
+                "first_session_candle_open" if session_open is not None else None
+            ),
+            "intraday_change_baseline_value": _round_optional(session_open),
             "session_high_from_intraday": pulse["session_high_from_1h"],
             "session_low_from_intraday": pulse["session_low_from_1h"],
             "session_range_pct_from_intraday": pulse["session_range_pct_from_1h"],
@@ -5518,6 +5649,25 @@ class VietnamMarketService:
         for field in DAILY_STOCK_PRICE_ENRICHMENT_FIELDS:
             normalized[field] = _safe_float(row.get(field))
 
+        foreign_field_presence = _normalized_foreign_field_presence(row, normalized)
+        foreign_flow_value_state = _foreign_flow_value_state(
+            normalized,
+            foreign_field_presence,
+        )
+        foreign_field_aliases = (
+            dict(row.get("_foreign_field_aliases"))
+            if isinstance(row.get("_foreign_field_aliases"), dict)
+            else {}
+        )
+        foreign_normalization_issues = [
+            dict(issue)
+            for issue in (row.get("_foreign_normalization_issues") or [])
+            if isinstance(issue, dict)
+        ]
+        capabilities = _daily_stock_price_capabilities(
+            normalized,
+            foreign_flow_value_state=foreign_flow_value_state,
+        )
         date_match = _date_match_status(daily_ohlc_date, normalized["date"])
         provider_dates = sorted(
             value
@@ -5568,6 +5718,11 @@ class VietnamMarketService:
                 "date_match": date_match,
                 "missing_fields": missing_fields,
                 "field_coverage": field_coverage,
+                "foreign_field_presence": foreign_field_presence,
+                "foreign_field_aliases": foreign_field_aliases,
+                "foreign_normalization_issues": foreign_normalization_issues,
+                "foreign_flow_value_state": foreign_flow_value_state,
+                "capabilities": capabilities,
                 **freshness,
                 "requested_date": requested_date,
                 "provider_session_date": normalized["date"],
@@ -5582,6 +5737,11 @@ class VietnamMarketService:
                 "missing_fields": missing_fields,
                 "field_coverage": field_coverage,
                 "units": units,
+                "foreign_field_presence": foreign_field_presence,
+                "foreign_field_aliases": foreign_field_aliases,
+                "normalization_issues": foreign_normalization_issues,
+                "foreign_flow_value_state": foreign_flow_value_state,
+                "capabilities": capabilities,
                 "diagnostics": safe_diagnostics,
             }
         )
@@ -5595,6 +5755,17 @@ class VietnamMarketService:
         diagnostics: Dict[str, Any],
     ) -> Dict[str, Any]:
         field_coverage = {field: False for field in DAILY_STOCK_PRICE_ENRICHMENT_FIELDS}
+        foreign_field_presence = {
+            field: "FIELD_ABSENT" for field in DAILY_STOCK_PRICE_FOREIGN_FIELDS
+        }
+        capabilities = {
+            "price_limits_status": "unavailable",
+            "matched_stats_status": "unavailable",
+            "put_through_status": "unavailable",
+            "foreign_flow_status": "unavailable",
+            "session_metadata_status": "unavailable",
+            "overall_status": "unavailable",
+        }
         safe_diagnostics = dict(diagnostics)
         safe_diagnostics.update(
             {
@@ -5602,6 +5773,11 @@ class VietnamMarketService:
                 "date_match": "unavailable",
                 "missing_fields": list(DAILY_STOCK_PRICE_ENRICHMENT_FIELDS),
                 "field_coverage": field_coverage,
+                "foreign_field_presence": foreign_field_presence,
+                "foreign_field_aliases": {},
+                "foreign_normalization_issues": [],
+                "foreign_flow_value_state": "unavailable",
+                "capabilities": capabilities,
             }
         )
         return {
@@ -5626,6 +5802,11 @@ class VietnamMarketService:
             "missing_fields": list(DAILY_STOCK_PRICE_ENRICHMENT_FIELDS),
             "field_coverage": field_coverage,
             "units": {},
+            "foreign_field_presence": foreign_field_presence,
+            "foreign_field_aliases": {},
+            "normalization_issues": [],
+            "foreign_flow_value_state": "unavailable",
+            "capabilities": capabilities,
             "diagnostics": safe_diagnostics,
         }
 
@@ -6482,8 +6663,8 @@ class VietnamMarketService:
                 "distance_to_20d_low_pct": "(close - low_20d) / low_20d * 100",
                 "foreign_net_sums": "sum(foreign_net) over the latest 5 or 20 rows when foreign_net history is available",
                 "neutral_status_labels": "Rule-based neutral condition labels only; no trading recommendations are generated",
-                "intraday_change": "latest_intraday_close - latest_intraday_open using provider-returned intraday candles",
-                "intraday_change_percent": "(latest_intraday_close - latest_intraday_open) / latest_intraday_open * 100",
+                "intraday_change": "latest_intraday_close - first_session_candle_open using provider-returned intraday candles",
+                "intraday_change_percent": "(latest_intraday_close - first_session_candle_open) / first_session_candle_open * 100",
                 "intraday_range_percent": "(latest_intraday_high - latest_intraday_low) / latest_intraday_open * 100",
                 "intraday_volume_vs_average": "latest_intraday_volume / average(previous available provider-returned intraday candle volumes), when at least 2 previous candles exist",
             },

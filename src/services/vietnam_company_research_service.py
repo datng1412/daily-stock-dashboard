@@ -125,6 +125,8 @@ def _channel_state(
         or ""
     ).strip().lower()
     if usable:
+        if public_status == "partial":
+            return "partial"
         return "stale" if public_status == "stale" or lifecycle == "stale" else "ready"
     if public_status == "disabled":
         return "disabled"
@@ -419,6 +421,28 @@ class VietnamCompanyResearchService:
             foreign_flow["foreign_sell_value"],
             foreign_flow["foreign_net_value"],
         )
+        foreign_flow["capability_status"] = (
+            str(daily_stock_price.get("capabilities", {}).get("foreign_flow_status"))
+            if isinstance(daily_stock_price.get("capabilities"), dict)
+            and daily_stock_price.get("capabilities", {}).get("foreign_flow_status")
+            else "ready"
+            if foreign_flow["status"] == "ok"
+            else "unavailable"
+        )
+        foreign_flow["value_state"] = str(
+            daily_stock_price.get("foreign_flow_value_state") or "unavailable"
+        )
+        foreign_flow["field_presence"] = dict(
+            daily_stock_price.get("foreign_field_presence") or {}
+        )
+        foreign_flow["field_aliases"] = dict(
+            daily_stock_price.get("foreign_field_aliases") or {}
+        )
+        foreign_flow["normalization_issues"] = [
+            dict(issue)
+            for issue in (daily_stock_price.get("normalization_issues") or [])
+            if isinstance(issue, dict)
+        ]
 
         technical = {
             "ma20": indicators.get("ma20"),
@@ -464,8 +488,33 @@ class VietnamCompanyResearchService:
         intraday_status = _dict(row.get("intraday_status"))
         intraday_diagnostics = _dict(intraday_status.get("diagnostics"))
         intraday_pulse = row.get("intraday_pulse") if isinstance(row.get("intraday_pulse"), dict) else None
+        intraday_candles = list(row.get("intraday_candles") or [])
+        intraday_cadence_status = (
+            row.get("intraday_cadence_status")
+            or intraday_status.get("intraday_cadence_status")
+        )
+        raw_intraday_status = intraday_status.get("status") or "unavailable"
+        intraday_capability_status = (
+            "partial"
+            if intraday_candles
+            and intraday_pulse
+            and intraday_cadence_status in {"irregular", "different_from_requested"}
+            else "ready"
+            if intraday_candles
+            and intraday_pulse
+            and intraday_cadence_status == "matched"
+            else "no_data"
+            if raw_intraday_status == "ok" and not intraday_candles
+            else "unavailable"
+            if raw_intraday_status in {"unavailable", "disabled"}
+            else "error"
+            if raw_intraday_status in {"error", "failed"}
+            else "partial"
+            if intraday_candles
+            else "unavailable"
+        )
         intraday = {
-            "candles": list(row.get("intraday_candles") or []),
+            "candles": intraday_candles,
             "pulse": intraday_pulse,
             "requested_timeframe": row.get("intraday_requested_timeframe") or row.get("intraday_timeframe"),
             "granularity": row.get("intraday_granularity"),
@@ -473,7 +522,8 @@ class VietnamCompanyResearchService:
             "granularity_seconds": row.get("intraday_granularity_seconds"),
             "actual_granularity_seconds": row.get("intraday_actual_granularity_seconds") or row.get("intraday_granularity_seconds"),
             "granularity_label": row.get("intraday_granularity_label"),
-            "cadence_status": row.get("intraday_cadence_status") or intraday_status.get("intraday_cadence_status"),
+            "cadence_status": intraday_cadence_status,
+            "capability_status": intraday_capability_status,
             "latest_date": row.get("intraday_latest_date"),
             "daily_price_date": row.get("daily_price_date"),
             "target_session_date": row.get("target_session_date")
@@ -612,13 +662,13 @@ class VietnamCompanyResearchService:
                 usable=bool(trade_tape),
             ),
             "intraday": _channel_state(
-                status=intraday_status,
+                status={**intraday_status, "status": intraday_capability_status},
                 diagnostics=intraday_diagnostics,
                 usable=bool(intraday.get("candles") and intraday.get("pulse")),
             ),
         }
         usable_live_channels = sum(
-            state in {"ready", "stale"} for state in live_channels.values()
+            state in {"ready", "partial", "stale"} for state in live_channels.values()
         )
         live_market_status = (
             "ready"
@@ -635,24 +685,36 @@ class VietnamCompanyResearchService:
             "provider_event_time": provider_event_time,
         }
 
+        existing_capabilities = _dict(daily_stock_price.get("capabilities"))
         daily_stock_price_capabilities = {
-            "daily_price_limits_status": _capability_state(
-                (reference_price, ceiling_price, floor_price)
-            ),
-            "matched_stats_status": _capability_state(
+            "price_limits_status": existing_capabilities.get(
+                "price_limits_status"
+            )
+            or _capability_state((reference_price, ceiling_price, floor_price)),
+            "matched_stats_status": existing_capabilities.get(
+                "matched_stats_status"
+            )
+            or _capability_state(
                 (
                     daily_stock_price.get("matched_volume"),
                     daily_stock_price.get("matched_value"),
                 )
             ),
-            "put_through_status": _capability_state(
+            "put_through_status": existing_capabilities.get("put_through_status")
+            or _capability_state(
                 (
                     daily_stock_price.get("put_through_volume"),
                     daily_stock_price.get("put_through_value"),
                 )
             ),
-            "foreign_flow_status": "ready" if foreign_flow["status"] == "ok" else "unavailable",
-            "session_metadata_status": "ready" if daily_stock_price.get("date") else "unavailable",
+            "foreign_flow_status": existing_capabilities.get(
+                "foreign_flow_status"
+            )
+            or foreign_flow["capability_status"],
+            "session_metadata_status": existing_capabilities.get(
+                "session_metadata_status"
+            )
+            or ("ready" if daily_stock_price.get("date") else "unavailable"),
         }
         capability_values = list(daily_stock_price_capabilities.values())
         daily_stock_price_capabilities["overall_status"] = (
@@ -662,6 +724,15 @@ class VietnamCompanyResearchService:
             if any(value in {"ready", "partial"} for value in capability_values)
             else "unavailable"
         )
+        daily_stock_price["capabilities"] = daily_stock_price_capabilities
+        daily_stock_price_capability_diagnostics = {
+            **daily_stock_price_capabilities,
+            # Preserve the established diagnostics key while the typed public
+            # capability object uses the shorter price_limits_status name.
+            "daily_price_limits_status": daily_stock_price_capabilities[
+                "price_limits_status"
+            ],
+        }
 
         existing_quality = _dict(row.get("data_quality_summary"))
         detailed_issues = _dedupe_issues(existing_quality.get("issues") or [])
@@ -766,7 +837,25 @@ class VietnamCompanyResearchService:
                     "source": SSI_DAILY_OHLC_SOURCE,
                 },
                 "live_channels": live_channels,
-                "daily_stock_price_capabilities": daily_stock_price_capabilities,
+                "daily_stock_price_capabilities": daily_stock_price_capability_diagnostics,
+                "foreign_flow": {
+                    "value_state": foreign_flow["value_state"],
+                    "field_presence": foreign_flow["field_presence"],
+                    "field_aliases": foreign_flow["field_aliases"],
+                    "normalization_issues": foreign_flow["normalization_issues"],
+                },
+                "intraday": {
+                    "requested_timeframe": intraday["requested_timeframe"],
+                    "actual_granularity": intraday["actual_granularity"],
+                    "cadence_status": intraday["cadence_status"],
+                    "capability_status": intraday["capability_status"],
+                    "change_baseline": _dict(intraday_pulse).get(
+                        "intraday_change_baseline"
+                    ),
+                    "change_baseline_value": _dict(intraday_pulse).get(
+                        "intraday_change_baseline_value"
+                    ),
+                },
                 "profile": {
                     "core_profile_status": profile["core_profile_status"],
                     "optional_metadata_status": optional_metadata_status,
@@ -829,7 +918,11 @@ class VietnamCompanyResearchService:
             if foreign_flow.get("status") == "ok" or has_daily_stock_price_fields
             else "missing"
         )
-        intraday_status = _dict(intraday).get("status") or "unavailable"
+        intraday_status = (
+            _dict(intraday).get("capability_status")
+            or _dict(intraday).get("status")
+            or "unavailable"
+        )
         realtime_status_value = _dict(realtime_status).get("status") or "unavailable"
         trade_tape_status_value = _dict(trade_tape_status).get("status") or "unavailable"
         order_book_status_value = _dict(order_book_status).get("status") or "unavailable"
@@ -952,6 +1045,11 @@ class VietnamCompanyResearchService:
             "value_unit": None,
             "source": SSI_DAILY_STOCK_PRICE_SOURCE,
             "status": "missing",
+            "capability_status": "unavailable",
+            "value_state": "unavailable",
+            "field_presence": {},
+            "field_aliases": {},
+            "normalization_issues": [],
         }
         missing_daily_stock_price = {
             "status": "unavailable",
@@ -963,6 +1061,18 @@ class VietnamCompanyResearchService:
             "missing_fields": [],
             "field_coverage": {},
             "units": {},
+            "foreign_field_presence": {},
+            "foreign_field_aliases": {},
+            "normalization_issues": [],
+            "foreign_flow_value_state": "unavailable",
+            "capabilities": {
+                "price_limits_status": "unavailable",
+                "matched_stats_status": "unavailable",
+                "put_through_status": "unavailable",
+                "foreign_flow_status": "unavailable",
+                "session_metadata_status": "unavailable",
+                "overall_status": "unavailable",
+            },
             "diagnostics": {},
         }
         missing_technical = {
@@ -1002,6 +1112,7 @@ class VietnamCompanyResearchService:
             "actual_granularity_seconds": None,
             "granularity_label": "provider-returned",
             "cadence_status": "unavailable",
+            "capability_status": "unavailable",
             "latest_date": None,
             "daily_price_date": None,
             "date_match": "unknown",

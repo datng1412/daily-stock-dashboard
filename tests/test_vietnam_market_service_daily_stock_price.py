@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
+from api.v1.schemas.stocks import VietnamDailyStockPrice
 from src.services.vietnam_company_research_service import VietnamCompanyResearchService
 from src.services.vietnam_market_service import (
     DAILY_OHLC_RATE_LIMIT_COOLDOWN_REASON,
@@ -459,6 +460,103 @@ def test_daily_stock_price_history_partial_preserves_explicit_zero_foreign_net()
     assert indicators["foreign_net_history_count"] == 4
     assert diagnostics["foreign_history_net_row_count"] == 4
     assert diagnostics["foreign_history_status"] == "partial"
+
+
+def test_daily_stock_price_explicit_zero_lineage_and_capabilities_survive_schema_serialization():
+    row = _full_daily_stock_price_row(
+        reference_price=None,
+        ceiling_price=None,
+        floor_price=None,
+        foreign_buy_volume=0,
+        foreign_sell_volume=0,
+        foreign_net_volume=0,
+        foreign_buy_value=0,
+        foreign_sell_value=0,
+        foreign_net_value=0,
+        _foreign_field_presence={
+            "foreign_buy_volume": "FIELD_PRESENT_EXPLICIT_ZERO",
+            "foreign_sell_volume": "FIELD_PRESENT_EXPLICIT_ZERO",
+            "foreign_net_volume": "DERIVED_FROM_PRESENT_INPUTS",
+            "foreign_buy_value": "FIELD_PRESENT_EXPLICIT_ZERO",
+            "foreign_sell_value": "FIELD_PRESENT_EXPLICIT_ZERO",
+            "foreign_net_value": "DERIVED_FROM_PRESENT_INPUTS",
+        },
+        _foreign_field_aliases={
+            "foreign_buy_volume": "totalForeignBuy",
+            "foreign_sell_volume": "totalForeignSell",
+            "foreign_net_volume": "derived: totalForeignBuy - totalForeignSell",
+            "foreign_buy_value": "totalForeignBuyValue",
+            "foreign_sell_value": "totalForeignSellValue",
+            "foreign_net_value": "derived: totalForeignBuyValue - totalForeignSellValue",
+        },
+    )
+
+    normalized = VietnamMarketService._normalize_ssi_daily_stock_price_enrichment(
+        row,
+        daily_ohlc_date="2026-06-30",
+        diagnostics={"to_date": "2026-06-30"},
+        now_epoch=1_751_241_600,
+    )
+    serialized = VietnamDailyStockPrice(**normalized).model_dump()
+
+    assert serialized["foreign_flow_value_state"] == "explicit_zero"
+    assert serialized["foreign_buy_volume"] == 0
+    assert serialized["foreign_net_value"] == 0
+    assert serialized["capabilities"] == {
+        "price_limits_status": "unavailable",
+        "matched_stats_status": "ready",
+        "put_through_status": "ready",
+        "foreign_flow_status": "ready",
+        "session_metadata_status": "ready",
+        "overall_status": "partial",
+    }
+    assert serialized["foreign_field_presence"]["foreign_net_volume"] == "DERIVED_FROM_PRESENT_INPUTS"
+
+
+def test_daily_stock_price_missing_and_partial_foreign_fields_never_become_zero():
+    missing = _full_daily_stock_price_row(
+        foreign_buy_volume=None,
+        foreign_sell_volume=None,
+        foreign_net_volume=None,
+        foreign_buy_value=None,
+        foreign_sell_value=None,
+        foreign_net_value=None,
+    )
+    unavailable = VietnamMarketService._normalize_ssi_daily_stock_price_enrichment(
+        missing,
+        daily_ohlc_date="2026-06-30",
+        diagnostics={"to_date": "2026-06-30"},
+        now_epoch=1_751_241_600,
+    )
+    partial = VietnamMarketService._normalize_ssi_daily_stock_price_enrichment(
+        {
+            **missing,
+            "foreign_buy_volume": 0,
+            "foreign_sell_volume": 0,
+            "foreign_net_volume": 0,
+        },
+        daily_ohlc_date="2026-06-30",
+        diagnostics={"to_date": "2026-06-30"},
+        now_epoch=1_751_241_600,
+    )
+
+    assert unavailable["foreign_flow_value_state"] == "unavailable"
+    assert unavailable["capabilities"]["foreign_flow_status"] == "unavailable"
+    assert all(
+        unavailable[field] is None
+        for field in (
+            "foreign_buy_volume",
+            "foreign_sell_volume",
+            "foreign_net_volume",
+            "foreign_buy_value",
+            "foreign_sell_value",
+            "foreign_net_value",
+        )
+    )
+    assert partial["foreign_flow_value_state"] == "partial"
+    assert partial["capabilities"]["foreign_flow_status"] == "partial"
+    assert partial["foreign_buy_volume"] == 0
+    assert partial["foreign_buy_value"] is None
 
 
 def test_daily_stock_price_date_mismatch_is_partial_without_changing_daily_price():

@@ -302,8 +302,21 @@ def test_missing_and_explicit_zero_stay_distinct_and_net_families_are_independen
     assert zero["foreign_net_volume"] == 0
     assert (zero["foreign_buy_value"], zero["foreign_sell_value"]) == (0.0, 0.0)
     assert zero["foreign_net_value"] == 0.0
-    assert set(zero["_foreign_field_presence"].values()) == {
-        "FIELD_PRESENT_EXPLICIT_ZERO"
+    assert zero["_foreign_field_presence"] == {
+        "foreign_buy_volume": "FIELD_PRESENT_EXPLICIT_ZERO",
+        "foreign_sell_volume": "FIELD_PRESENT_EXPLICIT_ZERO",
+        "foreign_net_volume": "DERIVED_FROM_PRESENT_INPUTS",
+        "foreign_buy_value": "FIELD_PRESENT_EXPLICIT_ZERO",
+        "foreign_sell_value": "FIELD_PRESENT_EXPLICIT_ZERO",
+        "foreign_net_value": "DERIVED_FROM_PRESENT_INPUTS",
+    }
+    assert zero["_foreign_field_raw_types"] == {
+        "foreign_buy_volume": "string",
+        "foreign_sell_volume": "integer",
+        "foreign_net_volume": "derived",
+        "foreign_buy_value": "string",
+        "foreign_sell_value": "integer",
+        "foreign_net_value": "derived",
     }
     assert missing["foreign_buy_volume"] is None
     assert missing["foreign_sell_volume"] == 40
@@ -343,12 +356,34 @@ def test_integral_numeric_strings_do_not_round_through_float() -> None:
         ("totalForeignSell", "NaN"),
         ("totalForeignBuyValue", "Infinity"),
         ("totalForeignSellValue", "-Infinity"),
-        ("totalMatch", "not-a-number"),
     ],
 )
-def test_invalid_summary_numeric_values_are_malformed(field: str, value: Any) -> None:
+def test_invalid_foreign_summary_numeric_values_are_null_with_typed_issue(
+    field: str, value: Any
+) -> None:
     adapter, auth, _data = make_adapter()
     auth.rest_client.payload = {"data": [summary_row(**{field: value})]}
+    result = adapter.get_securities_summary(symbol="FPT", limit=1)
+    assert result["status"] == "ok"
+    row = result["rows"][0]
+    normalized_field = {
+        "totalForeignBuy": "foreign_buy_volume",
+        "totalForeignSell": "foreign_sell_volume",
+        "totalForeignBuyValue": "foreign_buy_value",
+        "totalForeignSellValue": "foreign_sell_value",
+    }[field]
+    assert row[normalized_field] is None
+    assert row["_foreign_field_presence"][normalized_field] == "PARSE_FAILURE"
+    assert row["_foreign_normalization_issues"] == [
+        {"field": field, "issue": "NON_NUMERIC_PROVIDER_FIELD"}
+    ]
+
+
+def test_invalid_non_audited_summary_numeric_value_is_malformed() -> None:
+    adapter, auth, _data = make_adapter()
+    auth.rest_client.payload = {
+        "data": [summary_row(totalMatch="not-a-number")]
+    }
     result = adapter.get_securities_summary(symbol="FPT", limit=1)
     assert result["failure_class"] == "malformed_response"
     assert result["rows"] == []

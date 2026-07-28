@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
 from api.app import create_app
+from src.services.vietnam_company_research_service import VietnamCompanyResearchService
 
 
 def test_vietnam_company_research_endpoint_returns_phase_one_contract(monkeypatch, tmp_path):
@@ -295,3 +296,91 @@ def test_vietnam_company_research_keeps_unavailable_live_sections_visible(monkey
     assert payload["data_quality_summary"]["checks"]["intraday"] == "unavailable"
     assert payload["data_quality_summary"]["checks"]["realtime"] == "unavailable"
     assert payload["data_quality_summary"]["checks"]["trade_tape"] == "unavailable"
+
+
+def test_company_snapshot_exposes_independent_daily_stock_price_and_zero_lineage_states():
+    service = VietnamCompanyResearchService(market_service=object(), time_func=lambda: 1_753_660_800)
+    snapshot = service._snapshot_from_watch_item(
+        "FPT",
+        {
+            "ticker": "FPT",
+            "status": "ok",
+            "latest_price": 63_000,
+            "daily_close": 63_000,
+            "latest_price_date": "2026-07-28",
+            "open": 62_500,
+            "high": 63_500,
+            "low": 62_000,
+            "close": 63_000,
+            "volume": 5_400_000,
+            "amount": 338_000_000_000,
+            "daily_stock_price": {
+                "status": "ok",
+                "quality_status": "partial",
+                "date": "2026-07-28",
+                "reference_price": None,
+                "ceiling_price": None,
+                "floor_price": None,
+                "matched_volume": 5_400_000,
+                "matched_value": 338_000_000_000,
+                "put_through_volume": 2_360_000,
+                "put_through_value": 156_800_000_000,
+                "foreign_buy_volume": 0,
+                "foreign_sell_volume": 0,
+                "foreign_net_volume": 0,
+                "foreign_buy_value": 0,
+                "foreign_sell_value": 0,
+                "foreign_net_value": 0,
+                "foreign_flow_value_state": "explicit_zero",
+                "foreign_field_presence": {
+                    "foreign_buy_volume": "FIELD_PRESENT_EXPLICIT_ZERO",
+                    "foreign_sell_volume": "FIELD_PRESENT_EXPLICIT_ZERO",
+                    "foreign_net_volume": "DERIVED_FROM_PRESENT_INPUTS",
+                    "foreign_buy_value": "FIELD_PRESENT_EXPLICIT_ZERO",
+                    "foreign_sell_value": "FIELD_PRESENT_EXPLICIT_ZERO",
+                    "foreign_net_value": "DERIVED_FROM_PRESENT_INPUTS",
+                },
+                "capabilities": {
+                    "price_limits_status": "unavailable",
+                    "matched_stats_status": "ready",
+                    "put_through_status": "ready",
+                    "foreign_flow_status": "ready",
+                    "session_metadata_status": "ready",
+                    "overall_status": "partial",
+                },
+            },
+            "intraday_status": {"status": "ok"},
+            "intraday_requested_timeframe": "1h",
+            "intraday_actual_granularity": "unknown",
+            "intraday_cadence_status": "irregular",
+            "intraday_candles": [
+                {"date_time": "2026-07-28T09:00:00+07:00", "open": 62_000, "close": 62_500},
+                {"date_time": "2026-07-28T09:37:00+07:00", "open": 62_500, "close": 63_000},
+            ],
+            "intraday_pulse": {
+                "latest_intraday_close": 63_000,
+                "intraday_change": 1_000,
+                "intraday_change_percent": 1.61,
+                "intraday_change_baseline": "first_session_candle_open",
+                "intraday_change_baseline_value": 62_000,
+            },
+        },
+    )
+
+    assert snapshot["daily_stock_price"]["capabilities"] == {
+        "price_limits_status": "unavailable",
+        "matched_stats_status": "ready",
+        "put_through_status": "ready",
+        "foreign_flow_status": "ready",
+        "session_metadata_status": "ready",
+        "overall_status": "partial",
+    }
+    assert snapshot["foreign_flow"]["capability_status"] == "ready"
+    assert snapshot["foreign_flow"]["value_state"] == "explicit_zero"
+    assert snapshot["foreign_flow"]["foreign_buy_volume"] == 0
+    assert snapshot["foreign_flow"]["foreign_net_value"] == 0
+    assert snapshot["intraday"]["status"] == "ok"
+    assert snapshot["intraday"]["capability_status"] == "partial"
+    assert snapshot["live_market"]["channels"]["intraday"] == "partial"
+    assert snapshot["diagnostics"]["intraday"]["change_baseline"] == "first_session_candle_open"
+    assert len(snapshot["quality_summary"]["groups"]) == 3

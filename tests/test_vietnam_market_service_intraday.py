@@ -8,6 +8,7 @@ import pandas as pd
 from src.services.vietnam_market_service import (
     VietnamDashboardConfig,
     VietnamMarketService,
+    calculate_intraday_pulse,
     clear_vietnam_cache,
     normalize_intraday_candles,
 )
@@ -368,7 +369,10 @@ def test_ssi_intraday_detects_provider_returned_minute_granularity():
     assert item["intraday_pulse"]["intraday_actual_granularity"] == "1m"
     assert item["intraday_pulse"]["intraday_cadence_status"] == "different_from_requested"
     assert item["intraday_pulse"]["latest_intraday_close"] == 133.0
-    assert item["intraday_pulse"]["intraday_change"] == 0.5
+    assert item["intraday_pulse"]["intraday_change"] == 2.0
+    assert item["intraday_pulse"]["intraday_change_baseline"] == "first_session_candle_open"
+    assert item["intraday_pulse"]["intraday_change_baseline_value"] == 131.0
+    assert item["intraday_pulse"]["latest_1h_change"] == 0.5
     assert item["data_quality_summary"]["checks"]["intraday"] == "partial"
     assert any(issue["code"] == "intraday_cadence_mismatch" for issue in item["data_quality_summary"]["issues"])
     assert not any("1H" in detail["reason"] for detail in item["intraday_details"])
@@ -589,3 +593,52 @@ def test_company_intraday_unavailable_uses_empty_candles_and_null_pulse():
     assert snapshot["intraday"]["candles"] == []
     assert snapshot["intraday"]["pulse"] is None
     assert snapshot["intraday"]["cadence_status"] == "unavailable"
+
+
+def test_intraday_change_uses_first_session_candle_open_with_explicit_baseline():
+    candles = [
+        {
+            "date_time": "2026-07-28T09:00:00+07:00",
+            "open": 100,
+            "high": 102,
+            "low": 99,
+            "close": 101,
+            "volume": 10,
+        },
+        {
+            "date_time": "2026-07-28T10:00:00+07:00",
+            "open": 105,
+            "high": 106,
+            "low": 104,
+            "close": 105,
+            "volume": 20,
+        },
+    ]
+
+    pulse = calculate_intraday_pulse(candles)
+
+    assert pulse["latest_1h_change"] == 0
+    assert pulse["intraday_change"] == 5
+    assert pulse["intraday_change_percent"] == 5
+    assert pulse["intraday_change_baseline"] == "first_session_candle_open"
+    assert pulse["intraday_change_baseline_value"] == 100
+
+
+def test_intraday_change_missing_baseline_remains_null():
+    pulse = calculate_intraday_pulse(
+        [
+            {
+                "date_time": "2026-07-28T09:00:00+07:00",
+                "open": None,
+                "high": 102,
+                "low": 99,
+                "close": 100,
+                "volume": 10,
+            }
+        ]
+    )
+
+    assert pulse["intraday_change"] is None
+    assert pulse["intraday_change_percent"] is None
+    assert pulse["intraday_change_baseline"] is None
+    assert pulse["intraday_change_baseline_value"] is None
