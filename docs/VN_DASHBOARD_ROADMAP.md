@@ -1,5 +1,16 @@
 ﻿# VN Dashboard Roadmap
 
+## Phase SSI-V3-M2.5C - Vietnam Dashboard scan-first overview (2026-07-28)
+
+- M2.5C-R1 closed the remaining Trade Tape terminal-state regression. One 20-second lifecycle is owned per selected ticker/subscription generation; same-generation polls do not reset it, and request loading cannot override typed unavailable, disabled, or error evidence.
+- Same-symbol provider-backed rows remain visible during refresh and survive empty or rejected refreshes with stale/reconnecting state. Ticker or subscription-generation changes create a new lifecycle, while disclosure and display-only changes do not.
+- Reordered `/vietnam` around a compact market/session strip, the primary keyboard-selectable watchlist scan, a selected-ticker hero, the existing canonical chart, four quick-fact groups, and a compact live-channel summary. On narrow screens the selected ticker remains immediately readable before the wider scan table.
+- Kept watchlist editing, refresh settings, support/ranking modules, formula notes, data quality, and detailed diagnostics available through collapsed disclosures. Opening these local disclosures does not issue watchlist or chart requests.
+- Preserved empty-start behavior, saved user watchlists, SSI-derived VN30 membership, progressive hydration, and request cancellation. Explicit URL watchlists take precedence over saved local state without persisting over it; a `ticker` query can transiently inspect one symbol while the active watchlist remains empty.
+- Kept completed-session DailyOhlc separate from optional current-session channels. Order book, last price, trade tape, and intraday retain independent ready/partial/unavailable/disabled/loading states, and a ready order book prevents a false global unavailable result.
+- Added direct selected-ticker navigation to Company Research and Foreign Flow. No API, provider, backend, data ownership, canonical-price, calculation, cache, refresh, or polling contract changed.
+- Browser acceptance covered empty, populated, partial, null/zero, diagnostics, and open order-book states at 1366x768, 1024x768, and 390x844. The R1 all-live-unavailable fixture additionally retained completed daily data while Trade Tape rendered unavailable at 0, 25, and 30 seconds on desktop and mobile. Page-level overflow is absent, disclosure expansion adds no request, and both owned harnesses released their Vite/Chrome processes and ports. Final outcome: `M2_5C_VIETNAM_DASHBOARD_SCAN_FIRST_READY`.
+
 ## Phase SSI-V3-M2.5B - Company Research data-state cleanup (2026-07-28)
 
 - The Company Research contract now separates `completed_session_date` from provider-backed live-event session/date context. A prior completed DailyOhlc session during the next active day is `latest_completed` and `completed`, not stale solely because X-QUOTE is current.

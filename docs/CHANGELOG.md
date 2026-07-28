@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [improvement] Make the Vietnam dashboard scan-first with a primary keyboard-selectable watchlist, compact selected-ticker context, canonical chart, independent live-channel summary, deep links, and collapsed secondary diagnostics.
+- [test] Cover Vietnam dashboard hierarchy, URL-over-local watchlist precedence, transient query-ticker inspection, keyboard selection, request-free disclosures, and linked chart/research/foreign-flow regressions.
+- [fix] Bound Trade Tape startup per ticker and subscription generation so polling cannot reset the deadline, typed terminal states override request loading, and prior rows survive failed refreshes.
+- [test] Cover Trade Tape terminal timing, polling stability, StrictMode cleanup, prior-row preservation, and desktop/mobile all-live-unavailable acceptance.
+
 - [fix] Separate completed daily sessions from live Company Research channels, bound optional loading states, and keep a ready X-QUOTE order book usable when other live channels are unavailable.
 - [improvement] Compact Company Research quality and source coverage, hide unavailable price-limit tiles, contain the order-book ladder on mobile, and separate core profile readiness from optional metadata completeness.
 - [test] Cover Company Research session finality, channel composition, provider-only price-limit lineage, current-session intraday targeting, issue deduplication, and responsive loading states.
