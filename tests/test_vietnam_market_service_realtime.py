@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from src.services.vietnam_market_service import (
     VietnamDashboardConfig,
@@ -258,6 +258,7 @@ def _service(fetcher: FakeSsiFetcher, *, realtime_enabled: bool = True, trade_ta
             mozyfin_news_enabled=False,
         ),
         ssi_fetcher=fetcher,
+        time_func=lambda: datetime(2026, 6, 30, 3, 0, tzinfo=timezone.utc).timestamp(),
     )
 
 

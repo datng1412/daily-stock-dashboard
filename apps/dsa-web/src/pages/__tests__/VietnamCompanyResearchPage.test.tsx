@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { stocksApi, type VietnamCompanyResearchResponse } from '../../api/stocks';
@@ -13,6 +13,25 @@ vi.mock('../../api/stocks', () => ({
 const makeCompanySnapshot = (): VietnamCompanyResearchResponse => ({
   ticker: 'FPT',
   status: 'ok',
+  sessionContext: {
+    completedSessionDate: '2026-06-17',
+    liveSessionDate: '2026-06-18',
+    providerEventTime: '2026-06-18T09:41:23+07:00',
+    sessionPhase: 'continuous_morning',
+    marketSessionActive: true,
+    sourceFreshness: 'latest_completed',
+  },
+  liveMarket: {
+    status: 'ready',
+    channels: {
+      lastPrice: 'ready',
+      orderBook: 'ready',
+      tradeTape: 'ready',
+      intraday: 'ready',
+    },
+    usableChannelCount: 4,
+    sessionDate: '2026-06-18',
+  },
   profile: {
     ticker: 'FPT',
     name: 'FPT Corporation',
@@ -37,6 +56,9 @@ const makeCompanySnapshot = (): VietnamCompanyResearchResponse => ({
       requestedSymbol: 'FPT',
       normalizedRowCount: 1,
     },
+    coreProfileStatus: 'ready',
+    optionalMetadataStatus: 'complete',
+    classificationSource: 'SSI SecuritiesDetails',
   },
   price: {
     latestPrice: 124600,
@@ -48,6 +70,13 @@ const makeCompanySnapshot = (): VietnamCompanyResearchResponse => ({
     source: 'SSI DailyOhlc',
     canonicalSource: 'SSI DailyOhlc',
     referenceSource: 'SSI DailyStockPrice',
+    referencePriceSource: 'SSI DailyStockPrice',
+    ceilingPriceSource: 'SSI DailyStockPrice',
+    floorPriceSource: 'SSI DailyStockPrice',
+    completedSessionDate: '2026-06-17',
+    finalCloseStatus: 'completed',
+    adjustmentStatus: 'not_provided',
+    sourceFreshness: 'latest_completed',
     status: 'ok',
   },
   tradingStats: {
@@ -227,16 +256,26 @@ const makeCompanySnapshot = (): VietnamCompanyResearchResponse => ({
       news: 'not_implemented',
     },
   },
+  qualitySummary: {
+    overallStatus: 'ready',
+    groups: [
+      { key: 'daily_data', label: 'Daily data', status: 'ready', detail: 'Latest completed 2026-06-17' },
+      { key: 'live_market', label: 'Live market', status: 'ready', detail: 'Order book ready, Last price ready' },
+      { key: 'company_metadata', label: 'Company metadata', status: 'ready', detail: 'Core profile ready' },
+    ],
+    issueCodes: [],
+    primaryIssues: [],
+  },
   sourceCoverage: [
-    { block: 'Daily OHLCV', source: 'SSI DailyOhlc', status: 'ok' },
-    { block: 'Daily stock price', source: 'SSI DailyStockPrice', status: 'ok' },
-    { block: 'Intraday OHLCV', source: 'SSI IntradayOhlc', status: 'ok' },
-    { block: 'Realtime snapshot', source: 'SSI realtime contract', status: 'ok' },
-    { block: 'Trade tape', source: 'SSI trade-tape contract', status: 'ok' },
-    { block: 'Profile', source: 'SSI SecuritiesDetails', status: 'ok' },
-    { block: 'News', source: 'NewsProvider future', status: 'not_implemented' },
-    { block: 'Financials', source: 'external provider future', status: 'not_implemented' },
-    { block: 'Corporate actions', source: 'external provider future', status: 'not_implemented' },
+    { group: 'Prices', block: 'Daily OHLCV', source: 'SSI DailyOhlc', status: 'ok' },
+    { group: 'Prices', block: 'Daily stock price', source: 'SSI DailyStockPrice', status: 'ok' },
+    { group: 'Live market', block: 'Intraday OHLCV', source: 'SSI IntradayOhlc', status: 'ok' },
+    { group: 'Live market', block: 'Realtime snapshot', source: 'SSI realtime contract', status: 'ok' },
+    { group: 'Live market', block: 'Order book', source: 'SSI X-QUOTE', status: 'ok' },
+    { group: 'Live market', block: 'Trade tape', source: 'SSI trade-tape contract', status: 'ok' },
+    { group: 'Company', block: 'Profile', source: 'SSI SecuritiesDetails', status: 'ok' },
+    { group: 'Company', block: 'Optional metadata', source: 'SSI SecuritiesDetails', status: 'complete' },
+    { group: 'News', block: 'News', source: 'NewsProvider future', status: 'not_implemented' },
   ],
   news: {
     items: [],
@@ -281,15 +320,16 @@ describe('VietnamCompanyResearchPage', () => {
 
     expect(await screen.findByRole('heading', { name: 'FPT' })).toBeInTheDocument();
     expect(screen.getByText('FPT Corporation | HOSE')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Data Quality Summary' })).toBeInTheDocument();
-    expect(screen.getByText('Data quality: ok')).toBeInTheDocument();
-    expect(screen.getByText('Canonical price source: SSI DailyOhlc')).toBeInTheDocument();
-    expect(screen.getByText('No data quality issues detected.')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Data summary' })).toBeInTheDocument();
+    expect(screen.getByText('Daily data')).toBeInTheDocument();
+    expect(screen.getAllByText('Live market').length).toBeGreaterThan(0);
+    expect(screen.getByText('Company metadata')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Source coverage' })).toBeInTheDocument();
     expect(screen.getByText('Daily OHLCV')).toBeInTheDocument();
     expect(screen.getByText('Canonical latest price (VND)')).toBeInTheDocument();
     expect(screen.getByText('Reference price (VND)')).toBeInTheDocument();
-    expect(screen.getByText('Canonical price: SSI DailyOhlc. Reference and limit fields: SSI DailyStockPrice.')).toBeInTheDocument();
+    expect(screen.getByText(/Canonical price: SSI DailyOhlc\./)).toBeInTheDocument();
+    expect(screen.getAllByText(/Latest completed 2026-06-17/).length).toBeGreaterThan(0);
     expect(screen.getByText('Daily OHLCV volume (shares)')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'DailyStockPrice enrichment' })).toBeInTheDocument();
     expect(screen.getByText('Matched volume (shares)')).toBeInTheDocument();
@@ -328,7 +368,7 @@ describe('VietnamCompanyResearchPage', () => {
     expect(screen.getByText('Trades loaded')).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Time' })).toBeInTheDocument();
     expect(screen.getAllByText('10:16:00').length).toBeGreaterThan(0);
-    expect(screen.queryByRole('heading', { name: 'News' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'News', level: 2 })).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Financials' })).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Events' })).not.toBeInTheDocument();
 
@@ -386,6 +426,93 @@ describe('VietnamCompanyResearchPage', () => {
     expect(book.queryByRole('columnheader', { name: 'Bid Vol' })).not.toBeInTheDocument();
     expect(book.queryByText('Bid Price')).not.toBeInTheDocument();
     expect(book.queryByText('Ask Price')).not.toBeInTheDocument();
+  });
+
+  it('keeps a ready order book usable when other live channels are unavailable', async () => {
+    const snapshot = makeCompanySnapshot();
+    snapshot.liveMarket = {
+      status: 'partial',
+      channels: {
+        lastPrice: 'no_data',
+        orderBook: 'ready',
+        tradeTape: 'reconnecting',
+        intraday: 'unavailable',
+      },
+      usableChannelCount: 1,
+      sessionDate: '2026-06-18',
+    };
+    snapshot.qualitySummary = {
+      overallStatus: 'partial',
+      groups: [
+        { key: 'daily_data', label: 'Daily data', status: 'ready', detail: 'Latest completed 2026-06-17' },
+        { key: 'live_market', label: 'Live market', status: 'partial', detail: 'Order book ready, Trade tape reconnecting' },
+        { key: 'company_metadata', label: 'Company metadata', status: 'ready', detail: 'Core profile ready' },
+      ],
+    };
+    snapshot.realtimeSnapshot = null;
+    snapshot.realtimeStatus = { status: 'unavailable', reasonCode: 'stream_cache_empty' };
+    snapshot.tradeTape = [];
+    snapshot.tradeTapeStatus = { status: 'unavailable', reasonCode: 'recovering' };
+    snapshot.intraday = { status: 'unavailable', candles: [], pulse: null };
+    vi.mocked(stocksApi.getVietnamCompanyResearch).mockResolvedValue(snapshot);
+
+    renderPage();
+
+    const summary = await screen.findByLabelText('Company Research Data Summary');
+    expect(summary).toHaveTextContent('Order book ready, Trade tape reconnecting');
+    expect(screen.getByRole('heading', { name: 'Order Book — SSI X-QUOTE' })).toBeInTheDocument();
+    expect(screen.queryByText('SSI realtime unavailable. Daily SSI data is still available.')).not.toBeInTheDocument();
+  });
+
+  it('hides all unavailable reference and limit tiles without substituting daily close', async () => {
+    const snapshot = makeCompanySnapshot();
+    snapshot.price.referencePrice = null;
+    snapshot.price.ceilingPrice = null;
+    snapshot.price.floorPrice = null;
+    snapshot.price.referencePriceSource = null;
+    snapshot.price.ceilingPriceSource = null;
+    snapshot.price.floorPriceSource = null;
+    vi.mocked(stocksApi.getVietnamCompanyResearch).mockResolvedValue(snapshot);
+
+    renderPage();
+
+    expect(await screen.findByTestId('company-latest-price')).toHaveTextContent('124.60');
+    expect(screen.queryByText('Reference price (VND)')).not.toBeInTheDocument();
+    expect(screen.queryByText('Ceiling price (VND)')).not.toBeInTheDocument();
+    expect(screen.queryByText('Floor price (VND)')).not.toBeInTheDocument();
+  });
+
+  it('moves trade tape from loading to a bounded no-data state', async () => {
+    vi.useFakeTimers();
+    const snapshot = makeCompanySnapshot();
+    snapshot.tradeTape = [];
+    snapshot.tradeTapeStatus = {
+      status: 'unavailable',
+      reasonCode: 'stream_cache_empty',
+      classification: 'stream_cache_empty',
+    };
+    snapshot.diagnostics = {
+      ...snapshot.diagnostics,
+      tradeTape: {
+        streamingStatus: 'running',
+        tradeTapeSubscriptionStatus: 'subscribed',
+        tradeTapeBufferRowCount: 0,
+      },
+    };
+    vi.mocked(stocksApi.getVietnamCompanyResearch).mockResolvedValue(snapshot);
+
+    renderPage();
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByText('Loading SSI trade tape...')).toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20_001);
+    });
+    expect(screen.getByText('No trade-tape rows arrived during the bounded startup wait.')).toBeInTheDocument();
+    expect(screen.queryByText('Loading SSI trade tape...')).not.toBeInTheDocument();
   });
 
   it('refreshes the company live snapshot immediately when tab focus returns', async () => {
@@ -547,7 +674,11 @@ describe('VietnamCompanyResearchPage', () => {
     expect(await screen.findByTestId('company-latest-price')).toHaveClass(expectedClass);
     expect(screen.getByTestId('company-daily-close')).toHaveClass(expectedClass);
     expect(screen.getByTestId('company-price-vs-reference')).toHaveClass(expectedClass);
-    expect(screen.getByTestId('company-reference-price')).toHaveClass('text-reference-yellow');
+    if (referencePrice === null) {
+      expect(screen.queryByTestId('company-reference-price')).not.toBeInTheDocument();
+    } else {
+      expect(screen.getByTestId('company-reference-price')).toHaveClass('text-reference-yellow');
+    }
     expect(screen.getByTestId('company-ceiling-price')).toHaveClass('text-ceiling-purple');
     expect(screen.getByTestId('company-floor-price')).toHaveClass('text-cyan');
   });
@@ -650,7 +781,7 @@ describe('VietnamCompanyResearchPage', () => {
 
     expect(await screen.findByRole('heading', { name: 'FPT' })).toBeInTheDocument();
     expect(screen.getByText('SSI intraday unavailable.')).toBeInTheDocument();
-    expect(screen.getByText('SSI realtime unavailable. Daily SSI data is still available.')).toBeInTheDocument();
+    expect(screen.getByText('Last-price snapshot unavailable. Other live channels may still be usable.')).toBeInTheDocument();
     expect(screen.getByText('SSI trade tape unavailable.')).toBeInTheDocument();
     expect(screen.queryByText('Latest intraday close')).not.toBeInTheDocument();
     expect(screen.queryByText('Session volume from intraday')).not.toBeInTheDocument();
@@ -686,7 +817,7 @@ describe('VietnamCompanyResearchPage', () => {
     expect(screen.queryByText(/Connection to remote host was lost/i)).not.toBeInTheDocument();
   });
 
-  it('renders DailyOhlc versus DailyStockPrice mismatch in the data quality summary', async () => {
+  it('keeps DailyOhlc versus DailyStockPrice detail out of the compact summary', async () => {
     const snapshot = makeCompanySnapshot();
     snapshot.dataQualitySummary = {
       overallStatus: 'partial',
@@ -719,12 +850,10 @@ describe('VietnamCompanyResearchPage', () => {
 
     renderPage();
 
-    const summary = await screen.findByLabelText('Data Quality Summary');
-    expect(summary).toHaveTextContent('Data quality: partial');
-    expect(summary).toHaveTextContent('DailyOhlc differs from DailyStockPrice for the same date.');
-    expect(summary).toHaveTextContent('DailyOhlc 70,700');
-    expect(summary).toHaveTextContent('DailyStockPrice 70,800');
-    expect(summary).toHaveTextContent('Realtime: unavailable');
+    const summary = await screen.findByLabelText('Company Research Data Summary');
+    expect(within(summary).getByText('Daily data')).toBeInTheDocument();
+    expect(summary).not.toHaveTextContent('DailyOhlc differs from DailyStockPrice for the same date.');
+    expect(summary).not.toHaveTextContent('DailyOhlc 70,700');
     expect(screen.getByRole('heading', { name: 'Price summary' })).toBeInTheDocument();
   });
 
@@ -789,9 +918,19 @@ describe('VietnamCompanyResearchPage', () => {
     expect(screen.getByText('SSI DailyStockPrice foreign flow unavailable.')).toBeInTheDocument();
   });
 
-  it('renders profile partial in the data quality summary', async () => {
+  it('separates core profile readiness from optional metadata completeness', async () => {
     const snapshot = makeCompanySnapshot();
     snapshot.profile.name = null;
+    snapshot.profile.coreProfileStatus = 'ready';
+    snapshot.profile.optionalMetadataStatus = 'incomplete';
+    snapshot.qualitySummary = {
+      overallStatus: 'partial',
+      groups: [
+        { key: 'daily_data', label: 'Daily data', status: 'ready' },
+        { key: 'live_market', label: 'Live market', status: 'ready' },
+        { key: 'company_metadata', label: 'Company metadata', status: 'ready', detail: 'Core profile ready · Optional metadata incomplete' },
+      ],
+    };
     snapshot.dataQualitySummary = {
       overallStatus: 'partial',
       canonicalPriceSource: 'SSI DailyOhlc',
@@ -819,9 +958,10 @@ describe('VietnamCompanyResearchPage', () => {
 
     renderPage();
 
-    const summary = await screen.findByLabelText('Data Quality Summary');
-    expect(summary).toHaveTextContent('Profile partial. Some metadata is unavailable.');
-    expect(summary).toHaveTextContent('Profile: partial');
+    const summary = await screen.findByLabelText('Company Research Data Summary');
+    expect(summary).toHaveTextContent('Core profile ready · Optional metadata incomplete');
+    expect(screen.getByText('Optional metadata incomplete.')).toBeInTheDocument();
+    expect(summary).not.toHaveTextContent('Profile partial');
   });
 
   it('keeps the company page useful with symbol, exchange, and market only', async () => {
@@ -845,6 +985,8 @@ describe('VietnamCompanyResearchPage', () => {
       completeness: 0.25,
       missingFields: ['name', 'name_en', 'industry', 'sector', 'issuer'],
       fieldCoverage: { symbol: true, exchange: true, market: true, name: false },
+      coreProfileStatus: 'ready',
+      optionalMetadataStatus: 'incomplete',
     };
     vi.mocked(stocksApi.getVietnamCompanyResearch).mockResolvedValue(snapshot);
 
@@ -852,7 +994,7 @@ describe('VietnamCompanyResearchPage', () => {
 
     expect(await screen.findByRole('heading', { name: 'FPT' })).toBeInTheDocument();
     expect(screen.queryByText('Company name unavailable')).not.toBeInTheDocument();
-    expect(screen.getByText('Profile partial. Some metadata is unavailable.')).toBeInTheDocument();
+    expect(screen.getByText('Optional metadata incomplete.')).toBeInTheDocument();
     const profile = within(screen.getByRole('heading', { name: 'Company profile' }).closest('section') as HTMLElement);
     expect(profile.getByText('Ticker')).toBeInTheDocument();
     expect(profile.getByText('Exchange')).toBeInTheDocument();
@@ -892,12 +1034,13 @@ describe('VietnamCompanyResearchPage', () => {
   it('handles a missing data quality summary without blocking existing cards', async () => {
     const snapshot = makeCompanySnapshot();
     snapshot.dataQualitySummary = undefined;
+    snapshot.qualitySummary = undefined;
     vi.mocked(stocksApi.getVietnamCompanyResearch).mockResolvedValue(snapshot);
 
     renderPage();
 
     expect(await screen.findByRole('heading', { name: 'FPT' })).toBeInTheDocument();
-    expect(screen.queryByLabelText('Data Quality Summary')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Company Research Data Summary')).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Price summary' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Trading stats' })).toBeInTheDocument();
   });
@@ -930,8 +1073,7 @@ describe('VietnamCompanyResearchPage', () => {
 
     renderPage();
 
-    const summary = await screen.findByLabelText('Data Quality Summary');
-    expect(summary).toHaveTextContent('Data quality issue detected.');
+    const summary = await screen.findByLabelText('Company Research Data Summary');
     expect(summary).not.toHaveTextContent(/RealtimeQuote|HTTP status|raw provider|attempted endpoints/i);
   });
 
@@ -966,7 +1108,7 @@ describe('VietnamCompanyResearchPage', () => {
   it('does not use recommendation wording in the data quality summary', async () => {
     renderPage();
 
-    const summary = await screen.findByLabelText('Data Quality Summary');
+    const summary = await screen.findByLabelText('Company Research Data Summary');
     expect(summary.textContent).not.toMatch(/\b(buy|sell|hold)\b|target[- ]price|recommendation/i);
   });
 });

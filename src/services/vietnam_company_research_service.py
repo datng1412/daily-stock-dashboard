@@ -2,14 +2,17 @@
 """Vietnam company research snapshot service.
 
 This service composes the existing SSI-backed Vietnam watchlist contract into a
-company-research page payload. It intentionally does not fetch news,
-fundamentals, or corporate actions in Phase 1.
+company-research page payload. News remains gated by the configured provider;
+fundamentals and corporate actions remain unavailable.
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from datetime import datetime, timezone
+from typing import Any, Callable, Dict, Iterable, Optional
+from zoneinfo import ZoneInfo
 
+from data_provider.ssi_streaming_realtime import vietnam_market_session_from_epoch
 from src.services.vietnam_market_service import VietnamMarketService
 
 
@@ -24,6 +27,27 @@ SSI_TRADE_TAPE_SOURCE = "SSI trade-tape contract"
 SSI_DERIVED_SOURCE = "SSI-derived"
 NEWS_FUTURE_SOURCE = "NewsProvider future"
 EXTERNAL_FUTURE_SOURCE = "external provider future"
+VN_TIMEZONE = ZoneInfo("Asia/Ho_Chi_Minh")
+
+_CHANNEL_READY_STATES = {"ok", "ready"}
+_CHANNEL_RECONNECTING_STATES = {
+    "awaiting_subscription",
+    "recovering",
+    "reconnecting",
+    "starting",
+}
+_CHANNEL_NO_DATA_REASONS = {
+    "cache_empty",
+    "stream_cache_empty",
+    "subscribed_empty",
+    "xtrade_cache_empty",
+}
+_NON_PRIMARY_ISSUE_CODES = {
+    "adjusted_price_status_unknown",
+    "final_close_status_unknown",
+    "metadata_partial",
+    "profile_partial",
+}
 
 
 def _vn_ticker(symbol: str) -> str:
@@ -49,11 +73,105 @@ def _dict(value: Any) -> Dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _date_text(value: Any) -> Optional[str]:
+    if value in (None, ""):
+        return None
+    text = str(value).strip()[:10]
+    try:
+        return datetime.strptime(text, "%Y-%m-%d").date().isoformat()
+    except ValueError:
+        return None
+
+
+def _timestamp_date(value: Any) -> Optional[str]:
+    if value in (None, ""):
+        return None
+    text = str(value).strip().replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=VN_TIMEZONE)
+    return parsed.astimezone(VN_TIMEZONE).date().isoformat()
+
+
+def _status_value(block: Dict[str, Any]) -> str:
+    return str(block.get("status") or "").strip().lower()
+
+
+def _diagnostic_status(block: Dict[str, Any], diagnostics: Dict[str, Any]) -> str:
+    for key in ("stream_state", "streamState", "streaming_status", "streamingStatus"):
+        value = block.get(key)
+        if value in (None, ""):
+            value = diagnostics.get(key)
+        if value not in (None, ""):
+            return str(value).strip().lower()
+    return ""
+
+
+def _channel_state(
+    *,
+    status: Dict[str, Any],
+    diagnostics: Dict[str, Any],
+    usable: bool,
+) -> str:
+    public_status = _status_value(status)
+    lifecycle = _diagnostic_status(status, diagnostics)
+    reason = str(
+        status.get("reason_code")
+        or status.get("reasonCode")
+        or status.get("classification")
+        or ""
+    ).strip().lower()
+    if usable:
+        return "stale" if public_status == "stale" or lifecycle == "stale" else "ready"
+    if public_status == "disabled":
+        return "disabled"
+    if lifecycle in _CHANNEL_RECONNECTING_STATES or reason in _CHANNEL_RECONNECTING_STATES:
+        return "reconnecting"
+    if reason in _CHANNEL_NO_DATA_REASONS or lifecycle in _CHANNEL_NO_DATA_REASONS:
+        return "no_data"
+    if public_status == "stale" or lifecycle in {"stale", "closed"}:
+        return "stale"
+    if public_status in {"error", "failed"}:
+        return "error"
+    return "unavailable"
+
+
+def _capability_state(values: Iterable[Any]) -> str:
+    present = [value is not None for value in values]
+    if all(present):
+        return "ready"
+    if any(present):
+        return "partial"
+    return "unavailable"
+
+
+def _dedupe_issues(issues: Iterable[Any]) -> list[Dict[str, Any]]:
+    output: list[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw in issues:
+        issue = raw if isinstance(raw, dict) else {}
+        code = str(issue.get("code") or "").strip()
+        if not code or code in seen:
+            continue
+        seen.add(code)
+        output.append(dict(issue))
+    return output
+
+
 class VietnamCompanyResearchService:
     """Build source-aware company research snapshots for Vietnam tickers."""
 
-    def __init__(self, market_service: Optional[VietnamMarketService] = None) -> None:
+    def __init__(
+        self,
+        market_service: Optional[VietnamMarketService] = None,
+        *,
+        time_func: Optional[Callable[[], float]] = None,
+    ) -> None:
         self.market_service = market_service or VietnamMarketService()
+        self._time_func = time_func or (lambda: datetime.now(timezone.utc).timestamp())
 
     def get_company_research_snapshot(self, ticker: str, force_refresh: bool = False) -> Dict[str, Any]:
         symbol = _vn_ticker(str(ticker or "").strip().upper())
@@ -73,13 +191,74 @@ class VietnamCompanyResearchService:
 
         return self._snapshot_from_watch_item(symbol, row)
 
+    @staticmethod
+    def _daily_session_state(
+        *,
+        completed_session_date: Optional[str],
+        live_session_date: Optional[str],
+        now_date: str,
+        market_active: bool,
+        daily_history_diagnostics: Dict[str, Any],
+    ) -> tuple[str, str]:
+        """Classify EOD finality separately from cache and live-event freshness."""
+        if not completed_session_date:
+            return "unknown", "unknown"
+        if completed_session_date > now_date:
+            return "unknown", "unknown"
+        adapter_freshness = str(
+            daily_history_diagnostics.get("freshness_status") or ""
+        ).strip().lower()
+        if adapter_freshness == "stale":
+            return "publication_lag", "completed"
+        if market_active and completed_session_date == now_date:
+            return "current", "provisional"
+        if live_session_date and completed_session_date == live_session_date and market_active:
+            return "current", "provisional"
+        if live_session_date and completed_session_date > live_session_date:
+            return "unknown", "unknown"
+        return "latest_completed", "completed"
+
+    @staticmethod
+    def _live_summary_detail(channels: Dict[str, str]) -> str:
+        labels = {
+            "last_price": "Last price",
+            "order_book": "Order book",
+            "trade_tape": "Trade tape",
+            "intraday": "Intraday",
+        }
+        priority = {"ready": 0, "reconnecting": 1, "no_data": 2, "stale": 3, "unavailable": 4, "disabled": 5, "error": 6}
+        ordered = sorted(
+            channels.items(),
+            key=lambda item: (priority.get(item[1], 9), list(labels).index(item[0])),
+        )
+        return ", ".join(
+            f"{labels[key]} {state.replace('_', ' ')}" for key, state in ordered
+        )
+
+    @staticmethod
+    def _user_warnings(values: Iterable[Any]) -> list[str]:
+        suppressed = (
+            "final close status is unknown",
+            "adjusted/unadjusted price status is unknown",
+            "indicators are based on a daily candle whose final status is unknown",
+        )
+        output: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            text = str(value or "").strip()
+            if not text or any(fragment in text.lower() for fragment in suppressed):
+                continue
+            if text not in seen:
+                seen.add(text)
+                output.append(text)
+        return output
+
     def _snapshot_from_watch_item(self, symbol: str, row: Dict[str, Any]) -> Dict[str, Any]:
         metadata = _dict(row.get("symbol_metadata"))
         daily_stock_price = _dict(row.get("daily_stock_price"))
         if daily_stock_price:
             daily_stock_price = dict(daily_stock_price)
             daily_stock_price["source"] = SSI_DAILY_STOCK_PRICE_SOURCE
-        price_limit = _dict(row.get("price_limit"))
         foreign = _dict(row.get("foreign"))
         indicators = _dict(row.get("indicators"))
         bollinger = _dict(indicators.get("bollinger"))
@@ -96,14 +275,44 @@ class VietnamCompanyResearchService:
         profile_quality = metadata.get("quality_status") or (
             "partial" if profile_status == "ok" else "unavailable"
         )
+        core_profile_ready = bool(
+            symbol
+            and _has_value(
+                profile_name,
+                row.get("exchange"),
+                metadata.get("exchange"),
+                row.get("market"),
+                metadata.get("market"),
+            )
+        )
+        optional_profile_fields = {
+            "name_en": metadata.get("name_en"),
+            "issuer": metadata.get("issuer"),
+            "listed_date": metadata.get("listed_date"),
+        }
+        optional_metadata_status = (
+            "complete"
+            if all(value is not None for value in optional_profile_fields.values())
+            else "incomplete"
+        )
+        profile_diagnostics = {
+            **dict(metadata.get("diagnostics") or {}),
+            "source_endpoint": metadata.get("source_endpoint") or SSI_SECURITIES_ENDPOINT,
+            "provider_version": metadata.get("provider_version") or "v3",
+            "fetched_at": metadata.get("fetched_at"),
+            "cache_status": metadata.get("cache_status"),
+            "missing_fields": list(metadata.get("missing_fields") or []),
+        }
         profile = {
             "ticker": symbol,
             "name": profile_name,
             "name_en": metadata.get("name_en"),
             "exchange": _first_present(row.get("exchange"), metadata.get("exchange"), row.get("market")),
             "market": _first_present(row.get("market"), metadata.get("market")),
-            "industry": _first_present(row.get("industry"), metadata.get("industry")),
-            "sector": _first_present(row.get("sector"), metadata.get("sector")),
+            # Classification stays provider-backed. Do not infer one label from
+            # the other or from the ticker.
+            "industry": metadata.get("industry"),
+            "sector": metadata.get("sector"),
             "security_type": _first_present(row.get("security_type"), metadata.get("security_type")),
             "issuer": _first_present(row.get("issuer"), metadata.get("issuer")),
             "lot_size": _first_present(row.get("lot_size"), metadata.get("lot_size")),
@@ -116,9 +325,7 @@ class VietnamCompanyResearchService:
             "cache_status": metadata.get("cache_status"),
             "data_state": (
                 "ready"
-                if profile_status == "ok" and profile_quality == "complete"
-                else "partial"
-                if profile_status == "ok"
+                if core_profile_ready
                 else "unavailable"
             ),
             "failure_class": metadata.get("failure_class"),
@@ -127,14 +334,24 @@ class VietnamCompanyResearchService:
             "completeness": metadata.get("completeness"),
             "missing_fields": list(metadata.get("missing_fields") or []),
             "field_coverage": dict(metadata.get("field_coverage") or {}),
-            "diagnostics": dict(metadata.get("diagnostics") or {}),
+            "diagnostics": profile_diagnostics,
+            "core_profile_status": "ready" if core_profile_ready else "unavailable",
+            "optional_metadata_status": optional_metadata_status,
+            "classification_source": (
+                _first_present(metadata.get("source_label"), metadata.get("source"))
+                if _has_value(metadata.get("industry"), metadata.get("sector"))
+                else None
+            ),
         }
         if profile["source"] == "SSI":
             profile["source"] = SSI_SECURITIES_DETAILS_SOURCE
 
-        reference_price = _first_present(daily_stock_price.get("reference_price"), row.get("ssi_reference_price"), price_limit.get("reference_price"))
-        ceiling_price = _first_present(daily_stock_price.get("ceiling_price"), row.get("ssi_ceiling_price"), price_limit.get("ceiling_price"))
-        floor_price = _first_present(daily_stock_price.get("floor_price"), row.get("ssi_floor_price"), price_limit.get("floor_price"))
+        # V3 securities-summary currently normalizes these fields as null.
+        # The ssi_* compatibility keys are copies of the same DailyStockPrice
+        # fields. Never fall through to the exchange-derived price_limit block.
+        reference_price = _first_present(daily_stock_price.get("reference_price"), row.get("ssi_reference_price"))
+        ceiling_price = _first_present(daily_stock_price.get("ceiling_price"), row.get("ssi_ceiling_price"))
+        floor_price = _first_present(daily_stock_price.get("floor_price"), row.get("ssi_floor_price"))
         latest_price_source = row.get("latest_price_source") or SSI_DAILY_OHLC_SOURCE
         price_date = _first_present(row.get("latest_price_date"), row.get("price_date"), row.get("ohlcv_date"), row.get("date"))
         price = {
@@ -146,7 +363,10 @@ class VietnamCompanyResearchService:
             "price_date": price_date,
             "source": latest_price_source,
             "canonical_source": latest_price_source,
-            "reference_source": SSI_DAILY_STOCK_PRICE_SOURCE,
+            "reference_source": SSI_DAILY_STOCK_PRICE_SOURCE if reference_price is not None else None,
+            "reference_price_source": SSI_DAILY_STOCK_PRICE_SOURCE if reference_price is not None else None,
+            "ceiling_price_source": SSI_DAILY_STOCK_PRICE_SOURCE if ceiling_price is not None else None,
+            "floor_price_source": SSI_DAILY_STOCK_PRICE_SOURCE if floor_price is not None else None,
             "status": _status_for(row.get("latest_price"), row.get("daily_close"), reference_price, ceiling_price, floor_price),
         }
 
@@ -256,6 +476,10 @@ class VietnamCompanyResearchService:
             "cadence_status": row.get("intraday_cadence_status") or intraday_status.get("intraday_cadence_status"),
             "latest_date": row.get("intraday_latest_date"),
             "daily_price_date": row.get("daily_price_date"),
+            "target_session_date": row.get("target_session_date")
+            or intraday_status.get("target_session_date"),
+            "session_basis": row.get("session_basis")
+            or intraday_status.get("session_basis"),
             "date_match": row.get("date_match"),
             "source": SSI_INTRADAY_SOURCE,
             "status": intraday_status.get("status") or "unavailable",
@@ -298,17 +522,215 @@ class VietnamCompanyResearchService:
             "message": order_book_status.get("message"),
         }
 
-        source_coverage = self._source_coverage(
-            profile,
-            price,
-            trading_stats,
-            foreign_flow,
-            technical,
-            daily_stock_price,
-            intraday,
-            realtime_status,
-            trade_tape_status,
+        now_epoch = float(self._time_func())
+        now_local = datetime.fromtimestamp(now_epoch, timezone.utc).astimezone(VN_TIMEZONE)
+        market_session = vietnam_market_session_from_epoch(now_epoch)
+        completed_session_date = _date_text(price_date)
+        provider_event_time = _first_present(
+            _dict(order_book).get("stream_timestamp"),
+            _dict(order_book).get("received_at"),
+            _dict(realtime_snapshot).get("snapshot_time"),
+            _dict(realtime_snapshot).get("realtime_time"),
+            _dict(realtime_snapshot).get("stream_timestamp"),
+            _dict(trade_tape[0] if trade_tape else {}).get("timestamp"),
         )
+        live_session_date = _first_present(
+            _date_text(_dict(order_book).get("trading_date")),
+            _timestamp_date(_dict(order_book).get("stream_timestamp")),
+            _timestamp_date(_dict(realtime_snapshot).get("snapshot_time")),
+            _timestamp_date(_dict(realtime_snapshot).get("realtime_time")),
+            _timestamp_date(_dict(trade_tape[0] if trade_tape else {}).get("timestamp")),
+        )
+        daily_history_diagnostics = _dict(row_diagnostics.get("daily_history"))
+        source_freshness, final_close_status = self._daily_session_state(
+            completed_session_date=completed_session_date,
+            live_session_date=live_session_date,
+            now_date=now_local.date().isoformat(),
+            market_active=bool(market_session.get("market_session_active")),
+            daily_history_diagnostics=daily_history_diagnostics,
+        )
+        raw_adjustment_status = str(
+            row.get("adjusted_price_status")
+            or row.get("price_adjustment_status")
+            or ""
+        ).strip().lower()
+        if raw_adjustment_status in {"adjusted", "unadjusted"}:
+            adjustment_status = raw_adjustment_status
+        elif raw_adjustment_status in {"", "unknown", "not_provided"}:
+            adjustment_status = "not_provided"
+        else:
+            adjustment_status = "unknown"
+
+        cache_ages = [
+            value
+            for value in (
+                _dict(order_book).get("age_seconds"),
+                _dict(realtime_snapshot).get("age_seconds"),
+                _dict(trade_tape[0] if trade_tape else {}).get("age_seconds"),
+            )
+            if isinstance(value, (int, float)) and value >= 0
+        ]
+        session_context = {
+            "completed_session_date": completed_session_date,
+            "live_session_date": live_session_date,
+            "provider_event_time": provider_event_time,
+            "fetched_at": datetime.fromtimestamp(now_epoch, timezone.utc).isoformat(),
+            "cache_age_seconds": min(cache_ages) if cache_ages else None,
+            "session_phase": market_session.get("market_session"),
+            "session_phase_label": market_session.get("market_session_label"),
+            "market_session_active": bool(market_session.get("market_session_active")),
+            "holiday_aware": bool(market_session.get("market_session_holiday_aware")),
+            "source_freshness": source_freshness,
+        }
+        price.update(
+            {
+                "completed_session_date": completed_session_date,
+                "final_close_status": final_close_status,
+                "adjustment_status": adjustment_status,
+                "source_freshness": source_freshness,
+            }
+        )
+
+        live_channels = {
+            "last_price": _channel_state(
+                status=realtime_status,
+                diagnostics=realtime_diagnostics,
+                usable=realtime_snapshot is not None
+                and _has_value(
+                    realtime_snapshot.get("price"),
+                    realtime_snapshot.get("realtime_price"),
+                ),
+            ),
+            "order_book": _channel_state(
+                status=order_book_status,
+                diagnostics=order_book_diagnostics,
+                usable=bool(order_book and (order_book.get("bids") or order_book.get("asks"))),
+            ),
+            "trade_tape": _channel_state(
+                status=trade_tape_status,
+                diagnostics=trade_tape_diagnostics,
+                usable=bool(trade_tape),
+            ),
+            "intraday": _channel_state(
+                status=intraday_status,
+                diagnostics=intraday_diagnostics,
+                usable=bool(intraday.get("candles") and intraday.get("pulse")),
+            ),
+        }
+        usable_live_channels = sum(
+            state in {"ready", "stale"} for state in live_channels.values()
+        )
+        live_market_status = (
+            "ready"
+            if usable_live_channels == len(live_channels)
+            else "partial"
+            if usable_live_channels
+            else "unavailable"
+        )
+        live_market = {
+            "status": live_market_status,
+            "channels": live_channels,
+            "usable_channel_count": usable_live_channels,
+            "session_date": live_session_date,
+            "provider_event_time": provider_event_time,
+        }
+
+        daily_stock_price_capabilities = {
+            "daily_price_limits_status": _capability_state(
+                (reference_price, ceiling_price, floor_price)
+            ),
+            "matched_stats_status": _capability_state(
+                (
+                    daily_stock_price.get("matched_volume"),
+                    daily_stock_price.get("matched_value"),
+                )
+            ),
+            "put_through_status": _capability_state(
+                (
+                    daily_stock_price.get("put_through_volume"),
+                    daily_stock_price.get("put_through_value"),
+                )
+            ),
+            "foreign_flow_status": "ready" if foreign_flow["status"] == "ok" else "unavailable",
+            "session_metadata_status": "ready" if daily_stock_price.get("date") else "unavailable",
+        }
+        capability_values = list(daily_stock_price_capabilities.values())
+        daily_stock_price_capabilities["overall_status"] = (
+            "ready"
+            if all(value == "ready" for value in capability_values)
+            else "partial"
+            if any(value in {"ready", "partial"} for value in capability_values)
+            else "unavailable"
+        )
+
+        existing_quality = _dict(row.get("data_quality_summary"))
+        detailed_issues = _dedupe_issues(existing_quality.get("issues") or [])
+        primary_issues = [
+            issue
+            for issue in detailed_issues
+            if str(issue.get("code") or "") not in _NON_PRIMARY_ISSUE_CODES
+        ]
+        issue_codes = [str(issue["code"]) for issue in detailed_issues]
+        quality_summary = {
+            "overall_status": (
+                "unavailable"
+                if price["status"] != "ok"
+                else "partial"
+                if live_market_status != "ready"
+                or profile["core_profile_status"] != "ready"
+                or primary_issues
+                else "ready"
+            ),
+            "groups": [
+                {
+                    "key": "daily_data",
+                    "label": "Daily data",
+                    "status": "ready" if price["status"] == "ok" else "unavailable",
+                    "detail": (
+                        f"Latest completed {completed_session_date}"
+                        if source_freshness == "latest_completed" and completed_session_date
+                        else source_freshness.replace("_", " ")
+                    ),
+                },
+                {
+                    "key": "live_market",
+                    "label": "Live market",
+                    "status": live_market_status,
+                    "detail": self._live_summary_detail(live_channels),
+                },
+                {
+                    "key": "company_metadata",
+                    "label": "Company metadata",
+                    "status": profile["core_profile_status"],
+                    "detail": (
+                        "Core profile ready · Optional metadata incomplete"
+                        if profile["core_profile_status"] == "ready"
+                        and optional_metadata_status == "incomplete"
+                        else "Core profile ready"
+                        if profile["core_profile_status"] == "ready"
+                        else "Core profile unavailable"
+                    ),
+                },
+            ],
+            "issue_codes": issue_codes,
+            "primary_issues": primary_issues,
+        }
+        data_quality_summary = {
+            **existing_quality,
+            "overall_status": quality_summary["overall_status"],
+            "issues": detailed_issues,
+            "issue_codes": issue_codes,
+            "checks": {
+                **_dict(existing_quality.get("checks")),
+                "final_close_status": final_close_status,
+                "adjusted_price_status": adjustment_status,
+                "realtime": live_channels["last_price"],
+                "order_book": live_channels["order_book"],
+                "trade_tape": live_channels["trade_tape"],
+                "intraday": live_channels["intraday"],
+                "profile": profile["core_profile_status"],
+            },
+        }
         market_blocks_ok = any(block.get("status") == "ok" for block in [profile, price, trading_stats, foreign_flow, technical])
         status = "ok" if price["status"] == "ok" and trading_stats["status"] == "ok" else "partial" if market_blocks_ok else "unavailable"
 
@@ -320,6 +742,8 @@ class VietnamCompanyResearchService:
         return {
             "ticker": symbol,
             "status": status,
+            "session_context": session_context,
+            "live_market": live_market,
             "profile": profile,
             "price": price,
             "trading_stats": trading_stats,
@@ -335,6 +759,25 @@ class VietnamCompanyResearchService:
             "order_book": order_book,
             "order_book_status": order_book_status,
             "diagnostics": {
+                "session": session_context,
+                "adjustment": {
+                    "status": adjustment_status,
+                    "raw_status": raw_adjustment_status or None,
+                    "source": SSI_DAILY_OHLC_SOURCE,
+                },
+                "live_channels": live_channels,
+                "daily_stock_price_capabilities": daily_stock_price_capabilities,
+                "profile": {
+                    "core_profile_status": profile["core_profile_status"],
+                    "optional_metadata_status": optional_metadata_status,
+                    "classification_source": profile["classification_source"],
+                    "source_endpoint": profile["source_endpoint"],
+                    "provider_version": profile["provider_version"],
+                    "fetched_at": profile["fetched_at"],
+                    "cache_status": profile["cache_status"],
+                    "missing_fields": profile["missing_fields"],
+                },
+                "quality_issues": detailed_issues,
                 "realtime": realtime_diagnostics,
                 "trade_tape": trade_tape_diagnostics,
                 "order_book": order_book_diagnostics,
@@ -350,12 +793,14 @@ class VietnamCompanyResearchService:
                 realtime_status,
                 trade_tape_status,
                 news,
+                order_book_status=order_book_status,
             ),
             "news": news,
             "financials": self._placeholder("not_implemented", EXTERNAL_FUTURE_SOURCE),
             "events": self._placeholder("not_implemented", EXTERNAL_FUTURE_SOURCE),
-            "data_quality_summary": _dict(row.get("data_quality_summary")),
-            "warnings": list(row.get("warnings") or []),
+            "quality_summary": quality_summary,
+            "data_quality_summary": data_quality_summary,
+            "warnings": self._user_warnings(row.get("warnings") or []),
             "errors": errors,
         }
 
@@ -371,6 +816,7 @@ class VietnamCompanyResearchService:
         realtime_status: Optional[Dict[str, Any]] = None,
         trade_tape_status: Optional[Dict[str, Any]] = None,
         news: Optional[Dict[str, Any]] = None,
+        order_book_status: Optional[Dict[str, Any]] = None,
     ) -> list[Dict[str, Any]]:
         has_daily_stock_price_fields = any(
             price.get(field) is not None
@@ -386,18 +832,28 @@ class VietnamCompanyResearchService:
         intraday_status = _dict(intraday).get("status") or "unavailable"
         realtime_status_value = _dict(realtime_status).get("status") or "unavailable"
         trade_tape_status_value = _dict(trade_tape_status).get("status") or "unavailable"
+        order_book_status_value = _dict(order_book_status).get("status") or "unavailable"
         return [
-            {"block": "Daily OHLCV", "source": SSI_DAILY_OHLC_SOURCE, "status": "ok" if technical.get("status") == "ok" or trading_stats.get("status") == "ok" else "missing"},
-            {"block": "Daily stock price", "source": SSI_DAILY_STOCK_PRICE_SOURCE, "status": daily_stock_status},
-            {"block": "Intraday OHLCV", "source": SSI_INTRADAY_SOURCE, "status": intraday_status},
-            {"block": "Realtime snapshot", "source": SSI_REALTIME_SOURCE, "status": realtime_status_value},
-            {"block": "Trade tape", "source": SSI_TRADE_TAPE_SOURCE, "status": trade_tape_status_value},
+            {"group": "Prices", "block": "Daily OHLCV", "source": SSI_DAILY_OHLC_SOURCE, "status": "ok" if technical.get("status") == "ok" or trading_stats.get("status") == "ok" else "unavailable"},
+            {"group": "Prices", "block": "Daily stock price", "source": SSI_DAILY_STOCK_PRICE_SOURCE, "status": daily_stock_status},
+            {"group": "Live market", "block": "Intraday OHLCV", "source": SSI_INTRADAY_SOURCE, "status": intraday_status},
+            {"group": "Live market", "block": "Realtime snapshot", "source": SSI_REALTIME_SOURCE, "status": realtime_status_value},
+            {"group": "Live market", "block": "Order book", "source": _dict(order_book_status).get("source") or "SSI X-QUOTE", "status": order_book_status_value},
+            {"group": "Live market", "block": "Trade tape", "source": SSI_TRADE_TAPE_SOURCE, "status": trade_tape_status_value},
             {
+                "group": "Company",
                 "block": "Profile",
                 "source": profile.get("source") or SSI_SECURITIES_DETAILS_SOURCE,
-                "status": profile.get("quality_status") or profile.get("status", "unavailable"),
+                "status": profile.get("core_profile_status") or profile.get("status", "unavailable"),
             },
             {
+                "group": "Company",
+                "block": "Optional metadata",
+                "source": profile.get("source") or SSI_SECURITIES_DETAILS_SOURCE,
+                "status": profile.get("optional_metadata_status") or "incomplete",
+            },
+            {
+                "group": "News",
                 "block": "News",
                 "source": _dict(news).get("source") or NEWS_FUTURE_SOURCE,
                 "status": _dict(news).get("status") or "not_implemented",
@@ -450,6 +906,9 @@ class VietnamCompanyResearchService:
             "missing_fields": [],
             "field_coverage": {},
             "diagnostics": {},
+            "core_profile_status": "unavailable",
+            "optional_metadata_status": "incomplete",
+            "classification_source": None,
         }
         missing_price = {
             "latest_price": None,
@@ -461,6 +920,13 @@ class VietnamCompanyResearchService:
             "source": SSI_DAILY_OHLC_SOURCE,
             "canonical_source": SSI_DAILY_OHLC_SOURCE,
             "reference_source": SSI_DAILY_STOCK_PRICE_SOURCE,
+            "reference_price_source": None,
+            "ceiling_price_source": None,
+            "floor_price_source": None,
+            "completed_session_date": None,
+            "final_close_status": "unknown",
+            "adjustment_status": "not_provided",
+            "source_freshness": "unknown",
             "status": "missing",
         }
         missing_trading = {
@@ -556,6 +1022,25 @@ class VietnamCompanyResearchService:
         return {
             "ticker": symbol,
             "status": "unavailable",
+            "session_context": {
+                "completed_session_date": None,
+                "live_session_date": None,
+                "provider_event_time": None,
+                "fetched_at": None,
+                "cache_age_seconds": None,
+                "session_phase": "unknown",
+                "source_freshness": "unknown",
+            },
+            "live_market": {
+                "status": "unavailable",
+                "channels": {
+                    "last_price": "unavailable",
+                    "order_book": "unavailable",
+                    "trade_tape": "unavailable",
+                    "intraday": "unavailable",
+                },
+                "usable_channel_count": 0,
+            },
             "profile": profile,
             "price": missing_price,
             "trading_stats": missing_trading,
@@ -615,6 +1100,16 @@ class VietnamCompanyResearchService:
                     "profile": "unavailable",
                     "news": "not_implemented",
                 },
+            },
+            "quality_summary": {
+                "overall_status": "unavailable",
+                "groups": [
+                    {"key": "daily_data", "label": "Daily data", "status": "unavailable", "detail": "unknown"},
+                    {"key": "live_market", "label": "Live market", "status": "unavailable", "detail": "No usable live channels"},
+                    {"key": "company_metadata", "label": "Company metadata", "status": "unavailable", "detail": "Core profile unavailable"},
+                ],
+                "issue_codes": ["daily_ohlc_unavailable"],
+                "primary_issues": [],
             },
             "warnings": [],
             "errors": errors or {},

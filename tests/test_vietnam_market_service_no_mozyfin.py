@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sys
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from data_provider.vnstock_community_news_provider import clear_vnstock_community_news_cache
@@ -253,6 +253,7 @@ def _service() -> VietnamMarketService:
             mozyfin_news_enabled=False,
         ),
         ssi_fetcher=FakeSsiFetcher(),
+        time_func=lambda: datetime(2026, 6, 30, 3, 0, tzinfo=timezone.utc).timestamp(),
     )
 
 

@@ -4,7 +4,7 @@ import { ArrowLeft, RefreshCw } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
 import { stocksApi, type VietnamCompanyResearchResponse, type VietnamRealtimeTrade } from '../api/stocks';
 import { AppPage, Badge, Button, Loading } from '../components/common';
-import { DataQualitySummary, OrderBookLadder } from '../components/dashboard';
+import { OrderBookLadder } from '../components/dashboard';
 import { cn } from '../utils/cn';
 import {
   CEILING_PRICE_CLASS,
@@ -35,14 +35,13 @@ type DiagnosticRow = {
   value: string;
 };
 
-const TRADE_TAPE_STARTUP_REFETCH_INTERVAL_MS = 4_000;
-const TRADE_TAPE_STARTUP_REFETCH_MAX_WAIT_MS = 60_000;
+const TRADE_TAPE_STARTUP_MAX_WAIT_MS = 20_000;
 const SELECTED_LIVE_CONTEXT_REFRESH_INTERVAL_MS = 3_000;
 
 const statusVariant = (status?: string | null): StatusVariant => {
-  if (status === 'ok' || status === 'complete') return 'success';
-  if (status === 'loading') return 'info';
-  if (status === 'partial') return 'warning';
+  if (status === 'ok' || status === 'complete' || status === 'ready' || status === 'completed') return 'success';
+  if (status === 'loading' || status === 'reconnecting' || status === 'no_data') return 'info';
+  if (status === 'partial' || status === 'incomplete' || status === 'provisional') return 'warning';
   if (status === 'not_implemented') return 'info';
   if (status === 'missing' || status === 'unavailable' || status === 'disabled') return 'warning';
   return 'default';
@@ -394,7 +393,7 @@ const SectionShell: React.FC<{
   children: React.ReactNode;
   className?: string;
 }> = ({ title, source, status, children, className }) => (
-  <section className={cn('rounded-lg border border-border/70 bg-card p-4 shadow-soft-card', className)}>
+  <section className={cn('min-w-0 rounded-lg border border-border/70 bg-card p-4 shadow-soft-card', className)}>
     <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
       <h2 className="text-base font-semibold text-foreground">{title}</h2>
       <div className="flex flex-wrap gap-2">
@@ -490,25 +489,66 @@ const CompanyNewsSection: React.FC<{ block: VietnamCompanyResearchResponse['news
 
 const SourceCoveragePanel: React.FC<{ snapshot: VietnamCompanyResearchResponse }> = ({ snapshot }) => (
   <SectionShell title="Source coverage" source="Backend contract" status={snapshot.status}>
-    <div className="grid gap-2">
-      {snapshot.sourceCoverage.map((item) => (
-        <div
-          key={`${item.block}-${item.source ?? 'none'}`}
-          className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/50 bg-elevated/35 px-3 py-2 text-sm"
-        >
-          <span className="font-medium text-foreground">{item.block}</span>
-          <span className="flex flex-wrap items-center gap-2">
-            <span className="text-secondary-text">{formatSource(item.source)}</span>
-            <Badge variant={statusVariant(item.status)}>{statusLabel(item.status)}</Badge>
-          </span>
+    <div className="grid gap-3">
+      {Array.from(new Set(snapshot.sourceCoverage.map((item) => item.group ?? 'Other'))).map((group) => (
+        <div key={group}>
+          <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-secondary-text">{group}</h3>
+          <div className="grid gap-1">
+            {snapshot.sourceCoverage.filter((item) => (item.group ?? 'Other') === group).map((item) => (
+              <div
+                key={`${item.block}-${item.source ?? 'none'}`}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/40 bg-elevated/25 px-3 py-2 text-sm"
+              >
+                <span className="font-medium text-foreground">{item.block}</span>
+                <span className="flex flex-wrap items-center gap-2">
+                  <span className="hidden text-xs text-secondary-text sm:inline">{formatSource(item.source)}</span>
+                  <Badge variant={statusVariant(item.status)}>{statusLabel(item.status)}</Badge>
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
       ))}
     </div>
   </SectionShell>
 );
 
+const CompanyQualitySummary: React.FC<{ snapshot: VietnamCompanyResearchResponse }> = ({ snapshot }) => {
+  const summary = snapshot.qualitySummary;
+  if (!summary?.groups?.length) return null;
+  return (
+    <section className="rounded-lg border border-border/70 bg-card p-4 shadow-soft-card" aria-label="Company Research Data Summary">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-base font-semibold text-foreground">Data summary</h2>
+        <Badge variant={statusVariant(summary.overallStatus)} size="md">
+          {statusLabel(summary.overallStatus)}
+        </Badge>
+      </div>
+      <div className="mt-3 grid gap-2 md:grid-cols-3">
+        {summary.groups.slice(0, 3).map((group) => (
+          <div key={group.key} className="rounded-lg border border-border/50 bg-elevated/30 p-3">
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-sm font-medium text-foreground">{group.label}</h3>
+              <Badge variant={statusVariant(group.status)}>{statusLabel(group.status)}</Badge>
+            </div>
+            {group.detail ? <p className="mt-1 text-xs text-secondary-text">{group.detail}</p> : null}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+};
+
 const CompanyDiagnosticsPanel: React.FC<{ snapshot: VietnamCompanyResearchResponse }> = ({ snapshot }) => {
   const rows = [
+    ...liveStatusDiagnosticRows('Session context', snapshot.diagnostics?.session),
+    ...liveStatusDiagnosticRows('Adjustment lineage', snapshot.diagnostics?.adjustment),
+    ...liveStatusDiagnosticRows('Live channel states', snapshot.diagnostics?.liveChannels),
+    ...liveStatusDiagnosticRows('DailyStockPrice capabilities', snapshot.diagnostics?.dailyStockPriceCapabilities),
+    ...liveStatusDiagnosticRows('Profile readiness', snapshot.diagnostics?.profile),
+    ...liveStatusDiagnosticRows('Quality issues', {
+      codes: snapshot.qualitySummary?.issueCodes ?? [],
+    }),
     ...liveStatusDiagnosticRows('SSI profile metadata status', snapshot.profile.diagnostics),
     ...liveStatusDiagnosticRows('SSI DailyStockPrice status', snapshot.dailyStockPrice?.diagnostics),
     ...liveStatusDiagnosticRows('SSI intraday status', snapshot.intraday?.diagnostics),
@@ -574,6 +614,7 @@ const VietnamCompanyResearchPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [tradeTapeWarmupTimedOut, setTradeTapeWarmupTimedOut] = useState(false);
   const tradeTapeWarmupStartedAtRef = useRef<{ symbol: string; startedAt: number } | null>(null);
   const selectedLiveContextRefreshInFlightRef = useRef(false);
 
@@ -632,21 +673,20 @@ const VietnamCompanyResearchPage: React.FC = () => {
   useEffect(() => {
     if (!ticker || !snapshot || hasCompanyTradeTapeData(snapshot) || !isCompanyTradeTapeWarmupPending(snapshot)) {
       tradeTapeWarmupStartedAtRef.current = null;
+      setTradeTapeWarmupTimedOut(false);
       return undefined;
     }
     if (tradeTapeWarmupStartedAtRef.current?.symbol !== ticker) {
       tradeTapeWarmupStartedAtRef.current = { symbol: ticker, startedAt: Date.now() };
+      setTradeTapeWarmupTimedOut(false);
     }
-    const startedAt = tradeTapeWarmupStartedAtRef.current.startedAt;
-    const timer = window.setInterval(() => {
-      if (Date.now() - startedAt >= TRADE_TAPE_STARTUP_REFETCH_MAX_WAIT_MS) {
-        window.clearInterval(timer);
-        return;
-      }
-      void loadSnapshot(false, true);
-    }, TRADE_TAPE_STARTUP_REFETCH_INTERVAL_MS);
-    return () => window.clearInterval(timer);
-  }, [loadSnapshot, snapshot, ticker]);
+    const elapsed = Date.now() - tradeTapeWarmupStartedAtRef.current.startedAt;
+    const timer = window.setTimeout(
+      () => setTradeTapeWarmupTimedOut(true),
+      Math.max(0, TRADE_TAPE_STARTUP_MAX_WAIT_MS - elapsed),
+    );
+    return () => window.clearTimeout(timer);
+  }, [snapshot, ticker]);
 
   if (loading && !snapshot) {
     return (
@@ -688,19 +728,22 @@ const VietnamCompanyResearchPage: React.FC = () => {
     { label: 'Reference price (VND)', value: snapshot.price.referencePrice, formatter: formatPrice, titleFormatter: formatFullVndTitle, tone: REFERENCE_PRICE_CLASS, testId: 'company-reference-price' },
     { label: 'Ceiling price (VND)', value: snapshot.price.ceilingPrice, formatter: formatPrice, titleFormatter: formatFullVndTitle, tone: CEILING_PRICE_CLASS, testId: 'company-ceiling-price' },
     { label: 'Floor price (VND)', value: snapshot.price.floorPrice, formatter: formatPrice, titleFormatter: formatFullVndTitle, tone: FLOOR_PRICE_CLASS, testId: 'company-floor-price' },
-    { label: 'Price date', value: snapshot.price.priceDate, formatter: (value) => formatNumber(value) },
-  ];
+    { label: 'Price date', value: snapshot.price.priceDate, formatter: (value?: number | string | null) => formatNumber(value) },
+  ].filter((row) => (
+    ['Canonical latest price (VND)', 'Daily close (VND)', 'Price date'].includes(row.label)
+    || hasMetricValue(row.value)
+  ));
   const profileRows: MetricRow[] = [
     { label: 'Ticker', value: snapshot.profile.ticker },
     { label: 'Company name', value: snapshot.profile.name },
     { label: 'English name', value: snapshot.profile.nameEn },
     { label: 'Exchange', value: snapshot.profile.exchange },
     { label: 'Market', value: snapshot.profile.market },
-    { label: 'Industry', value: snapshot.profile.industry },
     {
       label: 'Sector',
       value: snapshot.profile.sector,
     },
+    { label: 'Industry', value: snapshot.profile.industry },
     { label: 'Security type', value: snapshot.profile.securityType },
     { label: 'Issuer', value: snapshot.profile.issuer },
     { label: 'Lot size', value: snapshot.profile.lotSize },
@@ -710,8 +753,8 @@ const VietnamCompanyResearchPage: React.FC = () => {
     hasMetricValue(row.value)
     && !(row.label === 'Sector' && row.value === snapshot.profile.industry)
   ));
-  const profileQualityStatus = snapshot.profile.qualityStatus ?? (
-    snapshot.profile.status === 'ok' ? 'partial' : 'unavailable'
+  const profileQualityStatus = snapshot.profile.coreProfileStatus ?? (
+    snapshot.profile.status === 'ok' ? 'ready' : 'unavailable'
   );
   const tradingRows: MetricRow[] = [
     { label: 'Open (VND)', value: snapshot.tradingStats.open, formatter: formatPrice, titleFormatter: formatFullVndTitle, tone: boardPriceClass(snapshot.tradingStats.open), testId: 'company-open-price' },
@@ -772,7 +815,11 @@ const VietnamCompanyResearchPage: React.FC = () => {
   const hasIntradayData = hasCompanyIntradayData(snapshot);
   const hasRealtimeData = hasCompanyRealtimeData(snapshot);
   const hasTradeTapeRows = hasCompanyTradeTapeData(snapshot);
-  const tradeTapeWarmupPending = !hasTradeTapeRows && isCompanyTradeTapeWarmupPending(snapshot);
+  const tradeTapeWarmupPending = (
+    !hasTradeTapeRows
+    && !tradeTapeWarmupTimedOut
+    && isCompanyTradeTapeWarmupPending(snapshot)
+  );
   const realtimeStreamState = streamLifecycleState(snapshot.realtimeStatus, snapshot.diagnostics?.realtime);
   const tradeTapeStreamState = streamLifecycleState(snapshot.tradeTapeStatus, snapshot.diagnostics?.tradeTape);
   const realtimePanelStatus = realtimeStreamState === 'stale'
@@ -826,16 +873,12 @@ const VietnamCompanyResearchPage: React.FC = () => {
     <AppPage className="space-y-4">
       <CompanyHeader snapshot={snapshot} onRefresh={() => void loadSnapshot(true)} refreshing={refreshing} />
       {error ? <section className="rounded-lg border border-warning/30 bg-warning/10 p-3 text-sm text-warning">{error}</section> : null}
-      <DataQualitySummary summary={snapshot.dataQualitySummary} />
+      <CompanyQualitySummary snapshot={snapshot} />
       <section className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
         <SectionShell title="Company profile" source={snapshot.profile.source} status={profileQualityStatus}>
           <MetricGrid rows={profileRows} />
-          <p className="mt-3 text-xs text-secondary-text">
-            Endpoint: {snapshot.profile.sourceEndpoint ?? '—'} · Provider: {snapshot.profile.providerVersion ?? '—'} ·
-            {' '}Fetched: {snapshot.profile.fetchedAt ?? '—'} · Cache: {snapshot.profile.cacheStatus ?? '—'}
-          </p>
-          {profileQualityStatus === 'partial' ? (
-            <p className="mt-3 text-xs text-secondary-text">Profile partial. Some metadata is unavailable.</p>
+          {snapshot.profile.optionalMetadataStatus === 'incomplete' && profileQualityStatus === 'ready' ? (
+            <p className="mt-3 text-xs text-secondary-text">Optional metadata incomplete.</p>
           ) : profileQualityStatus === 'unavailable' ? (
             <p className="mt-3 text-xs text-secondary-text">Profile unavailable. Daily SSI data is still available.</p>
           ) : null}
@@ -845,7 +888,11 @@ const VietnamCompanyResearchPage: React.FC = () => {
       <section className="grid gap-4 xl:grid-cols-2">
         <SectionShell title="Price summary" source={snapshot.price.source} status={snapshot.price.status}>
           <p className="mb-3 text-xs text-secondary-text">
-            Canonical price: {formatSource(snapshot.price.canonicalSource ?? snapshot.price.source)}. Reference and limit fields: {formatSource(snapshot.price.referenceSource)}.
+            Canonical price: {formatSource(snapshot.price.canonicalSource ?? snapshot.price.source)}.
+            {snapshot.price.sourceFreshness === 'latest_completed' && snapshot.price.completedSessionDate
+              ? ` Latest completed session ${snapshot.price.completedSessionDate}.`
+              : null}
+            {snapshot.price.finalCloseStatus === 'provisional' ? ' Current session · provisional.' : null}
           </p>
           {dailyStockPriceDateMatch === 'mismatched' ? (
             <p className="mb-3 rounded-lg border border-warning/30 bg-warning/10 p-2 text-xs text-warning">
@@ -884,9 +931,11 @@ const VietnamCompanyResearchPage: React.FC = () => {
           <MetricGrid rows={technicalRows} />
         </SectionShell>
         <SectionShell title="Intraday pulse" source={snapshot.intraday?.source ?? 'SSI IntradayOhlc'} status={snapshot.intraday?.status ?? 'unavailable'}>
-          <p className="mb-3 text-xs text-secondary-text">
-            {companyIntradayCadenceText(snapshot)}. Requested {snapshot.intraday?.requestedTimeframe ?? '-'}; SSI IntradayOhlc is not a realtime matched quote.
-          </p>
+          {hasIntradayData ? (
+            <p className="mb-3 text-xs text-secondary-text">
+              {companyIntradayCadenceText(snapshot)}. Requested {snapshot.intraday?.requestedTimeframe ?? '-'}; SSI IntradayOhlc is not a realtime matched quote.
+            </p>
+          ) : null}
           {hasIntradayData ? (
             <MetricGrid rows={intradayRows} />
           ) : (
@@ -897,10 +946,15 @@ const VietnamCompanyResearchPage: React.FC = () => {
           {hasRealtimeData ? (
             <MetricGrid rows={realtimeRows} />
           ) : (
-            <p className="text-sm text-secondary-text">{streamLifecycleCopy(realtimeStreamState, 'SSI realtime unavailable. Daily SSI data is still available.')}</p>
+            <p className="text-sm text-secondary-text">
+              {snapshot.liveMarket?.channels.lastPrice === 'no_data'
+                ? 'Last-price snapshot has no data.'
+                : streamLifecycleCopy(realtimeStreamState, 'Last-price snapshot unavailable. Other live channels may still be usable.')}
+            </p>
           )}
         </SectionShell>
         <OrderBookLadder
+          className="min-w-0"
           orderBook={snapshot.orderBook}
           status={snapshot.orderBookStatus}
           referencePrice={referencePrice}
@@ -921,7 +975,13 @@ const VietnamCompanyResearchPage: React.FC = () => {
           ) : tradeTapeWarmupPending ? (
             <p className="text-sm text-secondary-text">Loading SSI trade tape...</p>
           ) : (
-            <p className="text-sm text-secondary-text">{streamLifecycleCopy(tradeTapeStreamState, 'SSI trade tape unavailable.')}</p>
+            <p className="text-sm text-secondary-text">
+              {tradeTapeWarmupTimedOut
+                ? 'No trade-tape rows arrived during the bounded startup wait.'
+                : snapshot.liveMarket?.channels.tradeTape === 'reconnecting'
+                  ? 'Trade tape reconnecting.'
+                  : streamLifecycleCopy(tradeTapeStreamState, 'SSI trade tape unavailable.')}
+            </p>
           )}
         </SectionShell>
       </section>

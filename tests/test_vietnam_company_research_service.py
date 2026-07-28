@@ -132,6 +132,9 @@ def test_vietnam_company_research_endpoint_returns_phase_one_contract(monkeypatc
     payload = response.json()
     assert payload["ticker"] == "FPT"
     assert payload["status"] == "ok"
+    assert payload["session_context"]["completed_session_date"] == "2026-06-17"
+    assert payload["price"]["final_close_status"] == "completed"
+    assert payload["price"]["adjustment_status"] == "not_provided"
     assert payload["profile"]["source"] == "SSI SecuritiesDetails"
     assert payload["profile"]["industry"] == "Information Technology"
     assert payload["price"]["source"] == "SSI DailyOhlc"
@@ -162,6 +165,8 @@ def test_vietnam_company_research_endpoint_returns_phase_one_contract(monkeypatc
     assert payload["realtime_snapshot"]["price"] == 124.8
     assert payload["trade_tape_status"]["status"] == "ok"
     assert payload["trade_tape"][0]["price"] == 124.8
+    assert payload["live_market"]["status"] in {"partial", "ready"}
+    assert len(payload["quality_summary"]["groups"]) == 3
     assert coverage["News"]["status"] == "not_implemented"
     assert payload["news"]["items"] == []
     assert payload["news"]["status"] == "not_implemented"

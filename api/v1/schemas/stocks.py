@@ -681,6 +681,9 @@ class VietnamCompanyProfile(BaseModel):
     missing_fields: List[str] = Field(default_factory=list)
     field_coverage: Dict[str, bool] = Field(default_factory=dict)
     diagnostics: Dict[str, Any] = Field(default_factory=dict)
+    core_profile_status: Literal["ready", "unavailable"] = "unavailable"
+    optional_metadata_status: Literal["complete", "incomplete"] = "incomplete"
+    classification_source: Optional[str] = None
 
 
 class VietnamCompanyPrice(BaseModel):
@@ -695,6 +698,13 @@ class VietnamCompanyPrice(BaseModel):
     source: Optional[str] = None
     canonical_source: Optional[str] = None
     reference_source: Optional[str] = None
+    reference_price_source: Optional[str] = None
+    ceiling_price_source: Optional[str] = None
+    floor_price_source: Optional[str] = None
+    completed_session_date: Optional[str] = None
+    final_close_status: Literal["completed", "provisional", "unknown", "not_applicable"] = "unknown"
+    adjustment_status: Literal["adjusted", "unadjusted", "not_provided", "unknown"] = "unknown"
+    source_freshness: Literal["current", "latest_completed", "publication_lag", "stale", "unknown"] = "unknown"
     status: str = "missing"
 
 
@@ -773,6 +783,8 @@ class VietnamCompanyIntraday(BaseModel):
     cadence_status: Optional[str] = None
     latest_date: Optional[str] = None
     daily_price_date: Optional[str] = None
+    target_session_date: Optional[str] = None
+    session_basis: Optional[str] = None
     date_match: Optional[str] = None
     source: Optional[str] = None
     status: str = "unavailable"
@@ -784,6 +796,7 @@ class VietnamCompanySourceCoverageItem(BaseModel):
     """Per-block source coverage row for Vietnam company research."""
 
     block: str
+    group: Optional[str] = None
     source: Optional[str] = None
     status: str
 
@@ -802,6 +815,8 @@ class VietnamCompanyResearchResponse(BaseModel):
 
     ticker: str
     status: str = "partial"
+    session_context: Dict[str, Any] = Field(default_factory=dict)
+    live_market: Dict[str, Any] = Field(default_factory=dict)
     profile: VietnamCompanyProfile
     price: VietnamCompanyPrice
     trading_stats: VietnamCompanyTradingStats
@@ -822,6 +837,7 @@ class VietnamCompanyResearchResponse(BaseModel):
     financials: VietnamCompanyPlaceholderBlock
     events: VietnamCompanyPlaceholderBlock
     data_quality_summary: Dict[str, Any] = Field(default_factory=dict)
+    quality_summary: Dict[str, Any] = Field(default_factory=dict)
     warnings: List[str] = Field(default_factory=list)
     errors: Dict[str, Any] = Field(default_factory=dict)
 

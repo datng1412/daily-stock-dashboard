@@ -387,6 +387,12 @@ export type VietnamWatchItem = {
   orderBook?: VietnamOrderBook | null;
   orderBookStatus?: VietnamOptionalLiveStatus;
   diagnostics?: {
+    session?: Record<string, unknown> | null;
+    adjustment?: Record<string, unknown> | null;
+    liveChannels?: Record<string, unknown> | null;
+    dailyStockPriceCapabilities?: Record<string, unknown> | null;
+    profile?: Record<string, unknown> | null;
+    qualityIssues?: Array<Record<string, unknown>> | null;
     realtime?: Record<string, unknown> | null;
     tradeTape?: Record<string, unknown> | null;
     orderBook?: Record<string, unknown> | null;
@@ -1452,6 +1458,9 @@ export type VietnamCompanyProfile = {
   missingFields?: string[];
   fieldCoverage?: Record<string, boolean>;
   diagnostics?: Record<string, unknown>;
+  coreProfileStatus?: 'ready' | 'unavailable';
+  optionalMetadataStatus?: 'complete' | 'incomplete';
+  classificationSource?: string | null;
 };
 
 export type VietnamCompanyPrice = {
@@ -1464,7 +1473,62 @@ export type VietnamCompanyPrice = {
   source?: string | null;
   canonicalSource?: string | null;
   referenceSource?: string | null;
+  referencePriceSource?: string | null;
+  ceilingPriceSource?: string | null;
+  floorPriceSource?: string | null;
+  completedSessionDate?: string | null;
+  finalCloseStatus?: 'completed' | 'provisional' | 'unknown' | 'not_applicable';
+  adjustmentStatus?: 'adjusted' | 'unadjusted' | 'not_provided' | 'unknown';
+  sourceFreshness?: 'current' | 'latest_completed' | 'publication_lag' | 'stale' | 'unknown';
   status: 'ok' | 'missing' | string;
+};
+
+export type VietnamCompanySessionContext = {
+  completedSessionDate?: string | null;
+  liveSessionDate?: string | null;
+  providerEventTime?: string | null;
+  fetchedAt?: string | null;
+  cacheAgeSeconds?: number | null;
+  sessionPhase?: string | null;
+  sessionPhaseLabel?: string | null;
+  marketSessionActive?: boolean;
+  holidayAware?: boolean;
+  sourceFreshness?: 'current' | 'latest_completed' | 'publication_lag' | 'stale' | 'unknown' | string;
+};
+
+export type VietnamCompanyChannelState =
+  | 'ready'
+  | 'partial'
+  | 'reconnecting'
+  | 'no_data'
+  | 'stale'
+  | 'unavailable'
+  | 'disabled'
+  | 'error';
+
+export type VietnamCompanyLiveMarket = {
+  status: 'ready' | 'partial' | 'unavailable';
+  channels: {
+    lastPrice: VietnamCompanyChannelState;
+    orderBook: VietnamCompanyChannelState;
+    tradeTape: VietnamCompanyChannelState;
+    intraday: VietnamCompanyChannelState;
+  };
+  usableChannelCount?: number;
+  sessionDate?: string | null;
+  providerEventTime?: string | null;
+};
+
+export type VietnamCompanyQualitySummary = {
+  overallStatus?: 'ready' | 'partial' | 'unavailable' | string;
+  groups: Array<{
+    key: 'daily_data' | 'live_market' | 'company_metadata' | string;
+    label: string;
+    status: string;
+    detail?: string | null;
+  }>;
+  issueCodes?: string[];
+  primaryIssues?: VietnamDataQualityIssue[];
 };
 
 export type VietnamCompanyTradingStats = {
@@ -1595,6 +1659,8 @@ export type VietnamCompanyIntraday = {
   cadenceStatus?: string | null;
   latestDate?: string | null;
   dailyPriceDate?: string | null;
+  targetSessionDate?: string | null;
+  sessionBasis?: 'current_live_session' | 'latest_completed_session' | string | null;
   dateMatch?: string | null;
   source?: string | null;
   status: 'ok' | 'disabled' | 'unavailable' | 'error' | string;
@@ -1629,6 +1695,7 @@ export type VietnamDataQualitySummary = {
 };
 
 export type VietnamCompanySourceCoverageItem = {
+  group?: string | null;
   block: string;
   source?: string | null;
   status: string;
@@ -1644,6 +1711,8 @@ export type VietnamCompanyPlaceholderBlock = {
 export type VietnamCompanyResearchResponse = {
   ticker: string;
   status: 'ok' | 'partial' | 'unavailable' | string;
+  sessionContext?: VietnamCompanySessionContext;
+  liveMarket?: VietnamCompanyLiveMarket;
   profile: VietnamCompanyProfile;
   price: VietnamCompanyPrice;
   tradingStats: VietnamCompanyTradingStats;
@@ -1671,11 +1740,18 @@ export type VietnamCompanyResearchResponse = {
   orderBook?: VietnamOrderBook | null;
   orderBookStatus?: VietnamOptionalLiveStatus;
   diagnostics?: {
+    session?: Record<string, unknown> | null;
+    adjustment?: Record<string, unknown> | null;
+    liveChannels?: Record<string, unknown> | null;
+    dailyStockPriceCapabilities?: Record<string, unknown> | null;
+    profile?: Record<string, unknown> | null;
+    qualityIssues?: Array<Record<string, unknown>> | null;
     realtime?: Record<string, unknown> | null;
     tradeTape?: Record<string, unknown> | null;
     orderBook?: Record<string, unknown> | null;
   };
   dataQualitySummary?: VietnamDataQualitySummary;
+  qualitySummary?: VietnamCompanyQualitySummary;
   sourceCoverage: VietnamCompanySourceCoverageItem[];
   news: VietnamCompanyPlaceholderBlock;
   financials: VietnamCompanyPlaceholderBlock;

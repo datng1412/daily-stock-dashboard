@@ -337,4 +337,5 @@ def test_company_snapshot_preserves_partial_profile_without_hiding_market_data()
     assert snapshot["price"]["canonical_source"] == "SSI DailyOhlc"
     assert snapshot["daily_stock_price"]["source"] == "SSI DailyStockPrice"
     coverage = {item["block"]: item for item in snapshot["source_coverage"]}
-    assert coverage["Profile"]["status"] == "partial"
+    assert coverage["Profile"]["status"] == "ready"
+    assert coverage["Optional metadata"]["status"] == "incomplete"

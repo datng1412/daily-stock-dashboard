@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -158,7 +159,12 @@ def test_intraday_normalization_orders_deduplicates_and_preserves_equal_time_eve
     assert [row["close"] for row in rows] == [10.5, 11.5, 12.5]
 
 
-def _service(fetcher: FakeSsiFetcher, *, intraday_enabled: bool = True) -> VietnamMarketService:
+def _service(
+    fetcher: FakeSsiFetcher,
+    *,
+    intraday_enabled: bool = True,
+    now: str = "2026-06-30T16:00:00",
+) -> VietnamMarketService:
     clear_vietnam_cache()
     return VietnamMarketService(
         manager=ExplodingManager(),
@@ -181,6 +187,9 @@ def _service(fetcher: FakeSsiFetcher, *, intraday_enabled: bool = True) -> Vietn
             mozyfin_news_enabled=False,
         ),
         ssi_fetcher=fetcher,
+        time_func=lambda: datetime.fromisoformat(now)
+        .replace(tzinfo=ZoneInfo("Asia/Ho_Chi_Minh"))
+        .timestamp(),
     )
 
 
@@ -251,7 +260,7 @@ def test_ssi_intraday_date_mismatch_is_unavailable_without_downgrading_daily_row
     assert item["daily_stock_price"]["status"] == "ok"
     assert item["intraday_source"] == "SSI IntradayOhlc"
     assert item["intraday_status"]["status"] == "unavailable"
-    assert item["intraday_status"]["message"] == "SSI IntradayOhlc latest candle date does not match latest daily trading date."
+    assert item["intraday_status"]["message"] == "SSI IntradayOhlc latest candle date does not match the target market session."
     assert item["intraday_status"]["intraday_latest_date"] == "2026-06-29"
     assert item["intraday_status"]["daily_price_date"] == "2026-06-30"
     assert item["intraday_status"]["date_match"] == "mismatched"
@@ -268,6 +277,38 @@ def test_ssi_intraday_date_mismatch_is_unavailable_without_downgrading_daily_row
     assert item["intraday_candles"] == []
     assert item["intraday_pulse"] is None
     assert item["intraday_labels"] == []
+
+
+def test_active_session_intraday_targets_current_date_not_previous_daily_date():
+    fetcher = FakeSsiFetcher(
+        {
+            "status": "ok",
+            "source": "SSI",
+            "rows": [
+                {
+                    "date_time": "2026-07-01T10:00:00+07:00",
+                    "open": 131.0,
+                    "high": 132.0,
+                    "low": 130.5,
+                    "close": 131.5,
+                    "volume": 2000,
+                    "ticker": "FPT",
+                    "source": "SSI",
+                }
+            ],
+        }
+    )
+
+    item = _service(
+        fetcher,
+        now="2026-07-01T10:01:00",
+    ).build_watchlist(["FPT"], force_refresh=True, include_intraday=True)["watchlist"][0]
+
+    assert item["latest_price_date"] == "2026-06-30"
+    assert item["intraday_status"]["status"] == "ok"
+    assert item["intraday_status"]["target_session_date"] == "2026-07-01"
+    assert item["intraday_status"]["session_basis"] == "current_live_session"
+    assert item["intraday_status"]["date_match"] == "matched"
 
 
 def test_ssi_intraday_detects_provider_returned_minute_granularity():

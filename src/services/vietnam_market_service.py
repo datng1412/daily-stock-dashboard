@@ -1688,6 +1688,8 @@ INTRADAY_DIAGNOSTIC_KEYS = {
     "pages_used",
     "intraday_latest_date",
     "daily_price_date",
+    "target_session_date",
+    "session_basis",
     "date_match",
     "intraday_granularity",
     "intraday_granularity_seconds",
@@ -3748,6 +3750,7 @@ class VietnamMarketService:
         ssi_fetcher: Optional[Any] = None,
         ssi_rest_provider: Optional[SsiRestProvider] = None,
         corporate_actions_provider: Optional[CorporateActionsProvider] = None,
+        time_func: Optional[Callable[[], float]] = None,
     ):
         self.config = config or _default_dashboard_config()
         if manager is not None:
@@ -3761,6 +3764,7 @@ class VietnamMarketService:
         self._ssi_rest_provider = ssi_rest_provider
         self._ssi_rest_provider_injected = ssi_rest_provider is not None
         self._corporate_actions_provider = corporate_actions_provider
+        self._time_func = time_func or time.time
 
     def _get_ssi_fetcher(self) -> Any:
         if self._ssi_fetcher is None:
@@ -4159,9 +4163,19 @@ class VietnamMarketService:
         if not intraday_latest_date and candles:
             intraday_latest_date = _intraday_candle_vn_date(candles[-1])
         daily_date = _valid_date_string(daily_price_date)
+        now_epoch = float(self._time_func())
+        market_session = vietnam_market_session_from_epoch(now_epoch)
+        current_vn_date = datetime.fromtimestamp(
+            now_epoch, timezone.utc
+        ).astimezone(VN_TIMEZONE).date().isoformat()
+        active_session = bool(market_session.get("market_session_active"))
+        target_session_date = current_vn_date if active_session else daily_date
+        session_basis = "current_live_session" if active_session else "latest_completed_session"
         diagnostics = {
             "intraday_latest_date": intraday_latest_date,
             "daily_price_date": daily_date,
+            "target_session_date": target_session_date,
+            "session_basis": session_basis,
             "date_match": "unknown",
             "intraday_granularity": intraday_payload.get("intraday_granularity") or "unknown",
             "intraday_granularity_seconds": intraday_payload.get("intraday_granularity_seconds"),
@@ -4170,14 +4184,14 @@ class VietnamMarketService:
             "intraday_actual_granularity_seconds": intraday_payload.get("intraday_actual_granularity_seconds") or intraday_payload.get("intraday_granularity_seconds"),
             "intraday_cadence_status": intraday_payload.get("intraday_cadence_status") or "unknown",
         }
-        if intraday_latest_date and daily_date:
-            diagnostics["date_match"] = "matched" if intraday_latest_date == daily_date else "mismatched"
+        if intraday_latest_date and target_session_date:
+            diagnostics["date_match"] = "matched" if intraday_latest_date == target_session_date else "mismatched"
         if diagnostics["date_match"] == "mismatched":
             diagnostics["failure_class"] = "stale_or_date_mismatched"
             return self._ssi_intraday_unavailable_payload(
                 str(intraday_payload.get("intraday_timeframe") or self.config.intraday_timeframe or "provider"),
                 status="unavailable",
-                reason="SSI IntradayOhlc latest candle date does not match latest daily trading date.",
+                reason="SSI IntradayOhlc latest candle date does not match the target market session.",
                 diagnostics=diagnostics,
             )
 
@@ -4186,6 +4200,8 @@ class VietnamMarketService:
             {
                 "intraday_latest_date": intraday_latest_date,
                 "daily_price_date": daily_date,
+                "target_session_date": target_session_date,
+                "session_basis": session_basis,
                 "date_match": diagnostics["date_match"],
                 "intraday_requested_timeframe": updated.get("intraday_requested_timeframe") or updated.get("intraday_timeframe"),
                 "intraday_actual_granularity": updated.get("intraday_actual_granularity") or diagnostics["intraday_actual_granularity"],
@@ -4198,6 +4214,8 @@ class VietnamMarketService:
             {
                 "intraday_latest_date": intraday_latest_date,
                 "daily_price_date": daily_date,
+                "target_session_date": target_session_date,
+                "session_basis": session_basis,
                 "date_match": diagnostics["date_match"],
                 "intraday_requested_timeframe": updated.get("intraday_requested_timeframe") or updated.get("intraday_timeframe"),
                 "intraday_actual_granularity": updated.get("intraday_actual_granularity") or diagnostics["intraday_actual_granularity"],
@@ -4209,6 +4227,8 @@ class VietnamMarketService:
         status_diagnostics.update(
             {
                 "daily_price_date": daily_date,
+                "target_session_date": target_session_date,
+                "session_basis": session_basis,
                 "date_match": diagnostics["date_match"],
                 "intraday_cadence_status": status_payload.get("intraday_cadence_status"),
                 "intraday_actual_granularity": status_payload.get("intraday_actual_granularity"),
@@ -4222,6 +4242,8 @@ class VietnamMarketService:
             {
                 "intraday_latest_date": intraday_latest_date,
                 "daily_price_date": daily_date,
+                "target_session_date": target_session_date,
+                "session_basis": session_basis,
                 "date_match": diagnostics["date_match"],
                 "intraday_requested_timeframe": updated.get("intraday_requested_timeframe") or updated.get("intraday_timeframe"),
                 "intraday_actual_granularity": updated.get("intraday_actual_granularity") or diagnostics["intraday_actual_granularity"],
