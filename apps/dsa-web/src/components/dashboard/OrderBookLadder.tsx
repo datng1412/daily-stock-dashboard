@@ -88,7 +88,7 @@ export const OrderBookLadder: React.FC<{
   const publicStatus = stale ? 'stale' : (status?.status ?? (hasRows ? 'ok' : 'unavailable'));
 
   return (
-    <section className={cn('rounded-lg border border-border/60 bg-elevated/30 p-4', className)}>
+    <section className={cn('min-w-0 max-w-full overflow-hidden rounded-lg border border-border/60 bg-elevated/30 p-4', className)}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 className="text-sm font-semibold text-foreground">Order Book — SSI X-QUOTE</h3>
@@ -109,7 +109,7 @@ export const OrderBookLadder: React.FC<{
               Last available order book is stale: {reasonText(status, orderBook)}
             </p>
           ) : null}
-          <div className="mt-3 overflow-x-auto">
+          <div className="mt-3 w-full max-w-full overflow-x-auto">
             <table className="w-full min-w-[520px] text-left text-xs">
               <thead className="border-b border-border/70 uppercase text-secondary-text">
                 <tr>

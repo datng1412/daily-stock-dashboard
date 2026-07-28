@@ -24,6 +24,14 @@ import { AppPage, Badge, Button, Loading, Tooltip } from '../components/common';
 import { VietnamLightweightChart } from '../components/charts/VietnamLightweightChart';
 import { normalizeShortTermChartZones } from '../components/charts/lightweightChartData';
 import { DataQualitySummary, ForeignFlowWatchlistRankings, OrderBookLadder } from '../components/dashboard';
+import {
+  tradeTapeLifecycleDetail,
+  useTradeTapeLifecycle,
+  VietnamLiveMarketSummary,
+  VietnamMarketSessionStrip,
+  type TradeTapeLifecycleState,
+  type VietnamLiveChannelSummary,
+} from '../components/vietnam-dashboard';
 import { useForeignFlowWatchlistBatch } from '../hooks/useForeignFlowWatchlistBatch';
 import { cn } from '../utils/cn';
 import { buildVietnamConditionSummary, VIETNAM_CONDITION_SUMMARY_SUBTITLE } from '../utils/vietnamConditionSummary';
@@ -71,8 +79,6 @@ const AUTO_REFRESH_INTERVALS = [60, 180, 300];
 const REALTIME_SNAPSHOT_REFRESH_INTERVALS = [2, 3, 5, 10, 15];
 const TRADE_TAPE_REFRESH_INTERVALS = [5, 10, 15];
 const SELECTED_LIVE_CONTEXT_REFRESH_INTERVAL_MS = 3_000;
-const TRADE_TAPE_STARTUP_REFETCH_INTERVAL_MS = 4_000;
-const TRADE_TAPE_STARTUP_REFETCH_MAX_WAIT_MS = 60_000;
 const FILTER_SLOW_LOADING_MS = 3_000;
 const FILTER_VERY_SLOW_LOADING_MS = 8_000;
 const VN30_COMPONENTS_REQUEST_TIMEOUT_MS = 15_000;
@@ -846,6 +852,7 @@ const statusExplanation = (
 const tradeTapeExplanation = (state: ReadinessState) => {
   if (state === 'Loading') return 'Trade tape: current trade tape status is loading from existing frontend state.';
   if (state === 'Ready') return 'Trade tape: existing trade tape status is ok and usable trade rows are present.';
+  if (state === 'Partial') return 'Trade tape: prior usable rows remain visible while the live channel refreshes or is stale.';
   if (state === 'Disabled') return 'Trade tape: existing trade tape status is disabled.';
   if (state === 'Not implemented') return 'Trade tape: trade tape readiness is marked not implemented by the existing status.';
   return 'Trade tape: existing status is unavailable or no usable trade rows are present in the current response.';
@@ -874,8 +881,7 @@ const deriveDataReadiness = ({
   realtimeQuotes,
   realtimeLoading,
   realtimeTrades,
-  tradesLoading,
-  tradesError,
+  tradeTapeLifecycleState,
   marketPhase,
 }: {
   data?: VietnamWatchlistResponse | null;
@@ -884,8 +890,7 @@ const deriveDataReadiness = ({
   realtimeQuotes: Record<string, VietnamRealtimeQuote | undefined>;
   realtimeLoading: boolean;
   realtimeTrades: VietnamRealtimeTrade[];
-  tradesLoading: boolean;
-  tradesError?: string | null;
+  tradeTapeLifecycleState: TradeTapeLifecycleState;
   marketPhase: VietnamMarketPhase;
 }): DataReadinessItem[] => {
   const rows = data?.watchlist ?? [];
@@ -935,19 +940,17 @@ const deriveDataReadiness = ({
     realtimeLoading && !hasAnyRealtimeStatus,
   );
 
-  const selectedTradeStatus = normalizedStatus(selectedItem?.tradeTapeStatus?.status ?? selectedItem?.dataQualitySummary?.checks?.tradeTape);
   const selectedTradeRows = selectedItem?.tradeTape ?? [];
-  const tradeTapeState: ReadinessState = tradesLoading && !hasTradeTapeData(realtimeTrades) && !hasTradeTapeData(selectedTradeRows)
-    ? 'Loading'
-    : tradesError
-      ? 'Unavailable'
-      : hasTradeTapeData(realtimeTrades) || (selectedTradeStatus === 'ok' && hasTradeTapeData(selectedTradeRows))
-        ? 'Ready'
-        : selectedTradeStatus === 'disabled'
-          ? 'Disabled'
-          : selectedTradeStatus === 'not_implemented'
-            ? 'Not implemented'
-            : 'Unavailable';
+  const hasSelectedTradeRows = hasTradeTapeData(realtimeTrades) || hasTradeTapeData(selectedTradeRows);
+  const tradeTapeState: ReadinessState = tradeTapeLifecycleState === 'ready'
+    ? 'Ready'
+    : tradeTapeLifecycleState === 'loading'
+      ? 'Loading'
+      : tradeTapeLifecycleState === 'disabled'
+        ? 'Disabled'
+        : (tradeTapeLifecycleState === 'reconnecting' || tradeTapeLifecycleState === 'stale') && hasSelectedTradeRows
+          ? 'Partial'
+          : 'Unavailable';
 
   const newsReadyCount = rows.filter((item) => (item.news?.length ?? 0) > 0 || normalizedStatus(item.newsStatus?.status) === 'ok').length;
   const newsDisabledCount = rows.filter((item) => normalizedStatus(item.newsStatus?.status) === 'disabled').length;
@@ -1014,8 +1017,7 @@ const DataReadinessStrip: React.FC<{
   realtimeQuotes: Record<string, VietnamRealtimeQuote | undefined>;
   realtimeLoading: boolean;
   realtimeTrades: VietnamRealtimeTrade[];
-  tradesLoading: boolean;
-  tradesError?: string | null;
+  tradeTapeLifecycleState: TradeTapeLifecycleState;
   marketPhase: VietnamMarketPhase;
 }> = ({
   data,
@@ -1024,8 +1026,7 @@ const DataReadinessStrip: React.FC<{
   realtimeQuotes,
   realtimeLoading,
   realtimeTrades,
-  tradesLoading,
-  tradesError,
+  tradeTapeLifecycleState,
   marketPhase,
 }) => {
   const items = deriveDataReadiness({
@@ -1035,8 +1036,7 @@ const DataReadinessStrip: React.FC<{
     realtimeQuotes,
     realtimeLoading,
     realtimeTrades,
-    tradesLoading,
-    tradesError,
+    tradeTapeLifecycleState,
     marketPhase,
   });
 
@@ -1241,6 +1241,25 @@ const readCustomWatchlist = () => {
   } catch {
     return [];
   }
+};
+
+interface VietnamDashboardUrlState {
+  watchlist: string[];
+  selectedTicker: string | null;
+}
+
+const readVietnamDashboardUrlState = (): VietnamDashboardUrlState => {
+  if (typeof window === 'undefined') return { watchlist: [], selectedTicker: null };
+  const params = new URLSearchParams(window.location.search);
+  const watchlistValue = params.get('watchlist') ?? params.get('tickers') ?? '';
+  const watchlist = watchlistValue
+    ? normalizeVietnamWatchlist(watchlistValue.split(',')) ?? []
+    : [];
+  const selectedTicker = normalizeVietnamTicker(params.get('ticker') ?? '');
+  return {
+    watchlist,
+    selectedTicker: /^[A-Z0-9]{2,10}$/.test(selectedTicker) ? selectedTicker : null,
+  };
 };
 
 const writeCustomWatchlist = (tickers: string[]) => {
@@ -2227,7 +2246,7 @@ const DataStatusPanel: React.FC<{
   );
 
   return (
-    <section className="rounded-lg border border-border/70 bg-card p-4">
+    <section id="vn-dashboard-data-details" className="rounded-lg border border-border/70 bg-card p-4">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <div className="flex flex-wrap items-center gap-2">
@@ -2443,20 +2462,6 @@ const DataStatusPanel: React.FC<{
   );
 };
 
-const SelectedTickerMetric: React.FC<{
-  label: string;
-  value: React.ReactNode;
-  detail?: React.ReactNode;
-  title?: string;
-  valueClassName?: string;
-}> = ({ label, value, detail, title, valueClassName }) => (
-  <div className="min-w-0 rounded-lg border border-border/50 bg-elevated/35 p-3">
-    <dt className="text-xs text-secondary-text">{label}</dt>
-    <dd className={cn('mt-1 truncate text-sm font-semibold text-foreground', valueClassName)} title={title}>{value}</dd>
-    {detail ? <dd className="mt-1 truncate text-xs text-secondary-text">{detail}</dd> : null}
-  </div>
-);
-
 const SelectedTickerHeader: React.FC<{
   item?: VietnamWatchItem | null;
   realtimeQuote?: VietnamRealtimeQuote | null;
@@ -2504,83 +2509,126 @@ const SelectedTickerHeader: React.FC<{
     : 'Unavailable';
 
   return (
-    <section className="rounded-lg border border-border/70 bg-card p-4 shadow-soft-card">
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(280px,360px)]">
+    <section
+      className="rounded-lg border border-cyan/20 bg-card p-4 shadow-soft-card"
+      data-testid="selected-ticker-hero"
+    >
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-            <div className="min-w-0">
-              <p className="label-uppercase text-cyan">Selected ticker</p>
-              <div className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                <h2 className="text-2xl font-semibold text-foreground">{item.ticker}</h2>
-                {companyDisplayName(item) ? (
-                  <p className="min-w-0 text-sm text-secondary-text">{companyDisplayName(item)}</p>
-                ) : null}
-              </div>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Badge variant={sectionStateVariant(dailySectionState)}>{dailySectionState}</Badge>
-              {metadataExchange ? <Badge variant="default">{metadataExchange}</Badge> : null}
-              {metadataMarket && metadataMarket !== metadataExchange ? <Badge variant="default">{metadataMarket}</Badge> : null}
-              <Badge variant="info">{dailySourceLabel}</Badge>
-              {showRealtimeStatus ? (
-                <Badge variant={realtimeSnapshotStateVariant(realtimeState)}>{realtimeStatusBadgeText(realtimeStatus)}</Badge>
-              ) : null}
-              {showTradeTapeStatus ? (
-                <Badge variant="warning">{tradeTapeStatusBadgeText(tradeTapeStatus)}</Badge>
-              ) : null}
-              {item.newsStatus?.status === 'disabled' ? <Badge variant="default">News disabled</Badge> : null}
-              {item.newsStatus?.status === 'unavailable' ? <Badge variant="warning">News unavailable</Badge> : null}
-            </div>
+          <p className="label-uppercase text-cyan">Selected ticker</p>
+          <div className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <h2 className="text-2xl font-semibold text-foreground">{item.ticker}</h2>
+            {companyDisplayName(item) ? (
+              <p className="min-w-0 text-sm text-secondary-text">{companyDisplayName(item)}</p>
+            ) : null}
           </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Badge variant={sectionStateVariant(dailySectionState)}>{dailySectionState}</Badge>
+            {metadataExchange ? <Badge variant="default">{metadataExchange}</Badge> : null}
+            {metadataMarket && metadataMarket !== metadataExchange ? <Badge variant="default">{metadataMarket}</Badge> : null}
+            <Badge variant="info">{dailySourceLabel}</Badge>
+            <Badge variant={liveState.variant}>
+              <span>Live</span>
+              <span aria-hidden="true"> · {liveState.label}</span>
+            </Badge>
+            {showRealtimeStatus ? (
+              <Badge variant={realtimeSnapshotStateVariant(realtimeState)}>{realtimeStatusBadgeText(realtimeStatus)}</Badge>
+            ) : null}
+            {showTradeTapeStatus ? (
+              <Badge variant="warning">{tradeTapeStatusBadgeText(tradeTapeStatus)}</Badge>
+            ) : null}
+            {item.newsStatus?.status === 'disabled' ? <Badge variant="default">News disabled</Badge> : null}
+            {item.newsStatus?.status === 'unavailable' ? <Badge variant="warning">News unavailable</Badge> : null}
+          </div>
+        </div>
+        <div className="flex shrink-0 flex-wrap gap-2">
+          <a
+            href={`/vietnam/company/${item.ticker}`}
+            className="inline-flex h-9 items-center rounded-lg border border-border/70 bg-elevated px-3 text-sm font-medium text-foreground transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan/25"
+          >
+            Open Company Research
+          </a>
+          <a
+            href={`/foreign-flow?mode=ticker&ticker=${item.ticker}`}
+            className="inline-flex h-9 items-center rounded-lg border border-border/70 bg-elevated px-3 text-sm font-medium text-foreground transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan/25"
+          >
+            Open Foreign Flow
+          </a>
+        </div>
+      </div>
 
-          <dl className="mt-4 grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-            <SelectedTickerMetric
-              label="Daily close"
-              value={formatPrice(item.latestPrice ?? item.close)}
-              detail={item.latestPriceDate ?? item.priceDate ?? '-'}
-              valueClassName={ssiBoardPriceClass(item, dailyCloseValue(item))}
-            />
-            <SelectedTickerMetric
-              label="% change"
-              value={`${formatSignedNumber(item.changePct, 2)}%`}
-              detail="SSI DailyOhlc"
-              valueClassName={signalTone(item.changePct)}
-            />
-            <SelectedTickerMetric
-              label="Foreign net"
-              value={hasDisplayValue(foreignNetVolume) ? formatSignedVolume(foreignNetVolume) : '-'}
-              detail="shares"
-              title={formatFullSharesTitle(foreignNetVolume)}
-              valueClassName={signalTone(foreignNetVolume)}
-            />
-            <SelectedTickerMetric
-              label="Volume / 20D"
-              value={`${formatVolume(item.volume)} / ${formatVolume(avgVolume20D)}`}
-              detail={dailyVolumeRatio == null ? 'Ratio unavailable' : formatRatio(dailyVolumeRatio)}
+      <dl className="mt-4 grid gap-2 text-sm sm:grid-cols-2 xl:grid-cols-4" data-testid="selected-ticker-quick-facts">
+        <div className="rounded-lg border border-border/50 bg-elevated/35 p-3">
+          <dt className="text-xs font-medium text-secondary-text">Price</dt>
+          <dd className="mt-2 flex items-baseline justify-between gap-3">
+            <span className="text-xs text-secondary-text">Daily close</span>
+            <span className={cn('font-semibold tabular-nums', ssiBoardPriceClass(item, dailyCloseValue(item)))}>
+              {formatPrice(item.latestPrice ?? item.close)}
+            </span>
+          </dd>
+          <dd className="mt-1 flex items-baseline justify-between gap-3">
+            <span className="text-xs text-secondary-text">% change</span>
+            <span className={cn('font-semibold tabular-nums', signalTone(item.changePct))}>
+              {formatSignedNumber(item.changePct, 2)}%
+            </span>
+          </dd>
+          <dd className="mt-1 text-xs text-secondary-text">{item.latestPriceDate ?? item.priceDate ?? '—'}</dd>
+        </div>
+        <div className="rounded-lg border border-border/50 bg-elevated/35 p-3">
+          <dt className="text-xs font-medium text-secondary-text">Trading</dt>
+          <dd className="mt-2 flex items-baseline justify-between gap-3">
+            <span className="text-xs text-secondary-text">Volume / 20D</span>
+            <span
+              className="font-semibold tabular-nums text-foreground"
               title={[
                 formatFullSharesTitle(item.volume),
                 formatFullSharesTitle(avgVolume20D),
               ].filter(Boolean).join(' / ') || undefined}
-            />
-            <SelectedTickerMetric
-              label="RSI14 / MA state"
-              value={rsiValue == null ? '-' : formatNumber(rsiValue, 2)}
-              detail={maState.label}
-            />
-            <SelectedTickerMetric
-              label="Live"
-              value={liveState.label}
-              detail={realtimeStatusBadgeText(realtimeStatus)}
-            />
-          </dl>
+            >
+              {formatVolume(item.volume)} / {formatVolume(avgVolume20D)}
+            </span>
+          </dd>
+          <dd className="mt-1 text-xs text-secondary-text">
+            {dailyVolumeRatio == null ? 'Ratio unavailable' : formatRatio(dailyVolumeRatio)}
+          </dd>
         </div>
+        <div className="rounded-lg border border-border/50 bg-elevated/35 p-3">
+          <dt className="text-xs font-medium text-secondary-text">Foreign flow</dt>
+          <dd className="mt-2 flex items-baseline justify-between gap-3">
+            <span className="text-xs text-secondary-text">Foreign net</span>
+            <span
+              className={cn('font-semibold tabular-nums', signalTone(foreignNetVolume))}
+              title={formatFullSharesTitle(foreignNetVolume)}
+            >
+              {hasDisplayValue(foreignNetVolume) ? formatSignedVolume(foreignNetVolume) : '—'}
+            </span>
+          </dd>
+          <dd className="mt-1 text-xs text-secondary-text">Completed-session shares</dd>
+        </div>
+        <div className="rounded-lg border border-border/50 bg-elevated/35 p-3">
+          <dt className="text-xs font-medium text-secondary-text">Technical</dt>
+          <dd className="mt-2 flex items-baseline justify-between gap-3">
+            <span className="text-xs text-secondary-text">RSI14 / MA state</span>
+            <span className="font-semibold tabular-nums text-foreground">
+              {rsiValue == null ? '—' : formatNumber(rsiValue, 2)}
+            </span>
+          </dd>
+          <dd className="mt-1 text-xs text-secondary-text">{maState.label}</dd>
+        </div>
+      </dl>
 
-        <DataQualitySummary
-          compact
-          summary={dataQualitySummary}
-          className="w-full border-cyan/10 bg-elevated/20"
-        />
-      </div>
+      {dataQualitySummary ? (
+        <details className="mt-3 rounded-lg border border-border/50 bg-elevated/20 p-3">
+          <summary className="cursor-pointer text-xs font-medium text-secondary-text">
+            Data quality details
+          </summary>
+          <DataQualitySummary
+            compact
+            summary={dataQualitySummary}
+            className="mt-3 w-full border-cyan/10 bg-elevated/20"
+          />
+        </details>
+      ) : null}
     </section>
   );
 };
@@ -3054,9 +3102,10 @@ const IndicatorTable: React.FC<{
   );
 
   return (
-    <section className="rounded-lg border border-border/70 bg-card p-4">
+    <section className="min-w-0 max-w-full overflow-hidden rounded-lg border border-cyan/20 bg-card p-4 shadow-soft-card" data-testid="watchlist-scan-surface">
       <div className="mb-3 flex items-center justify-between gap-3">
         <div>
+          <p className="label-uppercase text-cyan">Watchlist scan</p>
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="text-base font-semibold text-foreground">Indicator table</h2>
             <Badge variant={sectionStateVariant(sectionState)}>{sectionState}</Badge>
@@ -3073,8 +3122,11 @@ const IndicatorTable: React.FC<{
         </span>
       </div>
       {items.length ? (
-        <div className="mb-3 rounded-lg border border-border/60 bg-elevated/30 p-3" data-testid="indicator-filter-controls">
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-7">
+        <details className="mb-3 rounded-lg border border-border/60 bg-elevated/30 p-3" data-testid="indicator-filter-controls">
+          <summary className="cursor-pointer text-sm font-medium text-foreground">
+            Filter and sort options
+          </summary>
+          <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-7">
             <label className="flex flex-col gap-1 text-xs font-medium text-secondary-text">
               Search ticker
               <input
@@ -3156,7 +3208,7 @@ const IndicatorTable: React.FC<{
               </Button>
             </div>
           </div>
-        </div>
+        </details>
       ) : null}
       {realtimeError ? (
         <div className="mb-3 rounded-lg border border-warning/20 bg-warning/10 p-2 text-xs text-warning">
@@ -3183,8 +3235,8 @@ const IndicatorTable: React.FC<{
         </div>
       ) : null}
       {filteredItems.length ? (
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[1500px] text-left text-sm">
+      <div className="w-full max-w-full overflow-x-auto">
+        <table className="w-full min-w-[980px] text-left text-sm">
           <thead className="border-b border-border/70 text-xs uppercase text-secondary-text">
             <tr>
               <th className="py-2 pr-3">{sortButton('ticker', 'Ticker')}</th>
@@ -3192,7 +3244,7 @@ const IndicatorTable: React.FC<{
               <th className="px-3 py-2 text-right">{sortButton('changePct', '% change', 'ml-auto')}</th>
               <th className="px-3 py-2 text-right">{sortButton('rsi14', 'RSI14', 'ml-auto')}</th>
               <th className="px-3 py-2">MA state</th>
-              <th className="px-3 py-2">
+              <th className="hidden px-3 py-2 2xl:table-cell">
                 <div className="flex items-start gap-1">
                   <div>Support<div className="mt-0.5 text-[10px] font-normal normal-case text-muted">D1 · 60 sessions</div></div>
                   <Tooltip content="Recent price zones below the latest daily close, derived from swing lows in the last 60 daily sessions." focusable>
@@ -3200,7 +3252,7 @@ const IndicatorTable: React.FC<{
                   </Tooltip>
                 </div>
               </th>
-              <th className="px-3 py-2">
+              <th className="hidden px-3 py-2 2xl:table-cell">
                 <div className="flex items-start gap-1">
                   <div>Resistance<div className="mt-0.5 text-[10px] font-normal normal-case text-muted">D1 · 60 sessions</div></div>
                   <Tooltip content="Recent price zones above the latest daily close, derived from swing highs in the last 60 daily sessions." focusable>
@@ -3209,11 +3261,11 @@ const IndicatorTable: React.FC<{
                 </div>
               </th>
               <th className="px-3 py-2 text-right">{sortButton('volumeRatio', 'Volume / 20D avg', 'ml-auto')}</th>
-              <th className="px-3 py-2 text-right">{sortButton('foreignNetVolume', 'Foreign net volume', 'ml-auto')}</th>
+              <th className="hidden px-3 py-2 text-right 2xl:table-cell">{sortButton('foreignNetVolume', 'Foreign net volume', 'ml-auto')}</th>
               <th className="px-3 py-2 text-right" title="Latest daily_available foreign net value from SSI DailyStockPrice">
                 {sortButton('foreignNetValue', 'NN ròng', 'ml-auto')}
               </th>
-              <th className="px-3 py-2 text-right" title="Five-session cumulative foreign net value from SSI DailyStockPrice">
+              <th className="hidden px-3 py-2 text-right 2xl:table-cell" title="Five-session cumulative foreign net value from SSI DailyStockPrice">
                 {sortButton('foreignNetValue5d', 'NN 5P', 'ml-auto')}
               </th>
               <th className="px-3 py-2">{sortButton('dataQuality', 'Data quality')}</th>
@@ -3242,7 +3294,11 @@ const IndicatorTable: React.FC<{
                     {(['Daily close', '% change', 'RSI14', 'MA state', 'Support', 'Resistance', 'Volume / 20D avg', 'Foreign net volume', 'NN ròng', 'NN 5P'] as const).map((label) => (
                       <td
                         key={label}
-                        className={cn('px-3 py-3', label !== 'MA state' && 'text-right tabular-nums')}
+                        className={cn(
+                          'px-3 py-3',
+                          label !== 'MA state' && 'text-right tabular-nums',
+                          ['Support', 'Resistance', 'Foreign net volume', 'NN 5P'].includes(label) && 'hidden 2xl:table-cell',
+                        )}
                         title={reason}
                         aria-label={`${item.ticker} ${label}: ${isLoadingRow ? 'Loading' : `Unavailable. ${reason}`}`}
                       >
@@ -3282,10 +3338,18 @@ const IndicatorTable: React.FC<{
                   key={item.ticker}
                   data-testid={`indicator-row-${item.ticker}`}
                   className={cn(
-                    'cursor-pointer border-b border-border/40 text-secondary-text hover:bg-elevated/40',
+                    'cursor-pointer border-b border-border/40 text-secondary-text hover:bg-elevated/40 focus-visible:bg-elevated/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cyan/30',
                     selectedTicker === item.ticker && 'bg-elevated/60 text-foreground',
                   )}
+                  tabIndex={0}
+                  aria-selected={selectedTicker === item.ticker}
                   onClick={() => onSelect(item.ticker)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      onSelect(item.ticker);
+                    }
+                  }}
                 >
                   <td className="py-3 pr-3 font-semibold text-foreground">
                     <a
@@ -3317,12 +3381,12 @@ const IndicatorTable: React.FC<{
                       {maState.label}
                     </Badge>
                   </td>
-                  <td className="px-3 py-3 text-right"><ShortTermZoneCell zones={item.indicators.shortTermZones?.support} prefix="S" ticker={item.ticker} /></td>
-                  <td className="px-3 py-3 text-right"><ShortTermZoneCell zones={item.indicators.shortTermZones?.resistance} prefix="R" ticker={item.ticker} /></td>
+                  <td className="hidden px-3 py-3 text-right 2xl:table-cell"><ShortTermZoneCell zones={item.indicators.shortTermZones?.support} prefix="S" ticker={item.ticker} /></td>
+                  <td className="hidden px-3 py-3 text-right 2xl:table-cell"><ShortTermZoneCell zones={item.indicators.shortTermZones?.resistance} prefix="R" ticker={item.ticker} /></td>
                   <td className="px-3 py-3 text-right tabular-nums">
                     {volumeRatio === null ? missingValue(missingCellReason(item, 'volumeRatio')) : `${formatNumber(volumeRatio, 2)}x`}
                   </td>
-                  <td className={cn('px-3 py-3 text-right font-medium tabular-nums', signalTone(foreignNetVolume))}>
+                  <td className={cn('hidden px-3 py-3 text-right font-medium tabular-nums 2xl:table-cell', signalTone(foreignNetVolume))}>
                     <div>{hasDisplayValue(foreignNetVolume) ? formatSignedNumber(foreignNetVolume, 0) : missingValue(missingCellReason(item, 'foreignNetVolume'))}</div>
                     <div className="mt-1 text-xs font-normal text-secondary-text">{hasDisplayValue(foreignNetVolume) ? 'SSI DailyStockPrice' : 'DailyStockPrice unavailable'}</div>
                   </td>
@@ -3338,7 +3402,7 @@ const IndicatorTable: React.FC<{
                       ? 'SSI DailyStockPrice returned no daily foreign-flow history.'
                       : 'Latest daily foreign net value unavailable from SSI DailyStockPrice.')}
                   </td>
-                  <td className={cn('px-3 py-3 text-right font-medium tabular-nums', signalTone(foreignFlow?.foreignNetValue5d))}>
+                  <td className={cn('hidden px-3 py-3 text-right font-medium tabular-nums 2xl:table-cell', signalTone(foreignFlow?.foreignNetValue5d))}>
                     {foreignFlowLoading && !foreignFlow ? (
                       <span className="text-muted" aria-label={`${item.ticker} NN 5P loading`}>Loading...</span>
                     ) : hasDisplayValue(foreignFlow?.foreignNetValue5d) ? (
@@ -4156,11 +4220,11 @@ const SelectedTickerDisclosure: React.FC<{
 }> = ({ title, defaultOpen = false, children }) => (
   <details
     open={defaultOpen}
-    className="rounded-lg border border-border/60 bg-elevated/30 p-3 text-sm text-secondary-text"
+    className="min-w-0 max-w-full overflow-hidden rounded-lg border border-border/60 bg-elevated/30 p-3 text-sm text-secondary-text"
     data-testid={`selected-disclosure-${title.toLowerCase().replaceAll(' ', '-')}`}
   >
     <summary className="cursor-pointer text-sm font-semibold text-foreground">{title}</summary>
-    <div className="mt-3">{children}</div>
+    <div className="mt-3 min-w-0 max-w-full">{children}</div>
   </details>
 );
 
@@ -4170,12 +4234,13 @@ const StockDetailView: React.FC<{
   realtimeQuote?: VietnamRealtimeQuote | null;
   realtimeTrades?: VietnamRealtimeTrade[];
   realtimeTradesResponse?: VietnamRealtimeTradesResponse | null;
+  tradeTapeLifecycleState: TradeTapeLifecycleState;
+  tradeTapeLifecycleDetailText: string;
   corporateActions?: VietnamCorporateActionsResponse | null;
   corporateActionsLoading?: boolean;
   corporateActionsError?: string | null;
   companyNews?: VietnamCompanyNewsResponse | null;
   companyNewsLoading?: boolean;
-  tradesLoading?: boolean;
   tradesError?: string | null;
   marketPhase: VietnamMarketPhase;
 }> = ({
@@ -4184,12 +4249,13 @@ const StockDetailView: React.FC<{
   realtimeQuote,
   realtimeTrades = [],
   realtimeTradesResponse = null,
+  tradeTapeLifecycleState,
+  tradeTapeLifecycleDetailText,
   corporateActions = null,
   corporateActionsLoading = false,
   corporateActionsError,
   companyNews = null,
   companyNewsLoading = false,
-  tradesLoading = false,
   tradesError,
   marketPhase,
 }) => {
@@ -4214,13 +4280,12 @@ const StockDetailView: React.FC<{
   const realtimeState = realtimeSnapshotState(realtimeQuote, marketPhase.code);
   const hasRealtimeSnapshot = hasRealtimeSnapshotData(realtimeQuote);
   const hasCurrentIntraday = hasCurrentIntradayData(item);
+  const responseSymbol = normalizeVietnamTicker(realtimeTradesResponse?.symbol ?? '');
   const tradeTapeDisplayRows = validTradeTapeRows(
-    hasTradeTapeData(realtimeTrades) ? realtimeTrades : item.tradeTape ?? [],
+    responseSymbol === item.ticker && hasTradeTapeData(realtimeTrades) ? realtimeTrades : item.tradeTape ?? [],
   );
   const hasTradeTape = hasTradeTapeData(tradeTapeDisplayRows);
-  const responseSymbol = normalizeVietnamTicker(realtimeTradesResponse?.symbol ?? '');
   const tradeTapeStatusBlock = responseSymbol === item.ticker ? realtimeTradesResponse : item.tradeTapeStatus;
-  const tradeTapePending = !hasTradeTape && isTradeTapeWarmupPending(tradeTapeStatusBlock);
   const intradayReasonCode = optionalLiveReasonCode(item.intradayStatus);
   const intradaySectionState: SectionState = hasCurrentIntraday
     ? intradayReasonCode === 'cadence_mismatch' || ['different_from_requested', 'irregular'].includes(intradayCadenceStatus(item) ?? '')
@@ -4234,13 +4299,17 @@ const StockDetailView: React.FC<{
     : realtimeQuote?.status === 'disabled' || item.realtimeStatus?.status === 'disabled'
       ? 'Disabled'
       : 'Unavailable';
-  const tradeTapeSectionState: SectionState = hasTradeTape
+  const tradeTapeSectionState: SectionState = tradeTapeLifecycleState === 'ready'
     ? 'Ready'
-    : tradesLoading || tradeTapePending
+    : tradeTapeLifecycleState === 'loading'
       ? 'Loading'
-      : item.tradeTapeStatus?.status === 'disabled'
-        ? 'Disabled'
-        : 'Unavailable';
+      : tradeTapeLifecycleState === 'reconnecting' || tradeTapeLifecycleState === 'stale'
+        ? hasTradeTape ? 'Updating...' : 'Partial'
+        : tradeTapeLifecycleState === 'disabled'
+          ? 'Disabled'
+          : tradeTapeLifecycleState === 'error'
+            ? 'Failed'
+            : 'Unavailable';
   const sessionCandlesCount = item.intradayPulse?.sessionCandlesCount ?? 0;
   const hasSessionCandles = sessionCandlesCount > 0;
   const hasSessionHighLowFromIntraday = intradaySessionHigh(item) != null && intradaySessionLow(item) != null;
@@ -4384,7 +4453,7 @@ const StockDetailView: React.FC<{
     || ['disabled', 'not_configured', 'not_implemented', 'unavailable', 'error'].includes(corporateActions?.status ?? '')
   );
   return (
-    <section className="rounded-lg border border-border/70 bg-card p-4">
+    <section className="min-w-0 max-w-full overflow-hidden rounded-lg border border-border/70 bg-card p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="label-uppercase text-secondary-text">Stock detail</p>
@@ -4403,7 +4472,7 @@ const StockDetailView: React.FC<{
         Labels are neutral condition tags only.
       </div>
       <div className="mt-4 grid gap-3">
-      <SelectedTickerDisclosure title="Price context" defaultOpen>
+      <SelectedTickerDisclosure title="Price context">
         <p className="mb-3 text-xs text-secondary-text">
           Daily close: SSI DailyOhlc · Reference and limits: SSI DailyStockPrice · Prices: VND.
         </p>
@@ -4612,7 +4681,6 @@ const StockDetailView: React.FC<{
           <dd className="mt-1 font-medium text-foreground">{formatNumber(indicators.rsi14Wilder ?? indicators.rsi14, 2)}</dd>
         </div>
       </dl>
-      <InspectChartCard item={item} />
       {marketStatusDetails.length ? (
         <div className="mt-4">
           <h3 className="text-sm font-semibold text-foreground">Condition reasons</h3>
@@ -4930,14 +4998,14 @@ const StockDetailView: React.FC<{
         <p className="mt-2 text-xs text-secondary-text">
           Historical trade tape is separate from X-TRADE latest-trade stream context.
         </p>
-        {!hasTradeTape && (tradesLoading || tradeTapePending) ? (
+        {!hasTradeTape && tradeTapeLifecycleState === 'loading' ? (
           <p className="mt-3 text-sm text-secondary-text">Loading SSI trade tape...</p>
         ) : null}
-        {!hasTradeTape && !tradeTapePending && (tradesError || !tradesLoading) ? (
+        {!hasTradeTape && tradeTapeLifecycleState !== 'loading' ? (
           <div className="mt-3 rounded-lg border border-warning/20 bg-warning/10 p-2 text-xs text-warning">
             {tradeTapeStatusBlock?.diagnostics?.symbolDataHealth === 'auction_waiting_for_match'
               ? 'Waiting for auction match — no valid execution yet.'
-              : optionalLiveStatusText('tradeTape', item.tradeTapeStatus)}
+              : tradeTapeLifecycleDetailText}
           </div>
         ) : null}
         {hasTradeTape ? (
@@ -5093,9 +5161,16 @@ const StockDetailView: React.FC<{
 };
 
 const VietnamDashboardPage: React.FC = () => {
+  const initialUrlState = useMemo(() => readVietnamDashboardUrlState(), []);
   const initialCustomWatchlist = useMemo(() => readCustomWatchlist(), []);
-  const [watchlist, setWatchlist] = useState<string[]>(initialCustomWatchlist);
-  const [activePresetId, setActivePresetId] = useState<VietnamDashboardActivePresetId>(initialCustomWatchlist.length ? 'custom' : 'empty');
+  const initialWatchlist = initialUrlState.watchlist.length ? initialUrlState.watchlist : initialCustomWatchlist;
+  const initialSelectedTicker = initialUrlState.selectedTicker && (
+    !initialUrlState.watchlist.length || initialUrlState.watchlist.includes(initialUrlState.selectedTicker)
+  )
+    ? initialUrlState.selectedTicker
+    : initialWatchlist[0] ?? null;
+  const [watchlist, setWatchlist] = useState<string[]>(initialWatchlist);
+  const [activePresetId, setActivePresetId] = useState<VietnamDashboardActivePresetId>(initialWatchlist.length ? 'custom' : 'empty');
   const [pendingPresetId, setPendingPresetId] = useState<VietnamDashboardActivePresetId | null>(null);
   const [pendingWatchlistTickerCount, setPendingWatchlistTickerCount] = useState<number | null>(null);
   const [filterLoadingStage, setFilterLoadingStage] = useState<FilterLoadingStage>('idle');
@@ -5128,10 +5203,10 @@ const VietnamDashboardPage: React.FC = () => {
   const [lastRealtimeErrorAt, setLastRealtimeErrorAt] = useState<string | null>(null);
   const [observability, setObservability] = useState<VietnamObservabilityResponse | null>(null);
   const [marketPhase, setMarketPhase] = useState(() => getVietnamMarketPhase());
-  const [loading, setLoading] = useState(initialCustomWatchlist.length > 0);
+  const [loading, setLoading] = useState(initialWatchlist.length > 0 || Boolean(initialSelectedTicker));
   const [forceLoading, setForceLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [selectedTicker, setSelectedTicker] = useState<string | null>(initialCustomWatchlist[0] ?? null);
+  const [selectedTicker, setSelectedTicker] = useState<string | null>(initialSelectedTicker);
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(false);
   const [autoRefreshInterval, setAutoRefreshInterval] = useState(180);
   const [realtimeAutoRefreshEnabled, setRealtimeAutoRefreshEnabled] = useState(true);
@@ -5179,6 +5254,7 @@ const VietnamDashboardPage: React.FC = () => {
   const initialWatchlistLoadStartedRef = useRef(false);
   const realtimeRequestIdRef = useRef(0);
   const tradesRequestIdRef = useRef(0);
+  const realtimeTradesSymbolRef = useRef<string | null>(null);
   const selectedLiveContextRequestIdRef = useRef(0);
   const corporateActionsRequestIdRef = useRef(0);
   const companyNewsRequestIdRef = useRef(0);
@@ -5188,7 +5264,6 @@ const VietnamDashboardPage: React.FC = () => {
   const realtimeSnapshotRefreshInFlightRef = useRef(false);
   const tradeTapeRefreshInFlightRef = useRef(false);
   const selectedLiveContextRefreshInFlightRef = useRef(false);
-  const tradeTapeWarmupStartedAtRef = useRef<{ symbol: string; startedAt: number } | null>(null);
   const pendingRealtimeSnapshotTickersRef = useRef<string[] | null>(null);
   const pendingTradeTapeSymbolRef = useRef<string | null>(null);
   const pendingSelectedLiveContextSymbolRef = useRef<string | null>(null);
@@ -5279,6 +5354,7 @@ const VietnamDashboardPage: React.FC = () => {
 
   const loadRealtimeTrades = useCallback(async (symbol: string | null) => {
     if (!symbol) {
+      realtimeTradesSymbolRef.current = null;
       setRealtimeTrades([]);
       setRealtimeTradesResponse(null);
       return;
@@ -5291,7 +5367,15 @@ const VietnamDashboardPage: React.FC = () => {
       const response = await stocksApi.getVietnamRealtimeTrades(symbol, 100);
       if (requestId !== tradesRequestIdRef.current || unmountedRef.current) return;
       if (symbol !== selectedTickerRef.current) return;
-      setRealtimeTrades(response.trades);
+      setRealtimeTrades((previous) => {
+        const canPreservePrevious = (
+          realtimeTradesSymbolRef.current === symbol
+          && hasTradeTapeData(previous)
+          && !hasTradeTapeData(response.trades)
+        );
+        realtimeTradesSymbolRef.current = symbol;
+        return canPreservePrevious ? previous : response.trades;
+      });
       setRealtimeTradesResponse(response);
       setLastTradeTapeRefreshAt(new Date().toISOString());
       setTradesError(response.status === 'ok' ? null : realtimeErrorMessage(response.statusMessage ?? response.error) ?? 'Trade tape unavailable');
@@ -5302,7 +5386,9 @@ const VietnamDashboardPage: React.FC = () => {
     } catch (err) {
       if (requestId !== tradesRequestIdRef.current || unmountedRef.current) return;
       setLastRealtimeErrorAt(new Date().toISOString());
-      setRealtimeTradesResponse(null);
+      if (realtimeTradesSymbolRef.current !== symbol) {
+        setRealtimeTradesResponse(null);
+      }
       setTradesError(realtimeErrorMessage(err instanceof Error ? err.message : null) ?? (err instanceof Error ? err.message : 'Trade tape unavailable'));
       void loadObservability();
     } finally {
@@ -5585,6 +5671,7 @@ const VietnamDashboardPage: React.FC = () => {
       setError(null);
       setRealtimeQuotes({});
       setRealtimeError(null);
+      realtimeTradesSymbolRef.current = null;
       setRealtimeTrades([]);
       setTradesError(null);
       setRealtimeTradesResponse(null);
@@ -5976,6 +6063,7 @@ const VietnamDashboardPage: React.FC = () => {
     setData(null);
     setRealtimeQuotes({});
     setRealtimeError(null);
+    realtimeTradesSymbolRef.current = null;
     setRealtimeTrades([]);
     setTradesError(null);
     setRealtimeTradesResponse(null);
@@ -6029,12 +6117,18 @@ const VietnamDashboardPage: React.FC = () => {
     if (initialWatchlistLoadStartedRef.current) return;
     initialWatchlistLoadStartedRef.current = true;
     const initialTickers = logicalWatchlistRef.current;
-    if (!initialTickers.length) {
+    const deepLinkTicker = normalizeVietnamTicker(selectedTickerRef.current ?? '');
+    const initialRequestTickers = initialTickers.length
+      ? initialTickers
+      : deepLinkTicker
+        ? [deepLinkTicker]
+        : [];
+    if (!initialRequestTickers.length) {
       setLoading(false);
       void loadObservability();
       return;
     }
-    void load(false, 'manual', initialTickers);
+    void load(false, 'manual', initialRequestTickers);
   }, [load, loadObservability]);
 
   useEffect(() => {
@@ -6262,47 +6356,39 @@ const VietnamDashboardPage: React.FC = () => {
     () => (data?.watchlist ?? []).find((item) => item.ticker === selectedTicker) ?? data?.watchlist?.[0] ?? null,
     [data, selectedTicker],
   );
-  useEffect(() => {
-    const normalizedSelectedTicker = normalizeVietnamTicker(selectedTicker ?? '');
-    const responseSymbol = normalizeVietnamTicker(realtimeTradesResponse?.symbol ?? '');
-    const selectedTradeResponse = normalizedSelectedTicker && responseSymbol === normalizedSelectedTicker
-      ? realtimeTradesResponse
-      : null;
-    const displayRows = validTradeTapeRows(
-      hasTradeTapeData(realtimeTrades) ? realtimeTrades : selectedItem?.tradeTape ?? [],
-    );
-    const statusBlock = selectedTradeResponse ?? selectedItem?.tradeTapeStatus ?? null;
-    if (
-      !normalizedSelectedTicker
-      || hasTradeTapeData(displayRows)
-      || isTabHidden
-      || !isTradeTapeWarmupPending(statusBlock)
-    ) {
-      if (!normalizedSelectedTicker || hasTradeTapeData(displayRows) || !isTradeTapeWarmupPending(statusBlock)) {
-        tradeTapeWarmupStartedAtRef.current = null;
-      }
-      return undefined;
-    }
-    if (tradeTapeWarmupStartedAtRef.current?.symbol !== normalizedSelectedTicker) {
-      tradeTapeWarmupStartedAtRef.current = { symbol: normalizedSelectedTicker, startedAt: Date.now() };
-    }
-    const startedAt = tradeTapeWarmupStartedAtRef.current.startedAt;
-    const timer = window.setInterval(() => {
-      if (Date.now() - startedAt >= TRADE_TAPE_STARTUP_REFETCH_MAX_WAIT_MS) {
-        window.clearInterval(timer);
-        return;
-      }
-      void refreshTradeTape(normalizedSelectedTicker);
-    }, TRADE_TAPE_STARTUP_REFETCH_INTERVAL_MS);
-    return () => window.clearInterval(timer);
-  }, [
-    isTabHidden,
-    realtimeTrades,
-    realtimeTradesResponse,
-    refreshTradeTape,
-    selectedItem,
-    selectedTicker,
-  ]);
+  const normalizedSelectedTicker = normalizeVietnamTicker(selectedTicker ?? '');
+  const selectedTradeResponse = (
+    normalizedSelectedTicker
+    && normalizeVietnamTicker(realtimeTradesResponse?.symbol ?? '') === normalizedSelectedTicker
+  )
+    ? realtimeTradesResponse
+    : null;
+  const selectedTradeTapeStatusBlock = selectedTradeResponse ?? selectedItem?.tradeTapeStatus ?? null;
+  const selectedTradeRows = validTradeTapeRows(
+    selectedTradeResponse && hasTradeTapeData(realtimeTrades) ? realtimeTrades : selectedItem?.tradeTape ?? [],
+  );
+  const selectedTradeTapeReady = hasTradeTapeData(selectedTradeRows);
+  const refreshTradeTapeDuringStartup = useCallback(() => {
+    if (!isTabHidden && normalizedSelectedTicker) void refreshTradeTape(normalizedSelectedTicker);
+  }, [isTabHidden, normalizedSelectedTicker, refreshTradeTape]);
+  const tradeTapeLifecycle = useTradeTapeLifecycle({
+    symbol: normalizedSelectedTicker,
+    generation: selectedTradeResponse?.generation
+      ?? optionalStatusValue(selectedTradeTapeStatusBlock, 'generation'),
+    hasRows: selectedTradeTapeReady,
+    status: selectedTradeTapeStatusBlock?.status,
+    streamState: selectedTradeResponse?.streamState
+      ?? optionalStatusValue(selectedTradeTapeStatusBlock, 'streamState')
+      ?? optionalStatusValue(selectedTradeTapeStatusBlock, 'stream_state'),
+    pendingEvidence: isTradeTapeWarmupPending(selectedTradeTapeStatusBlock),
+    requestLoading: tradesLoading,
+    requestError: tradesError,
+    onStartupPoll: refreshTradeTapeDuringStartup,
+  });
+  const selectedTradeTapeDetail = tradeTapeLifecycleDetail(
+    tradeTapeLifecycle.state,
+    selectedTradeRows.length,
+  );
   const hasCommittedData = Boolean(data);
   const hasCommittedRows = (data?.watchlist.length ?? 0) > 0;
   const isEmptyStart = !hasActiveWatchlist && !hasCommittedData && !loading && !error;
@@ -6387,54 +6473,120 @@ const VietnamDashboardPage: React.FC = () => {
     && !customPickerTickers.includes(normalizedCustomTickerQuery)
     ? normalizedCustomTickerQuery
     : null;
+  const selectedRealtimeQuote = selectedItem ? realtimeQuotes[selectedItem.ticker] : null;
+  const selectedOrderBookReady = Boolean(
+    (selectedItem?.orderBook?.bids?.length ?? 0) + (selectedItem?.orderBook?.asks?.length ?? 0),
+  );
+  const selectedRealtimeReady = hasRealtimeSnapshotData(selectedRealtimeQuote);
+  const selectedIntradayReady = hasCurrentIntradayData(selectedItem);
+  const liveChannelState = (
+    ready: boolean,
+    status?: string | null,
+    pending = false,
+  ): VietnamLiveChannelSummary['state'] => {
+    if (ready) return 'ready';
+    if (pending) return 'loading';
+    if (statusMapsToDisabled(status)) return 'disabled';
+    return 'unavailable';
+  };
+  const liveChannels: VietnamLiveChannelSummary[] = [
+    {
+      key: 'order-book',
+      label: 'Order book',
+      state: liveChannelState(selectedOrderBookReady, selectedItem?.orderBookStatus?.status),
+      detail: selectedOrderBookReady
+        ? 'Provider ladder available'
+        : statusMapsToDisabled(selectedItem?.orderBookStatus?.status)
+          ? 'Order book disabled'
+          : 'Order book unavailable',
+    },
+    {
+      key: 'last-price',
+      label: 'Last price',
+      state: liveChannelState(selectedRealtimeReady, selectedRealtimeQuote?.status ?? selectedItem?.realtimeStatus?.status, realtimeLoading),
+      detail: selectedRealtimeReady
+        ? formatPrice(selectedRealtimeQuote?.snapshotPrice ?? selectedRealtimeQuote?.realtimePrice)
+        : realtimeStatusBadgeText(selectedRealtimeQuote?.status ?? selectedItem?.realtimeStatus?.status),
+    },
+    {
+      key: 'trade-tape',
+      label: 'Trade tape',
+      state: tradeTapeLifecycle.state,
+      detail: selectedTradeTapeDetail,
+    },
+    {
+      key: 'intraday',
+      label: 'Intraday',
+      state: liveChannelState(selectedIntradayReady, selectedItem?.intradayStatus?.status),
+      detail: selectedIntradayReady
+        ? intradayCadenceText(selectedItem)
+        : statusMapsToDisabled(selectedItem?.intradayStatus?.status)
+          ? 'Intraday disabled'
+          : 'No usable current-session candles',
+    },
+  ];
+  const readyLiveChannelCount = liveChannels.filter((channel) => channel.state === 'ready').length;
+  const loadingLiveChannelCount = liveChannels.filter((channel) => channel.state === 'loading').length;
+  const liveOverallState: VietnamLiveChannelSummary['state'] = readyLiveChannelCount === liveChannels.length
+    ? 'ready'
+    : readyLiveChannelCount > 0
+      ? 'partial'
+      : loadingLiveChannelCount > 0
+        ? 'loading'
+        : liveChannels.some((channel) => channel.state === 'reconnecting')
+          ? 'reconnecting'
+        : liveChannels.every((channel) => channel.state === 'disabled')
+          ? 'disabled'
+          : liveChannels.some((channel) => channel.state === 'error')
+            ? 'error'
+            : 'unavailable';
+  const liveOverallLabel = liveOverallState === 'ready'
+    ? 'Ready'
+    : liveOverallState === 'partial'
+      ? 'Partial'
+      : liveOverallState === 'loading'
+        ? 'Loading'
+        : liveOverallState === 'reconnecting'
+          ? 'Reconnecting'
+        : liveOverallState === 'disabled'
+          ? 'Disabled'
+          : liveOverallState === 'error'
+            ? 'Error'
+            : 'Unavailable';
+  const latestCompletedSession = selectedItem?.latestPriceDate
+    ?? selectedItem?.ohlcvDate
+    ?? data?.watchlist.map((item) => item.latestPriceDate ?? item.ohlcvDate ?? '').filter(Boolean).sort().at(-1)
+    ?? null;
+  const openLiveDetails = () => {
+    const disclosure = document.querySelector<HTMLDetailsElement>('[data-testid="selected-disclosure-live-context"]');
+    if (!disclosure) return;
+    disclosure.open = true;
+    disclosure.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+  };
 
   return (
     <AppPage className="space-y-5">
-      <header className="flex flex-col gap-4 border-b border-border/70 pb-5 lg:flex-row lg:items-end lg:justify-between">
+      <header className="flex flex-col gap-2 border-b border-border/70 pb-4">
         <div>
           <p className="label-uppercase text-secondary-text">Vietnam market</p>
-          <h1 className="mt-2 text-2xl font-semibold text-foreground md:text-3xl">Watchlist Monitor</h1>
-          <p className="mt-2 max-w-3xl text-sm text-secondary-text">
-            SSI daily OHLCV, price-limit awareness, foreign flow, liquidity, and technical score tracking.
+          <h1 className="mt-1 text-2xl font-semibold text-foreground md:text-3xl">Vietnam Market Overview</h1>
+          <p className="mt-1 max-w-3xl text-sm text-secondary-text">
+            Scan your watchlist first, then inspect completed-session price, flow, technical, and optional live context.
           </p>
-          <p className="mt-2 max-w-3xl text-xs text-secondary-text">
-            During trading hours, the latest daily candle close may represent the latest traded price. After market close, it represents the final close.
-          </p>
-          <p className="mt-1 max-w-3xl text-xs text-secondary-text">
-            Labels are neutral condition tags only.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="secondary" onClick={() => refreshWatchlistData(false)} isLoading={loading && !forceLoading} loadingText="Refreshing" disabled={!hasActiveWatchlist || isWatchlistFilterBusy}>
-            <RefreshCw className="h-4 w-4" />
-            Refresh
-          </Button>
-          <Button variant="outline" onClick={() => refreshWatchlistData(true)} isLoading={forceLoading} loadingText="Refreshing live" disabled={!hasActiveWatchlist || isWatchlistFilterBusy}>
-            <DatabaseZap className="h-4 w-4" />
-            Force live refresh
-          </Button>
-          <Button variant="secondary" onClick={handleRefreshRealtimeData} isLoading={realtimeLoading || tradesLoading} loadingText="Refreshing realtime">
-            <Activity className="h-4 w-4" />
-            Refresh realtime
-          </Button>
         </div>
       </header>
 
-      <DataReadinessStrip
-        data={data}
-        selectedItem={selectedItem}
-        loading={loading}
-        realtimeQuotes={realtimeQuotes}
-        realtimeLoading={realtimeLoading}
-        realtimeTrades={realtimeTrades}
-        tradesLoading={tradesLoading}
-        tradesError={tradesError}
-        marketPhase={marketPhase}
-      />
-
-      <IndexContextPanel
-        dailyIndex={dailyIndex}
-        indexComponents={indexComponents}
+      <VietnamMarketSessionStrip
+        universeLabel={activePresetId === 'vn30' ? 'Vietnam Market · VN30' : 'Vietnam Market · Watchlist'}
+        marketPhase={marketPhase.phase}
+        completedSession={latestCompletedSession}
+        liveState={liveOverallState}
+        liveLabel={`Live market ${liveOverallLabel.toLowerCase()}`}
+        sourceLabel="SSI V3"
+        freshnessLabel={formatRelativeAge(data?.dataQuality.lastRefreshTime ?? lastRefreshAt)}
+        refreshing={loading && !forceLoading}
+        refreshDisabled={!hasActiveWatchlist || isWatchlistFilterBusy}
+        onRefresh={() => refreshWatchlistData(false)}
       />
 
       {isUpdatingWatchlist || (hasCommittedData && error) ? (
@@ -6450,8 +6602,14 @@ const VietnamDashboardPage: React.FC = () => {
         </div>
       ) : null}
 
-      <section className="rounded-lg border border-border/70 bg-card p-4">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+      <details className="rounded-lg border border-border/70 bg-card p-4" data-testid="refresh-settings-disclosure">
+        <summary className="cursor-pointer text-sm font-semibold text-foreground">
+          Refresh settings
+          <span className="ml-2 text-xs font-normal text-secondary-text">
+            {autoRefreshEnabled ? `${autoRefreshInterval}s overview` : 'manual overview'} · {realtimeAutoRefreshEnabled ? `${realtimeSnapshotRefreshInterval}s live` : 'manual live'}
+          </span>
+        </summary>
+        <div className="mt-4 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-base font-semibold text-foreground">Refresh control</h2>
@@ -6475,6 +6633,27 @@ const VietnamDashboardPage: React.FC = () => {
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => refreshWatchlistData(true)}
+              isLoading={forceLoading}
+              loadingText="Refreshing live"
+              disabled={!hasActiveWatchlist || isWatchlistFilterBusy}
+            >
+              <DatabaseZap className="h-4 w-4" aria-hidden="true" />
+              Force live refresh
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleRefreshRealtimeData}
+              isLoading={realtimeLoading || tradesLoading}
+              loadingText="Refreshing realtime"
+            >
+              <Activity className="h-4 w-4" aria-hidden="true" />
+              Refresh realtime
+            </Button>
             <label className="inline-flex items-center gap-2 text-sm text-secondary-text">
               <input
                 type="checkbox"
@@ -6585,10 +6764,17 @@ const VietnamDashboardPage: React.FC = () => {
         <div className="mt-3 rounded-lg border border-border/60 bg-elevated/30 p-3 text-xs text-secondary-text">
           Daily close currently uses the configured daily OHLCV candle close when no reliable realtime matched quote field is present.
         </div>
-      </section>
+      </details>
 
-      <section className="rounded-lg border border-border/70 bg-card p-4">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+      <details
+        className="rounded-lg border border-border/70 bg-card p-4"
+        open={!hasActiveWatchlist}
+        data-testid="watchlist-management-disclosure"
+      >
+        <summary className="cursor-pointer text-sm font-semibold text-foreground">
+          {hasActiveWatchlist ? `Manage watchlist · ${watchlist.length} tickers` : 'Set up watchlist'}
+        </summary>
+        <div className="mt-4 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-base font-semibold text-foreground">Edit Watchlist</h2>
@@ -6833,38 +7019,7 @@ const VietnamDashboardPage: React.FC = () => {
         <p className="mt-3 text-xs text-secondary-text">
           Custom symbols use uppercase letters and numbers, 2 to 10 characters, with a maximum of {VIETNAM_WATCHLIST_MAX_SIZE} tickers.
         </p>
-      </section>
-
-      <section className="grid gap-3 md:grid-cols-4">
-        <div className="rounded-lg border border-border/70 bg-card p-4">
-          <Activity className="mb-3 h-5 w-5 text-cyan" />
-          <p className="text-xs text-secondary-text">Tickers</p>
-          <p className="text-2xl font-semibold text-foreground">{summary.count}</p>
-        </div>
-        <div className="rounded-lg border border-border/70 bg-card p-4">
-          <ArrowUpRight className="mb-3 h-5 w-5 text-success" />
-          <p className="text-xs text-secondary-text">Advancers</p>
-          <p className="text-2xl font-semibold text-foreground">{summary.up}</p>
-        </div>
-        <div className="rounded-lg border border-border/70 bg-card p-4">
-          <Banknote className="mb-3 h-5 w-5 text-warning" />
-          <p className="text-xs text-secondary-text">Avg liquidity</p>
-          <p className="text-2xl font-semibold text-foreground">
-            {summary.avgLiquidity === null ? '—' : `${summary.avgLiquidity}/100`}
-          </p>
-        </div>
-        <div className="rounded-lg border border-border/70 bg-card p-4" data-testid="foreign-net-volume-summary-card">
-          <ShieldAlert className="mb-3 h-5 w-5 text-purple" />
-          <p className="text-xs text-secondary-text">Foreign net volume</p>
-          <p
-            className={cn('text-2xl font-semibold', signalTone(summary.foreignNetVolume))}
-            title={formatFullSharesTitle(summary.foreignNetVolume)}
-          >
-            {formatSignedVolume(summary.foreignNetVolume)}
-          </p>
-          <p className="mt-1 text-xs text-secondary-text">SSI DailyStockPrice · shares</p>
-        </div>
-      </section>
+      </details>
 
       {error && !hasCommittedData ? (
         <div className="rounded-lg border border-danger/30 bg-danger/10 p-4 text-sm text-danger">{error}</div>
@@ -6881,62 +7036,141 @@ const VietnamDashboardPage: React.FC = () => {
           />
         </>
       ) : loading && !data ? (
-        <Loading label="Loading Vietnam watchlist..." />
+        <>
+          <Loading label="Loading Vietnam watchlist..." />
+          <div className="sr-only">
+            <DataReadinessStrip
+              data={data}
+              selectedItem={selectedItem}
+              loading={loading}
+              realtimeQuotes={realtimeQuotes}
+              realtimeLoading={realtimeLoading}
+              realtimeTrades={selectedTradeRows}
+              tradeTapeLifecycleState={tradeTapeLifecycle.state}
+              marketPhase={marketPhase}
+            />
+          </div>
+        </>
       ) : (
         <>
-          <WatchlistScanSummary
-            items={data?.watchlist ?? []}
-            realtimeQuotes={realtimeQuotes}
-            marketPhase={marketPhase}
-          />
-          <ForeignFlowWatchlistRankings
-            data={currentForeignFlowData}
-            loading={foreignFlowLoading}
-            updating={foreignFlowUpdating}
-            error={foreignFlowError}
-            totalTickerCount={logicalWatchlist.length}
-            onRetry={refreshForeignFlow}
-          />
-          <IndicatorTable
-            items={indicatorRows}
-            realtimeQuotes={realtimeQuotes}
-            realtimeLoading={realtimeLoading}
-            realtimeError={realtimeError}
-            isUpdating={isUpdatingWatchlist}
-            hasRequestFailure={Boolean(error)}
-            hydrationStatus={vn30Hydration.status}
-            selectedTicker={selectedItem?.ticker}
-            marketPhase={marketPhase}
-            foreignFlowRows={foreignFlowRows}
-            foreignFlowLoading={foreignFlowLoading}
-            onSelect={setSelectedTicker}
-          />
-          <SelectedTickerHeader
-            item={selectedItem}
-            realtimeQuote={selectedItem ? realtimeQuotes[selectedItem.ticker] : null}
-            marketPhase={marketPhase}
-            emptyStart={isEmptyStart}
+          <div className="flex min-w-0 max-w-full flex-col gap-5">
+            <div className="order-2 min-w-0 max-w-full md:order-1">
+              <IndicatorTable
+                items={indicatorRows}
+                realtimeQuotes={realtimeQuotes}
+                realtimeLoading={realtimeLoading}
+                realtimeError={realtimeError}
+                isUpdating={isUpdatingWatchlist}
+                hasRequestFailure={Boolean(error)}
+                hydrationStatus={vn30Hydration.status}
+                selectedTicker={selectedItem?.ticker}
+                marketPhase={marketPhase}
+                foreignFlowRows={foreignFlowRows}
+                foreignFlowLoading={foreignFlowLoading}
+                onSelect={setSelectedTicker}
+              />
+            </div>
+            <div className="order-1 min-w-0 max-w-full md:order-2">
+              <SelectedTickerHeader
+                item={selectedItem}
+                realtimeQuote={selectedRealtimeQuote}
+                marketPhase={marketPhase}
+                emptyStart={isEmptyStart}
+              />
+            </div>
+          </div>
+          {selectedItem ? <InspectChartCard item={selectedItem} /> : null}
+          <VietnamLiveMarketSummary
+            overallState={liveOverallState}
+            overallLabel={liveOverallLabel}
+            channels={liveChannels}
+            onShowDetails={selectedItem ? openLiveDetails : undefined}
           />
           <StockDetailView
             item={selectedItem}
             fixtureMode={data?.fixtureMode}
-            realtimeQuote={selectedItem ? realtimeQuotes[selectedItem.ticker] : null}
+            realtimeQuote={selectedRealtimeQuote}
             realtimeTrades={realtimeTrades}
             realtimeTradesResponse={realtimeTradesResponse}
+            tradeTapeLifecycleState={tradeTapeLifecycle.state}
+            tradeTapeLifecycleDetailText={selectedTradeTapeDetail}
             corporateActions={corporateActions}
             corporateActionsLoading={corporateActionsLoading}
             corporateActionsError={corporateActionsError}
             companyNews={selectedCompanyNews}
             companyNewsLoading={selectedCompanyNewsLoading}
-            tradesLoading={tradesLoading}
             tradesError={tradesError}
             marketPhase={marketPhase}
           />
-          <section className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
-            {(data?.watchlist ?? []).map((item) => (
-              <WatchCard key={item.ticker} item={item} realtimeQuote={realtimeQuotes[item.ticker]} marketPhase={marketPhase} />
-            ))}
-          </section>
+          <details className="rounded-lg border border-border/70 bg-card p-4" data-testid="dashboard-supporting-modules">
+            <summary className="cursor-pointer text-sm font-semibold text-foreground">
+              Supporting watchlist context
+              <span className="ml-2 text-xs font-normal text-secondary-text">
+                breadth, rankings, readiness, index coverage, and row cards
+              </span>
+            </summary>
+            <div className="mt-4 grid gap-4">
+              <section className="grid gap-3 md:grid-cols-4" aria-label="Watchlist summary">
+                <div className="rounded-lg border border-border/70 bg-card p-4">
+                  <Activity className="mb-3 h-5 w-5 text-cyan" />
+                  <p className="text-xs text-secondary-text">Tickers</p>
+                  <p className="text-2xl font-semibold text-foreground">{summary.count}</p>
+                </div>
+                <div className="rounded-lg border border-border/70 bg-card p-4">
+                  <ArrowUpRight className="mb-3 h-5 w-5 text-success" />
+                  <p className="text-xs text-secondary-text">Advancers</p>
+                  <p className="text-2xl font-semibold text-foreground">{summary.up}</p>
+                </div>
+                <div className="rounded-lg border border-border/70 bg-card p-4">
+                  <Banknote className="mb-3 h-5 w-5 text-warning" />
+                  <p className="text-xs text-secondary-text">Avg liquidity</p>
+                  <p className="text-2xl font-semibold text-foreground">
+                    {summary.avgLiquidity === null ? '—' : `${summary.avgLiquidity}/100`}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-border/70 bg-card p-4" data-testid="foreign-net-volume-summary-card">
+                  <ShieldAlert className="mb-3 h-5 w-5 text-purple" />
+                  <p className="text-xs text-secondary-text">Foreign net volume</p>
+                  <p
+                    className={cn('text-2xl font-semibold', signalTone(summary.foreignNetVolume))}
+                    title={formatFullSharesTitle(summary.foreignNetVolume)}
+                  >
+                    {formatSignedVolume(summary.foreignNetVolume)}
+                  </p>
+                  <p className="mt-1 text-xs text-secondary-text">SSI DailyStockPrice · shares</p>
+                </div>
+              </section>
+              <WatchlistScanSummary
+                items={data?.watchlist ?? []}
+                realtimeQuotes={realtimeQuotes}
+                marketPhase={marketPhase}
+              />
+              <ForeignFlowWatchlistRankings
+                data={currentForeignFlowData}
+                loading={foreignFlowLoading}
+                updating={foreignFlowUpdating}
+                error={foreignFlowError}
+                totalTickerCount={logicalWatchlist.length}
+                onRetry={refreshForeignFlow}
+              />
+              <DataReadinessStrip
+                data={data}
+                selectedItem={selectedItem}
+                loading={loading}
+                realtimeQuotes={realtimeQuotes}
+                realtimeLoading={realtimeLoading}
+                realtimeTrades={selectedTradeRows}
+                tradeTapeLifecycleState={tradeTapeLifecycle.state}
+                marketPhase={marketPhase}
+              />
+              <IndexContextPanel dailyIndex={dailyIndex} indexComponents={indexComponents} />
+              <section className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3" aria-label="Detailed watchlist cards">
+                {(data?.watchlist ?? []).map((item) => (
+                  <WatchCard key={item.ticker} item={item} realtimeQuote={realtimeQuotes[item.ticker]} marketPhase={marketPhase} />
+                ))}
+              </section>
+            </div>
+          </details>
           <DataStatusPanel
             data={data}
             selectedItem={selectedItem}
@@ -6963,9 +7197,10 @@ const VietnamDashboardPage: React.FC = () => {
       )}
 
       {data ? (
-        <section className="rounded-lg border border-border/70 bg-card p-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-base font-semibold text-foreground">Dashboard formulas</h2>
+        <details className="rounded-lg border border-border/70 bg-card p-4" data-testid="dashboard-formulas-disclosure">
+          <summary className="cursor-pointer text-sm font-semibold text-foreground">Dashboard formulas</summary>
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+            <h2 className="sr-only">Dashboard formulas</h2>
             <div className="flex flex-wrap gap-2">
               <Badge variant="info">{data.ruleMetadata?.ruleSetName ?? 'Vietnam neutral technical labels'}</Badge>
               <Badge variant="default">{data.ruleMetadata?.ruleSetVersion ?? 'v1'}</Badge>
@@ -6980,7 +7215,7 @@ const VietnamDashboardPage: React.FC = () => {
               </div>
             ))}
           </dl>
-        </section>
+        </details>
       ) : null}
     </AppPage>
   );
