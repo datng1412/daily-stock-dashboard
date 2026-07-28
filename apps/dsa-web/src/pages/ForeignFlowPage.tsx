@@ -11,6 +11,8 @@ import { AppPage, Badge, Button, EmptyState, Input, PageHeader, Select } from '.
 import { ForeignFlowSymbolHistoryChart, type SymbolForeignFlowChartMode } from '../components/foreign-flow/ForeignFlowSymbolHistoryChart';
 import { ForeignFlowSymbolHistoryTable } from '../components/foreign-flow/ForeignFlowSymbolHistoryTable';
 import { ForeignFlowWatchlistScreener } from '../components/foreign-flow/ForeignFlowWatchlistScreener';
+import { ForeignFlowOverview } from '../components/foreign-flow/ForeignFlowOverview';
+import { ForeignFlowDataDetails } from '../components/foreign-flow/ForeignFlowDataDetails';
 import {
   mapIndustryFlowViewState,
   mapProprietaryFlowViewState,
@@ -37,6 +39,7 @@ type ExplorerData =
   | { mode: 'vn30'; payload: VietnamVn30ForeignFlowResponse }
   | { mode: 'industry' | 'proprietary'; payload: VietnamFlowDataResponse };
 type DataMode = Exclude<ForeignFlowExplorerMode, 'watchlist'>;
+type PageMode = ForeignFlowExplorerMode | 'overview' | 'details';
 type ModeRequestState = {
   data: ExplorerData | null;
   loading: boolean;
@@ -62,13 +65,15 @@ type FlowRow = Record<string, unknown> & {
 };
 type RankedRow = { label: string; net: number | null; turnover?: number | null; coverage?: number | null };
 
-const MODES: Array<{ value: ForeignFlowExplorerMode; label: string }> = [
-  { value: 'watchlist', label: 'Watchlist · Danh sách theo dõi' },
-  { value: 'ticker', label: 'Ticker' },
-  { value: 'vn30', label: 'Current VN30 basket' },
-  { value: 'industry', label: 'Industry' },
+const MODES: Array<{ value: PageMode; label: string }> = [
+  { value: 'overview', label: 'Overview' },
+  { value: 'vn30', label: 'Stocks' },
+  { value: 'industry', label: 'Industries' },
+  { value: 'watchlist', label: 'Watchlist' },
   { value: 'proprietary', label: 'Proprietary' },
+  { value: 'details', label: 'Data Details' },
 ];
+const PAGE_MODES: PageMode[] = ['overview', 'ticker', 'vn30', 'industry', 'watchlist', 'proprietary', 'details'];
 const WINDOWS: ForeignFlowExplorerWindow[] = ['1', '5', '20', '60', 'custom'];
 const STORAGE_KEY = 'stockclock.vn.foreignFlowExplorer.preferences.v1';
 const TICKER_RE = /^[A-Z0-9]{1,10}$/;
@@ -198,12 +203,12 @@ const safeFailureMessage = (failureClass: string | null) => {
 const ForeignFlowPage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedMode = searchParams.get('mode');
-  const initialMode = MODES.some((item) => item.value === requestedMode)
-    ? requestedMode as ForeignFlowExplorerMode
+  const initialMode = PAGE_MODES.includes(requestedMode as PageMode)
+    ? requestedMode as PageMode
     : searchParams.get('scope') === 'vn30'
       ? 'vn30'
-      : readPreference('mode', MODES.map((item) => item.value), 'watchlist');
-  const [mode, setMode] = useState<ForeignFlowExplorerMode>(initialMode);
+      : 'overview';
+  const [mode, setMode] = useState<PageMode>(initialMode);
   const [window, setWindow] = useState<ForeignFlowExplorerWindow>(() => {
     const requested = searchParams.get('window') as ForeignFlowExplorerWindow | null;
     return requested && WINDOWS.includes(requested) ? requested : readPreference('window', WINDOWS, '20');
@@ -241,7 +246,7 @@ const ForeignFlowPage = () => {
     industry: null,
     proprietary: null,
   });
-  const activeState = mode === 'watchlist' ? null : modeStates[mode];
+  const activeState = DATA_MODES.includes(mode as DataMode) ? modeStates[mode as DataMode] : null;
   const data = activeState?.data ?? null;
   const loading = activeState?.loading ?? false;
   const error = activeState?.error ?? null;
@@ -282,16 +287,21 @@ const ForeignFlowPage = () => {
     }
   }, [customFrom, customTo, mode, tickerDraft, window]);
 
-  const load = useCallback(async (forceRefresh = false) => {
-    if (mode === 'watchlist') return;
-    const requestMode = mode;
-    if (mode === 'ticker' && !ticker) {
+  const loadMode = useCallback(async (
+    requestMode: DataMode,
+    forceRefresh = false,
+  ) => {
+    if (requestMode === 'ticker' && !ticker) {
       updateModeState('ticker', (current) => ({ ...current, error: null }));
       return;
     }
     let bounds: { fromDate: string; toDate: string };
     try {
-      bounds = explorerDateBounds(window, customFrom, customTo);
+      bounds = explorerDateBounds(
+        requestMode === 'industry' && window !== 'custom' ? '60' : window,
+        customFrom,
+        customTo,
+      );
     } catch (caught) {
       updateModeState(requestMode, (current) => ({
         ...current,
@@ -399,17 +409,36 @@ const ForeignFlowPage = () => {
         updateModeState(requestMode, (current) => ({ ...current, loading: false }));
       }
     }
-  }, [customFrom, customTo, mode, proprietaryTarget, ticker, updateModeState, window]);
+  }, [customFrom, customTo, proprietaryTarget, ticker, updateModeState, window]);
+
+  const load = useCallback(async (forceRefresh = false) => {
+    if (mode === 'overview' || mode === 'details') {
+      await Promise.all([
+        loadMode('vn30', forceRefresh),
+        loadMode('industry', forceRefresh),
+      ]);
+      return;
+    }
+    if (DATA_MODES.includes(mode as DataMode)) {
+      await loadMode(mode as DataMode, forceRefresh);
+    }
+  }, [loadMode, mode]);
 
   useEffect(() => {
     void load(false);
-    if (mode === 'watchlist') return undefined;
-    const requestMode = mode;
+    const requestModes: DataMode[] = mode === 'overview' || mode === 'details'
+      ? ['vn30', 'industry']
+      : DATA_MODES.includes(mode as DataMode)
+        ? [mode as DataMode]
+        : [];
+    if (!requestModes.length) return undefined;
     const modeAbortRefs = abortRefs.current;
     const modeRequestIds = requestIds.current;
     return () => {
-      modeAbortRefs[requestMode]?.abort();
-      modeRequestIds[requestMode] += 1;
+      requestModes.forEach((requestMode) => {
+        modeAbortRefs[requestMode]?.abort();
+        modeRequestIds[requestMode] += 1;
+      });
     };
   }, [load, mode]);
 
@@ -500,6 +529,7 @@ const ForeignFlowPage = () => {
       return;
     }
     setTicker(normalized);
+    setMode('ticker');
     setSearchParams((current) => {
       const next = new URLSearchParams(current);
       next.set('ticker', normalized);
@@ -508,8 +538,24 @@ const ForeignFlowPage = () => {
     });
   };
 
+  const navigateTo = (target: PageMode, selectedTicker?: string) => {
+    if (selectedTicker) {
+      const normalized = normalizeVietnamTicker(selectedTicker);
+      setTickerDraft(normalized);
+      setTicker(normalized);
+    }
+    setMode(target);
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.set('mode', target);
+      if (selectedTicker) next.set('ticker', normalizeVietnamTicker(selectedTicker));
+      return next;
+    });
+  };
+
   const exportCsv = () => {
-    const csv = buildForeignFlowCsv(selection.rows, { mode, metric, window });
+    if (!DATA_MODES.includes(mode as DataMode)) return;
+    const csv = buildForeignFlowCsv(selection.rows, { mode: mode as ForeignFlowExplorerMode, metric, window });
     const subject = mode === 'ticker' ? ticker.toLowerCase() : mode === 'proprietary' ? proprietaryTarget.replace(':', '-').toLowerCase() : mode;
     downloadForeignFlowCsv(csv, `stockclock-${mode === 'proprietary' ? 'proprietary' : 'foreign'}-${subject}-${window}d.csv`);
   };
@@ -520,7 +566,7 @@ const ForeignFlowPage = () => {
         eyebrow="Vietnam · SSI FastConnect V3"
         title="Foreign Flow Explorer"
         description="Inspect provider-backed completed-session foreign and proprietary flow without converting missing values to zero."
-        actions={mode === 'watchlist' ? undefined : (
+        actions={DATA_MODES.includes(mode as DataMode) ? (
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={() => void load(true)} isLoading={loading} disabled={Boolean(validationError) || (mode === 'ticker' && !ticker)}>
               <RefreshCw className="h-4 w-4" /> Force Refresh
@@ -529,7 +575,7 @@ const ForeignFlowPage = () => {
               <Download className="h-4 w-4" /> Export CSV
             </Button>
           </div>
-        )}
+        ) : undefined}
       />
 
       <section className="space-y-4 rounded-xl border border-border/70 bg-card p-4" aria-label="Foreign Flow Explorer controls">
@@ -539,18 +585,39 @@ const ForeignFlowPage = () => {
               className={`rounded-lg px-3 py-2 text-sm font-medium ${mode === item.value ? 'bg-cyan/15 text-cyan' : 'bg-elevated/40 text-secondary-text hover:text-foreground'}`}
               onClick={() => {
                 if (mode === item.value) return;
-                setMode(item.value);
-                setSearchParams((current) => {
-                  const next = new URLSearchParams(current);
-                  next.set('mode', item.value);
-                  return next;
-                });
+                navigateTo(item.value);
               }}>
               {item.label}
             </button>
           ))}
         </div>
-        {mode !== 'watchlist' ? <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {mode === 'overview' ? (
+          <div className="grid items-end gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(12rem,1fr)_auto_auto_minmax(10rem,auto)_auto]">
+            <Select label="Universe" value="vn30" onChange={() => undefined}
+              options={[{ value: 'vn30', label: 'Current VN30 basket' }]} />
+            <div className="inline-flex rounded-lg border border-border/70 p-1" role="group" aria-label="Time window">
+              {WINDOWS.filter((item) => item !== 'custom').map((item) => <button key={item} type="button" aria-pressed={window === item}
+                className={`rounded-md px-3 py-1.5 text-sm ${window === item ? 'bg-cyan/15 text-cyan' : 'text-secondary-text'}`}
+                onClick={() => setWindow(item)}>{item}D</button>)}
+            </div>
+            <div className="inline-flex rounded-lg border border-border/70 p-1" role="group" aria-label="Metric">
+              {(['value', 'volume'] as const).map((item) => <button key={item} type="button" aria-pressed={metric === item}
+                className={`rounded-md px-3 py-1.5 text-sm ${metric === item ? 'bg-cyan/15 text-cyan' : 'text-secondary-text'}`}
+                onClick={() => setMetric(item)}>{item === 'value' ? 'Value' : 'Volume'}</button>)}
+            </div>
+            <div className="text-sm">
+              <span className="block text-xs text-secondary-text">Latest completed</span>
+              <span className="font-medium">{(modeStates.vn30.data?.mode === 'vn30'
+                ? modeStates.vn30.data.payload.decomposition.latestCompletedSession
+                : null) ?? '—'}</span>
+            </div>
+            <Button variant="outline" size="sm" onClick={() => void load(true)}
+              isLoading={modeStates.vn30.loading || modeStates.industry.loading}>
+              <RefreshCw className="h-4 w-4" /> Refresh
+            </Button>
+          </div>
+        ) : null}
+        {DATA_MODES.includes(mode as DataMode) ? <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           {mode === 'ticker' ? (
             <Input label="Ticker" value={tickerDraft} placeholder="Enter ticker"
               onChange={(event) => setTickerDraft(normalizeVietnamTicker(event.target.value))}
@@ -575,7 +642,7 @@ const ForeignFlowPage = () => {
               { value: 'cumulative', label: 'Cumulative net' },
             ]} />
         </div> : null}
-        {mode !== 'watchlist' ? <div className="flex flex-wrap gap-3">
+        {DATA_MODES.includes(mode as DataMode) ? <div className="flex flex-wrap gap-3">
           <div className="inline-flex rounded-lg border border-border/70 p-1" role="group" aria-label="Time window">
             {WINDOWS.map((item) => <button key={item} type="button" aria-pressed={window === item}
               className={`rounded-md px-3 py-1.5 text-sm ${window === item ? 'bg-cyan/15 text-cyan' : 'text-secondary-text'}`}
@@ -594,6 +661,28 @@ const ForeignFlowPage = () => {
           ) : null}
         </div> : null}
       </section>
+
+      {mode === 'overview' ? (
+        <ForeignFlowOverview
+          vn30={modeStates.vn30.data?.mode === 'vn30' ? modeStates.vn30.data.payload : null}
+          industry={modeStates.industry.data?.mode === 'industry' ? modeStates.industry.data.payload : null}
+          loading={modeStates.vn30.loading || modeStates.industry.loading}
+          error={modeStates.vn30.error ?? modeStates.industry.error}
+          metric={metric}
+          window={window}
+          chartMode={chartMode === 'buy-sell' ? 'buy-sell' : 'net'}
+          onChartModeChange={setChartMode}
+          onRefresh={() => void load(true)}
+          onNavigate={navigateTo}
+        />
+      ) : null}
+
+      {mode === 'details' ? (
+        <ForeignFlowDataDetails
+          vn30={modeStates.vn30.data?.mode === 'vn30' ? modeStates.vn30.data.payload : null}
+          industry={modeStates.industry.data?.mode === 'industry' ? modeStates.industry.data.payload : null}
+        />
+      ) : null}
 
       {mode === 'watchlist' ? <ForeignFlowWatchlistScreener /> : null}
 

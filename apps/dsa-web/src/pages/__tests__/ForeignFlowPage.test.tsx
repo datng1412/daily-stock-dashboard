@@ -23,6 +23,7 @@ const symbolHistory = vi.mocked(stocksApi.getVietnamForeignFlowSymbolHistory);
 const vn30 = vi.mocked(stocksApi.getVietnamVn30ForeignFlow);
 const industry = vi.mocked(stocksApi.getVietnamIndustryFlow);
 const proprietary = vi.mocked(stocksApi.getVietnamProprietaryFlow);
+const watchlist = vi.mocked(stocksApi.getVietnamForeignFlowWatchlist);
 
 const tickerPayload = (): VietnamForeignFlowSymbolHistoryResponse => ({
   ticker: 'FPT',
@@ -51,11 +52,36 @@ const vn30Payload = (): VietnamVn30ForeignFlowResponse => ({
   dataState: 'partial',
   membership: { memberCount: 2, source: 'SSI IndexComponents' },
   components: [
-    { ticker: 'FPT', foreignNetValue20d: 500 },
-    { ticker: 'HPG', foreignNetValue20d: -100 },
+    {
+      ticker: 'FPT',
+      foreignNetValue: 150,
+      foreignNetValue5d: 300,
+      foreignNetValue20d: 500,
+      foreignNetVolume: 15,
+      foreignNetVolume5d: 30,
+      foreignNetVolume20d: 50,
+    },
+    {
+      ticker: 'HPG',
+      foreignNetValue: -50,
+      foreignNetValue5d: -80,
+      foreignNetValue20d: -100,
+      foreignNetVolume: -5,
+      foreignNetVolume5d: -8,
+      foreignNetVolume20d: -10,
+    },
   ],
   decomposition: {
+    status: 'partial',
+    dataState: 'partial',
+    usable: true,
     latestCompletedSession: '2026-07-21',
+    anomalySessions: [],
+    anomalyCount: 0,
+    windows: {
+      '5': { foreignNetValue: 220, foreignNetVolume: 22 },
+      '20': { foreignNetValue: 400, foreignNetVolume: 40 },
+    },
     series: [
       {
         tradingDate: '2026-07-21',
@@ -64,10 +90,26 @@ const vn30Payload = (): VietnamVn30ForeignFlowResponse => ({
         foreignNetValue: 400,
         valueBreadth: { netBuyCount: 1, netSellCount: 1, zeroCount: 0, unavailableCount: 0 },
         valueCoverageRatio: 1,
+        dataState: 'ready',
+        state: 'ready',
       },
     ],
+    latest: {
+      tradingDate: '2026-07-21',
+      foreignBuyValue: 1_000,
+      foreignSellValue: 600,
+      foreignNetValue: 400,
+      foreignBuyVolume: 100,
+      foreignSellVolume: 60,
+      foreignNetVolume: 40,
+      valueBreadth: { netBuyCount: 1, netSellCount: 1, zeroCount: 0, unavailableCount: 0 },
+      volumeBreadth: { netBuyCount: 1, netSellCount: 1, zeroCount: 0, unavailableCount: 0 },
+      valueCoverageRatio: 1,
+      dataState: 'ready',
+      state: 'ready',
+    },
   },
-  canonical: { capabilityStatus: 'unsupported' },
+  canonical: { capabilityStatus: 'unsupported', diagnostics: {}, windows: { '5': {}, '20': {} }, series: [] },
   cache: { status: 'hit', ageSeconds: 12 },
   fetchedAt: '2026-07-21T09:00:00Z',
 } as unknown as VietnamVn30ForeignFlowResponse);
@@ -112,21 +154,119 @@ beforeEach(() => {
       proprietaryNetValue: 200,
     }],
   });
+  watchlist.mockResolvedValue({
+    status: 'partial',
+    dataState: 'partial',
+    usable: true,
+    requestedTickers: ['FPT', 'SSI'],
+    normalizedTickers: ['FPT', 'SSI'],
+    duplicateTickersRemoved: 0,
+    expectedSymbolCount: 2,
+    readySymbolCount: 1,
+    partialSymbolCount: 1,
+    unavailableSymbolCount: 0,
+    requestedSessionCount: 60,
+    fetchedAt: '2026-07-21T09:00:00Z',
+    provider: 'ssi_fastconnect',
+    providerVersion: 'v3',
+    cacheState: 'mixed',
+    items: [
+      {
+        ticker: 'FPT',
+        availability: 'ready',
+        sourceFreshness: 'latest_completed',
+        cacheState: 'hit',
+        actualSessionCount: 60,
+        requestedSessionCount: 60,
+        complete: true,
+        netValue1d: 100,
+        netValue5d: 300,
+        netValue20d: 500,
+        buyStreak: 2,
+        sellStreak: 0,
+        streakMetricBasis: 'foreign_net_value',
+        containsProviderAnomaly: false,
+        anomalySessions: [],
+        anomalyCount: 0,
+        source: 'ssi_fastconnect',
+        sourceEndpoint: 'daily_stock_price',
+      },
+      {
+        ticker: 'SSI',
+        availability: 'partial',
+        sourceFreshness: 'latest_completed',
+        cacheState: 'miss',
+        actualSessionCount: 20,
+        requestedSessionCount: 60,
+        complete: false,
+        netValue1d: null,
+        netValue5d: 0,
+        netValue20d: -200,
+        buyStreak: null,
+        sellStreak: 1,
+        streakMetricBasis: 'foreign_net_value',
+        containsProviderAnomaly: false,
+        anomalySessions: [],
+        anomalyCount: 0,
+        source: 'ssi_fastconnect',
+        sourceEndpoint: 'daily_stock_price',
+      },
+    ],
+  } as unknown as Awaited<ReturnType<typeof stocksApi.getVietnamForeignFlowWatchlist>>);
 });
 
 describe('ForeignFlowPage', () => {
-  it('starts with a user-controlled empty watchlist and no provider request', () => {
+  it('starts in Overview with four primary KPIs, one primary chart, and no fixed watchlist', async () => {
     renderPage();
-    expect(screen.getByRole('heading', { name: 'Create a foreign-flow watchlist' })).toBeInTheDocument();
-    expect(screen.getByText(/No symbols are loaded by default/)).toBeInTheDocument();
+    await waitFor(() => expect(vn30).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(industry).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole('button', { name: 'Overview' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getAllByTestId('foreign-flow-primary-kpi')).toHaveLength(4);
+    expect(screen.getByText('Net foreign flow by completed session')).toBeInTheDocument();
+    expect(screen.getByText(/Your watchlist is empty/)).toBeInTheDocument();
     expect(symbolHistory).not.toHaveBeenCalled();
+    expect(stocksApi.getVietnamForeignFlowWatchlist).not.toHaveBeenCalled();
+  });
+
+  it('keeps Overview zero distinct from a missing KPI', async () => {
+    const payload = vn30Payload();
+    payload.decomposition.latest!.foreignNetValue = 0;
+    payload.decomposition.windows['5'].foreignNetValue = null;
+    vn30.mockResolvedValue(payload);
+
+    renderPage();
+
+    const oneDayCard = (await screen.findByText('Net foreign flow 1D')).closest('article');
+    const fiveDayCard = screen.getByText('Net foreign flow 5D').closest('article');
+    expect(oneDayCard).not.toBeNull();
+    expect(fiveDayCard).not.toBeNull();
+    expect(within(oneDayCard as HTMLElement).getByText('0')).toBeInTheDocument();
+    expect(within(fiveDayCard as HTMLElement).getByText('—')).toBeInTheDocument();
+  });
+
+  it('keeps the usable VN30 Overview visible when Industry is unavailable', async () => {
+    industry.mockResolvedValue({
+      status: 'unavailable',
+      dataState: 'unavailable',
+      usable: false,
+      failureClass: 'provider_unavailable',
+      source: 'ssi_fastconnect',
+      providerVersion: 'v3',
+      endpoint: 'securitiesSummary',
+      fetchedAt: '2026-07-21T09:00:00Z',
+      cache: { status: 'unavailable', ageSeconds: null },
+      rows: [],
+    });
+
+    renderPage();
+
+    expect(await screen.findByText('Top net bought')).toBeInTheDocument();
+    expect(screen.getByText('Industry summary unavailable. VN30 Overview remains usable.')).toBeInTheDocument();
+    expect(screen.getAllByTestId('foreign-flow-primary-kpi')).toHaveLength(4);
   });
 
   it('loads a validated ticker and keeps value/volume selection request-free', async () => {
-    renderPage();
-    fireEvent.click(screen.getByRole('button', { name: 'Ticker' }));
-    fireEvent.change(screen.getByLabelText('Ticker'), { target: { value: 'fpt' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Load ticker' }));
+    renderPage('/foreign-flow?mode=ticker&ticker=FPT');
     await waitFor(() => expect(symbolHistory).toHaveBeenCalledTimes(1));
     expect(symbolHistory).toHaveBeenCalledWith('FPT', expect.objectContaining({ limit: 20, forceRefresh: false }));
     fireEvent.click(within(screen.getByRole('group', { name: 'Metric' })).getByRole('button', { name: 'Volume' }));
@@ -155,7 +295,9 @@ describe('ForeignFlowPage', () => {
 
   it('exposes bounded industry data and labels turnover separately from net flow', async () => {
     renderPage();
-    fireEvent.click(screen.getByRole('button', { name: 'Industry' }));
+    await waitFor(() => expect(industry).toHaveBeenCalledTimes(1));
+    await screen.findByText('Industry leaders');
+    fireEvent.click(screen.getByRole('button', { name: 'Industries' }));
     await waitFor(() => expect(industry).toHaveBeenCalledTimes(1));
     expect(screen.getByText(/Turnover is trading activity, not foreign net cash flow/)).toBeInTheDocument();
     const rankings = screen.getByRole('region', { name: 'industry rankings' });
@@ -250,7 +392,7 @@ describe('ForeignFlowPage', () => {
     const view = renderPage('/foreign-flow?mode=vn30');
     expect(await screen.findByRole('region', { name: 'vn30 foreign flow unavailable' })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Industry' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Industries' }));
     expect(await screen.findByRole('region', { name: 'industry foreign flow unavailable' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Proprietary' }));
@@ -263,12 +405,84 @@ describe('ForeignFlowPage', () => {
     await waitFor(() => expect(symbolHistory).toHaveBeenCalledTimes(1));
     expect(screen.getByText('2026-07-21T09:00:00Z')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Current VN30 basket' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Stocks' }));
     await waitFor(() => expect(vn30).toHaveBeenCalledTimes(1));
-    fireEvent.click(screen.getByRole('button', { name: 'Ticker' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Overview' }));
+    await screen.findByText('Top net bought');
+    fireEvent.click(screen.getByRole('button', { name: 'FPT' }));
 
     await waitFor(() => expect(screen.getByText('2026-07-21T09:00:00Z')).toBeInTheDocument());
     expect(symbolHistory).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps Overview metric and window changes local and hides gross series by default', async () => {
+    renderPage();
+    await screen.findByText('Top net bought');
+    const vn30Calls = vn30.mock.calls.length;
+    const industryCalls = industry.mock.calls.length;
+    expect(screen.getByRole('button', { name: 'Show gross buy/sell' })).toHaveAttribute('aria-pressed', 'false');
+
+    fireEvent.click(within(screen.getByRole('group', { name: 'Metric' })).getByRole('button', { name: 'Volume' }));
+    fireEvent.click(within(screen.getByRole('group', { name: 'Time window' })).getByRole('button', { name: '5D' }));
+
+    await waitFor(() => {
+      expect(vn30).toHaveBeenCalledTimes(vn30Calls);
+      expect(industry).toHaveBeenCalledTimes(industryCalls);
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Show gross buy/sell' }));
+    expect(screen.getByRole('button', { name: 'Show net only' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('renders saved watchlist rows compactly without blanking partial items', async () => {
+    localStorage.setItem('stockclock.vn.foreignFlowWatchlist.v1', JSON.stringify({
+      tickers: ['FPT', 'SSI'],
+      metric: 'value',
+      window: 20,
+      filter: 'all',
+      sort: 'input',
+      direction: 'asc',
+    }));
+    renderPage();
+
+    await waitFor(() => expect(watchlist).toHaveBeenCalledTimes(1));
+    const summary = screen.getByRole('heading', { name: 'Watchlist snapshot' }).closest('section');
+    expect(summary).not.toBeNull();
+    expect(within(summary as HTMLElement).getByText('FPT')).toBeInTheDocument();
+    expect(within(summary as HTMLElement).getByText('SSI')).toBeInTheDocument();
+    expect(within(summary as HTMLElement).getAllByText('—').length).toBeGreaterThan(0);
+    expect(within(summary as HTMLElement).getByText(/usable rows remain visible/)).toBeInTheDocument();
+  });
+
+  it('keeps provider publication lag compact and secondary', async () => {
+    renderPage();
+    await screen.findByText('Top net bought');
+
+    expect(screen.getByText('Provider publication lag')).toBeInTheDocument();
+    expect(screen.queryByRole('alert', { name: /publication lag/i })).not.toBeInTheDocument();
+  });
+
+  it('moves technical provenance and direct capability into Data Details', async () => {
+    renderPage();
+    await screen.findByText('Top net bought');
+    expect(screen.queryByText('securitiesSummary?index=')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Data Details' }));
+
+    expect(await screen.findByRole('heading', { name: 'VN30 foreign flow provenance' })).toBeInTheDocument();
+    expect(screen.getByText('Direct VN30 capability')).toBeInTheDocument();
+    expect(screen.getByText('Historical constituent correctness')).toBeInTheDocument();
+    expect(screen.getByText('unsupported')).toBeInTheDocument();
+  });
+
+  it('keeps explicit Watchlist and Proprietary deep links', async () => {
+    const watchlistView = renderPage('/foreign-flow?mode=watchlist');
+    expect(screen.getByRole('button', { name: 'Watchlist' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('heading', { name: 'Create a foreign-flow watchlist' })).toBeInTheDocument();
+    watchlistView.unmount();
+
+    renderPage('/foreign-flow?mode=proprietary');
+    await waitFor(() => expect(proprietary).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole('button', { name: 'Proprietary' })).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('preserves same-mode usable data when a force refresh becomes unavailable', async () => {
