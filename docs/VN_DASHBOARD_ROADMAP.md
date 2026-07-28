@@ -1,5 +1,13 @@
 ﻿# VN Dashboard Roadmap
 
+## Phase SSI-V3-M2.5B - Company Research data-state cleanup (2026-07-28)
+
+- The Company Research contract now separates `completed_session_date` from provider-backed live-event session/date context. A prior completed DailyOhlc session during the next active day is `latest_completed` and `completed`, not stale solely because X-QUOTE is current.
+- Live availability is composed independently for last price, X-QUOTE order book, X-TRADE tape, and IntradayOhlc. A usable order book keeps the live-market block partial/usable when other channels are unavailable, reconnecting, or empty.
+- Trade-tape startup loading has a bounded 20-second UI transition. Active-session IntradayOhlc is validated against the current Vietnam session date; outside active windows it uses the latest completed daily-session basis.
+- Reference, ceiling, and floor remain provider-only DailyStockPrice values in the company contract. Exchange-derived price-limit calculations are not used as a fallback, and null limit fields no longer reserve large page tiles.
+- Core profile readiness and optional metadata completeness are separate; Sector and Industry render only from provider metadata. Quality issues are deduplicated by code, the primary summary has three groups, and technical provenance remains in diagnostics.
+
 ## Phase SSI-V3-M2.5A - Foreign Flow visual simplification and Overview (2026-07-28)
 
 - Made Overview the default Foreign Flow mode with four primary KPIs, one completed-session chart, five-row bought/sold rankings, compact Industry leaders, a bounded saved-watchlist snapshot, and one compact SSI V3 quality strip.

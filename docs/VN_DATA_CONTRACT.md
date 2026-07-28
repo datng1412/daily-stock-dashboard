@@ -4,6 +4,18 @@
 
 This document defines the public data contract for the VN dashboard and company research page. It is intentionally data-quality-first: valid daily SSI data should remain visible even when optional live or enrichment sections are unavailable.
 
+## Company Research session and availability contract (Phase SSI-V3-M2.5B)
+
+`GET /api/v1/stocks/vn/company/{ticker}` additively separates completed daily and live-event context. `session_context.completed_session_date` identifies the provider-backed DailyOhlc session; `live_session_date` is populated only from provider event provenance such as X-QUOTE trading date or a parseable stream timestamp. These dates may differ normally. `source_freshness` uses `current`, `latest_completed`, `publication_lag`, `stale`, or `unknown`; cache age remains a separate transport/cache observation and never determines source freshness by itself. The market-session helper is explicitly holiday-unaware.
+
+Daily finality uses `completed`, `provisional`, `unknown`, or `not_applicable`. A prior dated daily row is completed, while a same-date daily row during an active Vietnam session is provisional. Adjustment lineage uses `adjusted`, `unadjusted`, `not_provided`, or `unknown`; V3 DailyOhlc currently maps absent adjustment lineage to informational `not_provided`, not a page warning.
+
+`live_market.channels` independently classifies `last_price`, `order_book`, `trade_tape`, and `intraday` as `ready`, `partial`, `reconnecting`, `no_data`, `stale`, `unavailable`, `disabled`, or `error`. Overall live state is ready only when all visible channels are usable, partial when at least one is usable, and unavailable when none are usable. A ready X-QUOTE order book therefore prevents a false global unavailable state.
+
+Company profile exposes `core_profile_status` separately from `optional_metadata_status`. Sector and Industry come only from provider metadata and remain null when absent. DailyStockPrice diagnostics independently classify price limits, matched/put-through statistics, foreign flow, and session metadata. Reference, ceiling, and floor values retain per-field DailyStockPrice lineage; exchange-limit calculations, daily close, bids, and asks are never substituted.
+
+The primary Company Research quality summary contains at most Daily data, Live market, and Company metadata. Detailed issue codes, finality, adjustment lineage, per-channel state, cache/source details, missing optional fields, and provider endpoints remain in diagnostics. Duplicate issues are removed by code. Missing values stay null and provider zero stays zero.
+
 ## Foreign Flow Explorer Runtime States (Phase SSI-V3-M2.4C-R2)
 
 Ticker, current-VN30, Industry, Proprietary, and Watchlist payloads are normalized by one frontend view-state contract: availability (`ready`, `partial`, `unavailable`), usability, source freshness, data quality, failure class, and row presence remain separate. Partial usable responses render their available content with a warning. Provider-unavailable responses render an explicit unavailable state and never an empty chart or table. A successful provider response with zero completed-session records remains a distinct empty-data state.

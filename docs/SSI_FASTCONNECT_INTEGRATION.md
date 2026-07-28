@@ -734,8 +734,12 @@ Company research current behavior:
 
 * `/api/v1/stocks/vn/company/{ticker}` exposes a company research snapshot contract for one VN ticker.
 * The endpoint reuses the SSI-backed watchlist row for profile, price, trading stats, foreign flow, and derived technical blocks.
-* Source coverage is explicit for Daily OHLCV, DailyStockPrice, Profile, News, Financials, and Corporate actions.
-* News, financials, and corporate-action events remain `not_implemented` placeholders in this phase.
+* Completed DailyOhlc session context is separate from current provider event context. Previous-session EOD data during the next active session is `latest_completed`; cache age does not make it stale.
+* Live state is channel-specific for last-price snapshot, X-QUOTE order book, X-TRADE tape, and IntradayOhlc. A ready order book keeps the live block partial/usable when another optional channel is empty or unavailable.
+* Active-session IntradayOhlc freshness targets the current Vietnam date. Outside active windows it targets the latest completed daily session. This classifier is holiday-unaware and does not fabricate missing bars.
+* V3 securities summary currently normalizes reference, ceiling, and floor as null. The company contract uses only explicit DailyStockPrice compatibility fields for those values and never uses the exchange-derived `price_limit` calculation, daily close, bid, or ask as a substitute.
+* Source coverage is grouped as Prices, Live market, Company, and News. Core profile readiness is separate from optional metadata completeness; provider-only Sector and Industry stay null when absent.
+* News, financials, and corporate-action events retain their existing gating/placeholder behavior.
 * The endpoint does not scrape Mozyfin, call FC Trading, infer corporate actions, or use Mozyfin/KBS fallback for SSI-owned market-data blocks.
 
 ## Normalized outputs

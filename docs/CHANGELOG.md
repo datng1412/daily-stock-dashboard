@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [fix] Separate completed daily sessions from live Company Research channels, bound optional loading states, and keep a ready X-QUOTE order book usable when other live channels are unavailable.
+- [improvement] Compact Company Research quality and source coverage, hide unavailable price-limit tiles, contain the order-book ladder on mobile, and separate core profile readiness from optional metadata completeness.
+- [test] Cover Company Research session finality, channel composition, provider-only price-limit lineage, current-session intraday targeting, issue deduplication, and responsive loading states.
 - [improvement] Make Foreign Flow Overview the default with four primary signals, one completed-session chart, compact rankings, Industry and watchlist summaries, and dedicated detailed modes.
 - [test] Cover Foreign Flow Overview hierarchy, null-versus-zero truthfulness, partial and unavailable section isolation, request-free controls, deep links, and responsive browser layouts.
 - [test] Live-prove the post-fix Foreign Flow Industry and Proprietary application routes with one bounded child while retaining provider publication-lag semantics.
