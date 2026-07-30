@@ -1,8 +1,10 @@
 import type {
+  VietnamCurrentForeignFlowAggregateResponse,
   VietnamFlowDataResponse,
   VietnamVn30ForeignFlowResponse,
 } from '../../api/stocks';
 import { Badge } from '../common';
+import { currentIndustryCapability } from './currentForeignFlowAggregateModel';
 import { mapIndustryFlowViewState, mapVn30FlowViewState } from './foreignFlowViewState';
 
 const displayValue = (input: unknown): string => {
@@ -26,12 +28,20 @@ const DetailGrid = ({ rows }: { rows: Array<[string, unknown]> }) => (
 export const ForeignFlowDataDetails = ({
   vn30,
   industry,
+  currentAggregate,
 }: {
   vn30: VietnamVn30ForeignFlowResponse | null;
   industry: VietnamFlowDataResponse | null;
+  currentAggregate: VietnamCurrentForeignFlowAggregateResponse | null;
 }) => {
   const vn30State = vn30 ? mapVn30FlowViewState(vn30) : null;
   const industryState = industry ? mapIndustryFlowViewState(industry) : null;
+  const latestDisplaySession = currentAggregate?.displaySeries
+    .map((row) => row.tradingDate)
+    .filter((value): value is string => Boolean(value))
+    .sort()
+    .at(-1) ?? vn30?.decomposition.latestCompletedSession;
+  const industryCurrentCapability = currentIndustryCapability(currentAggregate);
 
   if (!vn30 && !industry) {
     return (
@@ -57,7 +67,7 @@ export const ForeignFlowDataDetails = ({
           ['Provider', vn30?.source],
           ['Provider version', vn30?.canonicalProviderVersion],
           ['Source endpoint', vn30?.sourceEndpoint],
-          ['Source session', vn30?.decomposition.latestCompletedSession],
+          ['Latest completed session', vn30?.decomposition.latestCompletedSession],
           ['Fetched at', vn30?.fetchedAt],
           ['Cache state', vn30?.cache.status],
           ['Cache age', vn30 ? `${vn30.cache.ageSeconds}s` : null],
@@ -70,6 +80,15 @@ export const ForeignFlowDataDetails = ({
           ['Historical constituent correctness', vn30?.historicalConstituentCorrect],
           ['Membership source', vn30?.membershipSource],
           ['Aggregation mode', vn30?.decompositionAggregationMode],
+          ['Latest display session', latestDisplaySession],
+          ['Current provider session', currentAggregate?.providerSessionDate],
+          ['Current finality', currentAggregate?.finality],
+          ['Current status', currentAggregate?.dataState],
+          ['Current observed symbols', currentAggregate?.coverage.observedSymbolCount],
+          ['Current requested symbols', currentAggregate?.coverage.requestedSymbolCount],
+          ['Current complete value coverage', currentAggregate?.coverage.completeValueCount],
+          ['Current complete volume coverage', currentAggregate?.coverage.completeVolumeCount],
+          ['Current provisional persisted', currentAggregate?.diagnostics?.provisionalPersisted],
         ]} />
       </section>
 
@@ -93,8 +112,20 @@ export const ForeignFlowDataDetails = ({
           ['Requested symbols', industry?.requestedSymbolCount],
           ['Classified symbols', industry?.classifiedSymbolCount],
           ['Failure class', industryState?.failureClass],
-          ['Current-session status', industry?.currentSessionStatus],
           ['Universe', industry?.universe],
+          ['Current capability state', industryCurrentCapability],
+          ['Current provider session', currentAggregate?.providerSessionDate],
+          ['Current finality', currentAggregate?.finality],
+          ['Current state', currentAggregate?.dataState],
+          ['Current industry universe', currentAggregate?.universe],
+          ['Current requested symbols', currentAggregate?.coverage.requestedSymbolCount],
+          ['Current classified symbols', currentAggregate?.coverage.classifiedSymbolCount],
+          ['Current observed symbols', currentAggregate?.coverage.observedSymbolCount],
+          ['Current complete value coverage', currentAggregate?.coverage.completeValueCount],
+          ['Current complete volume coverage', currentAggregate?.coverage.completeVolumeCount],
+          ['Current industry groups', currentAggregate?.groups.length],
+          ['Current stale symbols', currentAggregate?.coverage.staleSymbolCount],
+          ['Current missing symbols', currentAggregate?.coverage.missingSymbols.length],
         ]} />
       </section>
 

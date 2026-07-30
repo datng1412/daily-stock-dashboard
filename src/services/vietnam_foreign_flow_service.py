@@ -23,6 +23,9 @@ from data_provider.ssi_provider_router import (
     SsiRestProviderRouter,
     create_ssi_rest_provider_router,
 )
+from src.services.vietnam_foreign_flow_history_store import (
+    VietnamForeignFlowHistoryStore,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -84,7 +87,10 @@ class _CacheEntry:
 
 
 _LOCK = RLock()
+_ACCEPTED_HISTORY_PERSIST_LOCK = RLock()
 _CACHE: "OrderedDict[Tuple[Any, ...], _CacheEntry]" = OrderedDict()
+_ACCEPTED_HISTORY: Dict[str, Dict[str, Dict[str, Any]]] = {}
+_ACCEPTED_HISTORY_LOADED_PATHS: set[str] = set()
 _IN_FLIGHT: Dict[Tuple[Any, ...], Future] = {}
 _WAITERS: Dict[Tuple[Any, ...], int] = {}
 _VN30_CACHE: "OrderedDict[Tuple[Any, ...], _CacheEntry]" = OrderedDict()
@@ -184,6 +190,8 @@ def reset_vietnam_foreign_flow_state() -> None:
     """Reset process-local cache and counters for deterministic tests."""
     with _LOCK:
         _CACHE.clear()
+        _ACCEPTED_HISTORY.clear()
+        _ACCEPTED_HISTORY_LOADED_PATHS.clear()
         _IN_FLIGHT.clear()
         _WAITERS.clear()
         _VN30_CACHE.clear()
@@ -197,6 +205,63 @@ def vietnam_foreign_flow_observability_snapshot() -> Dict[str, Any]:
     """Return counters only; this function performs no provider or cache work."""
     with _LOCK:
         return deepcopy(_METRICS)
+
+
+def accepted_vietnam_foreign_flow_history(
+    tickers: Iterable[str],
+) -> Dict[str, List[Dict[str, Any]]]:
+    """Read accepted completed rows without provider work or cache mutation."""
+
+    normalized = [_normalize_ticker(ticker) for ticker in tickers]
+    with _LOCK:
+        return {
+            ticker: [
+                deepcopy(_ACCEPTED_HISTORY[ticker][trading_date])
+                for trading_date in sorted(_ACCEPTED_HISTORY.get(ticker, {}))
+            ]
+            for ticker in normalized
+        }
+
+
+def _merge_accepted_history(
+    history: Dict[str, Dict[str, Dict[str, Any]]],
+) -> int:
+    merged_rows = 0
+    with _LOCK:
+        for ticker, rows_by_date in history.items():
+            accepted = _ACCEPTED_HISTORY.setdefault(ticker, {})
+            for trading_date, row in rows_by_date.items():
+                accepted[trading_date] = deepcopy(row)
+                merged_rows += 1
+            for old_date in sorted(accepted)[:-MAX_ROWS]:
+                accepted.pop(old_date, None)
+    return merged_rows
+
+
+def initialize_vietnam_foreign_flow_accepted_history(
+    store: Optional[VietnamForeignFlowHistoryStore] = None,
+) -> Dict[str, Any]:
+    """Best-effort startup restore with no provider or streaming work."""
+
+    selected = store or VietnamForeignFlowHistoryStore()
+    identity = selected.identity
+    with _ACCEPTED_HISTORY_PERSIST_LOCK:
+        with _LOCK:
+            if identity in _ACCEPTED_HISTORY_LOADED_PATHS:
+                return {
+                    "restored_rows": 0,
+                    **selected.diagnostics(),
+                    "load_state": "already_loaded",
+                }
+        restored = selected.load()
+        restored_rows = _merge_accepted_history(restored)
+        with _LOCK:
+            _ACCEPTED_HISTORY_LOADED_PATHS.add(identity)
+        return {
+            **selected.diagnostics(),
+            "restored_rows": restored_rows,
+            "load_state": selected.status,
+        }
 
 
 def _normalize_ticker(value: str) -> str:
@@ -602,10 +667,47 @@ class VietnamForeignFlowService:
         fetcher: Optional[Any] = None,
         *,
         rest_provider: Optional[SsiRestProvider] = None,
+        accepted_history_path: Optional[str] = None,
+        accepted_history_store: Optional[VietnamForeignFlowHistoryStore] = None,
+        persist_accepted_history: Optional[bool] = None,
     ):
         self._fetcher = fetcher
         self._rest_provider = rest_provider
         self._rest_provider_lock = RLock()
+        explicitly_configured = (
+            accepted_history_path is not None or accepted_history_store is not None
+        )
+        self._persist_accepted_history = (
+            bool(persist_accepted_history)
+            if persist_accepted_history is not None
+            else fetcher is None or explicitly_configured
+        )
+        self._accepted_history_store = (
+            accepted_history_store
+            or (
+                VietnamForeignFlowHistoryStore(accepted_history_path)
+                if self._persist_accepted_history
+                else None
+            )
+        )
+
+    def _ensure_accepted_history_loaded(self) -> None:
+        if self._accepted_history_store is not None:
+            initialize_vietnam_foreign_flow_accepted_history(
+                self._accepted_history_store
+            )
+
+    def _persist_completed_history(self) -> None:
+        store = self._accepted_history_store
+        if store is None:
+            return
+        with _ACCEPTED_HISTORY_PERSIST_LOCK:
+            with _LOCK:
+                snapshot = deepcopy(_ACCEPTED_HISTORY)
+            if not store.write(snapshot):
+                logger.warning(
+                    "Accepted SSI DailyStockPrice foreign-flow history persistence failed"
+                )
 
     def _get_rest_provider(self) -> SsiRestProvider:
         if self._rest_provider is None:
@@ -626,6 +728,7 @@ class VietnamForeignFlowService:
         to_date: Optional[str] = None,
         force_refresh: bool = False,
     ) -> Dict[str, Any]:
+        self._ensure_accepted_history_loaded()
         normalized_ticker = _normalize_ticker(ticker)
         parsed_from = _parse_iso_date(from_date, "from_date")
         parsed_to = _parse_iso_date(to_date, "to_date")
@@ -777,6 +880,52 @@ class VietnamForeignFlowService:
         provider_result: Dict[str, Any] = {}
         attempts = 1
         pages_used = 0
+
+        def accepted_rows() -> List[Dict[str, Any]]:
+            with _LOCK:
+                stored = deepcopy(_ACCEPTED_HISTORY.get(ticker, {}))
+            rows = [stored[key] for key in sorted(stored)]
+            if mode == "date_range":
+                return [
+                    row
+                    for row in rows
+                    if parsed_from.isoformat()
+                    <= str(row.get("trading_date") or "")
+                    <= parsed_to.isoformat()
+                ][:MAX_ROWS]
+            return rows[-int(requested_limit):]
+
+        def preserved_payload(
+            *,
+            failure_class: Optional[str],
+            provider_latest_returned: Optional[str],
+            reason: str,
+        ) -> Optional[Dict[str, Any]]:
+            rows = accepted_rows()
+            if not rows:
+                return None
+            payload = self._build_payload(
+                ticker,
+                mode,
+                requested_limit,
+                parsed_from,
+                parsed_to,
+                rows,
+                "stale",
+                "stale",
+                failure_class,
+            )
+            payload.update(
+                cache_state="stale_hit",
+                cache_age_seconds=0.0,
+                stale_reason=reason,
+                response_regressive=True,
+                preserved_latest_completed=rows[-1]["trading_date"],
+                provider_latest_returned=provider_latest_returned,
+                cached_latest_retained=True,
+            )
+            return payload
+
         try:
             if mode == "date_range":
                 request_ranges = [(parsed_from, parsed_to)]
@@ -806,6 +955,30 @@ class VietnamForeignFlowService:
                     break
             failure_class = _safe_failure_class(provider_result.get("failure_class"))
             if provider_result.get("status") != "ok":
+                preserved = None if stale_available else preserved_payload(
+                    failure_class=failure_class,
+                    provider_latest_returned=None,
+                    reason=(
+                        "SSI DailyStockPrice refresh was weaker than accepted history; "
+                        "last-known-good completed sessions are preserved."
+                    ),
+                )
+                if preserved is not None:
+                    self._finish_provider_metrics(
+                        started,
+                        ticker,
+                        mode,
+                        requested_limit,
+                        parsed_from,
+                        parsed_to,
+                        "stale",
+                        len(preserved["rows"]),
+                        failure_class,
+                        attempts,
+                        pages_used,
+                        "accepted_history_recovery",
+                    )
+                    return preserved, "stale"
                 if failure_class == "empty_response":
                     _metric_add("provider_empty_results")
                     payload = self._build_payload(ticker, mode, requested_limit, parsed_from, parsed_to, [], "empty", "empty", None)
@@ -821,8 +994,27 @@ class VietnamForeignFlowService:
                 return payload, "negative"
             rows, stats = _normalize_rows(all_rows)
             stats["duplicate_date_count"] += max(0, int(provider_result.get("duplicate_date_count") or 0))
-            if mode == "recent_sessions":
-                rows = rows[-int(requested_limit):]
+            provider_latest_returned = (
+                rows[-1]["trading_date"] if rows else None
+            )
+            with _LOCK:
+                accepted = _ACCEPTED_HISTORY.setdefault(ticker, {})
+                cached_latest_before = max(accepted) if accepted else None
+                for row in rows:
+                    accepted[str(row["trading_date"])] = deepcopy(row)
+                if len(accepted) > MAX_ROWS:
+                    for old_date in sorted(accepted)[:-MAX_ROWS]:
+                        accepted.pop(old_date, None)
+                cached_latest_after = max(accepted) if accepted else None
+            self._persist_completed_history()
+            response_regressive = bool(
+                cached_latest_before
+                and (
+                    provider_latest_returned is None
+                    or provider_latest_returned < cached_latest_before
+                )
+            )
+            rows = accepted_rows()
             if len(rows) > MAX_ROWS:
                 raise ValueError(f"normalized provider response exceeded the {MAX_ROWS}-row public cap")
             for name, amount in stats.items():
@@ -834,7 +1026,26 @@ class VietnamForeignFlowService:
                 _METRICS["last_success_at"] = _iso_now()
                 _METRICS["last_failure_class"] = None
             payload = self._build_payload(ticker, mode, requested_limit, parsed_from, parsed_to, rows, state, "fresh", None)
-            payload.update(cache_state=cache_outcome, cache_age_seconds=0.0)
+            payload.update(
+                cache_state=cache_outcome,
+                cache_age_seconds=0.0,
+                response_regressive=response_regressive,
+                preserved_latest_completed=cached_latest_after,
+                provider_latest_returned=provider_latest_returned,
+                cached_latest_retained=bool(
+                    response_regressive
+                    and cached_latest_after == cached_latest_before
+                ),
+            )
+            if response_regressive:
+                payload.update(
+                    data_state="stale",
+                    freshness="stale",
+                    stale_reason=(
+                        "SSI DailyStockPrice returned an older latest session; "
+                        "last-known-good completed history is retained."
+                    ),
+                )
             self._finish_provider_metrics(started, ticker, mode, requested_limit, parsed_from, parsed_to, state, len(rows), None, attempts, pages_used, cache_outcome)
             return payload, "positive" if rows else "empty"
         except Exception:

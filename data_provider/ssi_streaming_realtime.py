@@ -90,9 +90,23 @@ CONTEXT_CLOSED = "closed"
 CONTEXT_FAILED = "failed"
 
 STREAM_CONTEXTS = ("x", "x_quote", "x_trade", "f", "r", "mi")
-RETRYABLE_STREAM_ERROR_CLASSES = {"network_closed", "timeout", "dns", "tls", "sdk_error", "unknown"}
-NON_RETRYABLE_STREAM_ERROR_CLASSES = {"authentication", "authorization", "configuration", "subscription_failure"}
+RETRYABLE_STREAM_ERROR_CLASSES = {
+    "authentication",
+    "authorization",
+    "network_closed",
+    "timeout",
+    "dns",
+    "tls",
+    "sdk_error",
+    "unknown",
+}
+NON_RETRYABLE_STREAM_ERROR_CLASSES = {
+    "configuration",
+    "entitlement_rejected",
+    "subscription_failure",
+}
 DEFAULT_RECONNECT_BACKOFF_SEQUENCE = (2, 5, 10, 20, 30)
+DEFAULT_STREAMING_RECOVERY_REQUEST_COOLDOWN_SECONDS = 5
 
 
 def vietnam_market_session_from_epoch(epoch_seconds: float) -> Dict[str, Any]:
@@ -142,15 +156,27 @@ def vietnam_market_session_from_provider_timestamp(value: Any) -> Optional[str]:
     if not text:
         return None
     parsed: Optional[datetime] = None
-    try:
-        if "T" in text or " " in text:
+    if "T" in text or " " in text:
+        try:
             parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
             if parsed.tzinfo is None:
                 parsed = parsed.replace(tzinfo=VIETNAM_MARKET_TIMEZONE)
-        else:
+        except ValueError:
+            for fmt in ("%Y/%m/%d %H:%M:%S", "%Y/%m/%d %H:%M:%S.%f"):
+                try:
+                    parsed = datetime.strptime(text, fmt).replace(
+                        tzinfo=VIETNAM_MARKET_TIMEZONE
+                    )
+                    break
+                except ValueError:
+                    continue
+    else:
+        try:
             time_part = datetime.strptime(text, "%H:%M:%S").time()
             parsed = datetime(2026, 7, 20, time_part.hour, time_part.minute, time_part.second, tzinfo=VIETNAM_MARKET_TIMEZONE)
-    except ValueError:
+        except ValueError:
+            parsed = None
+    if parsed is None:
         return None
     return str(vietnam_market_session_from_epoch(parsed.timestamp())["market_session"])
 
@@ -230,6 +256,9 @@ class SsiRealtimeStreamClient(Protocol):
     def stop(self) -> None:
         """Stop streaming idempotently."""
 
+    def ensure_channels(self, channels: Sequence[str]) -> None:
+        """Add channels to the existing shared transport without reconnecting."""
+
 
 @dataclass(frozen=True)
 class CachedRealtimeSnapshot:
@@ -255,6 +284,7 @@ class CachedOrderBook:
 @dataclass(frozen=True)
 class CachedForeignRoom:
     symbol: str
+    session_date: str
     foreign_room: Dict[str, Any]
     received_at: float
 
@@ -477,7 +507,9 @@ def classify_streaming_error(error: Any) -> str:
     combined = f"{name} {text}"
     if any(marker in combined for marker in ("401", "unauthorized", "authentication", "invalid token")):
         return "authentication"
-    if any(marker in combined for marker in ("403", "forbidden", "not entitled", "permission denied")):
+    if any(marker in combined for marker in ("not entitled", "entitlement rejected")):
+        return "entitlement_rejected"
+    if any(marker in combined for marker in ("403", "forbidden", "permission denied")):
         return "authorization"
     if any(marker in combined for marker in ("configuration incomplete", "config incomplete", "missing credential", "at least one streaming channel")):
         return "configuration"
@@ -858,7 +890,7 @@ class OrderBookCache:
 
 
 class ForeignRoomCache:
-    """Thread-safe latest R foreign-room cache keyed by VN ticker."""
+    """Thread-safe replacement snapshots keyed by VN ticker and session."""
 
     def __init__(
         self,
@@ -869,11 +901,13 @@ class ForeignRoomCache:
         self.ttl_seconds = max(1, int(ttl_seconds or DEFAULT_FOREIGN_ROOM_TTL_SECONDS))
         self._time_func = time_func
         self._lock = threading.RLock()
-        self._rows: Dict[str, CachedForeignRoom] = {}
+        self._rows: Dict[Tuple[str, str], CachedForeignRoom] = {}
+        self._latest_session_by_symbol: Dict[str, str] = {}
 
     def clear(self) -> None:
         with self._lock:
             self._rows.clear()
+            self._latest_session_by_symbol.clear()
 
     def put_rows(self, rows: Iterable[Dict[str, Any]]) -> int:
         now = float(self._time_func())
@@ -884,24 +918,39 @@ class ForeignRoomCache:
                 if not foreign_room:
                     continue
                 symbol = str(foreign_room.get("ticker") or foreign_room.get("symbol") or "").strip().upper()
-                self._rows[symbol] = CachedForeignRoom(
+                session_date = str(foreign_room.get("provider_session_date") or "").strip()
+                if not session_date:
+                    continue
+                self._rows[(symbol, session_date)] = CachedForeignRoom(
                     symbol=symbol,
+                    session_date=session_date,
                     foreign_room=foreign_room,
                     received_at=now,
+                )
+                self._latest_session_by_symbol[symbol] = max(
+                    session_date,
+                    self._latest_session_by_symbol.get(symbol, session_date),
                 )
                 written += 1
         return written
 
-    def get(self, symbol: str) -> Dict[str, Any]:
+    def get(self, symbol: str, session_date: Optional[str] = None) -> Dict[str, Any]:
         normalized = str(symbol or "").strip().upper()
         now = float(self._time_func())
         with self._lock:
-            entry = self._rows.get(normalized)
+            requested_session = str(session_date or "").strip()
+            resolved_session = (
+                requested_session
+                or self._latest_session_by_symbol.get(normalized)
+                or ""
+            )
+            entry = self._rows.get((normalized, resolved_session))
 
         if entry is None:
             return {
                 "status": "empty",
                 "row": None,
+                "session_date": requested_session or None,
                 "latest_foreign_room_timestamp": None,
                 "latest_foreign_room_age_seconds": None,
             }
@@ -915,6 +964,7 @@ class ForeignRoomCache:
         return {
             "status": "persisted_stale" if row.get("snapshot_source") == "persisted" else "stale" if row["is_stale"] else "hit",
             "row": row,
+            "session_date": entry.session_date,
             "latest_foreign_room_timestamp": row.get("stream_timestamp") or row.get("time"),
             "latest_foreign_room_age_seconds": int(age_seconds),
         }
@@ -952,25 +1002,54 @@ class ForeignRoomCache:
         if not any(value is not None for value in numeric_fields.values()):
             return None
 
+        provider_session_date = self._safe_text(
+            self._first_value(
+                row,
+                "provider_session_date",
+                "trading_date",
+                "TradingDate",
+                "snapshot_trading_date",
+            )
+        )
+        if not provider_session_date:
+            return None
         cached_at = _utc_iso_from_epoch(now)
         foreign_room = {
             "ticker": symbol,
             "symbol": symbol,
             "exchange": self._safe_text(self._first_value(row, "exchange", "Exchange", "Market", "market")),
-            "trading_date": self._safe_text(
-                self._first_value(row, "trading_date", "TradingDate", "Date", "date")
-            ),
+            "trading_date": provider_session_date,
+            "provider_session_date": provider_session_date,
+            "session_date_source": self._safe_text(
+                self._first_value(row, "session_date_source")
+            )
+            or "unknown",
             "time": self._safe_text(self._first_value(row, "time", "Time", "TradingTime", "tradingTime")),
             "stream_timestamp": self._safe_text(self._first_value(row, "stream_timestamp", "streamTimestamp")),
             "stream_data_type": FOREIGN_ROOM_CHANNEL_PREFIX,
             "r_type": self._safe_text(self._first_value(row, "r_type", "RType", "rtype")) or FOREIGN_ROOM_CHANNEL_PREFIX,
-            "source": "SSI R foreign-room stream",
+            "source": "SSI FastConnect V3 ForeignRoomMessage",
             "received_at": cached_at,
             "cached_at": cached_at,
             "cache_ttl_seconds": self.ttl_seconds,
-            "value_semantics_status": "needs_semantics_proof",
+            "update_semantics": "cumulative_replacement_snapshot",
+            "value_semantics_status": "provisional_current_session",
+            "finality": "current_session_provisional",
+            "raw_field_presence": dict(row.get("raw_field_presence") or {}),
         }
         foreign_room.update(numeric_fields)
+        foreign_room["foreign_net_volume"] = (
+            numeric_fields["foreign_buy_volume"] - numeric_fields["foreign_sell_volume"]
+            if numeric_fields["foreign_buy_volume"] is not None
+            and numeric_fields["foreign_sell_volume"] is not None
+            else None
+        )
+        foreign_room["foreign_net_value"] = (
+            numeric_fields["foreign_buy_value"] - numeric_fields["foreign_sell_value"]
+            if numeric_fields["foreign_buy_value"] is not None
+            and numeric_fields["foreign_sell_value"] is not None
+            else None
+        )
         return _copy_persisted_snapshot_metadata(foreign_room, row)
 
     @staticmethod
@@ -1383,6 +1462,15 @@ class SsiStreamingRealtimeManager:
         self._last_transition_at: Optional[str] = None
         self._last_error_class: Optional[str] = None
         self._retry_blocked = False
+        self._recovery_request_cooldown_seconds = max(
+            float(DEFAULT_STREAMING_RECOVERY_REQUEST_COOLDOWN_SECONDS),
+            float(self.reconnect_initial_delay_seconds),
+        )
+        self._recovery_request_count = 0
+        self._recovery_request_suppressed_count = 0
+        self._last_recovery_request_at: Optional[str] = None
+        self._last_recovery_request_epoch: Optional[float] = None
+        self._last_recovery_trigger: Optional[str] = None
         self._opened_channels: set[str] = set()
         self._suppressed_close_generations: set[int] = set()
         self._reconnect_success_generations: set[int] = set()
@@ -1434,11 +1522,17 @@ class SsiStreamingRealtimeManager:
 
     @staticmethod
     def _event_trading_date(row: Dict[str, Any]) -> Optional[str]:
-        value = row.get("trading_date") or row.get("TradingDate") or row.get("date")
+        value = (
+            row.get("trading_date")
+            or row.get("TradingDate")
+            or row.get("provider_session_date")
+            or row.get("date")
+            or row.get("stream_timestamp")
+        )
         text = str(value or "").strip()
         if not text:
             return None
-        for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y"):
+        for fmt in ("%d/%m/%Y", "%Y/%m/%d", "%Y-%m-%d", "%d-%m-%Y"):
             try:
                 return datetime.strptime(text[:10], fmt).date().isoformat()
             except ValueError:
@@ -1620,8 +1714,6 @@ class SsiStreamingRealtimeManager:
                 generation = self._generation
                 self._start_count += 1
                 self._state = MANAGER_STARTING
-                self._latest_error = None
-                self._last_error_class = None
                 self._requested_symbols = normalized_symbols
                 self._channels = list(channels)
                 self._connected = False
@@ -1714,6 +1806,191 @@ class SsiStreamingRealtimeManager:
             except Exception as exc:  # pragma: no cover - defensive shutdown path
                 self._record_error(exc, set_errored=False)
         return self.status()
+
+    def ensure_symbol_subscription(
+        self,
+        symbol: str,
+        *,
+        recovery_trigger: str = "route_touch",
+    ) -> Dict[str, Any]:
+        """Idempotently add one symbol to the lifecycle-owned stream cohort."""
+
+        result = self.ensure_symbol_subscriptions(
+            [symbol],
+            recovery_trigger=recovery_trigger,
+        )
+        symbols = list(result.get("symbols") or [])
+        return {
+            **result,
+            "symbol": symbols[0] if symbols else None,
+            "subscription_added": bool(result.get("subscription_added_count")),
+        }
+
+    def ensure_symbol_subscriptions(
+        self,
+        symbols: Iterable[str],
+        *,
+        recovery_trigger: str = "route_touch",
+    ) -> Dict[str, Any]:
+        """Idempotently extend the shared transport with one bounded symbol cohort."""
+
+        normalized_symbols = normalize_streaming_symbols(symbols)
+        if not normalized_symbols:
+            return {
+                "status": "unavailable",
+                "symbols": [],
+                "subscription_added_count": 0,
+                "reason": "A valid symbol is required.",
+            }
+        with self._lock:
+            if (
+                self._shutdown_requested
+                or self._state != MANAGER_RUNNING
+                or not self._connected
+                or self._client is None
+            ):
+                if (
+                    not self._shutdown_requested
+                ):
+                    # Record the cohort before recovery so the lifecycle-owned
+                    # rebuild restores every requested symbol in one transport.
+                    for requested_symbol in normalized_symbols:
+                        if requested_symbol not in self._requested_symbols:
+                            self._requested_symbols.append(requested_symbol)
+                recovery = self.request_recovery(trigger=recovery_trigger)
+                return {
+                    "status": "unavailable",
+                    "symbols": normalized_symbols,
+                    "subscription_added_count": 0,
+                    "reason": "The shared SSI streaming transport is not connected.",
+                    "recovery_requested": bool(recovery.get("recovery_requested")),
+                    "recovery_status": recovery.get("status"),
+                }
+            pending_symbols = [
+                symbol
+                for symbol in normalized_symbols
+                if symbol not in self._requested_symbols
+            ]
+            if not pending_symbols:
+                return {
+                    "status": "ok",
+                    "symbols": normalized_symbols,
+                    "subscription_added_count": 0,
+                    "reason": None,
+                }
+            ensure_channels = getattr(self._client, "ensure_channels", None)
+            if not callable(ensure_channels):
+                return {
+                    "status": "unavailable",
+                    "symbols": normalized_symbols,
+                    "subscription_added_count": 0,
+                    "reason": "The active SSI streaming client cannot extend its subscription.",
+                }
+
+            pending_symbol_channels = build_streaming_channels(
+                pending_symbols,
+                realtime_template=self.channel_template,
+                order_book_enabled=self.order_book_enabled,
+                foreign_room_enabled=self.foreign_room_enabled,
+                trade_tape_enabled=self.trade_tape_enabled,
+                session_status_enabled=self.session_status_enabled,
+                market_index_enabled=False,
+            )
+            pending_channels = [
+                channel
+                for channel in pending_symbol_channels
+                if channel not in self._channels
+            ]
+            try:
+                ensure_channels(pending_channels)
+            except Exception as exc:  # noqa: BLE001 - retain typed degradation.
+                safe_error = sanitize_streaming_error(exc)
+                logger.warning(
+                    "vn_stream_symbol_subscription_failed symbol_count=%s error=%s",
+                    len(pending_symbols),
+                    safe_error,
+                )
+                return {
+                    "status": "unavailable",
+                    "symbols": normalized_symbols,
+                    "subscription_added_count": 0,
+                    "reason": safe_error,
+                }
+
+            self._requested_symbols.extend(pending_symbols)
+            self._channels.extend(pending_channels)
+            self._opened_channels.update(pending_channels)
+            self._subscription_restore_attempt_count += len(pending_channels)
+            for context in {
+                stream_context_for_channel(channel)
+                for channel in pending_channels
+            }:
+                if context:
+                    self._mark_context_subscription_open_locked(context)
+            return {
+                "status": "ok",
+                "symbols": normalized_symbols,
+                "subscription_added_count": len(pending_symbols),
+                "reason": None,
+            }
+
+    def request_recovery(self, *, trigger: str = "route_touch") -> Dict[str, Any]:
+        """Schedule one lifecycle-owned reconnect with single-flight cooldown."""
+
+        safe_trigger = str(trigger or "route_touch").strip()[:64] or "route_touch"
+        with self._lock:
+            if not self.enabled:
+                return {"status": "disabled", "recovery_requested": False}
+            if self._shutdown_requested:
+                return {"status": "shutdown", "recovery_requested": False}
+            if not self.reconnect_enabled:
+                return {"status": "reconnect_disabled", "recovery_requested": False}
+            if (
+                self._state == MANAGER_RUNNING
+                and self._connected
+                and self._client is not None
+                and self._transport_state == TRANSPORT_CONNECTED
+            ):
+                return {"status": "connected", "recovery_requested": False}
+            symbols = list(self._requested_symbols or self._bootstrap_symbols)
+            if not symbols:
+                return {"status": "symbols_empty", "recovery_requested": False}
+            if self._last_error_class in NON_RETRYABLE_STREAM_ERROR_CLASSES:
+                return {
+                    "status": "non_retryable",
+                    "recovery_requested": False,
+                    "failure_class": self._last_error_class,
+                }
+            if self._reconnect_in_progress or self._next_reconnect_epoch is not None:
+                self._recovery_request_suppressed_count += 1
+                return {"status": "already_scheduled", "recovery_requested": False}
+
+            now = float(self._time_func())
+            cooldown_until = (
+                float(self._last_recovery_request_epoch)
+                + self._recovery_request_cooldown_seconds
+                if self._last_recovery_request_epoch is not None
+                else now
+            )
+            self._retry_blocked = False
+            self._recovery_request_count += 1
+            self._last_recovery_request_epoch = now
+            self._last_recovery_request_at = _utc_iso_from_epoch(now)
+            self._last_recovery_trigger = safe_trigger
+            self._last_reconnect_reason = safe_trigger
+            if cooldown_until > now:
+                self._next_reconnect_epoch = cooldown_until
+                self._next_reconnect_at = _utc_iso_from_epoch(cooldown_until)
+                self._reconnect_scheduled_count += 1
+                self._reconnect_tasks_created += 1
+                self._transition_transport_locked(TRANSPORT_RECONNECTING)
+            else:
+                self._schedule_reconnect_locked(reason=safe_trigger, from_now=False)
+            return {
+                "status": "scheduled",
+                "recovery_requested": True,
+                "next_reconnect_at": self._next_reconnect_at,
+            }
 
     def set_bootstrap_context(
         self,
@@ -1823,12 +2100,38 @@ class SsiStreamingRealtimeManager:
                 valid_trade_rows = rows_by_context["x_trade"]
                 written = self.cache.put_rows(rows_by_context["x"])
                 order_book_written = self.order_book_cache.put_rows(order_book_rows)
-                foreign_room_written = self.foreign_room_cache.put_rows(foreign_room_rows)
+                session_written = self.session_status_cache.put_rows(session_rows)
+                session_aware_foreign_room_rows: List[Dict[str, Any]] = []
+                for row in foreign_room_rows:
+                    symbol = str(row.get("ticker") or row.get("symbol") or "").strip().upper()
+                    provider_status = self.session_status_cache.get(symbol).get("row") if symbol else None
+                    provider_status_date = self._event_trading_date(provider_status or {})
+                    if provider_status_date != self._session_date:
+                        provider_status_date = None
+                    event_date = self._event_trading_date(row)
+                    provider_session_date = provider_status_date or event_date
+                    if not provider_session_date:
+                        # A time-only event cannot establish a provider date.
+                        # Do not assign the local calendar date to provider data.
+                        continue
+                    session_aware_foreign_room_rows.append(
+                        {
+                            **row,
+                            "provider_session_date": provider_session_date,
+                            "session_date_source": (
+                                "provider_market_status"
+                                if provider_status_date
+                                else "provider_event"
+                            ),
+                        }
+                    )
+                foreign_room_written = self.foreign_room_cache.put_rows(
+                    session_aware_foreign_room_rows
+                )
                 market_index_written = self.market_index_cache.put_rows(market_index_rows)
                 trade_written = self.trade_tape_cache.put_rows(
                     self._trade_events_from_streaming_rows(valid_trade_rows)
                 )
-                session_written = self.session_status_cache.put_rows(session_rows)
                 if any((written, order_book_written, foreign_room_written, market_index_written, trade_written, session_written)):
                     store = self._snapshot_store
                     if store is not None and not self._shutdown_requested:
@@ -1926,6 +2229,10 @@ class SsiStreamingRealtimeManager:
             if first_open_for_generation:
                 self._connect_count += 1
                 self._last_connected_at = _utc_iso_from_epoch(float(self._time_func()))
+                self._latest_error = None
+                self._last_error_at = None
+                self._last_error_class = None
+                self._retry_blocked = False
             self._transition_transport_locked(TRANSPORT_CONNECTED)
             if context:
                 self._mark_context_subscription_open_locked(context)
@@ -2623,6 +2930,143 @@ class SsiStreamingRealtimeManager:
             "diagnostics": diagnostics,
         }
 
+    def current_foreign_flow(self, symbol: str) -> Dict[str, Any]:
+        """Return the current-session provisional R snapshot without blending REST."""
+
+        requested_symbol = str(symbol or "").strip().upper()
+        status = self.status()
+        session_date = str(status.get("session_date") or self._session_date)
+        market_active = bool(status.get("market_session_active"))
+        room_status = self.foreign_room(requested_symbol)
+        cache_result = self.foreign_room_cache.get(requested_symbol, session_date)
+        row = cache_result.get("row")
+        has_volume_pair = bool(
+            row
+            and row.get("foreign_buy_volume") is not None
+            and row.get("foreign_sell_volume") is not None
+        )
+        has_value_pair = bool(
+            row
+            and row.get("foreign_buy_value") is not None
+            and row.get("foreign_sell_value") is not None
+        )
+        usable = has_volume_pair or has_value_pair
+
+        stream_status = str(room_status.get("streaming_status") or "unavailable")
+        transport_connected = bool(
+            status.get("connected")
+            and status.get("transport_state") == TRANSPORT_CONNECTED
+            and status.get("manager_state") == MANAGER_RUNNING
+        )
+        failure_class: Optional[str] = None
+        if row and usable:
+            if not market_active:
+                data_state = "market_closed"
+                reason = "Market closed — showing last known current-session provisional flow."
+            elif not transport_connected:
+                data_state = "stale"
+                failure_class = self._current_flow_failure_class(
+                    status.get("last_error_class")
+                )
+                reason = "Current-session foreign flow connection was lost; showing the last received snapshot."
+            elif cache_result.get("status") in {"stale", "persisted_stale"}:
+                data_state = "stale"
+                reason = "Current-session foreign flow snapshot is stale."
+            else:
+                data_state = "ready"
+                reason = None
+        elif stream_status == "manager_error":
+            data_state = "unavailable"
+            failure_class = self._current_flow_failure_class(
+                (room_status.get("diagnostics") or {}).get("last_error_class")
+                or status.get("last_error_class")
+            )
+            reason = str(room_status.get("reason") or "SSI streaming manager error.")
+        elif stream_status in {
+            "disabled",
+            "r_disabled",
+            "manager_not_started",
+            "bootstrap_symbols_empty",
+            "ticker_not_bootstrapped",
+            "r_not_subscribed",
+        }:
+            data_state = "unavailable"
+            failure_class = stream_status
+            reason = str(room_status.get("reason") or "Current foreign flow unavailable.")
+        elif not market_active:
+            data_state = "market_closed"
+            reason = "Market closed — no current-session foreign room message was received."
+            usable = False
+        else:
+            data_state = "waiting"
+            reason = "Waiting for the first SSI ForeignRoomMessage for this session."
+
+        return {
+            "status": "ok" if data_state == "ready" else "partial" if usable else "unavailable",
+            "data_state": data_state,
+            "usable": bool(usable),
+            "failure_class": failure_class,
+            "symbol": requested_symbol,
+            "provider_session_date": session_date,
+            "is_current_session": bool(row and row.get("provider_session_date") == session_date),
+            "is_provisional": bool(row),
+            "current": dict(row) if row and usable else None,
+            "stream_status": stream_status,
+            "stream_reason": reason,
+            "cache": {
+                "status": cache_result.get("status"),
+                "age_seconds": cache_result.get("latest_foreign_room_age_seconds"),
+                "ttl_seconds": self.foreign_room_cache.ttl_seconds,
+            },
+            "market_session": {
+                key: status.get(key)
+                for key in (
+                    "market_session",
+                    "market_session_label",
+                    "market_session_active",
+                    "market_session_is_auction",
+                    "market_session_is_continuous",
+                )
+            },
+            "diagnostics": {
+                "manager_state": room_status.get("manager_state"),
+                "subscription_count": status.get("subscription_count", 0),
+                "foreign_room_subscription_count": len(
+                    status.get("foreign_room_channels") or []
+                ),
+                "foreign_room_rows_observed": status.get("foreign_room_rows_observed", 0),
+                "session_date_source": (
+                    row.get("session_date_source") if row else "manager_vietnam_session"
+                ),
+                "raw_field_presence": dict(row.get("raw_field_presence") or {}) if row else {},
+                "replacement_snapshot": True,
+                "transport_connected": transport_connected,
+                "recovery_request_count": status.get("recovery_request_count", 0),
+                "recovery_request_suppressed_count": status.get(
+                    "recovery_request_suppressed_count", 0
+                ),
+                "last_recovery_request_at": status.get("last_recovery_request_at"),
+                "last_recovery_trigger": status.get("last_recovery_trigger"),
+            },
+        }
+
+    @staticmethod
+    def _current_flow_failure_class(error_class: Any) -> Optional[str]:
+        mapping = {
+            "configuration": "credentials_missing",
+            "authentication": "authentication_rejected",
+            "authorization": "authentication_rejected",
+            "entitlement_rejected": "entitlement_rejected",
+            "subscription_failure": "subscription_failed",
+            "network_closed": "connection_failed",
+            "timeout": "connection_failed",
+            "dns": "connection_failed",
+            "tls": "connection_failed",
+            "sdk_error": "provider_unavailable",
+            "unknown": "unexpected_internal_error",
+        }
+        return mapping.get(str(error_class or "").strip()) or None
+
     def market_index_pulse(self, index_codes: Iterable[str]) -> Dict[str, Any]:
         requested_indexes = normalize_streaming_symbols(index_codes)
         if not requested_indexes:
@@ -3248,6 +3692,10 @@ class SsiStreamingRealtimeManager:
                         "next_retry_at": self._next_reconnect_at,
                         "in_flight_reconnect": self._reconnect_in_progress,
                         "shutdown_requested": self._shutdown_requested,
+                        "recovery_request_count": self._recovery_request_count,
+                        "recovery_request_suppressed_count": self._recovery_request_suppressed_count,
+                        "last_recovery_request_at": self._last_recovery_request_at,
+                        "last_recovery_trigger": self._last_recovery_trigger,
                     }
                 ],
                 "contexts": contexts,
@@ -3442,6 +3890,11 @@ class SsiStreamingRealtimeManager:
                 "connected": self._connected,
                 "generation": self._generation,
                 "last_error_class": self._last_error_class,
+                "recovery_request_count": self._recovery_request_count,
+                "recovery_request_suppressed_count": self._recovery_request_suppressed_count,
+                "last_recovery_request_at": self._last_recovery_request_at,
+                "last_recovery_trigger": self._last_recovery_trigger,
+                "recovery_request_cooldown_seconds": self._recovery_request_cooldown_seconds,
                 "reconnect_scheduled_count": self._reconnect_scheduled_count,
                 "reconnect_success_count": self._reconnect_success_count,
                 "reconnect_failure_count": self._reconnect_failure_count,

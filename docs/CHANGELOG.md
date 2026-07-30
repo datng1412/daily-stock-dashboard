@@ -9,6 +9,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [fix] Preserve provisional foreign-flow finality through VN30 and Industry display models, label stale current rows `Mất kết nối`, and replace obsolete Industry current diagnostics with aggregate-backed capability and coverage.
+- [test] Cover shared current/completed status selection, 30/30 stale finality, accepted same-date precedence, precise session provenance, and Industry ready/partial/stale/waiting states.
+- [documentation] Record current-finality independence from coverage, precise VN30 session labels, and bounded current-VN30 Industry diagnostics.
+- [fix] Persist accepted completed SSI DailyStockPrice foreign-flow history atomically across backend restart while excluding provisional current snapshots and aggregates.
+- [test] Add restart, regression, corruption, atomic-write, same-date correction, and provisional-exclusion coverage plus an 18-fixture system-Chrome desktop/mobile gate.
+- [documentation] Record the R6A durable-cache lifecycle, system-browser acceptance, and still-pending active-session provider publication proof.
+- [fix] Preserve newer accepted DailyStockPrice foreign-flow sessions when a later refresh is regressive, partial, empty, or unavailable.
+- [new feature] Extend VN30, current-VN30 industry, and selected-watchlist foreign-flow views through the latest provider-dated session with provisional SSI V3 ForeignRoomMessage aggregates and explicit coverage.
+- [improvement] Include current provisional flow in display-only windows, rankings, charts, tables, and CSV while keeping accepted same-date precedence and completed-history isolation.
+- [test] Cover last-known-good foreign-flow retention, shared cohort subscriptions, current aggregate coverage, null-versus-zero semantics, latest-session presentation, and visibility recovery.
+- [fix] Keep a newer provider-dated current foreign-flow snapshot visible after market close as `Tạm tính` until accepted DailyStockPrice for the same date replaces it.
+- [test] Cover post-close latest-session selection, display-only row ordering, accepted same-date precedence, null-versus-zero handling, and current-flow presentation isolation.
+- [fix] Recover the process-shared SSI V3 stream after retryable session/auth failures, retain stale current foreign-flow snapshots, and isolate completed DailyStockPrice data from stream health.
+- [improvement] Refresh current foreign flow once when a hidden Foreign Flow or Company Research tab becomes visible without clearing existing values or adding a polling lifecycle.
+- [test] Cover single-flight stream recovery, retry cooldown, subscription restoration, stale-snapshot replacement, capability isolation, and visibility-resume behavior.
+- [improvement] Unify Company Research and Foreign Flow ticker summaries around the latest provider-dated foreign-flow session with accepted same-date precedence.
+- [test] Cover latest-session selection, concise current states, duplicate-card removal, stale-response rejection, provisional history isolation, and 26 desktop/mobile visual fixtures.
+- [improvement] Add the provider-dated current foreign-flow session as the first display-only ticker detail row with short truthful states and completed same-date precedence.
+- [test] Cover current-row mapping, null-versus-zero behavior, isolation from historical calculations, single polling ownership, and 16 desktop/mobile visual fixtures.
+- [fix] Make Company Research current-flow polling React Strict Mode safe with one effective initial request.
+- [test] Prove current foreign-flow raw-message routing, subscription idempotency, cache headers, and 60 desktop/mobile visual states.
+- [documentation] Record the M2.6B-R1 production call graph and active-session SSI streaming authorization blocker.
+- [new feature] Add provisional current-session foreign flow by symbol from SSI V3 ForeignRoomMessage replacement snapshots.
+- [improvement] Show independent current-flow states in Foreign Flow ticker mode and Company Research without changing completed DailyStockPrice history.
+- [test] Cover raw room-field presence, replacement semantics, session state, API separation, and current-flow rendering.
+- [fix] Accept the observed SSI room-stream date/time shape and use its provider date for current-session identity.
+- [documentation] Correct the SSI V3 room source inventory by separating room capacity from its explicit foreign buy/sell counters and retain active-session, reset, replay, and reconciliation gates.
+- [test] Add bounded room-message mapping, null/zero/net, snapshot replacement, delay, replay, failure-stop, and resource-cleanup coverage.
+- [chore] Extend the manual-only SSI V3 current-session diagnostic with one bounded room-only client, sanitized evidence, and no local message accumulation.
 - [fix] Preserve SSI V3 foreign-flow explicit zero versus missing/malformed lineage and derive net values only from complete gross pairs.
 - [improvement] Add independent Company Research DailyStockPrice capability states, partial irregular-intraday state, explicit change baseline, and compact technical details.
 - [test] Cover Company Research zero lineage, capability independence, cadence/baseline states, null-versus-zero rendering, regressions, and bounded desktop/mobile acceptance.

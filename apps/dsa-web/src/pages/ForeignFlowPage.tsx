@@ -3,6 +3,8 @@ import { Download, RefreshCw, Search } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import {
   stocksApi,
+  type VietnamCurrentForeignFlowAggregateResponse,
+  type VietnamCurrentForeignFlowResponse,
   type VietnamFlowDataResponse,
   type VietnamForeignFlowSymbolHistoryResponse,
   type VietnamVn30ForeignFlowResponse,
@@ -13,6 +15,17 @@ import { ForeignFlowSymbolHistoryTable } from '../components/foreign-flow/Foreig
 import { ForeignFlowWatchlistScreener } from '../components/foreign-flow/ForeignFlowWatchlistScreener';
 import { ForeignFlowOverview } from '../components/foreign-flow/ForeignFlowOverview';
 import { ForeignFlowDataDetails } from '../components/foreign-flow/ForeignFlowDataDetails';
+import LatestForeignFlowCard from '../components/foreign-flow/LatestForeignFlowCard';
+import { mergeCurrentFlowSessionDisplayRow } from '../components/foreign-flow/currentForeignFlowTableModel';
+import {
+  mergeCurrentAggregateRows,
+  type ForeignFlowDisplayRow,
+} from '../components/foreign-flow/currentForeignFlowAggregateModel';
+import {
+  selectForeignFlowDisplayStatus,
+  selectLatestForeignFlowSession,
+  type ForeignFlowCurrentState,
+} from '../components/foreign-flow/latestForeignFlowSessionModel';
 import {
   mapIndustryFlowViewState,
   mapProprietaryFlowViewState,
@@ -48,8 +61,8 @@ type ModeRequestState = {
 };
 type ModeStateMap = Record<DataMode, ModeRequestState>;
 
-type FlowRow = Record<string, unknown> & {
-  tradingDate?: string;
+type FlowRow = ForeignFlowDisplayRow & {
+  tradingDate?: string | null;
   foreignBuyVolume?: number | null;
   foreignSellVolume?: number | null;
   foreignNetVolume?: number | null;
@@ -64,6 +77,8 @@ type FlowRow = Record<string, unknown> & {
   proprietaryNetValue?: number | null;
 };
 type RankedRow = { label: string; net: number | null; turnover?: number | null; coverage?: number | null };
+
+const CURRENT_FLOW_POLL_INTERVAL_MS = 15_000;
 
 const MODES: Array<{ value: PageMode; label: string }> = [
   { value: 'overview', label: 'Overview' },
@@ -114,6 +129,23 @@ const numberOf = (row: FlowRow, key: string) => finite(row[key]) ? row[key] as n
 const fieldsFor = (metric: ForeignFlowExplorerMetric) => metric === 'value'
   ? ['foreignBuyValue', 'foreignSellValue', 'foreignNetValue'] as const
   : ['foreignBuyVolume', 'foreignSellVolume', 'foreignNetVolume'] as const;
+const CURRENT_FLOW_STATES: ForeignFlowCurrentState[] = [
+  'waiting',
+  'ready',
+  'stale',
+  'market_closed',
+  'unavailable',
+  'error',
+];
+const currentStateOf = (value: unknown): ForeignFlowCurrentState | null => (
+  typeof value === 'string' && CURRENT_FLOW_STATES.includes(value as ForeignFlowCurrentState)
+    ? value as ForeignFlowCurrentState
+    : null
+);
+const sumCount = (rows: FlowRow[], key: keyof FlowRow): number | null => {
+  const values = rows.map((row) => row[key]).filter(finite);
+  return values.length ? values.reduce((sum, value) => sum + value, 0) : null;
+};
 
 const toFlowRows = (data: ExplorerData | null): FlowRow[] => {
   if (!data) return [];
@@ -150,6 +182,39 @@ const aggregateBySession = (rows: FlowRow[], metric: ForeignFlowExplorerMetric):
     const net = sumNullable(entries.map((row) => numberOf(row, netKey)));
     if (net !== null) cumulative += net;
     const present = [buy, sell, net].filter((value) => value !== null).length;
+    const semantic = entries.find((row) => (
+      row.sourceKind === 'current'
+      || row.finality === 'current_session_provisional'
+      || row.isCurrent === true
+    )) ?? entries.find((row) => (
+      row.sourceKind === 'completed'
+      || row.finality === 'completed_accepted'
+      || row.isCompleted === true
+    ));
+    const isCurrent = Boolean(
+      semantic?.sourceKind === 'current'
+      || semantic?.finality === 'current_session_provisional'
+      || semantic?.isCurrent === true,
+    );
+    const hasSemantics = Boolean(semantic);
+    const sourceKind = hasSemantics ? isCurrent ? 'current' : 'completed' : undefined;
+    const finality = hasSemantics
+      ? isCurrent ? 'current_session_provisional' : 'completed_accepted'
+      : undefined;
+    const currentState = isCurrent
+      ? currentStateOf(semantic?.currentState ?? semantic?.dataState)
+      : null;
+    const providerStatus = isCurrent ? text(semantic?.providerStatus) || currentState : null;
+    const displayStatus = hasSemantics
+      ? selectForeignFlowDisplayStatus({
+        sourceKind,
+        finality,
+        currentState,
+        providerStatus,
+        usable: present > 0,
+        hasUsableValues: present > 0,
+      })
+      : undefined;
     return {
       tradingDate,
       buy,
@@ -162,6 +227,29 @@ const aggregateBySession = (rows: FlowRow[], metric: ForeignFlowExplorerMetric):
       sign: net === null ? 'unavailable' : net > 0 ? 'positive' : net < 0 ? 'negative' : 'zero',
       state: present === 0 ? 'unavailable' : present === 3 ? 'ready' : 'partial',
       unit: metric === 'value' ? 'VND' : 'shares',
+      ...(hasSemantics ? {
+        displayOrigin: isCurrent ? 'current_session_provisional' as const : 'completed_session' as const,
+        sourceKind,
+        source: text(semantic?.source) || null,
+        finality,
+        currentState,
+        providerStatus,
+        displayStatus,
+        statusLabel: displayStatus,
+        isCurrent,
+        isCompleted: !isCurrent,
+        isPartial: entries.some((row) => row.isPartial === true) || present < 3,
+        isStale: isCurrent && (
+          entries.some((row) => row.isStale === true)
+          || currentState === 'stale'
+        ),
+        requestedCount: sumCount(entries, 'requestedCount'),
+        observedCount: sumCount(entries, 'observedCount'),
+        completeValueCount: sumCount(entries, 'completeValueCount'),
+        completeVolumeCount: sumCount(entries, 'completeVolumeCount'),
+        providerTime: text(semantic?.providerTime) || null,
+        receivedAt: text(semantic?.receivedAt) || null,
+      } : {}),
     };
   });
 };
@@ -232,6 +320,19 @@ const ForeignFlowPage = () => {
   const [customTo, setCustomTo] = useState(today);
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   const [chartMode, setChartMode] = useState<SymbolForeignFlowChartMode>('net');
+  const [currentFlow, setCurrentFlow] = useState<{
+    symbol: string;
+    data: VietnamCurrentForeignFlowResponse | null;
+    loading: boolean;
+    error: string | null;
+  }>({ symbol: '', data: null, loading: false, error: null });
+  const [currentFlowRefreshGeneration, setCurrentFlowRefreshGeneration] = useState(0);
+  const [currentAggregateRefreshGeneration, setCurrentAggregateRefreshGeneration] = useState(0);
+  const [currentAggregate, setCurrentAggregate] = useState<{
+    data: VietnamCurrentForeignFlowAggregateResponse | null;
+    loading: boolean;
+    error: string | null;
+  }>({ data: null, loading: false, error: null });
   const [modeStates, setModeStates] = useState<ModeStateMap>(initialModeStates);
   const modeStatesRef = useRef(modeStates);
   const requestIds = useRef<Record<DataMode, number>>({
@@ -442,12 +543,182 @@ const ForeignFlowPage = () => {
     };
   }, [load, mode]);
 
-  const rawRows = useMemo(() => toFlowRows(data), [data]);
+  useEffect(() => {
+    if (mode !== 'ticker' || !ticker) return undefined;
+    let inFlight = false;
+    let controller: AbortController | null = null;
+    let wasHidden = document.visibilityState === 'hidden';
+    const request = (forceRefresh = false) => {
+      if (inFlight || document.visibilityState === 'hidden') return;
+      inFlight = true;
+      controller = new AbortController();
+      setCurrentFlow((current) => ({
+        symbol: ticker,
+        data: current.symbol === ticker ? current.data : null,
+        loading: true,
+        error: null,
+      }));
+      void stocksApi.getVietnamCurrentForeignFlow(ticker, {
+        forceRefresh,
+        signal: controller.signal,
+      })
+        .then((payload) => {
+          if (!controller?.signal.aborted) {
+            setCurrentFlow({ symbol: ticker, data: payload, loading: false, error: null });
+          }
+        })
+        .catch((caught: unknown) => {
+          if (!controller?.signal.aborted) {
+            setCurrentFlow((current) => ({
+              ...current,
+              symbol: ticker,
+              loading: false,
+              error: caught instanceof Error
+                ? 'Foreign flow could not be loaded.'
+                : 'Foreign flow unavailable.',
+            }));
+          }
+        })
+        .finally(() => {
+          inFlight = false;
+        });
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        wasHidden = true;
+        return;
+      }
+      if (!wasHidden) return;
+      wasHidden = false;
+      request(true);
+    };
+    const initialRequest = globalThis.setTimeout(
+      () => request(currentFlowRefreshGeneration > 0),
+      0,
+    );
+    const timer = globalThis.setInterval(() => request(false), CURRENT_FLOW_POLL_INTERVAL_MS);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      globalThis.clearTimeout(initialRequest);
+      globalThis.clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      controller?.abort();
+    };
+  }, [currentFlowRefreshGeneration, mode, ticker]);
+
+  useEffect(() => {
+    if (!['overview', 'details', 'vn30', 'industry'].includes(mode)) return undefined;
+    let inFlight = false;
+    let controller: AbortController | null = null;
+    let wasHidden = document.visibilityState === 'hidden';
+    const request = (forceRefresh = false) => {
+      if (inFlight || document.visibilityState === 'hidden') return;
+      inFlight = true;
+      controller = new AbortController();
+      setCurrentAggregate((current) => ({ ...current, loading: true, error: null }));
+      void stocksApi.getVietnamCurrentForeignFlowAggregate({
+        scope: 'vn30',
+        includeIndustries: true,
+        forceRefresh,
+        signal: controller.signal,
+      }).then((payload) => {
+        if (!controller?.signal.aborted) {
+          setCurrentAggregate((previous) => ({
+            data: payload.usable ? payload : previous.data,
+            loading: false,
+            error: null,
+          }));
+        }
+      }).catch(() => {
+        if (!controller?.signal.aborted) {
+          setCurrentAggregate((previous) => ({
+            ...previous,
+            loading: false,
+            error: 'Current-session aggregate is unavailable; completed sessions remain visible.',
+          }));
+        }
+      }).finally(() => {
+        inFlight = false;
+      });
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        wasHidden = true;
+        return;
+      }
+      if (!wasHidden) return;
+      wasHidden = false;
+      request(true);
+    };
+    const initialRequest = globalThis.setTimeout(
+      () => request(currentAggregateRefreshGeneration > 0),
+      0,
+    );
+    const timer = globalThis.setInterval(() => request(false), CURRENT_FLOW_POLL_INTERVAL_MS);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      globalThis.clearTimeout(initialRequest);
+      globalThis.clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      controller?.abort();
+    };
+  }, [currentAggregateRefreshGeneration, mode]);
+
+  const rawRows = useMemo(() => {
+    const completedRows = toFlowRows(data);
+    if (!data) return completedRows;
+    if (data.mode !== 'vn30' && data.mode !== 'industry') return completedRows;
+    return mergeCurrentAggregateRows(
+      completedRows,
+      currentAggregate.data,
+      data.mode,
+    );
+  }, [currentAggregate.data, data]);
   const selection = useMemo(
     () => selectForeignFlowWindow(rawRows, window, dateOf, anomalyOf, customFrom, customTo),
     [customFrom, customTo, rawRows, window],
   );
   const chartRows = useMemo(() => aggregateBySession(selection.rows, metric), [metric, selection.rows]);
+  const currentFlowData = currentFlow.symbol === ticker ? currentFlow.data : null;
+  const latestCompletedTickerSession = useMemo(() => {
+    if (!data || data.mode !== 'ticker') return null;
+    const candidates = [
+      ...data.payload.rows,
+      ...(data.payload.latestRow ? [data.payload.latestRow] : []),
+    ].filter((row) => /^\d{4}-\d{2}-\d{2}$/.test(row.tradingDate));
+    const latest = candidates.reduce<(typeof candidates)[number] | null>(
+      (selected, row) => !selected || row.tradingDate > selected.tradingDate ? row : selected,
+      null,
+    );
+    return latest ? {
+      sessionDate: latest.tradingDate,
+      source: 'SSI DailyStockPrice',
+      foreignBuyVolume: latest.foreignBuyVolume,
+      foreignSellVolume: latest.foreignSellVolume,
+      foreignNetVolume: latest.foreignNetVolume,
+      foreignBuyValue: latest.foreignBuyValue,
+      foreignSellValue: latest.foreignSellValue,
+      foreignNetValue: latest.foreignNetValue,
+    } : null;
+  }, [data]);
+  const latestTickerSession = useMemo(
+    () => selectLatestForeignFlowSession({
+      completed: latestCompletedTickerSession,
+      current: currentFlowData,
+    }),
+    [currentFlowData, latestCompletedTickerSession],
+  );
+  const detailRows = useMemo(
+    () => mode === 'ticker'
+      ? mergeCurrentFlowSessionDisplayRow(
+        chartRows,
+        currentFlowData,
+        metric,
+        latestCompletedTickerSession?.sessionDate,
+      )
+      : chartRows,
+    [chartRows, currentFlowData, latestCompletedTickerSession?.sessionDate, metric, mode],
+  );
   const totalBuy = sumMetric(selection.rows, metric, 'buy');
   const totalSell = sumMetric(selection.rows, metric, 'sell');
   const totalNet = sumMetric(selection.rows, metric, 'net');
@@ -491,8 +762,24 @@ const ForeignFlowPage = () => {
       const key = metric === 'value'
         ? window === '60' ? 'foreignNetValue60d' : window === '20' ? 'foreignNetValue20d' : window === '5' ? 'foreignNetValue5d' : 'foreignNetValue'
         : window === '60' ? 'foreignNetVolume60d' : window === '20' ? 'foreignNetVolume20d' : window === '5' ? 'foreignNetVolume5d' : 'foreignNetVolume';
+      const currentByTicker = new Map(
+        (currentAggregate.data?.items ?? []).map((row) => [row.symbol, row]),
+      );
       return data.payload.components
-        .map((row) => ({ label: row.ticker, net: finite(row[key]) ? row[key] as number : null }))
+        .map((row) => {
+          const currentWindow = currentByTicker.get(row.ticker)?.displayWindows?.[
+            window === 'custom' ? '60' : window
+          ];
+          const currentValue = currentWindow?.[
+            metric === 'value' ? 'foreignNetValue' : 'foreignNetVolume'
+          ];
+          return {
+            label: row.ticker,
+            net: finite(currentValue)
+              ? currentValue
+              : finite(row[key]) ? row[key] as number : null,
+          };
+        })
         .filter((row) => row.net !== null)
         .sort((left, right) => (right.net ?? 0) - (left.net ?? 0));
     }
@@ -514,7 +801,7 @@ const ForeignFlowPage = () => {
       turnover: item.turnover.length ? item.turnover.reduce((sum, value) => sum + value, 0) : null,
       coverage: item.coverage.length ? item.coverage.reduce((sum, value) => sum + value, 0) / item.coverage.length : null,
     })).sort((left, right) => (right.net ?? Number.NEGATIVE_INFINITY) - (left.net ?? Number.NEGATIVE_INFINITY));
-  }, [data, metric, selection.rows, window]);
+  }, [currentAggregate.data?.items, data, metric, selection.rows, window]);
   const vn30Latest = data?.mode === 'vn30'
     ? data.payload.decomposition.latest ?? data.payload.decomposition.series.at(-1) ?? null
     : null;
@@ -565,10 +852,17 @@ const ForeignFlowPage = () => {
       <PageHeader
         eyebrow="Vietnam · SSI FastConnect V3"
         title="Foreign Flow Explorer"
-        description="Inspect provider-backed completed-session foreign and proprietary flow without converting missing values to zero."
+        description="Inspect provider-backed foreign and proprietary flow while keeping current and completed session finality explicit."
         actions={DATA_MODES.includes(mode as DataMode) ? (
           <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={() => void load(true)} isLoading={loading} disabled={Boolean(validationError) || (mode === 'ticker' && !ticker)}>
+            <Button variant="outline" size="sm" onClick={() => {
+              void load(true);
+              if (mode === 'ticker' && ticker) {
+                setCurrentFlowRefreshGeneration((current) => current + 1);
+              } else if (['vn30', 'industry'].includes(mode)) {
+                setCurrentAggregateRefreshGeneration((current) => current + 1);
+              }
+            }} isLoading={loading} disabled={Boolean(validationError) || (mode === 'ticker' && !ticker)}>
               <RefreshCw className="h-4 w-4" /> Force Refresh
             </Button>
             <Button variant="outline" size="sm" onClick={exportCsv} disabled={!selection.rows.length}>
@@ -611,7 +905,10 @@ const ForeignFlowPage = () => {
                 ? modeStates.vn30.data.payload.decomposition.latestCompletedSession
                 : null) ?? '—'}</span>
             </div>
-            <Button variant="outline" size="sm" onClick={() => void load(true)}
+            <Button variant="outline" size="sm" onClick={() => {
+              void load(true);
+              setCurrentAggregateRefreshGeneration((current) => current + 1);
+            }}
               isLoading={modeStates.vn30.loading || modeStates.industry.loading}>
               <RefreshCw className="h-4 w-4" /> Refresh
             </Button>
@@ -666,13 +963,17 @@ const ForeignFlowPage = () => {
         <ForeignFlowOverview
           vn30={modeStates.vn30.data?.mode === 'vn30' ? modeStates.vn30.data.payload : null}
           industry={modeStates.industry.data?.mode === 'industry' ? modeStates.industry.data.payload : null}
+          currentAggregate={currentAggregate.data}
           loading={modeStates.vn30.loading || modeStates.industry.loading}
           error={modeStates.vn30.error ?? modeStates.industry.error}
           metric={metric}
           window={window}
           chartMode={chartMode === 'buy-sell' ? 'buy-sell' : 'net'}
           onChartModeChange={setChartMode}
-          onRefresh={() => void load(true)}
+          onRefresh={() => {
+            void load(true);
+            setCurrentAggregateRefreshGeneration((current) => current + 1);
+          }}
           onNavigate={navigateTo}
         />
       ) : null}
@@ -681,6 +982,7 @@ const ForeignFlowPage = () => {
         <ForeignFlowDataDetails
           vn30={modeStates.vn30.data?.mode === 'vn30' ? modeStates.vn30.data.payload : null}
           industry={modeStates.industry.data?.mode === 'industry' ? modeStates.industry.data.payload : null}
+          currentAggregate={currentAggregate.data}
         />
       ) : null}
 
@@ -692,6 +994,13 @@ const ForeignFlowPage = () => {
       ) : null}
       {loading && !data ? <div className="h-32 animate-pulse rounded-xl bg-elevated/50" aria-label="Loading foreign flow" /> : null}
       {error ? <div role="alert" className="rounded-lg border border-danger/30 bg-danger/10 p-3 text-sm text-danger">{error}</div> : null}
+      {mode === 'ticker' && ticker ? (
+        <LatestForeignFlowCard
+          view={latestTickerSession}
+          loading={(loading && !data) || (currentFlow.symbol === ticker && currentFlow.loading)}
+          error={currentFlow.symbol === ticker ? currentFlow.error : null}
+        />
+      ) : null}
 
       {data && viewState?.availability === 'unavailable' && !viewState.usable ? (
         <section
@@ -731,7 +1040,7 @@ const ForeignFlowPage = () => {
           <section className="grid gap-2 rounded-xl border border-border/70 bg-card p-4 text-sm md:grid-cols-3 xl:grid-cols-6" aria-label="Provenance and freshness">
             <div><span className="text-secondary-text">Source</span><p>{provenance?.source}</p></div>
             <div><span className="text-secondary-text">Endpoint</span><p>{provenance?.endpoint}</p></div>
-            <div><span className="text-secondary-text">Source session</span><p>{selection.sessionDates.at(-1) ?? '—'}</p></div>
+            <div><span className="text-secondary-text">{mode === 'ticker' ? 'Latest session' : 'Latest display session'}</span><p>{mode === 'ticker' ? latestTickerSession?.sessionDate ?? '—' : selection.sessionDates.at(-1) ?? '—'}</p></div>
             <div><span className="text-secondary-text">Fetched at</span><p>{provenance?.fetchedAt}</p></div>
             <div><span className="text-secondary-text">Cache</span><p>{provenance?.cache}</p></div>
             <div><span className="text-secondary-text">Source freshness</span><p>{provenance?.freshness}</p></div>
@@ -747,11 +1056,11 @@ const ForeignFlowPage = () => {
           {mode === 'industry' ? (
             <div className="rounded-lg border border-border/70 bg-card p-3 text-sm text-secondary-text">
               Industry flow is bounded to current VN30 membership. Turnover is trading activity, not foreign net cash flow.
-              Current-session industry flow remains unavailable.
+              Current-session totals use observed SSI ForeignRoomMessage rows only; missing members are excluded and coverage stays visible.
             </div>
           ) : null}
 
-          <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6" aria-label="Selected window summary">
+          {mode !== 'ticker' ? <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6" aria-label="Selected window summary">
             {[
               ['Gross buy', totalBuy],
               ['Gross sell', totalSell],
@@ -773,7 +1082,7 @@ const ForeignFlowPage = () => {
               <p className="mt-1 font-semibold">{selection.containsProviderAnomaly ? 'Anomaly present' : 'Clean'}</p>
               <p className="text-xs text-secondary-text">{selection.anomalySessions.join(', ') || 'No labelled anomaly'}</p>
             </div>
-          </section>
+          </section> : null}
 
           {mode === 'vn30' && data.mode === 'vn30' && vn30Latest ? (
             <section className="rounded-xl border border-border/70 bg-card p-4" aria-label="VN30 breadth">
@@ -812,7 +1121,7 @@ const ForeignFlowPage = () => {
           ) : null}
 
           <section className="rounded-xl border border-border/70 bg-card p-4">
-            <ForeignFlowSymbolHistoryTable rows={chartRows} metric={metric} />
+            <ForeignFlowSymbolHistoryTable rows={detailRows} metric={metric} />
           </section>
           <p className="text-xs text-secondary-text">
             Availability: {provenance?.state} · requested sessions: {selection.requestedSessionCount ?? 'custom'} ·

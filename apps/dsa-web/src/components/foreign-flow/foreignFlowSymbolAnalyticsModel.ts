@@ -3,6 +3,12 @@ import type {
   VietnamForeignFlowSymbolAnalytics,
 } from '../../api/stocks';
 import { foreignFlowSign, type ForeignFlowSign } from '../../utils/foreignFlowSign';
+import type {
+  ForeignFlowCurrentState,
+  ForeignFlowFinality,
+  ForeignFlowSourceKind,
+  LatestForeignFlowStatus,
+} from './latestForeignFlowSessionModel';
 
 export type SymbolForeignFlowMetric = 'value' | 'volume';
 export type SymbolForeignFlowRange = 20 | 40 | 60;
@@ -21,6 +27,24 @@ export type SymbolForeignFlowMetricRow = {
   sign: ForeignFlowSign;
   state: 'ready' | 'partial' | 'unavailable';
   unit: 'VND' | 'shares';
+  displayOrigin?: 'completed_session' | 'current_session_provisional';
+  sourceKind?: ForeignFlowSourceKind;
+  source?: string | null;
+  finality?: ForeignFlowFinality;
+  currentState?: ForeignFlowCurrentState | null;
+  providerStatus?: string | null;
+  displayStatus?: LatestForeignFlowStatus;
+  statusLabel?: LatestForeignFlowStatus;
+  isCurrent?: boolean;
+  isCompleted?: boolean;
+  isPartial?: boolean;
+  isStale?: boolean;
+  requestedCount?: number | null;
+  observedCount?: number | null;
+  completeValueCount?: number | null;
+  completeVolumeCount?: number | null;
+  providerTime?: string | null;
+  receivedAt?: string | null;
 };
 
 export const getSymbolForeignFlowMetric = (

@@ -198,6 +198,50 @@ def test_failed_force_refresh_preserves_positive_rows_as_stale():
     assert vietnam_foreign_flow_observability_snapshot()["stale_recoveries"] == 1
 
 
+def test_regressive_successful_refresh_preserves_newer_accepted_session():
+    fetcher = _Fetcher([
+        {"status": "ok", "rows": [_row(27), _row(28)]},
+        {"status": "ok", "rows": [_row(27, foreign_buy_value=27_777)]},
+    ])
+    service = VietnamForeignFlowService(fetcher)
+
+    original = service.get_symbol_history("FPT", limit=2)
+    refreshed = service.get_symbol_history("FPT", limit=2, force_refresh=True)
+
+    assert [row["trading_date"] for row in original["rows"]] == [
+        "2026-06-27",
+        "2026-06-28",
+    ]
+    assert [row["trading_date"] for row in refreshed["rows"]] == [
+        "2026-06-27",
+        "2026-06-28",
+    ]
+    assert refreshed["rows"][0]["foreign_buy_value"] == 27_777
+    assert refreshed["latest_row"]["trading_date"] == "2026-06-28"
+    assert refreshed["data_state"] == "stale"
+    assert refreshed["response_regressive"] is True
+    assert refreshed["provider_latest_returned"] == "2026-06-27"
+    assert refreshed["preserved_latest_completed"] == "2026-06-28"
+    assert refreshed["cached_latest_retained"] is True
+
+
+def test_empty_successful_refresh_does_not_clear_accepted_history_or_other_symbol():
+    fetcher = _Fetcher([
+        {"status": "ok", "rows": [_row(28)]},
+        {"status": "ok", "rows": []},
+        {"status": "ok", "rows": [_row(27)]},
+    ])
+    service = VietnamForeignFlowService(fetcher)
+
+    service.get_symbol_history("FPT", limit=1)
+    preserved = service.get_symbol_history("FPT", limit=1, force_refresh=True)
+    hpg = service.get_symbol_history("HPG", limit=1)
+
+    assert preserved["latest_row"]["trading_date"] == "2026-06-28"
+    assert preserved["response_regressive"] is True
+    assert hpg["latest_row"]["trading_date"] == "2026-06-27"
+
+
 def test_cache_key_separates_ticker_limit_and_date_range():
     fetcher = _Fetcher([{"status": "ok", "rows": [_row(day) for day in range(1, 21)]}])
     service = VietnamForeignFlowService(fetcher)

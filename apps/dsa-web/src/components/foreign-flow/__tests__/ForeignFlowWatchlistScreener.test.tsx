@@ -12,11 +12,13 @@ import { ForeignFlowWatchlistScreener } from '../ForeignFlowWatchlistScreener';
 vi.mock('../../../api/stocks', () => ({
   stocksApi: {
     getVietnamForeignFlowWatchlist: vi.fn(),
+    getVietnamCurrentForeignFlowAggregate: vi.fn(),
     getVietnamIndexComponents: vi.fn(),
   },
 }));
 
 const watchlist = vi.mocked(stocksApi.getVietnamForeignFlowWatchlist);
+const currentAggregate = vi.mocked(stocksApi.getVietnamCurrentForeignFlowAggregate);
 const indexComponents = vi.mocked(stocksApi.getVietnamIndexComponents);
 
 const makeItem = (
@@ -132,6 +134,34 @@ beforeEach(() => {
   vi.clearAllMocks();
   localStorage.clear();
   watchlist.mockImplementation(async (tickers) => responseFor(tickers));
+  currentAggregate.mockResolvedValue({
+    status: 'unavailable',
+    dataState: 'waiting',
+    usable: false,
+    scope: 'current_foreign_flow_aggregate',
+    universe: 'watchlist',
+    isProvisional: false,
+    source: 'SSI FastConnect V3 ForeignRoomMessage',
+    providerVersion: 'v3',
+    endpoint: 'room.{symbol}',
+    updateSemantics: 'cumulative_replacement_snapshot',
+    aggregate: null,
+    displaySeries: [],
+    displayWindows: {},
+    rankings: {},
+    items: [],
+    groups: [],
+    coverage: {
+      requestedSymbolCount: 0,
+      classifiedSymbolCount: 0,
+      subscribedSymbolCount: 0,
+      observedSymbolCount: 0,
+      completeVolumeCount: 0,
+      completeValueCount: 0,
+      missingSymbols: [],
+      staleSymbolCount: 0,
+    },
+  });
   indexComponents.mockResolvedValue({
     status: 'ok',
     source: 'ssi_fastconnect',

@@ -39,6 +39,7 @@ from api.v1.schemas.stocks import (
     VietnamForeignFlowSymbolHistoryResponse,
     VietnamForeignIndexFlowResponse,
     VietnamCurrentForeignFlowResponse,
+    VietnamCurrentForeignFlowAggregateResponse,
     VietnamProprietaryFlowResponse,
     VietnamIndustryFlowRequest,
     VietnamIndustryFlowResponse,
@@ -897,12 +898,76 @@ def get_vietnam_foreign_flow_index(
 )
 def get_vietnam_current_foreign_flow(
     ticker: str,
+    response: Response,
+    force_refresh: bool = Query(
+        False,
+        description="Re-read the shared cache without duplicating the SSI subscription.",
+    ),
 ) -> VietnamCurrentForeignFlowResponse:
+    response.headers["Cache-Control"] = "no-store, no-cache, max-age=0"
+    response.headers["Pragma"] = "no-cache"
     service = VietnamFlowDataService()
     try:
-        return VietnamCurrentForeignFlowResponse(**service.current_foreign_by_symbol(ticker))
+        return VietnamCurrentForeignFlowResponse(
+            **service.current_foreign_by_symbol(
+                ticker,
+                force_refresh=force_refresh,
+            )
+        )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail={"error": "vn_current_foreign_invalid_request", "message": str(exc)}) from exc
+    finally:
+        service.close()
+
+
+@router.get(
+    "/vn/foreign-flow/current-aggregate",
+    response_model=VietnamCurrentForeignFlowAggregateResponse,
+    summary="Vietnam current-session foreign-flow aggregate",
+)
+def get_vietnam_current_foreign_flow_aggregate(
+    response: Response,
+    scope: str = Query(
+        "vn30",
+        pattern="^(vn30|watchlist)$",
+        description="SSI VN30 basket or an explicit user-selected watchlist.",
+    ),
+    tickers: str = Query(
+        "",
+        description="Comma-separated symbols required only for watchlist scope.",
+    ),
+    include_industries: bool = Query(
+        True,
+        description="Include current VN30-member ICB aggregates when classification exists.",
+    ),
+    force_refresh: bool = Query(
+        False,
+        description="Refresh membership metadata and re-read the shared stream cache.",
+    ),
+) -> VietnamCurrentForeignFlowAggregateResponse:
+    response.headers["Cache-Control"] = "no-store, no-cache, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    service = VietnamFlowDataService()
+    try:
+        payload = service.current_foreign_aggregate(
+            index_code="VN30" if scope == "vn30" else None,
+            symbols=(
+                tickers.split(",")
+                if scope == "watchlist" and tickers
+                else None
+            ),
+            include_industries=include_industries and scope == "vn30",
+            force_refresh=force_refresh,
+        )
+        return VietnamCurrentForeignFlowAggregateResponse(**payload)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "vn_current_foreign_aggregate_invalid_request",
+                "message": str(exc),
+            },
+        ) from exc
     finally:
         service.close()
 

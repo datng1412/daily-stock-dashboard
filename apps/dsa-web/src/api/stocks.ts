@@ -857,6 +857,9 @@ export type VietnamForeignFlowWatchlistItem = {
   anomalyCount: number;
   source: 'ssi_fastconnect';
   sourceEndpoint: 'daily_stock_price';
+  displayFinality?: 'current_session_provisional' | 'completed_accepted';
+  displayStatus?: string | null;
+  displayCoverage?: string | null;
 };
 
 export type VietnamForeignFlowWatchlistResponse = {
@@ -1631,7 +1634,23 @@ export type VietnamFlowDataResponse = {
   diagnostics?: Record<string, unknown>;
 };
 
-export type VietnamCurrentForeignFlowResponse = VietnamFlowDataResponse & {
+export type VietnamCurrentForeignFlowDataState =
+  | 'waiting'
+  | 'ready'
+  | 'stale'
+  | 'market_closed'
+  | 'unavailable'
+  | 'error';
+
+export type VietnamCurrentForeignFlowSourceKind = 'current' | 'completed';
+export type VietnamCurrentForeignFlowFinality =
+  | 'current_session_provisional'
+  | 'completed_accepted';
+
+export type VietnamCurrentForeignFlowResponse = Omit<VietnamFlowDataResponse, 'dataState'> & {
+  dataState: VietnamCurrentForeignFlowDataState;
+  usable: boolean;
+  failureClass?: string | null;
   symbol: string;
   tradingDate?: string | null;
   freshnessStatus: string;
@@ -1641,6 +1660,103 @@ export type VietnamCurrentForeignFlowResponse = VietnamFlowDataResponse & {
   latestCompletedComparison?: Record<string, unknown> | null;
   streamStatus: string;
   streamReason: string;
+  finality?: Extract<VietnamCurrentForeignFlowFinality, 'current_session_provisional'> | null;
+  updateSemantics?: 'cumulative_replacement_snapshot' | null;
+  marketSession?: {
+    marketSession?: string | null;
+    marketSessionLabel?: string | null;
+    marketSessionActive?: boolean | null;
+  };
+  diagnostics?: Record<string, unknown>;
+};
+
+export type VietnamCurrentForeignFlowAggregateItem = {
+  symbol: string;
+  providerSessionDate?: string | null;
+  dataState: VietnamCurrentForeignFlowDataState;
+  usable: boolean;
+  isStale: boolean;
+  streamStatus: string;
+  foreignBuyVolume?: number | null;
+  foreignSellVolume?: number | null;
+  foreignNetVolume?: number | null;
+  foreignBuyValue?: number | null;
+  foreignSellValue?: number | null;
+  foreignNetValue?: number | null;
+  providerTime?: string | null;
+  receivedAt?: string | null;
+  icbCode?: string | null;
+  icbName?: string | null;
+  displayLatest?: VietnamCurrentForeignFlowDisplayRow | null;
+  displayWindows?: Record<string, Record<string, unknown>>;
+};
+
+export type VietnamCurrentForeignFlowDisplayRow = Record<string, unknown> & {
+  tradingDate?: string | null;
+  providerSessionDate?: string | null;
+  sourceKind?: VietnamCurrentForeignFlowSourceKind | null;
+  source?: string | null;
+  finality?: VietnamCurrentForeignFlowFinality | null;
+  currentState?: VietnamCurrentForeignFlowDataState | null;
+  dataState?: VietnamCurrentForeignFlowDataState | null;
+  providerStatus?: string | null;
+  status?: string | null;
+  displayStatus?: string | null;
+  isCurrent?: boolean;
+  isCompleted?: boolean;
+  isPartial?: boolean;
+  isStale?: boolean;
+  requestedCount?: number | null;
+  observedCount?: number | null;
+  completeValueCount?: number | null;
+  completeVolumeCount?: number | null;
+  foreignBuyVolume?: number | null;
+  foreignSellVolume?: number | null;
+  foreignNetVolume?: number | null;
+  foreignBuyValue?: number | null;
+  foreignSellValue?: number | null;
+  foreignNetValue?: number | null;
+  providerTime?: string | null;
+  receivedAt?: string | null;
+  icbCode?: string | null;
+  icbName?: string | null;
+};
+
+export type VietnamCurrentForeignFlowAggregateResponse = {
+  status: 'ok' | 'partial' | 'unavailable';
+  dataState: VietnamCurrentForeignFlowDataState;
+  usable: boolean;
+  failureClass?: string | null;
+  scope: 'current_foreign_flow_aggregate';
+  universe: string;
+  providerSessionDate?: string | null;
+  isProvisional: boolean;
+  finality?: Extract<VietnamCurrentForeignFlowFinality, 'current_session_provisional'> | null;
+  source: string;
+  providerVersion: 'v3';
+  endpoint: 'room.{symbol}';
+  updateSemantics: 'cumulative_replacement_snapshot';
+  aggregate?: Record<string, unknown> | null;
+  displaySeries: VietnamCurrentForeignFlowDisplayRow[];
+  displayWindows: Record<string, Record<string, unknown>>;
+  rankings: Record<string, {
+    topBuy: Array<Record<string, unknown>>;
+    topSell: Array<Record<string, unknown>>;
+  }>;
+  items: VietnamCurrentForeignFlowAggregateItem[];
+  groups: VietnamCurrentForeignFlowDisplayRow[];
+  coverage: {
+    requestedSymbolCount: number;
+    classifiedSymbolCount: number;
+    subscribedSymbolCount: number;
+    observedSymbolCount: number;
+    completeVolumeCount: number;
+    completeValueCount: number;
+    missingSymbols: string[];
+    staleSymbolCount: number;
+  };
+  marketSession?: Record<string, unknown>;
+  diagnostics?: Record<string, unknown>;
 };
 
 export type VietnamCompanyIntraday = {
@@ -2237,7 +2353,7 @@ export const stocksApi = {
 
   async getVietnamCurrentForeignFlow(
     rawTicker: string,
-    options?: { signal?: AbortSignal },
+    options?: { forceRefresh?: boolean; signal?: AbortSignal },
   ): Promise<VietnamCurrentForeignFlowResponse> {
     const ticker = normalizeVietnamTicker(rawTicker);
     if (!/^[A-Z0-9]{1,10}$/.test(ticker) || ticker === 'ALL') {
@@ -2246,9 +2362,33 @@ export const stocksApi = {
     const response = await apiClient.get(`/api/v1/stocks/vn/foreign-flow/current/${ticker}`, {
       timeout: 120000,
       signal: options?.signal,
+      params: options?.forceRefresh ? { force_refresh: true } : undefined,
     });
     const { toCamelCase } = await import('./utils');
     return toCamelCase<VietnamCurrentForeignFlowResponse>(response.data);
+  },
+
+  async getVietnamCurrentForeignFlowAggregate(
+    options: {
+      scope: 'vn30' | 'watchlist';
+      tickers?: string[];
+      includeIndustries?: boolean;
+      forceRefresh?: boolean;
+      signal?: AbortSignal;
+    },
+  ): Promise<VietnamCurrentForeignFlowAggregateResponse> {
+    const response = await apiClient.get('/api/v1/stocks/vn/foreign-flow/current-aggregate', {
+      timeout: 120000,
+      signal: options.signal,
+      params: {
+        scope: options.scope,
+        ...(options.tickers?.length ? { tickers: options.tickers.join(',') } : {}),
+        include_industries: options.includeIndustries ?? options.scope === 'vn30',
+        ...(options.forceRefresh ? { force_refresh: true } : {}),
+      },
+    });
+    const { toCamelCase } = await import('./utils');
+    return toCamelCase<VietnamCurrentForeignFlowAggregateResponse>(response.data);
   },
 
   async getVietnamProprietaryFlow(

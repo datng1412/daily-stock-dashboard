@@ -1,6 +1,16 @@
 # Vietnam Foreign Flow Product, Data, and Delivery Plan
 
-Status: Phase 4.12E-3 implements deterministic, on-demand single-symbol analytics over at most 60 accepted SSI DailyStockPrice sessions; runtime smoke was intentionally skipped and the Phase 4.12E-2 runtime follow-up remains deferred
+Status: SSI-V3-M2.6B-R6B preserves current finality through display models and repairs bounded current-VN30 Industry diagnostics; active-session replacement publication remains pending
+
+R6B keeps current finality independent from field and symbol completeness.
+Accepted DailyStockPrice alone displays `Đủ`; current connected, stale/
+disconnected, post-close, waiting, and unavailable rows display `Đang diễn ra`,
+`Mất kết nối`, `Tạm tính`, `Chờ dữ liệu`, and `Không khả dụng`. Data Details
+separates latest completed, latest display, and current provider sessions.
+Industry current diagnostics use aggregate-backed ready/partial/stale/waiting/
+unavailable states for the current VN30 membership universe. Proprietary
+semantics, polling, stream ownership, aggregation math, and persistence remain
+outside this correction.
 
 > SSI-V3-A1 migration note: V3 `securitiesSummary` documents foreign buy/sell totals and values, but the existing-key raw V3 auth mapping received HTTP 401, so no V3 data parity request ran. Shares/VND units, completed-session finality, direct-net precedence, and multi-symbol replacement remain unverified. V2 DailyStockPrice remains the only foreign-flow runtime source under outcome D. See `docs/SSI_FASTCONNECT_V3_MIGRATION.md`.
 
@@ -22,6 +32,31 @@ The product journey is:
 
 `scan -> compare -> inspect -> monitor`
 
+## Continuous latest-session contract
+
+Completed rows remain authoritative SSI DailyStockPrice observations keyed by symbol and trading date. The service retains accepted rows across request shapes and backend restart, so a weaker refresh ending on an older date cannot remove a newer accepted session. Regressive responses are marked and report the provider latest date and the retained latest completed date.
+
+R6A stores only normalized accepted completed rows in
+`DATA_CACHE_DIR/vietnam_foreign_flow_accepted.v1.json` (default
+`data/cache/`). Schema-v1 startup rehydration is best effort; corrupt or
+mismatched files are ignored, writes use a same-directory temporary file plus
+`fsync` and atomic replacement, and each symbol is bounded to 120 sessions
+across at most 128 symbols. Provider source/finality, field-presence coverage,
+anomaly lineage, and persistence time are retained. `ForeignRoomMessage`
+snapshots and every provisional aggregate remain outside this file.
+
+Local visual acceptance uses the first approved installed system browser rather
+than downloading Playwright Chromium. Chrome 150.0.7871.187 completed all 18
+fixtures at 1366x768 and 390x844 with no page overflow or surviving owned
+process/port. The one active-window diagnostic produced no retained terminal
+summary after tool-output truncation and was not repeated, so live
+authentication, publication, VN30/industry/watchlist aggregation, and polling
+connection counts remain pending rather than inferred.
+
+The current dataset remains independent: one process-owned SSI V3 stream stores the latest replacement `ForeignRoomMessage` snapshot per symbol and provider-backed session date. The display-only dataset combines accepted completed rows with a newer current row; accepted DailyStockPrice suppresses a provisional row for the same date. Current values may extend 1/5/20/60-session display windows, rankings, charts, detail tables, and displayed-series CSV, but are labeled provisional/partial and are never persisted as accepted history.
+
+VN30 uses the current SSI IndexComponents basket. Industry grouping is explicitly the current VN30 membership universe, not the full market. Watchlist current aggregation is limited to user-selected symbols and introduces no default symbols. All aggregates disclose observed/requested and complete-side coverage; missing fields are excluded rather than zero-filled, while audited explicit provider zero remains valid. Proprietary flow remains separate.
+
 Phase 4.12E-2 adds `GET /api/v1/stocks/vn/foreign-flow/vn30` and `scope=vn30`. Exact SSI IndexComponents membership is resolved before at most four concurrent cached symbol-history reads. The backend builds one common observed date axis capped at 20 dates, then calculates aligned latest/5/20 buy, sell, and net value/volume, metric-specific coverage and breadth, component summaries, and deterministic rankings. The frontend makes one aggregate request and derives 5/10/20 net, buy/sell, cumulative-net, and breadth charts locally. Historical totals use current membership and are not constituent-correct. Current-session semantics, HOSE/HNX/UPCOM/sector scopes, broad-market behavior, and alerts remain gated.
 
 ## Fixed source and interpretation boundaries
@@ -29,7 +64,11 @@ Phase 4.12E-2 adds `GET /api/v1/stocks/vn/foreign-flow/vn30` and `scope=vn30`. E
 - Foreign flow is actual foreign buy/sell activity.
 - Foreign room is remaining permitted foreign ownership capacity.
 - Foreign ownership is a position or percentage. It is a future, separate domain.
-- SSI `R:{symbol}` remains foreign-room context only. It is not a foreign-flow source.
+- SSI V3 `room.{symbol}` carries two independent groups: ownership-room
+  capacity (`TotalRoom`, `CurrentRoom`) and explicit current-session foreign
+  trading counters (`BuyQuantity`, `SellQuantity`, `BuyValue`, `SellValue`).
+  Capacity must never be transformed into flow; the counters remain a
+  provisional candidate until active-session evidence is collected.
 - Missing value fields remain `null`. StockClock must not estimate them from volume and price.
 - SSI DailyOhlc remains the sole D1 candle and canonical `latest_price` source.
 - SSI IntradayOhlc remains the sole accepted SSI 1-minute candle source.
@@ -54,7 +93,10 @@ Phase 4.12E-2 adds `GET /api/v1/stocks/vn/foreign-flow/vn30` and `scope=vn30`. E
 
 ### Gaps that block the product
 
-- No verified official SSI current-session foreign-flow authority exists in the product contract. The after-close DailyStockPrice proof does not establish active-session cumulative behavior.
+- The official V3 room model is now a verified current-session flow candidate,
+  but active-session publication, delay, replay, reset, and post-close
+  reconciliation remain gated. The after-close DailyStockPrice proof does not
+  establish those stream behaviors.
 - DailyStockPrice correction timing and bulk behavior are not yet proven. The daily field/date/history/value contract is verified, while production rows should use neutral `daily_available` finality until a stronger provider-final marker is established.
 - No 60-session foreign-flow history or value-based 5/20/60 trend is implemented.
 - No canonical foreign-flow finality, freshness, coverage, aggregate, reconciliation, or counter-reset model exists.
@@ -162,7 +204,8 @@ State behavior:
 - `partial`: show the computed covered subset and `covered / expected`; never imply a complete aggregate.
 - `stale`: preserve last-known metrics with age and reason.
 - `unavailable`: show no metric-shaped placeholders and retain other dashboard data.
-- `market_closed`: prefer the latest accepted daily aggregate when one is implemented; a retained provisional snapshot remains labelled stale/last known.
+- `market_closed`: accepted DailyStockPrice for the same date wins; otherwise a
+  newer retained provider snapshot remains visible as provisional `Tạm tính`.
 - Missing value fields: keep value cards absent or explicitly unavailable while valid volume remains visible.
 
 ### 2. Top buyers and sellers
@@ -280,7 +323,10 @@ Do not compress lifecycle, finality, aggregation, and market session into one fi
 | `freshness_status` | `fresh`, `stale`, `unknown` | Age against the source-specific policy |
 | `aggregation_status` | `complete`, `partial`, `unavailable`, null | Component completeness for basket/market scopes |
 
-`market_closed` does not make a valid `daily_available` row unavailable. A future stale current snapshot may remain visible after close only as last-known provisional data with a clear age; the accepted daily row replaces it when available.
+`market_closed` does not make a valid `daily_available` row unavailable. A
+newer retained provider-dated current snapshot remains visible after close as
+`Tạm tính`; accepted DailyStockPrice for the same date replaces it when
+available.
 
 ### Zero, null, missing row, and partial
 
@@ -355,7 +401,7 @@ Phase 4.12A-Lite completed the DailyStockPrice daily-symbol gate as bounded diag
 | DailyStockPrice | Bulk behavior, active-session updates, explicit final timing/corrections, larger-window performance, and rate limits | Verified `daily_available` symbol authority; current authority only if observed and documented |
 | `X` | Whether explicit cumulative foreign fields exist, update cadence, reset/session behavior, timestamps | Quote snapshot only unless explicit official flow fields and semantics are proven; never a candle |
 | `X-TRADE` | Whether foreign participant identity is explicitly present and stable | Recent trade events only; no inferred participant, history reconstruction, or candle aggregation |
-| `R` | Confirm room fields, units, timestamp, and continued isolation | Foreign room only; never used as foreign flow |
+| `R` / `room.{symbol}` | Observe explicit buy/sell counters, delay, snapshot replacement, reset, replay, and post-close reconciliation | Room capacity remains isolated; explicit trading counters are provisional and never inferred from capacity |
 | `MI` | Whether an explicit official index/market foreign aggregate exists and its scope | Market-index context only unless a separately named, documented aggregate is proven |
 | Other installed FC Data endpoints | Enumerate official methods/signatures and identify documented foreign-flow candidates | No speculative runtime endpoint probing |
 
@@ -373,6 +419,237 @@ Phase 4.12A-Lite completed the DailyStockPrice daily-symbol gate as bounded diag
 - **Current-session-source gate:** pass only when an official cumulative current source, timestamp, reset behavior, and session boundary are observed. Otherwise current remains unavailable.
 - **Volume/value gate:** each metric passes independently. Missing value does not block verified volume product paths.
 - **Bulk-fetch gate:** pass only with an official bounded bulk shape or a measured provider budget safe for the target scope.
+
+## SSI-V3-M2.6B current-session symbol flow implementation (2026-07-29)
+
+M2.6B uses `room.{symbol}` only for provisional current-session symbol flow.
+The startup-owned shared manager owns the provider connection. A current-flow
+read may idempotently ensure one requested symbol on that existing cohort, but
+the request never creates, reconnects, or closes the stream. Raw
+`bq`/`sq`/`bv`/`sv` presence is audited before typed defaults, and a provider
+zero is distinct from a missing field.
+
+Storage is keyed by normalized symbol plus provider session date. Each message
+replaces the earlier cumulative snapshot; no local addition is allowed.
+Provider market-status session identity is preferred when available, with the
+manager's explicit Vietnam session date recorded as fallback. Room capacity
+`tr`/`cr` remains independently available and is never converted into flow.
+
+The public symbol state machine is:
+
+| State | Meaning |
+| --- | --- |
+| `waiting` | subscribed/active but no usable current-session message yet |
+| `ready` | usable current-session provisional snapshot |
+| `stale` | active session with an aged current-session snapshot |
+| `market_closed` | inactive window; last current-session snapshot may remain visible |
+| `unavailable` | disabled, not started, not bootstrapped, or not subscribed |
+| `error` | typed streaming manager/provider failure |
+
+DailyStockPrice remains the completed-session authority. The provisional row
+is not appended to history or included in completed-session windows, rankings,
+aggregates, or exports. One bounded active-session FPT observation confirmed
+room publication with all four nonzero flow counters and a
+`YYYY/MM/DD HH:MM:SS` provider timestamp; the production parser now accepts
+that observed timestamp and uses its date for session identity.
+
+M2.6B-R2 reuses that current-flow response as the first display-only row in the
+Foreign Flow ticker-mode `Chi tiết phiên` table when a provider-backed session
+date is present. The row has no provisional 5-session or 20-session value and
+is excluded from chart data, rankings, analytics, and CSV/export. Short table
+states are `Đang diễn ra`, `Tạm tính`, `Chờ dữ liệu`, `Mất kết nối`, and
+`Không khả dụng`; missing values remain dashes while explicit provider zero
+remains zero. An accepted DailyStockPrice row for the same date suppresses the
+provisional row, so completed-session authority and date uniqueness are
+preserved.
+
+M2.6B-R3 consolidates the Company Research and Foreign Flow ticker summaries
+into one latest-session `Foreign flow` presentation. A shared frontend
+selector compares the accepted DailyStockPrice date with the current-flow
+provider date. Current wins only when its date is newer; DailyStockPrice wins
+when newer or on the same date. Current waiting or unavailable values remain
+null and render as dashes, while explicit provider zero remains zero. The
+standalone current-session card is removed. The same page-owned 15-second
+current-flow request continues to feed the unified card and the display-only
+table row; provisional data remains excluded from completed history, charts,
+5P/20P windows, rankings, analytics, persistence, and CSV export. The existing
+streaming authorization limitation remains a separate runtime gate.
+
+M2.6B-R4 makes that streaming limitation recoverable and capability-scoped.
+Retryable authentication/session or socket failure schedules one
+lifecycle-monitor rebuild under single-flight and cooldown controls. A route,
+manual refresh, hidden-to-visible transition, or reload may request recovery,
+but none owns or closes the provider client. Symbol leases survive rebuild and
+the complete cohort is restored. A prior valid current snapshot remains
+displayed as `stale` until a newer replacement message arrives; with no prior
+snapshot, only current flow is unavailable.
+
+Completed DailyStockPrice history and current-membership VN30 decomposition
+remain usable independently and cannot be downgraded or emptied by the stream
+failure cache. Foreign Flow and Company Research retain one 15-second current
+polling owner and add exactly one hidden-to-visible current refresh. No current
+VN30/HOSE/industry/watchlist aggregation or provisional historical, rolling,
+ranking, analytics, chart, persistence, or export insertion is permitted.
+
+M2.6B-R5 confirms the backend current-flow cache/API already retains a usable
+provider-dated snapshot when the market becomes inactive. The shared frontend
+latest-session selector now presents that newer snapshot as `Tạm tính` in both
+the unified card and the display-only detail row. It remains provisional until
+accepted DailyStockPrice for the same date replaces it; that replacement
+suppresses the provisional duplicate. Market close adds no request, does not
+fabricate a session date, and does not insert the snapshot into completed
+history or any chart, rolling, ranking, analytics, export, aggregation, or
+persistence input.
+
+R1 proves the production call graph:
+`OfficialSsiV3RealtimeStreamClient` callback -> `normalize_v3_streaming_messages`
+-> `SsiStreamingRealtimeManager.handle_message` ->
+`ForeignRoomCache.put_rows`/`current_foreign_flow` ->
+`VietnamFlowDataService.current_foreign_by_symbol` ->
+`get_vietnam_current_foreign_flow` ->
+`VietnamCurrentForeignFlowResponse` ->
+`stocksApi.getVietnamCurrentForeignFlow` -> the shared latest-session selector
+and unified `Foreign flow` card.
+Repeated route reads, 15-second page polling, and force refresh keep the same
+subscription counts. A 60-view desktop/mobile fixture gate passes. The active
+application retry reached readiness but SSI streaming authorization failed
+before a room event, so live application-route publication remains blocked.
+Delay, replay/reset, and reconciliation acceptance also remain pending.
+
+## SSI-V3-M2.6A-R1 foreign-room flow correction (2026-07-29)
+
+Primary outcome:
+`M2_6A_R1_V3_FOREIGN_ROOM_CANDIDATE_FOUND_ACTIVE_SESSION_PENDING` at the
+pre-open eligibility check; replace this line with the bounded live result when
+an active-session observation is completed.
+
+The gate inspected the current repository, installed `ssi-sdk==3.0.5`, and the
+official [Python service contract](https://developers.ssi.com.vn/docs/sdk/python/service-classes)
+and [Python model contract](https://developers.ssi.com.vn/docs/sdk/python/utilities).
+No undocumented endpoint was invented or probed. R1 also inspected the
+installed model decoder and official V2 foreign-room contract. The earlier
+room-only conclusion was incomplete: one official V3 room message contains
+both room-capacity fields and separate foreign buy/sell counters.
+
+### Current ownership and call graph
+
+| Source | Official method/topic | Current owner and cache | Current purpose | Foreign-flow authority |
+| --- | --- | --- | --- | --- |
+| DailyStockPrice | `get_securities_summary_historical` through the V3 adapter | `SsiFastConnectV3Adapter`; completed-session foreign-flow services own bounded REST caches | Completed-session ticker history/enrichment | Historical only; a current-date row is an unverified candidate |
+| X | `trade.{symbol}` | Startup-owned stream manager; request handlers read `RealtimeSnapshotCache` | Latest valid matched execution as quote context | Failed: no explicit foreign fields |
+| X-QUOTE | `quote.{symbol}` | Startup-owned stream manager; request handlers read `OrderBookCache` | Bid/ask ladder | No |
+| X-TRADE | `trade.{symbol}` | Startup-owned stream manager; request handlers read `TradeTapeEventCache` | Recent matched trades | Failed: no foreign participant identity |
+| R | `room.{symbol}` / `ForeignRoomMessage` | Startup-owned stream manager; request handlers read `ForeignRoomCache` | Room capacity plus separate foreign buy/sell counters | Diagnostic provisional candidate only; no production promotion |
+| F | `market.{board}` / `MarketStatusMessage` | Session/status context cache where available | Session/date context | Context only |
+| MI | `get_index_summary`, `get_board_summary`, and index context | V3 REST/market-index context | Index activity and proprietary aggregates | Failed for ticker foreign flow |
+| IntradayOhlc | V3 OHLC methods | V3 adapter and intraday service cache | Price/volume candles | No |
+
+Parser tests prove normalization and cache behavior, not live provider
+semantics. Request handlers remain cache readers for streams; the M2.6A
+diagnostic does not start a production manager or add a new cache.
+
+### Candidate inventory
+
+| Candidate | Explicit audited fields | Volume | Value | Timestamp | Session date | Snapshot/delta known | Gate |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| DailyStockPrice | yes, raw aliases retained by the adapter | shares | VND under the established board policy | no provider event time | `TradingDate` | no | `active_session_pending` |
+| X | no | no | no | `trading_time` | no independent date | event shape only | failed |
+| X-QUOTE | no | no | no | `trading_time` | no independent date | point order book, not flow | failed |
+| X-TRADE | no participant identity | no foreign metric | no foreign metric | `trading_time` | no independent date | trade event | failed |
+| R | `buy_quantity`, `sell_quantity`, `buy_value`, `sell_value` | typed quantity | typed value, operational unit unproven | `trading_time` | no independent date | V2 cumulative migration evidence; V3 observation pending | `active_session_pending` |
+| F | no | no | no | no event timestamp | `trading_date` | not applicable | failed |
+| MI | no foreign aggregate | no | no | no event timestamp | `trading_date` | summary semantics do not establish ticker flow | failed |
+| Other documented V3 market methods | none | no | no | capability-specific | capability-specific | not applicable | failed |
+
+Exact migration mapping keeps the capability groups separate:
+
+| Semantic category | V2 field | V3 model field / raw alias | Diagnostic field |
+| --- | --- | --- | --- |
+| Room capacity | `TotalRoom` | `total_room` / `tr` | `total_foreign_room` |
+| Room capacity | `CurrentRoom` | `current_room` / `cr` | `current_foreign_room` |
+| Trading flow | `FBuyVol` | `buy_quantity` / `bq` | `foreign_buy_volume` |
+| Trading flow | `FSellVol` | `sell_quantity` / `sq` | `foreign_sell_volume` |
+| Trading flow | `FBuyVal` | `buy_value` / `bv` | `foreign_buy_value` |
+| Trading flow | `FSellVal` | `sell_value` / `sv` | `foreign_sell_value` |
+| Context | `TradingDate` | no V3 model field | never invented; active-window receipt-date attribution is labelled |
+| Context | `Time` | `trading_time` / `t` | provider event time |
+| Context | `Symbol` | `symbol` / `s` | uppercase symbol |
+
+Official [V2 Data Streaming documentation](https://fc-data.ssi.com.vn/Help/NavigateDataStreamPage)
+and the [V2 specification PDF](https://www.ssi.com.vn/upload/files/KHCN/fast%20connect/FastConnectData_Specs_v2_0.pdf)
+describe the four trading-flow fields as totals from market open to report
+time. This is migration evidence for a V3 cumulative snapshot candidate, not
+automatic V3 parity. `TotalRoom` and `CurrentRoom`
+never create or modify any flow value.
+
+The accepted historical raw aliases remain `totalForeignBuy`,
+`totalForeignSell`, `totalForeignBuyValue`, and
+`totalForeignSellValue`. Net is derived only from a complete compatible gross
+pair. Missing, null, blank, or malformed values remain null; explicit provider
+zero remains zero. The typed `SecuritiesSummary` model itself does not declare
+these four aliases, so raw field presence does not supply missing
+current-session semantics.
+
+### Evidence matrix
+
+| Gate | DailyStockPrice | X | X-QUOTE | X-TRADE | R | F | MI |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Official SSI V3 source | passed | passed | passed | passed | passed | passed | passed |
+| Explicit foreign buy field | pending | failed | failed | failed | passed | failed | failed |
+| Explicit foreign sell field | pending | failed | failed | failed | passed | failed | failed |
+| Volume unit known | passed | failed | failed | failed | failed | failed | failed |
+| Value unit known | passed | failed | failed | failed | failed | failed | failed |
+| Current-session identity | pending | not_applicable | not_applicable | not_applicable | pending | passed | not_applicable |
+| Provider timestamp | pending | passed | passed | passed | passed | pending | pending |
+| Snapshot/delta known | pending | not_applicable | not_applicable | not_applicable | pending | not_applicable | not_applicable |
+| Cumulative behavior observed | pending | not_applicable | not_applicable | not_applicable | pending | not_applicable | not_applicable |
+| Correction behavior | pending | not_applicable | not_applicable | not_applicable | pending | not_applicable | not_applicable |
+| Session reset observed | pending | not_applicable | not_applicable | not_applicable | pending | not_applicable | not_applicable |
+| Reconnect/replay known | not_applicable | not_applicable | not_applicable | not_applicable | pending | not_applicable | not_applicable |
+| Post-close reconciliation | pending | not_applicable | not_applicable | not_applicable | pending | not_applicable | not_applicable |
+| Ticker-level authority | pending | failed | failed | failed | pending | failed | failed |
+| Final gate result | pending | failed | failed | failed | pending | failed | failed |
+
+The V3 room stream is now the prioritized current-session candidate. Each
+message is treated as a complete replacement snapshot candidate and is never
+summed locally. A static nonzero current-session sample may support
+`cumulative_snapshot_candidate`; changing counters may support
+`cumulative_snapshot_observed`; zero-only data remains inconclusive. Counter
+decreases classify as `correction_or_reset_candidate` and are never discarded
+or assumed monotonic.
+
+### Manual evidence and next permitted phase
+
+`scripts/diagnose_vn_current_foreign_flow.py` is offline by default. Live use
+requires `--allow-live`, detects the existing holiday-unaware Vietnam session
+window, permits one or two symbols, one to eight messages per symbol, and at
+most 120 seconds. Room mode owns one room-only client and closes it in
+`finally`. Output contains only source/channel, symbol, provider event time,
+separate receipt time, field presence/type/semantic/numeric value, delay,
+change class, units, counts, failure class, and gate status. Optional sanitized
+evidence is restricted to `.tmp/current-foreign-flow/`; full provider messages
+are never emitted.
+
+At `2026-07-29T08:54:31+07:00`, the eligibility check classified the market
+as pre-open and made no provider call. Rate-limit, authorization, publication,
+and delay behavior were therefore not exercised at that point.
+
+One subsequent active-window FPT/SSI room-only run consumed approximately 87
+seconds of its 90-second observation bound and terminated without a surviving
+diagnostic process. Because `--save-sanitized-evidence` writes whenever a
+normalized message exists and no evidence file was created, zero normalized
+room messages were collected. The invoking caller did not retain the final
+JSON, so authentication/subscription acknowledgement is not claimed and the
+provider call was not repeated. The primary outcome remains
+`M2_6A_R1_V3_FOREIGN_ROOM_CANDIDATE_FOUND_ACTIVE_SESSION_PENDING`.
+
+Next, run the same diagnostic once during a real ATO/continuous/ATC window.
+If nonzero or changing explicit values appear, record them as
+`current_provisional` candidate evidence without local accumulation. A later
+same-session post-close comparison against accepted
+DailyStockPrice remains mandatory, as does a separate future-session reset
+observation. No current provisional product, aggregate, polling, persistence,
+alert, UI, or accepted-history replacement is authorized by this result.
 
 ## Source authority and reconciliation
 

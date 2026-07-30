@@ -3,6 +3,7 @@ import { Download, Plus, RefreshCw, Trash2, X } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import {
   stocksApi,
+  type VietnamCurrentForeignFlowAggregateResponse,
   type VietnamForeignFlowWatchlistResponse,
   type VietnamForeignFlowWatchlistWindow,
 } from '../../api/stocks';
@@ -25,6 +26,7 @@ import {
 import { foreignFlowSignTextClass } from '../../utils/foreignFlowSign';
 import { formatForeignFlowValue, formatForeignFlowVolume } from '../../utils/vietnamNumberFormat';
 import { mapWatchlistFlowViewState } from './foreignFlowViewState';
+import { applyCurrentWatchlistFlow } from './currentForeignFlowAggregateModel';
 
 const windowOptions: VietnamForeignFlowWatchlistWindow[] = [1, 5, 20, 60];
 
@@ -67,6 +69,7 @@ export const ForeignFlowWatchlistScreener = () => {
   const [draft, setDraft] = useState('');
   const [editorError, setEditorError] = useState<string | null>(null);
   const [data, setData] = useState<VietnamForeignFlowWatchlistResponse | null>(null);
+  const [currentAggregate, setCurrentAggregate] = useState<VietnamCurrentForeignFlowAggregateResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [presetLoading, setPresetLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -142,16 +145,68 @@ export const ForeignFlowWatchlistScreener = () => {
     void load(false);
   }, [load]);
 
+  useEffect(() => {
+    if (!tickers.length) {
+      setCurrentAggregate(null);
+      return undefined;
+    }
+    let inFlight = false;
+    let wasHidden = document.visibilityState === 'hidden';
+    let controller: AbortController | null = null;
+    const request = () => {
+      if (inFlight || document.visibilityState === 'hidden') return;
+      inFlight = true;
+      controller = new AbortController();
+      void stocksApi.getVietnamCurrentForeignFlowAggregate({
+        scope: 'watchlist',
+        tickers,
+        includeIndustries: false,
+        signal: controller.signal,
+      }).then((response) => {
+        if (!controller?.signal.aborted && response.usable) {
+          setCurrentAggregate(response);
+        }
+      }).catch(() => {
+        // Preserve the last usable current-session snapshot on transient failures.
+      }).finally(() => {
+        inFlight = false;
+      });
+    };
+    const handleVisibility = () => {
+      if (document.visibilityState === 'hidden') {
+        wasHidden = true;
+        return;
+      }
+      if (wasHidden) {
+        wasHidden = false;
+        request();
+      }
+    };
+    const initial = globalThis.setTimeout(request, 0);
+    const timer = globalThis.setInterval(request, 15_000);
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      globalThis.clearTimeout(initial);
+      globalThis.clearInterval(timer);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      controller?.abort();
+    };
+  }, [data?.fetchedAt, scopeKey, tickers]);
+
   const currentData = data?.normalizedTickers.join(',') === scopeKey ? data : null;
+  const effectiveItems = useMemo(
+    () => applyCurrentWatchlistFlow(currentData?.items ?? [], currentAggregate),
+    [currentAggregate, currentData?.items],
+  );
   const selectedRows = useMemo(
-    () => selectForeignFlowWatchlistRows(currentData?.items ?? [], {
+    () => selectForeignFlowWatchlistRows(effectiveItems, {
       metric, window: selectedWindow, filter, search, sort, direction,
     }),
-    [currentData, direction, filter, metric, search, selectedWindow, sort],
+    [direction, effectiveItems, filter, metric, search, selectedWindow, sort],
   );
   const summary = useMemo(
-    () => summarizeForeignFlowWatchlist(currentData?.items ?? [], metric, selectedWindow),
-    [currentData, metric, selectedWindow],
+    () => summarizeForeignFlowWatchlist(effectiveItems, metric, selectedWindow),
+    [effectiveItems, metric, selectedWindow],
   );
 
   const addDraft = () => {
@@ -341,7 +396,11 @@ export const ForeignFlowWatchlistScreener = () => {
           </section>
           <p className="text-xs text-secondary-text">
             Provider {currentData.provider} {currentData.providerVersion} · cache {currentData.cacheState} ·
-            loaded once at 60 completed sessions. Metric, window, filter, sort, and CSV changes are local.
+            accepted completed history plus newer provisional current flow.
+            {currentAggregate?.usable
+              ? ` Current coverage ${currentAggregate.coverage.observedSymbolCount}/${currentAggregate.coverage.requestedSymbolCount}.`
+              : ''}
+            {' '}Metric, window, filter, sort, and CSV changes are local.
           </p>
           <section className="overflow-x-auto rounded-xl border border-border/70 bg-card" aria-label="Watchlist foreign flow table">
             <table className="min-w-full text-sm">
@@ -377,6 +436,11 @@ export const ForeignFlowWatchlistScreener = () => {
                       <Badge variant={item.availability === 'ready' ? 'success' : item.availability === 'partial' ? 'warning' : 'danger'}>
                         {item.availability}
                       </Badge>
+                      {item.displayStatus ? (
+                        <span className="block text-xs text-secondary-text">
+                          {item.displayStatus} · {item.displayCoverage}
+                        </span>
+                      ) : null}
                       {item.containsProviderAnomaly ? <span className="ml-1 text-xs text-warning">Anomaly</span> : null}
                       {item.failureClass ? <span className="block text-xs text-secondary-text">{item.failureClass}</span> : null}
                       <span className="block text-xs text-secondary-text">{item.actualSessionCount}/60 sessions</span>

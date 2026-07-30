@@ -2,9 +2,16 @@ import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, RefreshCw } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
-import { stocksApi, type VietnamCompanyResearchResponse, type VietnamRealtimeTrade } from '../api/stocks';
+import {
+  stocksApi,
+  type VietnamCompanyResearchResponse,
+  type VietnamCurrentForeignFlowResponse,
+  type VietnamRealtimeTrade,
+} from '../api/stocks';
 import { AppPage, Badge, Button, Loading } from '../components/common';
 import { OrderBookLadder } from '../components/dashboard';
+import LatestForeignFlowCard from '../components/foreign-flow/LatestForeignFlowCard';
+import { selectLatestForeignFlowSession } from '../components/foreign-flow/latestForeignFlowSessionModel';
 import { cn } from '../utils/cn';
 import {
   CEILING_PRICE_CLASS,
@@ -37,6 +44,7 @@ type DiagnosticRow = {
 
 const TRADE_TAPE_STARTUP_MAX_WAIT_MS = 20_000;
 const SELECTED_LIVE_CONTEXT_REFRESH_INTERVAL_MS = 3_000;
+const CURRENT_FOREIGN_FLOW_REFRESH_INTERVAL_MS = 15_000;
 
 const statusVariant = (status?: string | null): StatusVariant => {
   if (status === 'ok' || status === 'complete' || status === 'ready' || status === 'completed') return 'success';
@@ -70,9 +78,7 @@ const formatNumber = (value?: number | string | null, digits = 0) => {
 
 const formatPrice = (value?: number | string | null) => formatCompactVnPrice(value, '\u2014');
 const formatVolume = (value?: number | string | null) => formatCompactShareVolume(value, '\u2014');
-const formatSignedVolume = (value?: number | string | null) => formatCompactShareVolume(value, '\u2014', true);
 const formatVndValue = (value?: number | string | null) => formatCompactVndValue(value, '\u2014');
-const formatSignedVndValue = (value?: number | string | null) => formatCompactVndValue(value, '\u2014', true);
 
 const formatSignedNumber = (value?: number | string | null) => {
   if (typeof value === 'number' && Number.isFinite(value)) {
@@ -631,9 +637,13 @@ const VietnamCompanyResearchPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [currentFlow, setCurrentFlow] = useState<VietnamCurrentForeignFlowResponse | null>(null);
+  const [currentFlowLoading, setCurrentFlowLoading] = useState(false);
+  const [currentFlowError, setCurrentFlowError] = useState<string | null>(null);
   const [tradeTapeWarmupTimedOut, setTradeTapeWarmupTimedOut] = useState(false);
   const tradeTapeWarmupStartedAtRef = useRef<{ symbol: string; startedAt: number } | null>(null);
   const selectedLiveContextRefreshInFlightRef = useRef(false);
+  const currentFlowRequestIdRef = useRef(0);
 
   const loadSnapshot = useCallback(async (forceRefresh = false, background = false) => {
     if (!ticker) {
@@ -665,9 +675,77 @@ const VietnamCompanyResearchPage: React.FC = () => {
     return true;
   }, [loadSnapshot, ticker]);
 
+  const loadCurrentFlow = useCallback(async (
+    signal?: AbortSignal,
+    forceRefresh = false,
+  ) => {
+    if (!ticker) return;
+    currentFlowRequestIdRef.current += 1;
+    const requestId = currentFlowRequestIdRef.current;
+    setCurrentFlowLoading(true);
+    setCurrentFlowError(null);
+    try {
+      const response = await stocksApi.getVietnamCurrentForeignFlow(ticker, {
+        forceRefresh,
+        signal,
+      });
+      if (!signal?.aborted && requestId === currentFlowRequestIdRef.current) {
+        setCurrentFlow(response);
+      }
+    } catch (err) {
+      if (!signal?.aborted && requestId === currentFlowRequestIdRef.current) {
+        setCurrentFlowError(
+          err instanceof Error
+            ? 'Foreign flow could not be loaded.'
+            : 'Foreign flow unavailable.',
+        );
+      }
+    } finally {
+      if (!signal?.aborted && requestId === currentFlowRequestIdRef.current) {
+        setCurrentFlowLoading(false);
+      }
+    }
+  }, [ticker]);
+
   useEffect(() => {
     void loadSnapshot(false);
   }, [loadSnapshot]);
+
+  useEffect(() => {
+    let inFlight = false;
+    let controller: AbortController | null = null;
+    let wasHidden = document.visibilityState === 'hidden';
+    const request = (forceRefresh = false) => {
+      if (inFlight || document.visibilityState === 'hidden') return;
+      inFlight = true;
+      controller = new AbortController();
+      void loadCurrentFlow(controller.signal, forceRefresh).finally(() => {
+        inFlight = false;
+      });
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        wasHidden = true;
+        return;
+      }
+      if (!wasHidden) return;
+      wasHidden = false;
+      request(true);
+    };
+    setCurrentFlow(null);
+    const initialRequest = window.setTimeout(() => request(false), 0);
+    const timer = window.setInterval(
+      () => request(false),
+      CURRENT_FOREIGN_FLOW_REFRESH_INTERVAL_MS,
+    );
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      window.clearTimeout(initialRequest);
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      controller?.abort();
+    };
+  }, [loadCurrentFlow]);
 
   useEffect(() => {
     if (!ticker || loading || refreshing) return undefined;
@@ -822,36 +900,21 @@ const VietnamCompanyResearchPage: React.FC = () => {
     { label: 'Session metadata', status: dailyStockPriceCapabilities.sessionMetadataStatus },
   ];
   const dailyStockPriceDateMatch = snapshot.dailyStockPrice?.dateMatch ?? snapshot.foreignFlow.dateMatch ?? 'unknown';
-  const foreignRows: MetricRow[] = [
-    { label: 'Foreign buy volume (shares)', value: snapshot.foreignFlow.foreignBuyVolume, formatter: formatVolume, titleFormatter: formatFullSharesTitle },
-    { label: 'Foreign sell volume (shares)', value: snapshot.foreignFlow.foreignSellVolume, formatter: formatVolume, titleFormatter: formatFullSharesTitle },
-    {
-      label: 'Foreign net volume (shares)',
-      value: snapshot.foreignFlow.foreignNetVolume,
-      formatter: formatSignedVolume,
-      titleFormatter: formatFullSharesTitle,
-      tone: typeof snapshot.foreignFlow.foreignNetVolume === 'number' && snapshot.foreignFlow.foreignNetVolume < 0 ? 'text-danger' : 'text-success',
+  const latestForeignFlowSession = selectLatestForeignFlowSession({
+    completed: {
+      sessionDate: snapshot.foreignFlow.date
+        ?? snapshot.dailyStockPrice?.date
+        ?? snapshot.sessionContext?.completedSessionDate,
+      source: snapshot.foreignFlow.source ?? 'SSI DailyStockPrice',
+      foreignBuyVolume: snapshot.foreignFlow.foreignBuyVolume,
+      foreignSellVolume: snapshot.foreignFlow.foreignSellVolume,
+      foreignNetVolume: snapshot.foreignFlow.foreignNetVolume,
+      foreignBuyValue: snapshot.foreignFlow.foreignBuyValue,
+      foreignSellValue: snapshot.foreignFlow.foreignSellValue,
+      foreignNetValue: snapshot.foreignFlow.foreignNetValue,
     },
-    { label: 'Foreign buy value (VND)', value: snapshot.foreignFlow.foreignBuyValue, formatter: formatVndValue, titleFormatter: formatFullVndTitle },
-    { label: 'Foreign sell value (VND)', value: snapshot.foreignFlow.foreignSellValue, formatter: formatVndValue, titleFormatter: formatFullVndTitle },
-    {
-      label: 'Foreign net value (VND)',
-      value: snapshot.foreignFlow.foreignNetValue,
-      formatter: formatSignedVndValue,
-      titleFormatter: formatFullVndTitle,
-      tone: typeof snapshot.foreignFlow.foreignNetValue === 'number' && snapshot.foreignFlow.foreignNetValue < 0 ? 'text-danger' : 'text-success',
-    },
-  ];
-  const foreignFlowStatus = snapshot.foreignFlow.capabilityStatus ?? (
-    snapshot.foreignFlow.status === 'ok' ? 'ready' : 'unavailable'
-  );
-  const foreignFlowProvenance = snapshot.foreignFlow.valueState === 'explicit_zero'
-    ? 'Provider explicitly reported zero foreign totals; net values are derived only from complete gross pairs.'
-    : snapshot.foreignFlow.valueState === 'partial'
-      ? 'Some provider foreign-flow fields are unavailable.'
-      : snapshot.foreignFlow.valueState === 'unavailable'
-        ? 'Provider foreign-flow fields were not supplied.'
-        : null;
+    current: currentFlow,
+  });
   const technicalRows: MetricRow[] = [
     { label: 'MA20', value: snapshot.technical.ma20, formatter: formatPrice, titleFormatter: formatFullVndTitle },
     { label: 'MA50', value: snapshot.technical.ma50, formatter: formatPrice, titleFormatter: formatFullVndTitle },
@@ -950,7 +1013,14 @@ const VietnamCompanyResearchPage: React.FC = () => {
 
   return (
     <AppPage className="space-y-4">
-      <CompanyHeader snapshot={snapshot} onRefresh={() => void loadSnapshot(true)} refreshing={refreshing} />
+      <CompanyHeader
+        snapshot={snapshot}
+        onRefresh={() => {
+          void loadSnapshot(true);
+          void loadCurrentFlow(undefined, true);
+        }}
+        refreshing={refreshing}
+      />
       {error ? <section className="rounded-lg border border-warning/30 bg-warning/10 p-3 text-sm text-warning">{error}</section> : null}
       <CompanyQualitySummary snapshot={snapshot} />
       <section className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
@@ -1003,15 +1073,12 @@ const VietnamCompanyResearchPage: React.FC = () => {
             <p className="text-sm text-secondary-text">SSI DailyStockPrice enrichment unavailable.</p>
           )}
         </SectionShell>
-        <SectionShell title="Foreign flow" source={snapshot.foreignFlow.source} status={foreignFlowStatus}>
-          <p className="mb-3 text-xs text-secondary-text">
-            SSI DailyStockPrice · Volume: shares · Value: VND.
-          </p>
-          {foreignFlowProvenance ? (
-            <p className="mb-3 text-xs text-secondary-text">{foreignFlowProvenance}</p>
-          ) : null}
-          <MetricGrid rows={foreignRows} />
-        </SectionShell>
+        <LatestForeignFlowCard
+          view={latestForeignFlowSession}
+          loading={currentFlowLoading}
+          error={currentFlowError}
+          compact
+        />
         <SectionShell title="Technical snapshot" source={snapshot.technical.source} status={snapshot.technical.status}>
           <p className="mb-3 text-xs text-secondary-text">
             SSI-derived metrics are calculated from SSI DailyOhlc; price-vs-reference also uses SSI DailyStockPrice reference.

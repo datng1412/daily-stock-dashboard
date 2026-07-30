@@ -11,6 +11,43 @@ Global rules:
 - KBS is legacy optional only and disabled by default.
 - News is disabled until a separate provider exists.
 
+## Completed foreign-flow restart behavior
+
+The existing symbol-history and aggregate routes keep their public schemas.
+Accepted completed SSI DailyStockPrice symbol rows are rehydrated at application
+startup from the bounded schema-v1 cache below `DATA_CACHE_DIR`. Valid newer
+accepted dates survive process restart and weaker/empty/failed refreshes; valid
+same-date corrections replace one row. This store is an internal completed-data
+continuity mechanism, not a fallback provider. Current `room.{symbol}` payloads
+and provisional aggregates are never persisted into it.
+
+## `GET /api/v1/stocks/vn/foreign-flow/current/{ticker}`
+
+Returns the process-shared SSI V3 `room.{ticker}` provisional current-session
+snapshot when one has been received. Raw `bq`/`sq`/`bv`/`sv` presence is
+audited before typed SDK defaults, each message replaces the prior
+symbol/session snapshot, and the application never locally accumulates room
+messages. Room capacity (`tr`/`cr`) remains separate from foreign trading flow.
+
+`data_state` is one of `waiting`, `ready`, `stale`, `market_closed`,
+`unavailable`, or `error`. `current` stays `null` until at least one complete
+buy/sell value or volume pair is present; missing fields are never fabricated
+as zero. `latest_completed_comparison` is independently sourced from an earlier
+SSI V3 DailyStockPrice session. Provisional current values are never appended
+to historical daily rows. The route never owns a stream client. It may record
+one bounded symbol lease and request recovery from the process-owned lifecycle
+when the shared client is disconnected or retryably failed. Repeated polls,
+manual refresh, and page reload share one scheduled attempt and cooldown;
+they do not create concurrent provider connections. `force_refresh=true`
+identifies an explicit recovery touch while retaining no-store response
+semantics and the existing subscription cohort.
+
+A valid prior snapshot remains present with `data_state=stale` during
+reconnection. Without a usable snapshot, the current capability is
+`unavailable`; completed DailyStockPrice capabilities remain independently
+usable. Successful connection clears the prior retryable stream failure, and
+only a newer provider message replaces the cached snapshot.
+
 ## `POST /api/v1/stocks/vn/industry-flow`
 
 Accepts exactly one bounded universe selector: `symbols` or `index_code`, plus ISO `from_date` and `to_date`. Valid provider-backed ready and partial responses retain their existing rows. The response also exposes `data_state`, `usable`, and a sanitized `failure_class`.
@@ -79,6 +116,13 @@ Response sections:
 - Source/cache/diagnostics metadata.
 - data_quality_summary with canonical price source, checks, and user-safe issues.
 - Additive request-completeness counters: `requested_tickers_count`, `returned_rows_count`, and `missing_tickers`.
+
+Current symbol foreign flow:
+
+- `GET /api/v1/stocks/vn/foreign-flow/current/{ticker}` returns the process-shared SSI V3 `ForeignRoomMessage` snapshot as `waiting`, `ready`, `stale`, `market_closed`, `unavailable`, or `error`.
+- The route may idempotently ensure the ticker on an already running shared stream manager; it never owns the WebSocket. Repeated reads and `force_refresh=true` do not duplicate subscriptions.
+- Responses use `Cache-Control: no-store, no-cache, max-age=0` and `Pragma: no-cache`. `force_refresh` re-reads the shared cache only.
+- `current` remains null until a usable gross value or volume pair arrives. Explicit provider zero remains zero; missing values remain null. DailyStockPrice comparison data stays separate and completed-session authoritative.
 
 Source ownership:
 
@@ -491,3 +535,21 @@ Response rules:
 - SSI trade tape is streaming-buffer backed for latest X-TRADE events only. Diagnostics distinguish not-subscribed, disabled, subscribed-empty, stale, cache-hit, and `buffered_rows_available` states. Trade rows use SSI-style matched-order fields: time, B/S side when explicit, volume, price, change, and change percent. Public rows can expose `side`, `side_label`, and raw `side_if_available`; observed `BU`/`SD` codes mean Buy/Sell but side is never inferred from price color or change. True historical time-and-sales remains unverified; endpoint/http details belong in diagnostics if a future verified source is added.
 - Legacy KBS may exist behind explicit development flags, but it is not a normal VN runtime fallback.
 - Primary UI should label this section as trade tape, not KBS.
+
+## `GET /api/v1/stocks/vn/foreign-flow/current-aggregate`
+
+Purpose:
+
+- Return display-only current-session foreign-flow totals from the process-owned SSI V3 `ForeignRoomMessage` cache.
+- Support `scope=vn30` using current SSI IndexComponents membership, or `scope=watchlist` using only normalized user-selected `tickers`.
+- Optionally include current-VN30 ICB groups when `include_industries=true`.
+
+Response rules:
+
+- Responses are no-store and do not start or own a provider connection.
+- `provider_session_date` is provider-backed; snapshots from different dates are never mixed.
+- `coverage` separates requested, classified, subscribed, observed, complete-volume, complete-value, missing, and stale symbols.
+- Missing fields remain null and are excluded from sums; explicit audited provider zero remains zero.
+- `display_series` retains source kind, finality, current/completed/partial/stale flags, coverage counts, values, and provider timestamps when available. Top-level `data_state` remains the aggregate current state that clients propagate into display models.
+- `display_series`, `display_windows`, `rankings`, `items`, and `groups` are provisional presentation data. Numeric completeness and coverage do not promote them to accepted data, and they do not mutate completed DailyStockPrice history.
+- Accepted DailyStockPrice for the same date has precedence. Proprietary flow is not part of this route.

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import threading
 from datetime import datetime, timedelta, timezone
 
 from data_provider.ssi_streaming_realtime import SsiStreamingRealtimeManager
@@ -152,24 +153,181 @@ def test_duplicate_disconnect_has_one_schedule_and_old_generation_cannot_mutate_
     assert lifecycle["transports"][0]["reconnect_success_count"] == 1
 
 
-def test_non_retryable_authentication_failure_fails_fast():
+def test_authentication_failure_is_retryable_and_route_touch_rebuilds_client():
     now = [_active_epoch()]
-    client = FakeLifecycleClient(fail_start=RuntimeError("401 Unauthorized"))
-    manager = _manager([client], now)
+    first_client = FakeLifecycleClient(
+        fail_start=RuntimeError("401 Unauthorized")
+    )
+    second_client = FakeLifecycleClient()
+    manager = _manager([first_client, second_client], now)
 
     manager.start(["FPT"])
+    first_touch = manager.ensure_symbol_subscription(
+        "SSI",
+        recovery_trigger="manual_refresh",
+    )
+    repeated_touch = manager.request_recovery(trigger="route_touch")
     status = manager.monitor_tick(wants_streaming=True)
     lifecycle = manager.lifecycle_snapshot()
-    trade_payload = manager.trade_tape("FPT")
 
-    assert status["last_error_class"] == "authentication"
+    assert first_touch["recovery_requested"] is True
+    assert repeated_touch["status"] == "already_scheduled"
+    assert status["manager_state"] == "running"
+    assert status["connected"] is True
+    assert status["last_error_class"] is None
     assert status["next_reconnect_at"] is None
-    assert lifecycle["overall_state"] == "failed"
-    assert lifecycle["transports"][0]["physical_transport_count"] == 0
+    assert lifecycle["overall_state"] == "recovering"
+    assert lifecycle["transports"][0]["physical_transport_count"] > 0
     assert lifecycle["transports"][0]["subscription_count"] > 0
-    assert lifecycle["transports"][0]["reconnect_scheduled_count"] == 0
-    assert trade_payload["stream_state"] == "failed"
-    assert trade_payload["generation"] == 1
+    assert lifecycle["transports"][0]["reconnect_scheduled_count"] == 1
+    assert lifecycle["transports"][0]["recovery_request_count"] == 1
+    assert lifecycle["transports"][0]["recovery_request_suppressed_count"] == 1
+    assert second_client.channels == status["channels"]
+    assert "R:FPT" in second_client.channels
+    assert "R:SSI" in second_client.channels
+    assert len(second_client.channels) == status["subscription_count"]
+    assert status["last_recovery_trigger"] == "manual_refresh"
+    assert status["generation"] == 2
+
+
+def test_concurrent_recovery_requests_are_single_flight():
+    now = [_active_epoch()]
+    manager = _manager(
+        [FakeLifecycleClient(fail_start=RuntimeError("401 Unauthorized"))],
+        now,
+    )
+    manager.start(["FPT"])
+    gate = threading.Barrier(6)
+    results = []
+
+    def request() -> None:
+        gate.wait(timeout=2)
+        results.append(manager.request_recovery(trigger="route_touch"))
+
+    threads = [
+        threading.Thread(target=request)
+        for _ in range(5)
+    ]
+    for thread in threads:
+        thread.start()
+    gate.wait(timeout=2)
+    for thread in threads:
+        thread.join(timeout=2)
+
+    assert sum(bool(item["recovery_requested"]) for item in results) == 1
+    status = manager.status()
+    assert status["recovery_request_count"] == 1
+    assert status["recovery_request_suppressed_count"] == 4
+
+
+def test_current_foreign_snapshot_stays_stale_until_recovery_message_replaces_it():
+    now = [_active_epoch()]
+    first_client = FakeLifecycleClient()
+    second_client = FakeLifecycleClient()
+    manager = _manager([first_client, second_client], now)
+    manager.start(["FPT"])
+    first_client.emit(
+        {
+            "ticker": "FPT",
+            "symbol": "FPT",
+            "stream_data_type": "R",
+            "provider_session_date": "2026-07-16",
+            "foreign_buy_volume": 10,
+            "foreign_sell_volume": 4,
+            "foreign_buy_value": 100,
+            "foreign_sell_value": 40,
+        }
+    )
+
+    first_client.on_error(RuntimeError("401 Unauthorized"))
+    stale = manager.current_foreign_flow("FPT")
+
+    assert stale["data_state"] == "stale"
+    assert stale["usable"] is True
+    assert stale["current"]["foreign_buy_volume"] == 10
+    assert stale["failure_class"] == "authentication_rejected"
+
+    now[0] += 2
+    manager.monitor_tick(wants_streaming=True)
+    second_client.emit(
+        {
+            "ticker": "FPT",
+            "symbol": "FPT",
+            "stream_data_type": "R",
+            "provider_session_date": "2026-07-16",
+            "foreign_buy_volume": 12,
+            "foreign_sell_volume": 5,
+            "foreign_buy_value": 120,
+            "foreign_sell_value": 50,
+        }
+    )
+    ready = manager.current_foreign_flow("FPT")
+
+    assert ready["data_state"] == "ready"
+    assert ready["current"]["foreign_buy_volume"] == 12
+    assert ready["failure_class"] is None
+    assert manager.status()["last_error_class"] is None
+
+
+def test_failed_recovery_keeps_snapshot_and_later_cooldown_attempt_succeeds():
+    now = [_active_epoch()]
+    first_client = FakeLifecycleClient()
+    failed_recovery = FakeLifecycleClient(
+        fail_start=RuntimeError("401 Unauthorized")
+    )
+    recovered_client = FakeLifecycleClient()
+    manager = _manager(
+        [first_client, failed_recovery, recovered_client],
+        now,
+    )
+    manager.start(["FPT"])
+    first_client.emit(
+        {
+            "ticker": "FPT",
+            "symbol": "FPT",
+            "stream_data_type": "R",
+            "provider_session_date": "2026-07-16",
+            "foreign_buy_volume": 10,
+            "foreign_sell_volume": 4,
+            "foreign_buy_value": 100,
+            "foreign_sell_value": 40,
+        }
+    )
+    first_client.on_error(RuntimeError("401 Unauthorized"))
+
+    now[0] += 2
+    first_attempt = manager.monitor_tick(wants_streaming=True)
+    stale = manager.current_foreign_flow("FPT")
+
+    assert first_attempt["manager_state"] == "errored"
+    assert first_attempt["next_reconnect_at"] is not None
+    assert stale["data_state"] == "stale"
+    assert stale["current"]["foreign_buy_volume"] == 10
+
+    now[0] += 5
+    second_attempt = manager.monitor_tick(wants_streaming=True)
+
+    assert second_attempt["manager_state"] == "running"
+    assert second_attempt["connected"] is True
+    assert second_attempt["last_error_class"] is None
+    assert recovered_client.start_calls == 1
+    assert "R:FPT" in recovered_client.channels
+
+
+def test_authentication_failure_without_snapshot_is_current_only_unavailable():
+    now = [_active_epoch()]
+    manager = _manager(
+        [FakeLifecycleClient(fail_start=RuntimeError("401 Unauthorized"))],
+        now,
+    )
+    manager.start(["FPT"])
+
+    payload = manager.current_foreign_flow("FPT")
+
+    assert payload["data_state"] == "unavailable"
+    assert payload["usable"] is False
+    assert payload["current"] is None
+    assert payload["failure_class"] == "authentication_rejected"
 
 
 def test_previous_session_event_does_not_restore_readiness():

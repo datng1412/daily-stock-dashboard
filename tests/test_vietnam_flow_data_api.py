@@ -22,9 +22,13 @@ class FakeFlowService:
             "diagnostics": {},
         }
 
-    def current_foreign_by_symbol(self, ticker):
+    def current_foreign_by_symbol(self, ticker, *, force_refresh=False):
+        assert force_refresh is False
         return {
             "status": "unavailable",
+            "data_state": "waiting",
+            "usable": False,
+            "failure_class": None,
             "symbol": ticker,
             "trading_date": "2026-07-23",
             "freshness_status": "previous_session_during_live_market",
@@ -32,11 +36,14 @@ class FakeFlowService:
             "is_provisional": False,
             "current": None,
             "latest_completed_comparison": {"foreign_buy_value": 0},
-            "stream_status": "CURRENT_FOREIGN_STREAM_BLOCKED_SEMANTICS",
-            "stream_reason": "unproven",
+            "stream_status": "subscribed_no_event",
+            "stream_reason": "Waiting for the first current-session room update.",
             "source": "ssi_fastconnect",
             "provider_version": "v3",
-            "endpoint": "securitiesSummary",
+            "endpoint": f"room.{ticker}",
+            "cache": {"status": "empty", "age_seconds": None},
+            "market_session": {"market_session": "continuous_morning"},
+            "diagnostics": {"provisional_appended_to_history": False},
         }
 
     def proprietary_flow(self, scope, identifier, **kwargs):
@@ -103,7 +110,9 @@ def test_flow_routes_preserve_zero_partial_coverage_and_blocked_stream(monkeypat
     assert index.json()["rows"][0]["coverage_ratio"] == 0.5
     assert current.json()["current"] is None
     assert current.json()["latest_completed_comparison"]["foreign_buy_value"] == 0
-    assert current.json()["stream_status"] == "CURRENT_FOREIGN_STREAM_BLOCKED_SEMANTICS"
+    assert current.json()["data_state"] == "waiting"
+    assert current.json()["stream_status"] == "subscribed_no_event"
+    assert current.json()["diagnostics"]["provisional_appended_to_history"] is False
     assert prop.json()["rows"][0]["proprietary_net_value"] == 0
     assert industry.json()["rows"][0]["matched_value"] == 0
     assert industry.json()["proprietary_industry_status"] == "unsupported"

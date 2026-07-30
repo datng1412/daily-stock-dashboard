@@ -1255,6 +1255,10 @@ class VietnamForeignFlowSymbolHistoryResponse(BaseModel):
     provider_version: Literal["v3"] = "v3"
     cache_state: Literal["hit", "miss", "refresh", "stale_hit", "unavailable"] = "unavailable"
     cache_age_seconds: Optional[float] = Field(default=None, ge=0)
+    response_regressive: bool = False
+    preserved_latest_completed: Optional[str] = None
+    provider_latest_returned: Optional[str] = None
+    cached_latest_retained: bool = False
 
 
 class VietnamForeignFlowBatchRequest(BaseModel):
@@ -1906,6 +1910,11 @@ class VietnamCurrentForeignFlowResponse(BaseModel):
     """Best available current-session foreign flow without REST/stream blending."""
 
     status: Literal["ok", "partial", "unavailable"]
+    data_state: Literal[
+        "waiting", "ready", "stale", "market_closed", "unavailable", "error"
+    ] = "unavailable"
+    usable: bool = False
+    failure_class: Optional[str] = None
     symbol: str
     trading_date: Optional[str] = None
     freshness_status: str
@@ -1918,6 +1927,42 @@ class VietnamCurrentForeignFlowResponse(BaseModel):
     source: str
     provider_version: str
     endpoint: str
+    finality: Optional[Literal["current_session_provisional"]] = None
+    update_semantics: Optional[Literal["cumulative_replacement_snapshot"]] = None
+    cache: Dict[str, Any] = Field(default_factory=dict)
+    market_session: Dict[str, Any] = Field(default_factory=dict)
+    diagnostics: Dict[str, Any] = Field(default_factory=dict)
+
+
+class VietnamCurrentForeignFlowAggregateResponse(BaseModel):
+    """Display-only current foreign-flow aggregate from the shared R cache."""
+
+    status: Literal["ok", "partial", "unavailable"]
+    data_state: Literal[
+        "waiting", "ready", "stale", "market_closed", "unavailable", "error"
+    ] = "unavailable"
+    usable: bool = False
+    failure_class: Optional[str] = None
+    scope: Literal["current_foreign_flow_aggregate"]
+    universe: str
+    provider_session_date: Optional[str] = None
+    is_provisional: bool = False
+    finality: Optional[Literal["current_session_provisional"]] = None
+    source: str
+    provider_version: Literal["v3"] = "v3"
+    endpoint: Literal["room.{symbol}"] = "room.{symbol}"
+    update_semantics: Literal["cumulative_replacement_snapshot"]
+    aggregate: Optional[Dict[str, Any]] = None
+    display_series: List[Dict[str, Any]] = Field(default_factory=list, max_length=60)
+    display_windows: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
+    rankings: Dict[str, Dict[str, List[Dict[str, Any]]]] = Field(
+        default_factory=dict
+    )
+    items: List[Dict[str, Any]] = Field(default_factory=list, max_length=30)
+    groups: List[Dict[str, Any]] = Field(default_factory=list, max_length=30)
+    coverage: Dict[str, Any] = Field(default_factory=dict)
+    market_session: Dict[str, Any] = Field(default_factory=dict)
+    diagnostics: Dict[str, Any] = Field(default_factory=dict)
 
 
 class VietnamProprietaryFlowResponse(BaseModel):

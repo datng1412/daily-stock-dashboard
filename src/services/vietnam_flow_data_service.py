@@ -39,6 +39,11 @@ _DIRECT_INDEX_CAPABILITY_LOCK = RLock()
 _DIRECT_INDEX_CAPABILITY_CACHE: Dict[
     Tuple[str, str, str, str, str], Tuple[datetime, Dict[str, Any]]
 ] = {}
+_CURRENT_UNIVERSE_LOCK = RLock()
+_CURRENT_UNIVERSE_CACHE: Dict[
+    str, Tuple[float, List[str], Dict[str, Dict[str, str]]]
+] = {}
+_CURRENT_UNIVERSE_TTL_SECONDS = 300
 
 
 class ForeignFlowRequestValidationError(ValueError):
@@ -49,6 +54,8 @@ def reset_vietnam_flow_data_capability_cache() -> None:
     """Reset the process-local direct-index capability cache for tests."""
     with _DIRECT_INDEX_CAPABILITY_LOCK:
         _DIRECT_INDEX_CAPABILITY_CACHE.clear()
+    with _CURRENT_UNIVERSE_LOCK:
+        _CURRENT_UNIVERSE_CACHE.clear()
 
 
 def _iso_date(value: str, name: str) -> str:
@@ -132,9 +139,14 @@ def _provider_failure_class(result: Mapping[str, Any]) -> str:
 
 
 class VietnamFlowDataService:
-    """Narrow REST-only flow capabilities; ambiguous room streaming stays blocked."""
+    """SSI flow capabilities with isolated completed and provisional sources."""
 
-    def __init__(self, provider: Optional[SsiRestProvider] = None) -> None:
+    def __init__(
+        self,
+        provider: Optional[SsiRestProvider] = None,
+        *,
+        streaming_reader: Optional[Any] = None,
+    ) -> None:
         self._router: Optional[SsiRestProviderRouter] = None
         self._initialization_failure = False
         if provider is None:
@@ -144,6 +156,23 @@ class VietnamFlowDataService:
             except Exception:
                 self._initialization_failure = True
         self._provider = provider
+        self._streaming_reader = streaming_reader
+
+    def _get_current_flow_reader(self) -> Optional[Any]:
+        if self._streaming_reader is not None:
+            return self._streaming_reader
+        try:
+            from data_provider.ssi_v3_streaming import SsiStreamingRealtimeReader
+            from src.services.ssi_streaming_realtime_lifecycle import (
+                get_existing_ssi_streaming_realtime_manager,
+            )
+
+            manager = get_existing_ssi_streaming_realtime_manager()
+            if manager is not None:
+                self._streaming_reader = SsiStreamingRealtimeReader(manager)
+        except Exception:
+            self._streaming_reader = None
+        return self._streaming_reader
 
     def close(self) -> None:
         if self._router is not None:
@@ -401,57 +430,765 @@ class VietnamFlowDataService:
             },
         }
 
-    def current_foreign_by_symbol(self, symbol: str) -> Dict[str, Any]:
+    def current_foreign_by_symbol(
+        self,
+        symbol: str,
+        *,
+        force_refresh: bool = False,
+    ) -> Dict[str, Any]:
         ticker = _symbols([symbol])[0]
-        if self._provider is None:
-            return {
+        reader = self._get_current_flow_reader()
+        if reader is None or not callable(getattr(reader, "get_current_foreign_flow", None)):
+            stream = {
                 "status": "unavailable",
-                "symbol": ticker,
-                "trading_date": None,
-                "freshness_status": "unavailable",
+                "data_state": "unavailable",
+                "usable": False,
+                "failure_class": "stream_manager_not_initialized",
+                "provider_session_date": datetime.now(_VN_TZ).date().isoformat(),
                 "is_current_session": False,
                 "is_provisional": False,
                 "current": None,
-                "latest_completed_comparison": None,
-                "stream_status": "CURRENT_FOREIGN_STREAM_BLOCKED_SEMANTICS",
-                "stream_reason": "SSI room buy/sell update semantics are not proven cumulative or delta.",
-                "source": _SOURCE,
-                "provider_version": _PROVIDER_VERSION,
-                "endpoint": "securitiesSummary",
+                "stream_status": "manager_not_started",
+                "stream_reason": "SSI streaming lifecycle has not created a process-shared manager.",
+                "cache": {"status": "not_started", "age_seconds": None},
+                "market_session": {},
+                "diagnostics": {},
             }
-        result = self._provider.get_daily_stock_price(ticker, limit=1)
-        row = next((item for item in result.get("rows") or [] if isinstance(item, Mapping)), None)
-        today = datetime.now(_VN_TZ).date().isoformat()
-        data_date = str(row.get("date") or "") if row else None
-        is_current = bool(data_date == today)
-        complete = bool(row) and all(
-            row.get(name) is not None
-            for name in (
-                "foreign_buy_volume", "foreign_sell_volume",
-                "foreign_buy_value", "foreign_sell_value",
-            )
+        else:
+            try:
+                ensure = getattr(reader, "ensure_current_foreign_flow", None)
+                if callable(ensure):
+                    ensure(
+                        ticker,
+                        recovery_trigger=(
+                            "manual_refresh" if force_refresh else "route_touch"
+                        ),
+                    )
+                stream = dict(reader.get_current_foreign_flow(ticker))
+            except Exception:
+                stream = {
+                    "status": "unavailable",
+                    "data_state": "error",
+                    "usable": False,
+                    "failure_class": "current_flow_reader_error",
+                    "provider_session_date": datetime.now(_VN_TZ).date().isoformat(),
+                    "is_current_session": False,
+                    "is_provisional": False,
+                    "current": None,
+                    "stream_status": "reader_error",
+                    "stream_reason": "SSI current foreign-flow cache could not be read.",
+                    "cache": {"status": "unavailable", "age_seconds": None},
+                    "market_session": {},
+                    "diagnostics": {},
+                }
+
+        session_date = str(
+            stream.get("provider_session_date")
+            or datetime.now(_VN_TZ).date().isoformat()
         )
-        current_row = dict(row) if is_current and complete else None
+        comparison: Optional[Dict[str, Any]] = None
+        comparison_failure: Optional[str] = None
+        if self._provider is not None:
+            result = self._provider.get_daily_stock_price(ticker, limit=5)
+            if result.get("status") == "ok":
+                completed_rows = [
+                    dict(item)
+                    for item in result.get("rows") or []
+                    if isinstance(item, Mapping)
+                    and str(item.get("date") or "") < session_date
+                ]
+                if completed_rows:
+                    comparison = max(
+                        completed_rows,
+                        key=lambda item: str(item.get("date") or ""),
+                    )
+                    comparison["finality"] = "completed_session_authority"
+                    comparison["source"] = "SSI V3 DailyStockPrice"
+            else:
+                comparison_failure = _provider_failure_class(result)
+
+        data_state = str(stream.get("data_state") or "unavailable")
+        current_row = dict(stream.get("current") or {}) or None
+        usable = bool(stream.get("usable") and current_row)
+        public_status = (
+            "ok"
+            if data_state == "ready" and usable
+            else "partial"
+            if usable
+            else "unavailable"
+        )
         return {
-            "status": "ok" if current_row else "unavailable",
+            "status": public_status,
+            "data_state": data_state,
+            "usable": usable,
+            "failure_class": stream.get("failure_class"),
             "symbol": ticker,
-            "trading_date": data_date,
-            "freshness_status": (
-                "current_session_provisional"
+            "trading_date": session_date if current_row else None,
+            "freshness_status": data_state,
+            "is_current_session": bool(stream.get("is_current_session") and current_row),
+            "is_provisional": bool(stream.get("is_provisional") and current_row),
+            "current": current_row,
+            "latest_completed_comparison": comparison,
+            "stream_status": str(stream.get("stream_status") or data_state),
+            "stream_reason": str(stream.get("stream_reason") or ""),
+            "source": (
+                "SSI FastConnect V3 ForeignRoomMessage"
                 if current_row
-                else "previous_session_during_live_market"
-                if row
+                else _SOURCE
+            ),
+            "provider_version": _PROVIDER_VERSION,
+            "endpoint": f"room.{ticker}",
+            "finality": "current_session_provisional" if current_row else None,
+            "update_semantics": (
+                "cumulative_replacement_snapshot" if current_row else None
+            ),
+            "cache": dict(stream.get("cache") or {}),
+            "market_session": dict(stream.get("market_session") or {}),
+            "diagnostics": {
+                **dict(stream.get("diagnostics") or {}),
+                "completed_comparison_source": "SSI V3 DailyStockPrice",
+                "completed_comparison_failure_class": comparison_failure,
+                "provisional_appended_to_history": False,
+            },
+        }
+
+    def current_foreign_aggregate(
+        self,
+        *,
+        symbols: Optional[Iterable[str]] = None,
+        index_code: Optional[str] = None,
+        include_industries: bool = False,
+        force_refresh: bool = False,
+    ) -> Dict[str, Any]:
+        """Build a display-only current aggregate from the shared R cache."""
+
+        if bool(symbols) == bool(index_code):
+            raise ValueError("provide exactly one of symbols or index_code")
+        classifications: Dict[str, Dict[str, str]] = {}
+        normalized_index = str(index_code or "").strip().upper() or None
+        if normalized_index:
+            now = time.monotonic()
+            with _CURRENT_UNIVERSE_LOCK:
+                cached = _CURRENT_UNIVERSE_CACHE.get(normalized_index)
+                if cached and cached[0] > now and not force_refresh:
+                    ticker_list = list(cached[1])
+                    classifications = deepcopy(cached[2])
+                else:
+                    ticker_list = []
+            if not ticker_list:
+                if self._provider is None:
+                    return self._unavailable_current_aggregate(
+                        universe=f"index:{normalized_index}",
+                        failure_class="provider_not_configured",
+                    )
+                membership = self._provider.get_securities_by_index(normalized_index)
+                if membership.get("status") != "ok":
+                    return self._unavailable_current_aggregate(
+                        universe=f"index:{normalized_index}",
+                        failure_class=_provider_failure_class(membership),
+                    )
+                membership_rows = [
+                    dict(row)
+                    for row in membership.get("rows") or []
+                    if isinstance(row, Mapping)
+                ]
+                try:
+                    ticker_list = _symbols(
+                        row.get("symbol") for row in membership_rows
+                    )
+                except ValueError:
+                    return self._unavailable_current_aggregate(
+                        universe=f"index:{normalized_index}",
+                        failure_class="membership_unavailable",
+                    )
+                for row in membership_rows:
+                    ticker = str(row.get("symbol") or "").strip().upper()
+                    if ticker not in ticker_list:
+                        continue
+                    code = str(row.get("icb_code") or "").strip()
+                    name = str(row.get("icb_name") or "").strip()
+                    if code and name:
+                        classifications[ticker] = {
+                            "icb_code": code,
+                            "icb_name": name,
+                        }
+                with _CURRENT_UNIVERSE_LOCK:
+                    _CURRENT_UNIVERSE_CACHE[normalized_index] = (
+                        now + _CURRENT_UNIVERSE_TTL_SECONDS,
+                        list(ticker_list),
+                        deepcopy(classifications),
+                    )
+            universe = f"index:{normalized_index}"
+        else:
+            ticker_list = _symbols(symbols or [])
+            universe = "selected_symbols"
+
+        reader = self._get_current_flow_reader()
+        if reader is None or not callable(
+            getattr(reader, "get_current_foreign_flow", None)
+        ):
+            return self._unavailable_current_aggregate(
+                universe=universe,
+                failure_class="stream_manager_not_initialized",
+                symbols=ticker_list,
+            )
+
+        ensure_result: Dict[str, Any] = {}
+        try:
+            ensure_cohort = getattr(
+                reader, "ensure_current_foreign_flow_cohort", None
+            )
+            if callable(ensure_cohort):
+                ensure_result = dict(
+                    ensure_cohort(
+                        ticker_list,
+                        recovery_trigger=(
+                            "manual_refresh" if force_refresh else "route_touch"
+                        ),
+                    )
+                )
+            else:
+                for ticker in ticker_list:
+                    ensure = getattr(reader, "ensure_current_foreign_flow", None)
+                    if callable(ensure):
+                        ensure(ticker, recovery_trigger="route_touch")
+            streams = {
+                ticker: dict(reader.get_current_foreign_flow(ticker))
+                for ticker in ticker_list
+            }
+        except Exception:
+            return self._unavailable_current_aggregate(
+                universe=universe,
+                failure_class="current_flow_reader_error",
+                symbols=ticker_list,
+            )
+
+        observed_dates = sorted({
+            str(stream.get("provider_session_date"))
+            for stream in streams.values()
+            if stream.get("current")
+            and stream.get("usable")
+            and stream.get("provider_session_date")
+        })
+        provider_session_date = observed_dates[-1] if observed_dates else next(
+            (
+                str(stream.get("provider_session_date"))
+                for stream in streams.values()
+                if stream.get("provider_session_date")
+            ),
+            None,
+        )
+        items: List[Dict[str, Any]] = []
+        for ticker in ticker_list:
+            stream = streams[ticker]
+            current = (
+                dict(stream.get("current") or {})
+                if stream.get("usable")
+                and stream.get("provider_session_date") == provider_session_date
+                else {}
+            )
+            item = {
+                "symbol": ticker,
+                "provider_session_date": (
+                    provider_session_date if current else None
+                ),
+                "data_state": str(stream.get("data_state") or "unavailable"),
+                "usable": bool(current),
+                "is_stale": str(stream.get("data_state")) in {"stale", "error"},
+                "stream_status": str(stream.get("stream_status") or "unavailable"),
+                "foreign_buy_volume": _number(current, "foreign_buy_volume"),
+                "foreign_sell_volume": _number(current, "foreign_sell_volume"),
+                "foreign_buy_value": _number(current, "foreign_buy_value"),
+                "foreign_sell_value": _number(current, "foreign_sell_value"),
+                "provider_time": current.get("stream_timestamp")
+                or current.get("time"),
+                "received_at": current.get("received_at"),
+                "raw_field_presence": dict(
+                    current.get("raw_field_presence") or {}
+                ),
+                **classifications.get(ticker, {}),
+            }
+            item["foreign_net_volume"] = (
+                item["foreign_buy_volume"] - item["foreign_sell_volume"]
+                if item["foreign_buy_volume"] is not None
+                and item["foreign_sell_volume"] is not None
+                else None
+            )
+            item["foreign_net_value"] = (
+                item["foreign_buy_value"] - item["foreign_sell_value"]
+                if item["foreign_buy_value"] is not None
+                and item["foreign_sell_value"] is not None
+                else None
+            )
+            items.append(item)
+
+        aggregate = self._aggregate_current_items(items, len(ticker_list))
+        observed_count = int(aggregate["observed_count"])
+        stale_count = sum(
+            bool(item["is_stale"]) and item["usable"] for item in items
+        )
+        if observed_count:
+            states = {
+                str(item["data_state"])
+                for item in items
+                if item["usable"]
+            }
+            data_state = (
+                "stale"
+                if states & {"stale", "error"}
+                else "market_closed"
+                if states == {"market_closed"}
+                else "ready"
+            )
+        else:
+            states = {
+                str(stream.get("data_state") or "")
+                for stream in streams.values()
+            }
+            data_state = (
+                "waiting"
+                if "waiting" in states
+                else "market_closed"
+                if "market_closed" in states
+                else "unavailable"
+            )
+
+        try:
+            from src.services.vietnam_foreign_flow_service import (
+                accepted_vietnam_foreign_flow_history,
+            )
+
+            accepted_history = accepted_vietnam_foreign_flow_history(ticker_list)
+        except Exception:
+            accepted_history = {ticker: [] for ticker in ticker_list}
+        display_by_symbol: Dict[str, List[Dict[str, Any]]] = {}
+        for item in items:
+            ticker = str(item["symbol"])
+            accepted_rows = [
+                {
+                    **dict(row),
+                    "source_kind": "completed",
+                    "source": "SSI DailyStockPrice",
+                    "finality": "completed_accepted",
+                    "status": "Đủ",
+                    "is_current": False,
+                    "is_completed": True,
+                    "is_partial": any(
+                        row.get(name) is None
+                        for name in (
+                            "foreign_buy_volume",
+                            "foreign_sell_volume",
+                            "foreign_buy_value",
+                            "foreign_sell_value",
+                        )
+                    ),
+                    "is_stale": False,
+                }
+                for row in accepted_history.get(ticker, [])
+                if row.get("trading_date")
+            ]
+            accepted_dates = {
+                str(row["trading_date"]) for row in accepted_rows
+            }
+            latest_accepted = max(accepted_dates) if accepted_dates else None
+            current_date = (
+                str(item.get("provider_session_date") or "")
+                if item.get("usable")
+                else ""
+            )
+            if (
+                current_date
+                and current_date not in accepted_dates
+                and (latest_accepted is None or current_date > latest_accepted)
+            ):
+                current_row = {
+                    "trading_date": current_date,
+                    **{
+                        name: item.get(name)
+                        for name in (
+                            "foreign_buy_volume",
+                            "foreign_sell_volume",
+                            "foreign_net_volume",
+                            "foreign_buy_value",
+                            "foreign_sell_value",
+                            "foreign_net_value",
+                        )
+                    },
+                    "source_kind": "current",
+                    "source": "SSI FastConnect V3 ForeignRoomMessage",
+                    "finality": "current_session_provisional",
+                    "status": (
+                        "Tạm tính"
+                        if item.get("data_state") == "market_closed"
+                        else "Mất kết nối"
+                        if item.get("data_state") in {"stale", "error"}
+                        else "Đang diễn ra"
+                    ),
+                    "requested_count": 1,
+                    "observed_count": 1,
+                    "complete_volume_count": int(
+                        item.get("foreign_buy_volume") is not None
+                        and item.get("foreign_sell_volume") is not None
+                    ),
+                    "complete_value_count": int(
+                        item.get("foreign_buy_value") is not None
+                        and item.get("foreign_sell_value") is not None
+                    ),
+                    "coverage": 1.0,
+                    "provider_time": item.get("provider_time"),
+                    "received_at": item.get("received_at"),
+                    "is_current": True,
+                    "is_completed": False,
+                    "is_partial": (
+                        item.get("foreign_buy_volume") is None
+                        or item.get("foreign_sell_volume") is None
+                        or item.get("foreign_buy_value") is None
+                        or item.get("foreign_sell_value") is None
+                    ),
+                    "is_stale": bool(item.get("is_stale")),
+                }
+                accepted_rows.append(current_row)
+            display_rows = sorted(
+                accepted_rows,
+                key=lambda row: str(row.get("trading_date") or ""),
+            )[-60:]
+            display_by_symbol[ticker] = display_rows
+            item["display_latest"] = display_rows[-1] if display_rows else None
+            item["display_windows"] = {
+                str(size): self._display_window(display_rows, size)
+                for size in (1, 5, 20, 60)
+            }
+
+        display_dates = sorted({
+            str(row.get("trading_date"))
+            for rows in display_by_symbol.values()
+            for row in rows
+            if row.get("trading_date")
+        })[-60:]
+        display_series: List[Dict[str, Any]] = []
+        for trading_date in display_dates:
+            entries = [
+                {
+                    **row,
+                    "usable": any(
+                        row.get(name) is not None
+                        for name in (
+                            "foreign_buy_volume",
+                            "foreign_sell_volume",
+                            "foreign_buy_value",
+                            "foreign_sell_value",
+                        )
+                    ),
+                }
+                for rows in display_by_symbol.values()
+                for row in rows
+                if row.get("trading_date") == trading_date
+            ]
+            aggregate_row = self._aggregate_current_items(
+                entries, len(ticker_list)
+            )
+            has_current = any(
+                row.get("source_kind") == "current" for row in entries
+            )
+            display_series.append({
+                "trading_date": trading_date,
+                **aggregate_row,
+                "source_kind": "current" if has_current else "completed",
+                "source": (
+                    "SSI FastConnect V3 ForeignRoomMessage aggregate"
+                    if has_current
+                    else "SSI DailyStockPrice current-membership aggregate"
+                ),
+                "finality": (
+                    "current_session_provisional"
+                    if has_current
+                    else "completed_accepted"
+                ),
+                "status": (
+                    "Tạm tính"
+                    if has_current and data_state == "market_closed"
+                    else "Mất kết nối"
+                    if has_current and data_state == "stale"
+                    else "Đang diễn ra"
+                    if has_current
+                    else "Đủ"
+                ),
+                "is_current": has_current,
+                "is_completed": not has_current,
+                "is_stale": has_current and data_state == "stale",
+            })
+
+        groups: List[Dict[str, Any]] = []
+        if include_industries:
+            by_industry: Dict[Tuple[str, str], List[Dict[str, Any]]] = defaultdict(list)
+            expected_by_industry: Dict[Tuple[str, str], int] = defaultdict(int)
+            for ticker in ticker_list:
+                classification = classifications.get(ticker)
+                if not classification:
+                    continue
+                key = (
+                    classification["icb_code"],
+                    classification["icb_name"],
+                )
+                expected_by_industry[key] += 1
+                item = next(row for row in items if row["symbol"] == ticker)
+                by_industry[key].append(item)
+            for key in sorted(expected_by_industry):
+                group = self._aggregate_current_items(
+                    by_industry.get(key, []),
+                    expected_by_industry[key],
+                )
+                groups.append({
+                    "icb_code": key[0],
+                    "icb_name": key[1],
+                    "universe": (
+                        "current_vn30_membership"
+                        if normalized_index == "VN30"
+                        else universe
+                    ),
+                    "provider_session_date": provider_session_date,
+                    "data_state": (
+                        data_state if group["observed_count"] else "unavailable"
+                    ),
+                    **group,
+                })
+        rankings: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
+        for size in (1, 5, 20, 60):
+            candidates = []
+            for item in items:
+                window = dict(item.get("display_windows", {}).get(str(size)) or {})
+                value = window.get("foreign_net_value")
+                if value is None:
+                    continue
+                candidates.append({
+                    "ticker": item["symbol"],
+                    "value": value,
+                    "trading_date": window.get("end_date"),
+                    "is_provisional": bool(window.get("is_provisional")),
+                    "is_partial": bool(window.get("is_partial")),
+                })
+            rankings[str(size)] = {
+                "top_buy": sorted(
+                    (row for row in candidates if row["value"] > 0),
+                    key=lambda row: (-row["value"], row["ticker"]),
+                )[:10],
+                "top_sell": sorted(
+                    (row for row in candidates if row["value"] < 0),
+                    key=lambda row: (row["value"], row["ticker"]),
+                )[:10],
+            }
+        return {
+            "status": (
+                "ok"
+                if observed_count == len(ticker_list)
+                and aggregate["complete_volume_count"] == len(ticker_list)
+                and aggregate["complete_value_count"] == len(ticker_list)
+                else "partial"
+                if observed_count
                 else "unavailable"
             ),
-            "is_current_session": bool(current_row),
-            "is_provisional": bool(current_row),
-            "current": current_row,
-            "latest_completed_comparison": None if current_row else (dict(row) if row else None),
-            "stream_status": "CURRENT_FOREIGN_STREAM_BLOCKED_SEMANTICS",
-            "stream_reason": "SSI room buy/sell update semantics are not proven cumulative or delta.",
-            "source": _SOURCE,
+            "data_state": data_state,
+            "usable": bool(observed_count),
+            "failure_class": None if observed_count else next(
+                (
+                    stream.get("failure_class")
+                    for stream in streams.values()
+                    if stream.get("failure_class")
+                ),
+                None,
+            ),
+            "scope": "current_foreign_flow_aggregate",
+            "universe": universe,
+            "provider_session_date": provider_session_date,
+            "is_provisional": bool(observed_count),
+            "finality": (
+                "current_session_provisional" if observed_count else None
+            ),
+            "source": "SSI FastConnect V3 ForeignRoomMessage",
             "provider_version": _PROVIDER_VERSION,
-            "endpoint": "securitiesSummary",
+            "endpoint": "room.{symbol}",
+            "update_semantics": "cumulative_replacement_snapshot",
+            "aggregate": aggregate if observed_count else None,
+            "display_series": display_series,
+            "display_windows": {
+                str(size): self._display_window(display_series, size)
+                for size in (1, 5, 20, 60)
+            },
+            "rankings": rankings,
+            "items": items,
+            "groups": groups,
+            "coverage": {
+                "requested_symbol_count": len(ticker_list),
+                "classified_symbol_count": len(classifications),
+                "subscribed_symbol_count": sum(
+                    item["stream_status"]
+                    not in {
+                        "r_not_subscribed",
+                        "ticker_not_bootstrapped",
+                        "manager_not_started",
+                    }
+                    for item in items
+                ),
+                "observed_symbol_count": observed_count,
+                "complete_volume_count": aggregate["complete_volume_count"],
+                "complete_value_count": aggregate["complete_value_count"],
+                "missing_symbols": [
+                    item["symbol"] for item in items if not item["usable"]
+                ],
+                "stale_symbol_count": stale_count,
+            },
+            "market_session": next(
+                (
+                    dict(stream.get("market_session") or {})
+                    for stream in streams.values()
+                    if stream.get("market_session")
+                ),
+                {},
+            ),
+            "diagnostics": {
+                "cohort_subscription_status": ensure_result.get("status"),
+                "subscription_added_count": ensure_result.get(
+                    "subscription_added_count", 0
+                ),
+                "mixed_provider_session_dates_excluded": observed_dates[:-1],
+                "provisional_persisted": False,
+            },
+        }
+
+    @staticmethod
+    def _aggregate_current_items(
+        items: List[Dict[str, Any]],
+        requested_count: int,
+    ) -> Dict[str, Any]:
+        usable = [item for item in items if item.get("usable")]
+        sums: Dict[str, Optional[float]] = {}
+        for name in (
+            "foreign_buy_volume",
+            "foreign_sell_volume",
+            "foreign_buy_value",
+            "foreign_sell_value",
+        ):
+            values = [
+                _number(item, name)
+                for item in usable
+                if _number(item, name) is not None
+            ]
+            sums[name] = sum(values) if values else None
+        sums["foreign_net_volume"] = (
+            sums["foreign_buy_volume"] - sums["foreign_sell_volume"]
+            if sums["foreign_buy_volume"] is not None
+            and sums["foreign_sell_volume"] is not None
+            else None
+        )
+        sums["foreign_net_value"] = (
+            sums["foreign_buy_value"] - sums["foreign_sell_value"]
+            if sums["foreign_buy_value"] is not None
+            and sums["foreign_sell_value"] is not None
+            else None
+        )
+        observed_count = len(usable)
+        complete_volume_count = sum(
+            item.get("foreign_buy_volume") is not None
+            and item.get("foreign_sell_volume") is not None
+            for item in usable
+        )
+        complete_value_count = sum(
+            item.get("foreign_buy_value") is not None
+            and item.get("foreign_sell_value") is not None
+            for item in usable
+        )
+        return {
+            **sums,
+            "requested_count": requested_count,
+            "observed_count": observed_count,
+            "complete_volume_count": complete_volume_count,
+            "complete_value_count": complete_value_count,
+            "coverage_ratio": (
+                observed_count / requested_count if requested_count else 0.0
+            ),
+            "is_partial": (
+                observed_count < requested_count
+                or complete_volume_count < requested_count
+                or complete_value_count < requested_count
+            ),
+        }
+
+    @staticmethod
+    def _display_window(
+        rows: List[Dict[str, Any]],
+        requested_count: int,
+    ) -> Dict[str, Any]:
+        selected = rows[-requested_count:]
+        result: Dict[str, Any] = {
+            "requested_sessions": requested_count,
+            "actual_sessions": len(selected),
+            "complete": len(selected) == requested_count,
+            "start_date": selected[0].get("trading_date") if selected else None,
+            "end_date": selected[-1].get("trading_date") if selected else None,
+            "is_provisional": any(
+                row.get("source_kind") == "current" for row in selected
+            ),
+            "is_partial": (
+                len(selected) != requested_count
+                or any(bool(row.get("is_partial")) for row in selected)
+            ),
+        }
+        for name in (
+            "foreign_buy_volume",
+            "foreign_sell_volume",
+            "foreign_net_volume",
+            "foreign_buy_value",
+            "foreign_sell_value",
+            "foreign_net_value",
+        ):
+            values = [
+                _number(row, name)
+                for row in selected
+                if _number(row, name) is not None
+            ]
+            result[name] = sum(values) if values else None
+        return result
+
+    @staticmethod
+    def _unavailable_current_aggregate(
+        *,
+        universe: str,
+        failure_class: str,
+        symbols: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        requested = list(symbols or [])
+        return {
+            "status": "unavailable",
+            "data_state": "unavailable",
+            "usable": False,
+            "failure_class": failure_class,
+            "scope": "current_foreign_flow_aggregate",
+            "universe": universe,
+            "provider_session_date": None,
+            "is_provisional": False,
+            "finality": None,
+            "source": "SSI FastConnect V3 ForeignRoomMessage",
+            "provider_version": _PROVIDER_VERSION,
+            "endpoint": "room.{symbol}",
+            "update_semantics": "cumulative_replacement_snapshot",
+            "aggregate": None,
+            "display_series": [],
+            "display_windows": {},
+            "rankings": {},
+            "items": [],
+            "groups": [],
+            "coverage": {
+                "requested_symbol_count": len(requested),
+                "classified_symbol_count": 0,
+                "subscribed_symbol_count": 0,
+                "observed_symbol_count": 0,
+                "complete_volume_count": 0,
+                "complete_value_count": 0,
+                "missing_symbols": requested,
+                "stale_symbol_count": 0,
+            },
+            "market_session": {},
+            "diagnostics": {"provisional_persisted": False},
         }
 
     def proprietary_flow(

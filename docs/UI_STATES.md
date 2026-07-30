@@ -11,6 +11,36 @@ Rules that apply to every state:
 - Missing object data renders as `null`.
 - Missing list data renders as `[]`.
 
+## R6B current finality and Industry diagnostics
+
+Finality takes precedence over completeness. Only accepted DailyStockPrice rows
+display `Đủ`. A current provisional row displays `Đang diễn ra` when connected,
+`Mất kết nối` when stale or disconnected, `Tạm tính` after market close,
+`Chờ dữ liệu` while waiting, and `Không khả dụng` without a usable snapshot.
+Complete numeric fields and 30/30 coverage do not change that status.
+
+Data Details labels latest completed, latest display, and current provider
+sessions separately. Current Industry capability is shown as `ready`, `partial`,
+`stale`, `waiting`, or `unavailable`, with the bounded current-VN30 universe and
+coverage. Completed Industry content remains visible if current data is waiting
+or unavailable. Proprietary zero semantics remain a separate issue.
+
+## R6A restart and system-browser acceptance
+
+Reloading the frontend or restarting the backend must not remove a newer
+accepted completed session merely because the next DailyStockPrice response is
+older, empty, or unavailable. A newer provisional current row remains visually
+first and concise; accepted same-date data suppresses it. Coverage remains
+readable, missing current values remain em dashes rather than zero, and explicit
+provider zero remains `0`.
+
+The system-Chrome gate accepted 18 deterministic states at 1366x768 and
+390x844, including current/completed ordering, post-close provisional display,
+full/partial/missing coverage, explicit zero, unavailable current with completed
+history retained, regressive refresh, same-date precedence, 20-plus-current
+history, chart/ranking/watchlist reach, and CSV finality/coverage. It found no
+page-level horizontal overflow; intentional table scrollers remained local.
+
 ## Symbol foreign-flow inspection
 
 - **Closed:** ticker selection only highlights the workspace; zero history requests and no hidden loading state.
@@ -172,6 +202,79 @@ Primary status priority is `Completed`, `Loading`, `Pre-open`, `Lunch break`, `C
 
 These states apply only to existing X/X-QUOTE/X-TRADE/F/R/MI consumers. They do not change D1/1m chart loading, polling, labels, or data ownership, and they do not add a frontend WebSocket or higher polling frequency.
 
+## SSI-V3-M2.6B current symbol flow states
+
+- `waiting`: show that the bounded subscription is awaiting its first usable
+  current-session room update; show no metric-shaped zeros.
+- `ready`: show the provisional cumulative snapshot with the short
+  `Đang diễn ra` status.
+- `stale`: retain received values with stale wording and cache age when
+  available.
+- `market_closed`: retain a usable same-session snapshot with the short
+  `Tạm tính` status; otherwise show a calm unavailable/no-message state without
+  fabricating values.
+- `unavailable`: show disabled/not-started/not-bootstrapped/not-subscribed
+  context without affecting completed daily history.
+- `error`: show a concise typed failure; do not expose raw provider text.
+
+M2.6B-R3 gives Foreign Flow ticker mode and Company Research one unified
+`Foreign flow` card. It compares the provider-backed current-flow
+`tradingDate` with the latest accepted DailyStockPrice date: a newer current
+date wins, while a newer or same-date completed row wins. If no safe current
+date exists, the accepted DailyStockPrice session remains visible. The
+separate `Current-session foreign flow` card is removed.
+
+In Foreign Flow ticker mode, a provider-dated current session is also shown as
+the first display-only row in `Chi tiết phiên` using the same page-owned
+response. It is not inserted into the historical chart, rankings, analytics,
+export, or rolling calculations.
+
+The display-only current row uses `Đang diễn ra`, `Tạm tính`, `Chờ dữ liệu`,
+`Mất kết nối`, or `Không khả dụng`. `Tạm tính` means a usable provider-dated
+current snapshot is retained after market close. Missing values and both
+rolling columns show `—`; an explicit provider zero remains `0`. If an accepted
+DailyStockPrice row already exists for that trading date, the accepted row
+wins and the provisional row is omitted. Completed-row status labels remain
+unchanged.
+
+The unified card shows buy, sell, and net value plus buy, sell, and net volume
+only when provider fields are usable. Room-capacity fields remain outside the
+trading-flow presentation. Provider event time and local receipt time are
+separate. Both pages poll the HTTP cache every 15 seconds
+with one in-flight request, abort cleanup, and stale-response rejection;
+manual refresh performs one no-store cache read. React Strict Mode must still
+produce one effective initial polling request.
+
+M2.6B-R4 adds one hidden-to-visible current-flow refresh to Foreign Flow ticker
+mode and Company Research. Hidden polling remains paused; returning visible
+does not clear the current card or completed data, does not create a second
+timer, and repeated visible events do not duplicate the resume request. While
+recovery is pending or fails, a usable prior current snapshot shows
+`Máº¥t káº¿t ná»‘i`; with no usable current snapshot, only the current capability
+shows `KhÃ´ng kháº£ dá»¥ng`. Completed DailyStockPrice content remains visible and
+the Overview does not become wholly unavailable because of stream health.
+
+M2.6B-R5 keeps the latest usable provider-dated snapshot in the shared unified
+card and the display-only detail row after market close. Market close changes
+its short label to `Tạm tính`; it does not erase the snapshot. Accepted
+DailyStockPrice for the same date replaces the provisional presentation and
+prevents a duplicate date. No polling, chart, rolling, ranking, analytics,
+export, aggregation, or persistence input changes.
+
+R1 visually accepted all six states plus explicit zero, partial volume-only,
+retained error data, room present/missing, and provider time present/absent at
+1366x768 and 390x844 on both pages. No page or card horizontal overflow was
+observed. The active live route remains blocked by SSI streaming authorization,
+which renders as a typed unavailable/error state without changing completed
+daily data.
+
+R3 visually accepted eight Company Research and five Foreign Flow ticker
+fixtures at both 1366x768 and 390x844. Each fixture rendered exactly one
+`Foreign flow` card, no duplicate current-session heading, a visible provider
+session date and concise state, no card clipping, and no page-level horizontal
+overflow. The 20-row ticker fixture retained the existing table scroller and
+21 display rows when the newer provisional row was eligible.
+
 ## Phase 4.12 Foreign Flow States
 
 Phase 4.12D-1 implements the daily watchlist batch subset below. Current-session provisional states and market aggregates remain planned.
@@ -196,4 +299,10 @@ Phase 4.12E-1-R2A browser acceptance verified the unavailable branch with five r
 
 Phase 4.12E-2 adds `scope=vn30`. The VN30 scope owns one aggregate request and disables the watchlist batch owner. Loading retains prior same-scope data; membership unavailable states say that SSI IndexComponents is unavailable and never substitute members. Ready, partial, stale, and unavailable aggregate states remain distinct. The page discloses that history uses current VN30 membership, and local window/metric/chart/view/sort/filter/ticker changes do not refetch. Net, buy/sell, cumulative-net, and breadth charts use 5/10/20 slices of the returned maximum-20-date series; null dates/values remain gaps rather than zero. Signed foreign-flow net values use green when positive, red when negative, neutral foreground styling at zero, and existing unavailable styling for null/non-finite values; visible signs and labels remain the non-color cue.
 
-Foreign flow and foreign room render as separate sections. Price reaction copy is descriptive (`Flow and price moved in the same direction`, `Foreign buying occurred while price declined`, or `Foreign selling occurred while price increased`) and does not present an instruction or forecast.
+Foreign-room capacity remains semantically separate and is not mapped into the unified foreign-flow summary. Price reaction copy is descriptive (`Flow and price moved in the same direction`, `Foreign buying occurred while price declined`, or `Foreign selling occurred while price increased`) and does not present an instruction or forecast.
+
+### Latest-session foreign-flow states
+
+Foreign Flow Overview, Stocks, Industries, Watchlist, Data Details, charts, and displayed-series exports may include one newer provider-dated current row above accepted completed history. Active current data is `Đang diễn ra`; a retained post-close snapshot is `Tạm tính`; a usable snapshot during an active disconnect is `Mất kết nối`; expected data without a snapshot is `Chờ dữ liệu`; unavailable capability is `Không khả dụng`. Coverage is shown independently, for example `Đang diễn ra · 27/30`.
+
+Current totals and windows are marked provisional when they include the current row. Missing symbols or fields render `—` and are not treated as zero; explicit provider zero renders `0`. Accepted DailyStockPrice for the same date suppresses the provisional duplicate and becomes `Đủ`. Completed content stays visible when the current stream is waiting or unavailable. Industry wording identifies the current VN30 membership universe, and watchlist requests remain limited to user-selected symbols.

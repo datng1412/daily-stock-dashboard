@@ -1,6 +1,7 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { StrictMode } from 'react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { BrowserRouter } from 'react-router-dom';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   stocksApi,
   type VietnamForeignFlowSymbolHistoryResponse,
@@ -11,6 +12,8 @@ import ForeignFlowPage from '../ForeignFlowPage';
 vi.mock('../../api/stocks', () => ({
   stocksApi: {
     getVietnamForeignFlowSymbolHistory: vi.fn(),
+    getVietnamCurrentForeignFlow: vi.fn(),
+    getVietnamCurrentForeignFlowAggregate: vi.fn(),
     getVietnamVn30ForeignFlow: vi.fn(),
     getVietnamIndustryFlow: vi.fn(),
     getVietnamProprietaryFlow: vi.fn(),
@@ -20,6 +23,8 @@ vi.mock('../../api/stocks', () => ({
 }));
 
 const symbolHistory = vi.mocked(stocksApi.getVietnamForeignFlowSymbolHistory);
+const currentFlow = vi.mocked(stocksApi.getVietnamCurrentForeignFlow);
+const currentAggregate = vi.mocked(stocksApi.getVietnamCurrentForeignFlowAggregate);
 const vn30 = vi.mocked(stocksApi.getVietnamVn30ForeignFlow);
 const industry = vi.mocked(stocksApi.getVietnamIndustryFlow);
 const proprietary = vi.mocked(stocksApi.getVietnamProprietaryFlow);
@@ -123,6 +128,61 @@ beforeEach(() => {
   vi.clearAllMocks();
   localStorage.clear();
   symbolHistory.mockResolvedValue(tickerPayload());
+  currentFlow.mockResolvedValue({
+    status: 'ok',
+    dataState: 'ready',
+    usable: true,
+    source: 'SSI FastConnect V3 ForeignRoomMessage',
+    providerVersion: 'v3',
+    symbol: 'FPT',
+    tradingDate: '2026-07-29',
+    freshnessStatus: 'ready',
+    isCurrentSession: true,
+    isProvisional: true,
+    current: {
+      foreignBuyValue: 1_000,
+      foreignSellValue: 400,
+      foreignNetValue: 600,
+      foreignBuyVolume: 10,
+      foreignSellVolume: 4,
+      foreignNetVolume: 6,
+    },
+    latestCompletedComparison: { date: '2026-07-28' },
+    streamStatus: 'cache_hit',
+    streamReason: '',
+    endpoint: 'room.FPT',
+    finality: 'current_session_provisional',
+    updateSemantics: 'cumulative_replacement_snapshot',
+    cache: { status: 'hit', ageSeconds: 1 },
+  });
+  currentAggregate.mockResolvedValue({
+    status: 'unavailable',
+    dataState: 'waiting',
+    usable: false,
+    scope: 'current_foreign_flow_aggregate',
+    universe: 'VN30',
+    isProvisional: false,
+    source: 'SSI FastConnect V3 ForeignRoomMessage',
+    providerVersion: 'v3',
+    endpoint: 'room.{symbol}',
+    updateSemantics: 'cumulative_replacement_snapshot',
+    aggregate: null,
+    displaySeries: [],
+    displayWindows: {},
+    rankings: {},
+    items: [],
+    groups: [],
+    coverage: {
+      requestedSymbolCount: 0,
+      classifiedSymbolCount: 0,
+      subscribedSymbolCount: 0,
+      observedSymbolCount: 0,
+      completeVolumeCount: 0,
+      completeValueCount: 0,
+      missingSymbols: [],
+      staleSymbolCount: 0,
+    },
+  });
   vn30.mockResolvedValue(vn30Payload());
   industry.mockResolvedValue({
     status: 'partial',
@@ -215,6 +275,10 @@ beforeEach(() => {
   } as unknown as Awaited<ReturnType<typeof stocksApi.getVietnamForeignFlowWatchlist>>);
 });
 
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 describe('ForeignFlowPage', () => {
   it('starts in Overview with four primary KPIs, one primary chart, and no fixed watchlist', async () => {
     renderPage();
@@ -222,7 +286,7 @@ describe('ForeignFlowPage', () => {
     await waitFor(() => expect(industry).toHaveBeenCalledTimes(1));
     expect(screen.getByRole('button', { name: 'Overview' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getAllByTestId('foreign-flow-primary-kpi')).toHaveLength(4);
-    expect(screen.getByText('Net foreign flow by completed session')).toBeInTheDocument();
+    expect(screen.getByText('Net foreign flow through latest session')).toBeInTheDocument();
     expect(screen.getByText(/Your watchlist is empty/)).toBeInTheDocument();
     expect(symbolHistory).not.toHaveBeenCalled();
     expect(stocksApi.getVietnamForeignFlowWatchlist).not.toHaveBeenCalled();
@@ -268,17 +332,332 @@ describe('ForeignFlowPage', () => {
   it('loads a validated ticker and keeps value/volume selection request-free', async () => {
     renderPage('/foreign-flow?mode=ticker&ticker=FPT');
     await waitFor(() => expect(symbolHistory).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(currentFlow).toHaveBeenCalledTimes(1));
     expect(symbolHistory).toHaveBeenCalledWith('FPT', expect.objectContaining({ limit: 20, forceRefresh: false }));
+    expect(screen.getAllByRole('heading', { name: 'Foreign flow' })).toHaveLength(1);
+    expect(screen.queryByRole('heading', { name: 'Current-session foreign flow' })).not.toBeInTheDocument();
+    const latestCard = screen.getByTestId('latest-foreign-flow-card');
+    expect(within(latestCard).getByText('Đang diễn ra')).toBeInTheDocument();
+    expect(within(latestCard).getByText(/Session: 2026-07-29/)).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Selected window summary' })).not.toBeInTheDocument();
     fireEvent.click(within(screen.getByRole('group', { name: 'Metric' })).getByRole('button', { name: 'Volume' }));
     expect(symbolHistory).toHaveBeenCalledTimes(1);
+    expect(currentFlow).toHaveBeenCalledTimes(1);
     expect(screen.getByText('2026-07-21T09:00:00Z')).toBeInTheDocument();
+  });
+
+  it('inserts the provider-backed current session first without changing completed rows', async () => {
+    renderPage('/foreign-flow?mode=ticker&ticker=FPT');
+
+    const currentRow = await screen.findByTestId('current-session-flow-row');
+    expect(currentRow).toHaveAttribute('data-current-session', 'true');
+    expect(within(currentRow).getByText('2026-07-29')).toBeInTheDocument();
+    expect(within(currentRow).getByText('1,000')).toBeInTheDocument();
+    expect(within(currentRow).getByText('400')).toBeInTheDocument();
+    expect(within(currentRow).getByText('600')).toBeInTheDocument();
+    expect(within(currentRow).getAllByText('—')).toHaveLength(2);
+    expect(within(currentRow).getByText('Đang diễn ra')).toBeInTheDocument();
+
+    const table = screen.getByRole('heading', { name: 'Chi tiết phiên' }).closest('section');
+    expect(table).not.toBeNull();
+    const rows = within(table as HTMLElement).getAllByRole('row').slice(1);
+    expect(rows[0]).toBe(currentRow);
+    expect(within(rows[1]).getByText('2026-07-21')).toBeInTheDocument();
+    expect(within(rows[1]).getByText('Đủ')).toBeInTheDocument();
+
+    fireEvent.click(within(table as HTMLElement).getByRole('button', { name: 'NN mua' }));
+    expect(within(table as HTMLElement).getAllByRole('row')[1]).toBe(currentRow);
+    expect(currentFlow).toHaveBeenCalledTimes(1);
+    expect(symbolHistory).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows a dated waiting row without fabricated values', async () => {
+    currentFlow.mockResolvedValue({
+      status: 'unavailable',
+      dataState: 'waiting',
+      usable: false,
+      source: 'ssi_fastconnect',
+      providerVersion: 'v3',
+      symbol: 'FPT',
+      tradingDate: '2026-07-29',
+      freshnessStatus: 'waiting',
+      isCurrentSession: false,
+      isProvisional: false,
+      current: null,
+      streamStatus: 'subscribed_no_event',
+      streamReason: 'Waiting for room data.',
+    });
+
+    renderPage('/foreign-flow?mode=ticker&ticker=FPT');
+
+    const currentRow = await screen.findByTestId('current-session-flow-row');
+    expect(within(currentRow).getAllByText('—')).toHaveLength(5);
+    expect(within(currentRow).getByText('Chờ dữ liệu')).toBeInTheDocument();
+    expect(within(currentRow).queryByText('0')).not.toBeInTheDocument();
+  });
+
+  it('lets an accepted same-date row suppress the provisional display row', async () => {
+    const payload = tickerPayload();
+    payload.rows = [{
+      tradingDate: '2026-07-29',
+      foreignBuyValue: 200,
+      foreignSellValue: 50,
+      foreignNetValue: 150,
+      foreignBuyVolume: 20,
+      foreignSellVolume: 5,
+      foreignNetVolume: 15,
+    }];
+    symbolHistory.mockResolvedValue(payload);
+
+    renderPage('/foreign-flow?mode=ticker&ticker=FPT');
+
+    await screen.findByText('Chi tiết phiên');
+    await waitFor(() => expect(currentFlow).toHaveBeenCalledTimes(1));
+    expect(screen.queryByTestId('current-session-flow-row')).not.toBeInTheDocument();
+    const summary = screen.getByTestId('latest-foreign-flow-card');
+    expect(within(summary).getByText('Đủ')).toBeInTheDocument();
+    expect(within(summary).getByText(/Session: 2026-07-29/)).toBeInTheDocument();
+    const table = screen.getByRole('heading', { name: 'Chi tiết phiên' }).closest('section');
+    expect(table).not.toBeNull();
+    expect(within(table as HTMLElement).getAllByText('2026-07-29')).toHaveLength(1);
+    expect(within(table as HTMLElement).getByText('Đủ')).toBeInTheDocument();
+  });
+
+  it('polls current flow once per interval and force refresh issues one explicit read', async () => {
+    vi.useFakeTimers();
+    renderPage('/foreign-flow?mode=ticker&ticker=FPT');
+    await act(async () => {
+      vi.advanceTimersByTime(0);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(currentFlow).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      vi.advanceTimersByTime(15_000);
+      await Promise.resolve();
+    });
+    expect(currentFlow).toHaveBeenCalledTimes(2);
+    expect(currentFlow).toHaveBeenLastCalledWith(
+      'FPT',
+      expect.objectContaining({ forceRefresh: false }),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Force Refresh/ }));
+    await act(async () => {
+      vi.advanceTimersByTime(0);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(currentFlow).toHaveBeenCalledTimes(3);
+    expect(currentFlow).toHaveBeenLastCalledWith(
+      'FPT',
+      expect.objectContaining({ forceRefresh: true }),
+    );
+  });
+
+  it('uses one effective current-flow polling lifecycle under React Strict Mode', async () => {
+    vi.useFakeTimers();
+    window.history.pushState({}, '', '/foreign-flow?mode=ticker&ticker=FPT');
+    render(
+      <StrictMode>
+        <BrowserRouter>
+          <ForeignFlowPage />
+        </BrowserRouter>
+      </StrictMode>,
+    );
+
+    await act(async () => {
+      vi.advanceTimersByTime(0);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(currentFlow).toHaveBeenCalledTimes(1);
+    expect(currentFlow).toHaveBeenCalledWith(
+      'FPT',
+      expect.objectContaining({ forceRefresh: false }),
+    );
+  });
+
+  it('issues one bounded current-flow refresh on hidden-to-visible resume without clearing values', async () => {
+    vi.useFakeTimers();
+    let visibility: DocumentVisibilityState = 'visible';
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => visibility,
+    });
+    let resolveResume!: (
+      value: Awaited<ReturnType<typeof stocksApi.getVietnamCurrentForeignFlow>>,
+    ) => void;
+
+    renderPage('/foreign-flow?mode=ticker&ticker=FPT');
+    await act(async () => {
+      vi.advanceTimersByTime(0);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(currentFlow).toHaveBeenCalledTimes(1);
+    expect(within(screen.getByTestId('latest-foreign-flow-card')).getByText(/Session: 2026-07-29/)).toBeInTheDocument();
+
+    currentFlow.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveResume = resolve;
+    }));
+    visibility = 'hidden';
+    fireEvent(document, new Event('visibilitychange'));
+    await act(async () => {
+      vi.advanceTimersByTime(15_000);
+      await Promise.resolve();
+    });
+    expect(currentFlow).toHaveBeenCalledTimes(1);
+
+    visibility = 'visible';
+    fireEvent(document, new Event('visibilitychange'));
+    fireEvent(document, new Event('visibilitychange'));
+    expect(currentFlow).toHaveBeenCalledTimes(2);
+    expect(currentFlow).toHaveBeenLastCalledWith(
+      'FPT',
+      expect.objectContaining({ forceRefresh: true }),
+    );
+    expect(within(screen.getByTestId('latest-foreign-flow-card')).getByText(/Session: 2026-07-29/)).toBeInTheDocument();
+
+    resolveResume({
+      status: 'partial',
+      dataState: 'stale',
+      usable: true,
+      source: 'SSI FastConnect V3 ForeignRoomMessage',
+      providerVersion: 'v3',
+      symbol: 'FPT',
+      tradingDate: '2026-07-29',
+      freshnessStatus: 'stale',
+      isCurrentSession: true,
+      isProvisional: true,
+      current: {
+        foreignBuyValue: 1_000,
+        foreignSellValue: 400,
+        foreignNetValue: 600,
+        foreignBuyVolume: 10,
+        foreignSellVolume: 4,
+        foreignNetVolume: 6,
+      },
+      streamStatus: 'reconnecting',
+      streamReason: 'Connection lost.',
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(within(screen.getByTestId('latest-foreign-flow-card')).getByText('Mất kết nối')).toBeInTheDocument();
+  });
+
+  it('ignores a stale current-flow response after the selected symbol changes', async () => {
+    let resolveFpt!: (
+      value: Awaited<ReturnType<typeof stocksApi.getVietnamCurrentForeignFlow>>,
+    ) => void;
+    currentFlow
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        resolveFpt = resolve;
+      }))
+      .mockResolvedValueOnce({
+        status: 'ok',
+        dataState: 'ready',
+        usable: true,
+        source: 'SSI FastConnect V3 ForeignRoomMessage',
+        providerVersion: 'v3',
+        symbol: 'HPG',
+        tradingDate: '2026-07-30',
+        freshnessStatus: 'ready',
+        isCurrentSession: true,
+        isProvisional: true,
+        current: {
+          foreignBuyValue: 2_000,
+          foreignSellValue: 500,
+          foreignNetValue: 1_500,
+        },
+        streamStatus: 'cache_hit',
+        streamReason: '',
+      });
+
+    renderPage('/foreign-flow?mode=ticker&ticker=FPT');
+    await waitFor(() => expect(currentFlow).toHaveBeenCalledTimes(1));
+    fireEvent.change(screen.getByLabelText('Ticker'), { target: { value: 'HPG' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Load ticker' }));
+    await waitFor(() => expect(currentFlow).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(within(screen.getByTestId('latest-foreign-flow-card')).getByText(/Session: 2026-07-30/)).toBeInTheDocument());
+
+    resolveFpt({
+      status: 'ok',
+      dataState: 'ready',
+      usable: true,
+      source: 'SSI FastConnect V3 ForeignRoomMessage',
+      providerVersion: 'v3',
+      symbol: 'FPT',
+      tradingDate: '2026-07-31',
+      freshnessStatus: 'ready',
+      isCurrentSession: true,
+      isProvisional: true,
+      current: { foreignNetValue: 9_999 },
+      streamStatus: 'cache_hit',
+      streamReason: '',
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(within(screen.getByTestId('latest-foreign-flow-card')).getByText(/Session: 2026-07-30/)).toBeInTheDocument();
+    expect(screen.queryByText(/Session: 2026-07-31/)).not.toBeInTheDocument();
+  });
+
+  it('keeps an explicit-zero after-hours snapshot visible as provisional', async () => {
+    currentFlow.mockResolvedValue({
+      status: 'partial',
+      dataState: 'market_closed',
+      usable: true,
+      source: 'SSI FastConnect V3 ForeignRoomMessage',
+      providerVersion: 'v3',
+      symbol: 'FPT',
+      tradingDate: '2026-07-29',
+      freshnessStatus: 'market_closed',
+      isCurrentSession: true,
+      isProvisional: true,
+      current: {
+        foreignBuyValue: 0,
+        foreignSellValue: 0,
+        foreignNetValue: 0,
+        foreignBuyVolume: 0,
+        foreignSellVolume: 0,
+        foreignNetVolume: 0,
+      },
+      latestCompletedComparison: { date: '2026-07-28' },
+      streamStatus: 'cache_hit',
+      streamReason: 'Market closed.',
+      endpoint: 'room.FPT',
+      finality: 'current_session_provisional',
+      updateSemantics: 'cumulative_replacement_snapshot',
+      cache: { status: 'stale', ageSeconds: 120 },
+    });
+
+    renderPage('/foreign-flow?mode=ticker&ticker=FPT');
+
+    const card = await screen.findByRole('region', { name: 'Foreign flow' });
+    expect(within(card).getByText('Tạm tính')).toBeInTheDocument();
+    expect(within(card).getByText(/Session: 2026-07-29/)).toBeInTheDocument();
+    expect(within(card).getAllByText('0')).toHaveLength(6);
+    const currentRow = await screen.findByTestId('current-session-flow-row');
+    expect(within(currentRow).getByText('2026-07-29')).toBeInTheDocument();
+    expect(within(currentRow).getByText('Tạm tính')).toBeInTheDocument();
   });
 
   it('uses returned sessions for 1D and preserves numeric zero separately from missing', async () => {
     renderPage('/foreign-flow?mode=ticker&ticker=FPT');
     await waitFor(() => expect(symbolHistory).toHaveBeenCalled());
     fireEvent.click(within(screen.getByRole('group', { name: 'Time window' })).getByRole('button', { name: '1D' }));
-    await waitFor(() => expect(screen.getByText('1/1')).toBeInTheDocument());
+    const table = screen.getByRole('heading', { name: 'Chi tiết phiên' }).closest('section');
+    expect(table).not.toBeNull();
+    await waitFor(() => {
+      expect(within(table as HTMLElement).getByText('2026-07-21')).toBeInTheDocument();
+      expect(within(table as HTMLElement).queryByText('2026-07-20')).not.toBeInTheDocument();
+    });
     fireEvent.click(screen.getByRole('button', { name: '20D' }));
     await waitFor(() => expect(screen.getAllByText('0').length).toBeGreaterThan(0));
     expect(screen.getAllByText('—').length).toBeGreaterThan(0);
@@ -291,6 +670,87 @@ describe('ForeignFlowPage', () => {
     expect(screen.getByText(/historical_constituent_correct = false/)).toBeInTheDocument();
     expect(screen.getByText(/Direct VN30 capability is secondary: unsupported/)).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'VN30 breadth' })).toHaveTextContent('Net buy 1');
+  });
+
+  it('keeps a stale full-coverage VN30 session provisional in the detail table', async () => {
+    const payload = vn30Payload();
+    payload.decomposition.latestCompletedSession = '2026-07-29';
+    payload.decomposition.series = [
+      {
+        tradingDate: '2026-07-28',
+        foreignBuyValue: 100,
+        foreignSellValue: 80,
+        foreignNetValue: 20,
+        dataState: 'ready',
+        state: 'ready',
+      },
+      {
+        tradingDate: '2026-07-29',
+        foreignBuyValue: 120,
+        foreignSellValue: 90,
+        foreignNetValue: 30,
+        dataState: 'ready',
+        state: 'ready',
+      },
+    ];
+    vn30.mockResolvedValue(payload);
+    currentAggregate.mockResolvedValue({
+      status: 'ok',
+      dataState: 'stale',
+      usable: true,
+      scope: 'current_foreign_flow_aggregate',
+      universe: 'index:VN30',
+      providerSessionDate: '2026-07-30',
+      isProvisional: true,
+      finality: 'current_session_provisional',
+      source: 'SSI FastConnect V3 ForeignRoomMessage',
+      providerVersion: 'v3',
+      endpoint: 'room.{symbol}',
+      updateSemantics: 'cumulative_replacement_snapshot',
+      aggregate: { foreignNetValue: 94_120_000_000 },
+      displaySeries: [{
+        tradingDate: '2026-07-30',
+        sourceKind: 'current',
+        finality: 'current_session_provisional',
+        foreignBuyValue: 539_680_000_000,
+        foreignSellValue: 445_570_000_000,
+        foreignNetValue: 94_120_000_000,
+        requestedCount: 30,
+        observedCount: 30,
+        completeValueCount: 30,
+        completeVolumeCount: 30,
+        isStale: true,
+      }],
+      displayWindows: {},
+      rankings: {},
+      items: [],
+      groups: [],
+      coverage: {
+        requestedSymbolCount: 30,
+        classifiedSymbolCount: 30,
+        subscribedSymbolCount: 30,
+        observedSymbolCount: 30,
+        completeVolumeCount: 30,
+        completeValueCount: 30,
+        missingSymbols: [],
+        staleSymbolCount: 30,
+      },
+    });
+
+    renderPage('/foreign-flow?mode=vn30');
+
+    const currentRow = await screen.findByTestId('current-session-flow-row');
+    expect(within(currentRow).getByText('2026-07-30')).toBeInTheDocument();
+    expect(within(currentRow).getByText('Mất kết nối')).toBeInTheDocument();
+    expect(within(currentRow).queryByText('Đủ')).not.toBeInTheDocument();
+    const table = screen.getByRole('heading', { name: 'Chi tiết phiên' }).closest('section');
+    expect(table).not.toBeNull();
+    const rows = within(table as HTMLElement).getAllByRole('row').slice(1);
+    expect(within(rows[1]).getByText('2026-07-29')).toBeInTheDocument();
+    expect(within(rows[1]).getByText('Đủ')).toBeInTheDocument();
+    expect(within(rows[2]).getByText('2026-07-28')).toBeInTheDocument();
+    expect(within(rows[2]).getByText('Đủ')).toBeInTheDocument();
+    expect(currentAggregate).toHaveBeenCalledTimes(1);
   });
 
   it('exposes bounded industry data and labels turnover separately from net flow', async () => {
@@ -457,7 +917,7 @@ describe('ForeignFlowPage', () => {
     renderPage();
     await screen.findByText('Top net bought');
 
-    expect(screen.getByText('Provider publication lag')).toBeInTheDocument();
+    expect(screen.queryByText('Provider publication lag')).not.toBeInTheDocument();
     expect(screen.queryByRole('alert', { name: /publication lag/i })).not.toBeInTheDocument();
   });
 
@@ -502,7 +962,7 @@ describe('ForeignFlowPage', () => {
 
     await waitFor(() => expect(symbolHistory).toHaveBeenCalledTimes(2));
     expect(await screen.findByRole('alert')).toHaveTextContent('Không thể kết nối');
-    expect(screen.getByRole('region', { name: 'Selected window summary' })).toBeInTheDocument();
+    expect(screen.getByTestId('latest-foreign-flow-card')).toBeInTheDocument();
     expect(screen.queryByText('Dữ liệu hiện không khả dụng')).not.toBeInTheDocument();
   });
 });

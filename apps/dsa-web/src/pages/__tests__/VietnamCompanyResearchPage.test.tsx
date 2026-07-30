@@ -1,12 +1,18 @@
+import { StrictMode } from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { stocksApi, type VietnamCompanyResearchResponse } from '../../api/stocks';
+import {
+  stocksApi,
+  type VietnamCompanyResearchResponse,
+  type VietnamCurrentForeignFlowResponse,
+} from '../../api/stocks';
 import VietnamCompanyResearchPage from '../VietnamCompanyResearchPage';
 
 vi.mock('../../api/stocks', () => ({
   stocksApi: {
     getVietnamCompanyResearch: vi.fn(),
+    getVietnamCurrentForeignFlow: vi.fn(),
   },
 }));
 
@@ -355,10 +361,55 @@ const renderPage = () => render(
   </MemoryRouter>,
 );
 
+const makeCurrentFlow = (
+  changes: Partial<VietnamCurrentForeignFlowResponse> = {},
+): VietnamCurrentForeignFlowResponse => ({
+  status: 'ok',
+  dataState: 'ready',
+  usable: true,
+  source: 'SSI FastConnect V3 ForeignRoomMessage',
+  providerVersion: 'v3',
+  symbol: 'FPT',
+  tradingDate: '2026-06-18',
+  freshnessStatus: 'ready',
+  isCurrentSession: true,
+  isProvisional: true,
+  current: {
+    foreignBuyVolume: 125_000,
+    foreignSellVolume: 80_000,
+    foreignNetVolume: 45_000,
+    foreignBuyValue: 1_250_000_000,
+    foreignSellValue: 800_000_000,
+    foreignNetValue: 450_000_000,
+  },
+  streamStatus: 'cache_hit',
+  streamReason: '',
+  finality: 'current_session_provisional',
+  ...changes,
+});
+
 describe('VietnamCompanyResearchPage', () => {
   beforeEach(() => {
     vi.useRealTimers();
     vi.mocked(stocksApi.getVietnamCompanyResearch).mockResolvedValue(makeCompanySnapshot());
+    vi.mocked(stocksApi.getVietnamCurrentForeignFlow).mockResolvedValue({
+      status: 'unavailable',
+      dataState: 'waiting',
+      usable: false,
+      source: 'ssi_fastconnect',
+      providerVersion: 'v3',
+      symbol: 'FPT',
+      tradingDate: null,
+      freshnessStatus: 'waiting',
+      isCurrentSession: false,
+      isProvisional: false,
+      current: null,
+      latestCompletedComparison: { date: '2026-06-17' },
+      streamStatus: 'subscribed_no_event',
+      streamReason: 'Waiting for the first SSI ForeignRoomMessage for this session.',
+      endpoint: 'room.FPT',
+      cache: { status: 'empty', ageSeconds: null },
+    });
   });
 
   afterEach(() => {
@@ -387,6 +438,9 @@ describe('VietnamCompanyResearchPage', () => {
     expect(screen.getByText('Put-through volume (shares)')).toBeInTheDocument();
     expect(screen.getByText('Foreign net volume (shares)')).toBeInTheDocument();
     expect(screen.getByText('Foreign net value (VND)')).toBeInTheDocument();
+    expect(screen.getAllByRole('heading', { name: 'Foreign flow' })).toHaveLength(1);
+    expect(screen.queryByRole('heading', { name: 'Current-session foreign flow' })).not.toBeInTheDocument();
+    expect(within(screen.getByTestId('latest-foreign-flow-card')).getByText('Đủ')).toBeInTheDocument();
     expect(screen.getByText('52W high (VND)')).toBeInTheDocument();
     expect(screen.getByText('140.00')).toBeInTheDocument();
     expect(screen.getByText('52W low (VND)')).toBeInTheDocument();
@@ -425,6 +479,185 @@ describe('VietnamCompanyResearchPage', () => {
     await waitFor(() => {
       expect(stocksApi.getVietnamCompanyResearch).toHaveBeenCalledWith('FPT', false);
     });
+  });
+
+  it('renders one unified card with the newer ready current session', async () => {
+    vi.mocked(stocksApi.getVietnamCurrentForeignFlow).mockResolvedValue(makeCurrentFlow());
+
+    renderPage();
+
+    const card = await screen.findByTestId('latest-foreign-flow-card');
+    await waitFor(() => expect(within(card).getByText('Đang diễn ra')).toBeInTheDocument());
+    expect(screen.getAllByRole('heading', { name: 'Foreign flow' })).toHaveLength(1);
+    expect(screen.queryByRole('heading', { name: 'Current-session foreign flow' })).not.toBeInTheDocument();
+    expect(within(card).getByText(/Session: 2026-06-18/)).toBeInTheDocument();
+    expect(within(card).getByText('+450.0M')).toBeInTheDocument();
+  });
+
+  it('retains the newer current snapshot as provisional after market close', async () => {
+    vi.mocked(stocksApi.getVietnamCurrentForeignFlow).mockResolvedValue(makeCurrentFlow({
+      status: 'partial',
+      dataState: 'market_closed',
+      freshnessStatus: 'market_closed',
+      streamStatus: 'cache_stale',
+      streamReason: 'Market closed.',
+    }));
+
+    renderPage();
+
+    const card = await screen.findByTestId('latest-foreign-flow-card');
+    await waitFor(() => expect(within(card).getByText('Tạm tính')).toBeInTheDocument());
+    expect(within(card).getByText(/Session: 2026-06-18/)).toBeInTheDocument();
+    expect(within(card).getByText('+450.0M')).toBeInTheDocument();
+    expect(screen.getAllByRole('heading', { name: 'Foreign flow' })).toHaveLength(1);
+    expect(screen.queryByRole('heading', { name: 'Current-session foreign flow' })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['waiting', 'unavailable', false, null, 'Chờ dữ liệu'],
+    ['unavailable', 'unavailable', false, null, 'Không khả dụng'],
+    ['stale', 'partial', true, makeCurrentFlow().current, 'Mất kết nối'],
+  ] as const)(
+    'renders the newer current %s state in the unified card',
+    async (dataState, status, usable, current, expectedStatus) => {
+      vi.mocked(stocksApi.getVietnamCurrentForeignFlow).mockResolvedValue(makeCurrentFlow({
+        dataState,
+        status,
+        usable,
+        current,
+      }));
+
+      renderPage();
+
+      const card = await screen.findByTestId('latest-foreign-flow-card');
+      await waitFor(() => expect(within(card).getByText(expectedStatus)).toBeInTheDocument());
+      expect(within(card).getByText(/Session: 2026-06-18/)).toBeInTheDocument();
+      if (!current) {
+        expect(within(card).getAllByText('—')).toHaveLength(6);
+        expect(within(card).queryByText('0')).not.toBeInTheDocument();
+      } else {
+        expect(within(card).getByText('+450.0M')).toBeInTheDocument();
+      }
+    },
+  );
+
+  it('gives an accepted same-date completed session precedence', async () => {
+    vi.mocked(stocksApi.getVietnamCurrentForeignFlow).mockClear();
+    vi.mocked(stocksApi.getVietnamCurrentForeignFlow).mockResolvedValue(makeCurrentFlow({
+      tradingDate: '2026-06-17',
+      current: {
+        foreignBuyValue: 999,
+        foreignSellValue: 111,
+        foreignNetValue: 888,
+      },
+    }));
+
+    renderPage();
+
+    const card = await screen.findByTestId('latest-foreign-flow-card');
+    await waitFor(() => expect(stocksApi.getVietnamCurrentForeignFlow).toHaveBeenCalledTimes(1));
+    expect(within(card).getByText('Đủ')).toBeInTheDocument();
+    expect(within(card).getByText(/Session: 2026-06-17/)).toBeInTheDocument();
+    expect(within(card).queryByText('888')).not.toBeInTheDocument();
+  });
+
+  it('uses one current-flow polling lifecycle and one manual refresh request', async () => {
+    vi.useFakeTimers();
+    renderPage();
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const initialRequestCount = vi.mocked(
+      stocksApi.getVietnamCurrentForeignFlow,
+    ).mock.calls.length;
+    expect(initialRequestCount).toBeGreaterThanOrEqual(1);
+
+    await act(async () => {
+      vi.advanceTimersByTime(15_000);
+      await Promise.resolve();
+    });
+    expect(stocksApi.getVietnamCurrentForeignFlow).toHaveBeenCalledTimes(
+      initialRequestCount + 1,
+    );
+    expect(stocksApi.getVietnamCurrentForeignFlow).toHaveBeenLastCalledWith(
+      'FPT',
+      expect.objectContaining({ forceRefresh: false }),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(stocksApi.getVietnamCurrentForeignFlow).toHaveBeenCalledTimes(
+      initialRequestCount + 2,
+    );
+    expect(stocksApi.getVietnamCurrentForeignFlow).toHaveBeenLastCalledWith(
+      'FPT',
+      expect.objectContaining({ forceRefresh: true }),
+    );
+  });
+
+  it('starts one effective current-flow request under React Strict Mode', async () => {
+    vi.useFakeTimers();
+    vi.mocked(stocksApi.getVietnamCurrentForeignFlow).mockClear();
+    render(
+      <StrictMode>
+        <MemoryRouter initialEntries={['/vietnam/company/FPT']}>
+          <Routes>
+            <Route path="/vietnam/company/:ticker" element={<VietnamCompanyResearchPage />} />
+          </Routes>
+        </MemoryRouter>
+      </StrictMode>,
+    );
+
+    await act(async () => {
+      vi.advanceTimersByTime(0);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(stocksApi.getVietnamCurrentForeignFlow).toHaveBeenCalledTimes(1);
+    expect(stocksApi.getVietnamCurrentForeignFlow).toHaveBeenCalledWith(
+      'FPT',
+      expect.objectContaining({ forceRefresh: false }),
+    );
+  });
+
+  it('refreshes current foreign flow once when a hidden tab becomes visible', async () => {
+    let visibility: DocumentVisibilityState = 'visible';
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => visibility,
+    });
+    renderPage();
+    await waitFor(() => {
+      expect(stocksApi.getVietnamCurrentForeignFlow).toHaveBeenCalled();
+    });
+    await screen.findByTestId('latest-foreign-flow-card');
+    const baselineCalls = vi.mocked(
+      stocksApi.getVietnamCurrentForeignFlow,
+    ).mock.calls.length;
+
+    visibility = 'hidden';
+    fireEvent(document, new Event('visibilitychange'));
+    expect(stocksApi.getVietnamCurrentForeignFlow).toHaveBeenCalledTimes(
+      baselineCalls,
+    );
+
+    visibility = 'visible';
+    fireEvent(document, new Event('visibilitychange'));
+    fireEvent(document, new Event('visibilitychange'));
+    await waitFor(() => {
+      expect(stocksApi.getVietnamCurrentForeignFlow).toHaveBeenCalledTimes(
+        baselineCalls + 1,
+      );
+    });
+    expect(stocksApi.getVietnamCurrentForeignFlow).toHaveBeenLastCalledWith(
+      'FPT',
+      expect.objectContaining({ forceRefresh: true }),
+    );
   });
 
   it('renders company SSI X-QUOTE order book with dynamic levels and board colors', async () => {
@@ -991,9 +1224,8 @@ describe('VietnamCompanyResearchPage', () => {
     const section = (await screen.findByRole('heading', { name: 'Foreign flow' })).closest('section');
     if (!section) throw new Error('Foreign flow section not found');
     const foreignFlow = within(section);
-    expect(foreignFlow.getByText('Provider explicitly reported zero foreign totals; net values are derived only from complete gross pairs.')).toBeInTheDocument();
     expect(foreignFlow.getAllByText('0')).toHaveLength(6);
-    expect(foreignFlow.getByText('ready')).toBeInTheDocument();
+    expect(foreignFlow.getByText('Đủ')).toBeInTheDocument();
     expect(foreignFlow.queryByText('unavailable')).not.toBeInTheDocument();
   });
 
@@ -1048,11 +1280,10 @@ describe('VietnamCompanyResearchPage', () => {
     const section = screen.getByRole('heading', { name: 'Foreign flow' }).closest('section');
     if (!section) throw new Error('Foreign flow section not found');
     const foreignFlow = within(section);
-    expect(foreignFlow.getByText('Provider foreign-flow fields were not supplied.')).toBeInTheDocument();
     expect(foreignFlow.getByText('Foreign net volume (shares)')).toBeInTheDocument();
     expect(foreignFlow.getAllByText('\u2014')).toHaveLength(6);
     expect(foreignFlow.queryByText('0')).not.toBeInTheDocument();
-    expect(foreignFlow.getByText('unavailable')).toBeInTheDocument();
+    expect(foreignFlow.getByText('Đủ')).toBeInTheDocument();
   });
 
   it('renders mixed foreign field coverage as partial', async () => {
@@ -1075,8 +1306,7 @@ describe('VietnamCompanyResearchPage', () => {
     const section = (await screen.findByRole('heading', { name: 'Foreign flow' })).closest('section');
     if (!section) throw new Error('Foreign flow section not found');
     const foreignFlow = within(section);
-    expect(foreignFlow.getByText('Some provider foreign-flow fields are unavailable.')).toBeInTheDocument();
-    expect(foreignFlow.getByText('partial')).toBeInTheDocument();
+    expect(foreignFlow.getByText('Đủ')).toBeInTheDocument();
     expect(foreignFlow.getAllByText('\u2014')).toHaveLength(4);
     expect(foreignFlow.queryByText('0')).not.toBeInTheDocument();
   });

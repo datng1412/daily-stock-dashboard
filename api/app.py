@@ -141,6 +141,9 @@ from src.services.stock_index_remote_service import (
     refresh_remote_stock_index_cache,
     settings_from_config,
 )
+from src.services.vietnam_foreign_flow_service import (
+    initialize_vietnam_foreign_flow_accepted_history,
+)
 
 
 _STOCK_INDEX_FILENAME = "stocks.index.json"
@@ -210,6 +213,9 @@ async def app_lifespan(app: FastAPI):
     mark_startup_stage("SYSTEM_CONFIG_INIT_START")
     app.state.system_config_service = SystemConfigService()
     mark_startup_stage("SYSTEM_CONFIG_INIT_COMPLETE")
+    app.state.vietnam_foreign_flow_history_status = await run_in_threadpool(
+        initialize_vietnam_foreign_flow_accepted_history
+    )
     mark_startup_stage("STOCK_INDEX_BACKGROUND_INIT_START")
     _schedule_stock_index_background_refresh(app, "startup")
     mark_startup_stage("STOCK_INDEX_BACKGROUND_INIT_COMPLETE")

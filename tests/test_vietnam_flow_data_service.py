@@ -9,13 +9,18 @@ from src.services.vietnam_flow_data_service import (
     VietnamFlowDataService,
     reset_vietnam_flow_data_capability_cache,
 )
+from src.services.vietnam_foreign_flow_service import (
+    reset_vietnam_foreign_flow_state,
+)
 
 
 @pytest.fixture(autouse=True)
 def _reset_direct_index_capability_cache():
     reset_vietnam_flow_data_capability_cache()
+    reset_vietnam_foreign_flow_state()
     yield
     reset_vietnam_flow_data_capability_cache()
+    reset_vietnam_foreign_flow_state()
 
 
 class FakeProvider:
@@ -101,6 +106,109 @@ class FakeProvider:
         )
 
 
+def test_current_vn30_aggregate_uses_one_cohort_and_excludes_mixed_session_dates() -> None:
+    class MembershipProvider(FakeProvider):
+        def get_securities_by_index(self, index_code: str) -> Dict[str, Any]:
+            assert index_code == "VN30"
+            return {
+                "status": "ok",
+                "rows": [
+                    {"symbol": "FPT", "icb_code": "9530", "icb_name": "Software"},
+                    {"symbol": "SSI", "icb_code": "8770", "icb_name": "Financial Services"},
+                    {"symbol": "HPG", "icb_code": "1750", "icb_name": "Industrial Metals"},
+                ],
+            }
+
+    class CurrentReader:
+        cohort_calls = []
+
+        def ensure_current_foreign_flow_cohort(
+            self,
+            symbols: list[str],
+            *,
+            recovery_trigger: str,
+        ) -> Dict[str, Any]:
+            self.cohort_calls.append((list(symbols), recovery_trigger))
+            return {
+                "status": "ok",
+                "symbols": list(symbols),
+                "subscription_added_count": len(symbols),
+            }
+
+        def get_current_foreign_flow(self, symbol: str) -> Dict[str, Any]:
+            rows = {
+                "FPT": {
+                    "foreign_buy_volume": 10,
+                    "foreign_sell_volume": 4,
+                    "foreign_buy_value": 100,
+                    "foreign_sell_value": 40,
+                    "raw_field_presence": {},
+                },
+                "SSI": {
+                    "foreign_buy_volume": 0,
+                    "foreign_sell_volume": 0,
+                    "foreign_buy_value": 0,
+                    "foreign_sell_value": 0,
+                    "raw_field_presence": {
+                        "foreign_buy_volume": "explicit_zero",
+                        "foreign_sell_volume": "explicit_zero",
+                    },
+                },
+                "HPG": {
+                    "foreign_buy_volume": 999,
+                    "foreign_sell_volume": 1,
+                    "foreign_buy_value": 999,
+                    "foreign_sell_value": 1,
+                    "raw_field_presence": {},
+                },
+            }
+            session = "2026-07-28" if symbol == "HPG" else "2026-07-29"
+            return {
+                "status": "ok",
+                "data_state": "ready",
+                "usable": True,
+                "failure_class": None,
+                "provider_session_date": session,
+                "current": rows[symbol],
+                "stream_status": "cache_hit",
+                "market_session": {"market_session_active": True},
+            }
+
+    reader = CurrentReader()
+    payload = VietnamFlowDataService(
+        MembershipProvider(),
+        streaming_reader=reader,
+    ).current_foreign_aggregate(
+        index_code="VN30",
+        include_industries=True,
+    )
+
+    assert reader.cohort_calls == [(["FPT", "SSI", "HPG"], "route_touch")]
+    assert payload["provider_session_date"] == "2026-07-29"
+    assert payload["status"] == "partial"
+    assert payload["aggregate"]["foreign_buy_volume"] == 10
+    assert payload["aggregate"]["foreign_sell_volume"] == 4
+    assert payload["aggregate"]["foreign_net_volume"] == 6
+    assert payload["aggregate"]["foreign_buy_value"] == 100
+    assert payload["aggregate"]["foreign_sell_value"] == 40
+    assert payload["aggregate"]["foreign_net_value"] == 60
+    assert payload["coverage"]["requested_symbol_count"] == 3
+    assert payload["coverage"]["observed_symbol_count"] == 2
+    assert payload["coverage"]["complete_volume_count"] == 2
+    assert payload["coverage"]["complete_value_count"] == 2
+    assert payload["coverage"]["missing_symbols"] == ["HPG"]
+    assert payload["diagnostics"]["mixed_provider_session_dates_excluded"] == [
+        "2026-07-28"
+    ]
+    assert {group["icb_code"] for group in payload["groups"]} == {
+        "1750",
+        "8770",
+        "9530",
+    }
+    assert payload["display_series"][-1]["source_kind"] == "current"
+    assert payload["display_series"][-1]["is_partial"] is True
+
+
 def test_index_foreign_history_uses_only_direct_provider_aggregate() -> None:
     payload = VietnamFlowDataService(FakeProvider()).foreign_history_by_index(
         "VN30", from_date="2026-07-23", to_date="2026-07-23"
@@ -113,6 +221,63 @@ def test_index_foreign_history_uses_only_direct_provider_aggregate() -> None:
     assert row["coverage_mode"] == "provider_aggregate"
     assert row["constituent_coverage"] == "not_applicable"
     assert row["status"] == "ok"
+
+
+def test_current_stream_failure_does_not_poison_completed_index_flow() -> None:
+    class FailedCurrentReader:
+        ensure_calls = 0
+
+        def ensure_current_foreign_flow(
+            self,
+            _symbol: str,
+            *,
+            recovery_trigger: str,
+        ) -> Dict[str, Any]:
+            self.ensure_calls += 1
+            assert recovery_trigger == "manual_refresh"
+            return {
+                "status": "unavailable",
+                "recovery_requested": True,
+            }
+
+        def get_current_foreign_flow(self, symbol: str) -> Dict[str, Any]:
+            return {
+                "status": "unavailable",
+                "data_state": "unavailable",
+                "usable": False,
+                "failure_class": "authentication_rejected",
+                "provider_session_date": "2026-07-29",
+                "is_current_session": False,
+                "is_provisional": False,
+                "current": None,
+                "stream_status": "reconnecting",
+                "stream_reason": "Current stream unavailable.",
+                "cache": {"status": "empty", "age_seconds": None},
+                "market_session": {},
+                "diagnostics": {},
+            }
+
+    reader = FailedCurrentReader()
+    service = VietnamFlowDataService(
+        FakeProvider(),
+        streaming_reader=reader,
+    )
+
+    current = service.current_foreign_by_symbol(
+        "FPT",
+        force_refresh=True,
+    )
+    completed = service.foreign_history_by_index(
+        "VN30",
+        from_date="2026-07-23",
+        to_date="2026-07-23",
+    )
+
+    assert current["status"] == "unavailable"
+    assert current["failure_class"] == "authentication_rejected"
+    assert reader.ensure_calls == 1
+    assert completed["status"] == "ok"
+    assert completed["rows"][0]["foreign_net_value"] == 160
 
 
 def test_provider_index_aggregate_is_retained_without_claiming_constituent_coverage() -> None:
@@ -466,16 +631,81 @@ def test_index_proprietary_flow_uses_proven_direct_index_summary_path() -> None:
     assert provider.market_calls == []
 
 
-def test_current_foreign_does_not_promote_previous_session_or_blend_stream() -> None:
+def test_current_foreign_does_not_promote_previous_session_or_blend_stream(
+    monkeypatch: Any,
+) -> None:
+    monkeypatch.setattr(
+        "src.services.ssi_streaming_realtime_lifecycle."
+        "get_existing_ssi_streaming_realtime_manager",
+        lambda: None,
+    )
     payload = VietnamFlowDataService(FakeProvider()).current_foreign_by_symbol("FPT")
 
     assert payload["status"] == "unavailable"
+    assert payload["data_state"] == "unavailable"
     assert payload["current"] is None
     assert payload["latest_completed_comparison"]["foreign_buy_value"] == 100
-    assert payload["stream_status"] == "CURRENT_FOREIGN_STREAM_BLOCKED_SEMANTICS"
+    assert payload["stream_status"] == "manager_not_started"
+    assert payload["diagnostics"]["provisional_appended_to_history"] is False
 
 
-def test_missing_runtime_credentials_degrade_to_typed_unavailable_without_provider_calls() -> None:
+def test_current_foreign_uses_stream_snapshot_and_keeps_daily_as_completed_comparison() -> None:
+    class ReadyReader:
+        def get_current_foreign_flow(self, symbol: str) -> Dict[str, Any]:
+            return {
+                "status": "ok",
+                "data_state": "ready",
+                "usable": True,
+                "failure_class": None,
+                "provider_session_date": "2026-07-29",
+                "is_current_session": True,
+                "is_provisional": True,
+                "current": {
+                    "symbol": symbol,
+                    "provider_session_date": "2026-07-29",
+                    "foreign_buy_volume": 20,
+                    "foreign_sell_volume": 5,
+                    "foreign_buy_value": 2_000,
+                    "foreign_sell_value": 500,
+                    "foreign_net_volume": 15,
+                    "foreign_net_value": 1_500,
+                    "raw_field_presence": {
+                        "foreign_buy_volume": "nonzero",
+                        "foreign_sell_volume": "nonzero",
+                        "foreign_buy_value": "nonzero",
+                        "foreign_sell_value": "nonzero",
+                    },
+                },
+                "stream_status": "cache_hit",
+                "stream_reason": None,
+                "cache": {"status": "hit", "age_seconds": 1},
+                "market_session": {"market_session": "continuous_morning"},
+                "diagnostics": {"replacement_snapshot": True},
+            }
+
+    payload = VietnamFlowDataService(
+        FakeProvider(),
+        streaming_reader=ReadyReader(),
+    ).current_foreign_by_symbol("FPT")
+
+    assert payload["status"] == "ok"
+    assert payload["data_state"] == "ready"
+    assert payload["current"]["foreign_net_value"] == 1_500
+    assert payload["latest_completed_comparison"]["date"] == "2026-07-23"
+    assert payload["latest_completed_comparison"]["finality"] == "completed_session_authority"
+    assert payload["finality"] == "current_session_provisional"
+    assert payload["update_semantics"] == "cumulative_replacement_snapshot"
+    assert payload["diagnostics"]["provisional_appended_to_history"] is False
+
+
+def test_missing_runtime_credentials_degrade_to_typed_unavailable_without_provider_calls(
+    monkeypatch: Any,
+) -> None:
+    monkeypatch.setattr(
+        "src.services.ssi_streaming_realtime_lifecycle."
+        "get_existing_ssi_streaming_realtime_manager",
+        lambda: None,
+    )
     with patch(
         "src.services.vietnam_flow_data_service.create_ssi_rest_provider_router",
         side_effect=ValueError("not configured"),

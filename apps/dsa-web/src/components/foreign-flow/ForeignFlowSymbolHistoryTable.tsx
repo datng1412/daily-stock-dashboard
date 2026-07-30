@@ -11,6 +11,9 @@ export const ForeignFlowSymbolHistoryTable = ({ rows, metric }: { rows: SymbolFo
   const [direction, setDirection] = useState<'asc' | 'desc'>('desc');
   const format = metric === 'value' ? formatForeignFlowValue : formatForeignFlowVolume;
   const sorted = useMemo(() => [...rows].sort((left, right) => {
+    const leftCurrent = left.displayOrigin === 'current_session_provisional';
+    const rightCurrent = right.displayOrigin === 'current_session_provisional';
+    if (leftCurrent !== rightCurrent) return leftCurrent ? -1 : 1;
     const a = left[sort]; const b = right[sort];
     if (a === null && b === null) return right.tradingDate.localeCompare(left.tradingDate);
     if (a === null) return 1; if (b === null) return -1;
@@ -28,12 +31,35 @@ export const ForeignFlowSymbolHistoryTable = ({ rows, metric }: { rows: SymbolFo
           {([['buy', 'NN mua'], ['sell', 'NN bán'], ['net', 'NN ròng'], ['rolling5', 'Ròng 5P'], ['rolling20', 'Ròng 20P']] as const).map(([key, label]) => <th key={key} className="px-3 py-2 text-right" aria-sort={sort === key ? (direction === 'asc' ? 'ascending' : 'descending') : 'none'}>{heading(key, label)}</th>)}
           <th className="px-3 py-2 text-left">Trạng thái</th>
         </tr></thead>
-        <tbody>{sorted.map((row) => <tr key={row.tradingDate} className="border-t border-border/60">
-          <td className="px-3 py-2 tabular-nums">{row.tradingDate}</td>
+        <tbody>{sorted.map((row) => {
+          const isCurrent = row.displayOrigin === 'current_session_provisional';
+          const status = row.statusLabel
+            ?? (isCurrent
+              ? 'Không khả dụng'
+              : row.sourceKind === 'completed' || row.finality === 'completed_accepted'
+                ? 'Đủ'
+                : row.state === 'ready'
+                  ? 'Đủ'
+                  : row.state === 'partial'
+                    ? 'Thiếu trường'
+                    : 'Không có');
+          return <tr
+            key={row.tradingDate}
+            className={cn('border-t border-border/60', isCurrent && 'bg-primary/5')}
+            data-current-session={isCurrent ? 'true' : undefined}
+            data-testid={isCurrent ? 'current-session-flow-row' : undefined}
+          >
+          <td className={cn('px-3 py-2 tabular-nums', isCurrent && 'font-semibold')}>
+            <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+              {isCurrent ? <span aria-hidden="true" className="size-1.5 rounded-full bg-primary" /> : null}
+              {row.tradingDate}
+            </span>
+          </td>
           <td className="px-3 py-2 text-right tabular-nums">{format(row.buy, '—')}</td><td className="px-3 py-2 text-right tabular-nums">{format(row.sell, '—')}</td>
           {[row.net, row.rolling5, row.rolling20].map((value, index) => <td key={index} className={cn('px-3 py-2 text-right tabular-nums', foreignFlowSignTextClass(value))}>{format(value)}</td>)}
-          <td className="px-3 py-2 text-secondary-text">{row.state === 'ready' ? 'Đủ' : row.state === 'partial' ? 'Thiếu trường' : 'Không có'}</td>
-        </tr>)}</tbody>
+          <td className="whitespace-nowrap px-3 py-2 text-secondary-text">{status}</td>
+        </tr>;
+        })}</tbody>
       </table>
     </div>
   </section>;

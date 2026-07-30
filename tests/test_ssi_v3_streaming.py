@@ -80,7 +80,7 @@ def test_invalid_or_incomplete_stream_numbers_are_not_coerced_to_zero() -> None:
     assert rows[0]["trade_message_classification"] == "malformed_trade_message"
 
 
-def test_foreign_room_aliases_preserve_zero_and_keep_update_semantics_unproven() -> None:
+def test_foreign_room_aliases_audit_raw_presence_and_normalize_replacement_snapshot() -> None:
     rows = normalize_v3_streaming_messages(
         [{
             "topic": "room.FPT",
@@ -107,15 +107,138 @@ def test_foreign_room_aliases_preserve_zero_and_keep_update_semantics_unproven()
         "foreign_buy_value": 0.0,
         "foreign_sell_volume": 5,
         "foreign_sell_value": 500.0,
+        "foreign_net_volume": -5,
+        "foreign_net_value": -500.0,
+        "raw_field_presence": {
+            "foreign_buy_volume": "explicit_zero",
+            "foreign_sell_volume": "nonzero",
+            "foreign_buy_value": "explicit_zero",
+            "foreign_sell_value": "nonzero",
+            "total_room": "nonzero",
+            "current_room": "nonzero",
+        },
+        "flow_message_usable": True,
         "stream_timestamp": "09:17:00",
         "time": "09:17:00",
         "event_market_session": "continuous_morning",
         "stream_data_type": "R",
         "r_type": "R",
-        "update_semantics": "unproven",
-        "value_semantics_status": "needs_semantics_proof",
-        "source": "SSI FastConnect V3 WebSocket room stream",
+        "update_semantics": "cumulative_replacement_snapshot",
+        "value_semantics_status": "provisional_current_session",
+        "finality": "current_session_provisional",
+        "source": "SSI FastConnect V3 ForeignRoomMessage",
     }]
+
+
+def test_foreign_room_missing_raw_fields_stay_null_instead_of_typed_zero_defaults() -> None:
+    row = normalize_v3_streaming_messages(
+        [{
+            "topic": "room.FPT",
+            "data": {"t": "09:17:00", "s": "FPT", "bq": "10", "bv": "bad"},
+        }],
+        ["FPT"],
+    )[0]
+
+    assert row["foreign_buy_volume"] == 10
+    assert row["foreign_sell_volume"] is None
+    assert row["foreign_buy_value"] is None
+    assert row["foreign_sell_value"] is None
+    assert row["foreign_net_volume"] is None
+    assert row["foreign_net_value"] is None
+    assert row["raw_field_presence"]["foreign_sell_volume"] == "missing"
+    assert row["raw_field_presence"]["foreign_buy_value"] == "malformed"
+    assert row["flow_message_usable"] is False
+
+
+def test_current_foreign_flow_replaces_cumulative_snapshot_without_local_addition() -> None:
+    vn_tz = timezone(timedelta(hours=7))
+    clock = [datetime(2026, 7, 20, 10, 0, tzinfo=vn_tz).timestamp()]
+
+    class _Client:
+        def start(self, on_message: Any, _on_error: Any, channels: List[str], **kwargs: Any) -> None:
+            self.on_message = on_message
+            for channel in channels:
+                kwargs["on_open"](channel)
+
+        def stop(self) -> None:
+            return None
+
+    manager = SsiStreamingRealtimeManager(
+        enabled=True,
+        parser=normalize_v3_streaming_messages,
+        client_factory=_Client,
+        foreign_room_enabled=True,
+        market_index_enabled=False,
+        session_status_enabled=False,
+        time_func=lambda: clock[0],
+    )
+    manager.start(["FPT"])
+    manager.handle_message({
+        "topic": "room.FPT",
+        "data": {"t": "2026/07/20 10:00:00", "s": "FPT", "bq": 10, "sq": 4, "bv": 100, "sv": 40},
+    })
+    manager.handle_message({
+        "topic": "room.FPT",
+        "data": {"t": "2026/07/20 10:01:00", "s": "FPT", "bq": 12, "sq": 5, "bv": 120, "sv": 50},
+    })
+
+    payload = manager.current_foreign_flow("FPT")
+
+    assert payload["data_state"] == "ready"
+    assert payload["current"]["foreign_buy_volume"] == 12
+    assert payload["current"]["foreign_sell_volume"] == 5
+    assert payload["current"]["foreign_net_volume"] == 7
+    assert payload["current"]["provider_session_date"] == "2026-07-20"
+    assert payload["current"]["session_date_source"] == "provider_event"
+    assert payload["diagnostics"]["replacement_snapshot"] is True
+
+    clock[0] = datetime(2026, 7, 20, 16, 0, tzinfo=vn_tz).timestamp()
+    after_hours = manager.current_foreign_flow("FPT")
+    assert after_hours["data_state"] == "market_closed"
+    assert after_hours["usable"] is True
+    assert after_hours["current"]["foreign_buy_volume"] == 12
+
+
+def test_time_only_room_message_does_not_fabricate_provider_session_date() -> None:
+    vn_tz = timezone(timedelta(hours=7))
+    now = datetime(2026, 7, 20, 10, 0, tzinfo=vn_tz).timestamp()
+
+    class _Client:
+        def start(self, on_message: Any, _on_error: Any, channels: List[str], **kwargs: Any) -> None:
+            self.on_message = on_message
+            for channel in channels:
+                kwargs["on_open"](channel)
+
+        def stop(self) -> None:
+            return None
+
+    manager = SsiStreamingRealtimeManager(
+        enabled=True,
+        parser=normalize_v3_streaming_messages,
+        client_factory=_Client,
+        foreign_room_enabled=True,
+        market_index_enabled=False,
+        session_status_enabled=False,
+        time_func=lambda: now,
+    )
+    manager.start(["FPT"])
+    manager.handle_message({
+        "topic": "room.FPT",
+        "data": {
+            "t": "10:00:00",
+            "s": "FPT",
+            "bq": 10,
+            "sq": 4,
+            "bv": 100,
+            "sv": 40,
+        },
+    })
+
+    payload = manager.current_foreign_flow("FPT")
+
+    assert payload["data_state"] == "waiting"
+    assert payload["current"] is None
+    assert payload["diagnostics"]["session_date_source"] == "manager_vietnam_session"
 
 
 class _FakeAuth:
@@ -193,6 +316,21 @@ def test_client_start_is_nonblocking_and_uses_one_deduplicated_connection() -> N
     ]
     assert opened == ["X:FPT", "X-TRADE:FPT", "X-QUOTE:FPT"]
     assert errors == []
+
+    client.ensure_channels(["R:FPT"])
+    client.ensure_channels(["R:FPT"])
+    assert websocket.sent == [
+        {
+            "method": "subscribe",
+            "channel": "DATA",
+            "topics": ["trade.FPT", "quote.FPT"],
+        },
+        {
+            "method": "subscribe",
+            "channel": "DATA",
+            "topics": ["room.FPT"],
+        },
+    ]
 
     client.stop()
     client.stop()

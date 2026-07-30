@@ -51,6 +51,22 @@ def _optional_number(value: Any, *, integer: bool = False) -> Optional[Any]:
     return float(parsed)
 
 
+def _raw_numeric_state(data: Mapping[str, Any], key: str) -> str:
+    """Classify raw provider presence before SDK/model defaults can mask it."""
+
+    if key not in data:
+        return "missing"
+    value = data.get(key)
+    if value is None:
+        return "null"
+    if isinstance(value, str) and not value.strip():
+        return "blank"
+    number = _optional_number(value)
+    if number is None or number < 0:
+        return "malformed"
+    return "explicit_zero" if number == 0 else "nonzero"
+
+
 def _symbol(value: Any) -> Optional[str]:
     text = str(value or "").strip().upper()
     return text or None
@@ -187,24 +203,61 @@ def normalize_v3_streaming_messages(
                 event_market_session = vietnam_market_session_from_provider_timestamp(timestamp)
                 if event_market_session is None:
                     continue
+                raw_presence = {
+                    "foreign_buy_volume": _raw_numeric_state(data, "bq"),
+                    "foreign_sell_volume": _raw_numeric_state(data, "sq"),
+                    "foreign_buy_value": _raw_numeric_state(data, "bv"),
+                    "foreign_sell_value": _raw_numeric_state(data, "sv"),
+                    "total_room": _raw_numeric_state(data, "tr"),
+                    "current_room": _raw_numeric_state(data, "cr"),
+                }
+                flow_values = {
+                    "foreign_buy_volume": _optional_number(data.get("bq"), integer=True),
+                    "foreign_sell_volume": _optional_number(data.get("sq"), integer=True),
+                    "foreign_buy_value": _optional_number(data.get("bv")),
+                    "foreign_sell_value": _optional_number(data.get("sv")),
+                }
+                for field, state in raw_presence.items():
+                    if state not in {"explicit_zero", "nonzero"} and field in flow_values:
+                        flow_values[field] = None
+                complete_volume_pair = all(
+                    flow_values[field] is not None
+                    for field in ("foreign_buy_volume", "foreign_sell_volume")
+                )
+                complete_value_pair = all(
+                    flow_values[field] is not None
+                    for field in ("foreign_buy_value", "foreign_sell_value")
+                )
                 rows.append(
                     {
                         "ticker": symbol,
                         "symbol": symbol,
                         "total_room": _optional_number(data.get("tr"), integer=True),
                         "current_room": _optional_number(data.get("cr"), integer=True),
-                        "foreign_buy_volume": _optional_number(data.get("bq"), integer=True),
-                        "foreign_buy_value": _optional_number(data.get("bv")),
-                        "foreign_sell_volume": _optional_number(data.get("sq"), integer=True),
-                        "foreign_sell_value": _optional_number(data.get("sv")),
+                        **flow_values,
+                        "foreign_net_volume": (
+                            flow_values["foreign_buy_volume"]
+                            - flow_values["foreign_sell_volume"]
+                            if complete_volume_pair
+                            else None
+                        ),
+                        "foreign_net_value": (
+                            flow_values["foreign_buy_value"]
+                            - flow_values["foreign_sell_value"]
+                            if complete_value_pair
+                            else None
+                        ),
+                        "raw_field_presence": raw_presence,
+                        "flow_message_usable": complete_volume_pair or complete_value_pair,
                         "stream_timestamp": timestamp,
                         "time": timestamp,
                         "event_market_session": event_market_session,
                         "stream_data_type": "R",
                         "r_type": "R",
-                        "update_semantics": "unproven",
-                        "value_semantics_status": "needs_semantics_proof",
-                        "source": "SSI FastConnect V3 WebSocket room stream",
+                        "update_semantics": "cumulative_replacement_snapshot",
+                        "value_semantics_status": "provisional_current_session",
+                        "finality": "current_session_provisional",
+                        "source": "SSI FastConnect V3 ForeignRoomMessage",
                     }
                 )
     return rows
@@ -246,6 +299,7 @@ class OfficialSsiV3RealtimeStreamClient:
         self._auth: Any = None
         self._websocket: Any = None
         self._closed_notified = False
+        self._subscribed_channels: set[str] = set()
 
     @staticmethod
     def _default_websocket_factory(auth: Any) -> Any:
@@ -328,6 +382,8 @@ class OfficialSsiV3RealtimeStreamClient:
             websocket.send(
                 {"method": "subscribe", "channel": V3_DATA_CHANNEL, "topics": topics}
             )
+            with self._lock:
+                self._subscribed_channels.update(channels)
             opened = True
             if on_open is not None:
                 for channel in channels:
@@ -365,6 +421,7 @@ class OfficialSsiV3RealtimeStreamClient:
             websocket, auth = self._websocket, self._auth
             self._websocket = None
             self._auth = None
+            self._subscribed_channels.clear()
         if websocket is not None:
             try:
                 websocket.disconnect()
@@ -386,6 +443,49 @@ class OfficialSsiV3RealtimeStreamClient:
             self._thread = None
         if thread is not None and thread.is_alive() and thread is not threading.current_thread():
             thread.join(timeout=2.0)
+
+    def ensure_channels(self, channels: Sequence[str]) -> None:
+        """Subscribe new topics on the already-connected shared V3 transport."""
+
+        safe_channels = list(
+            dict.fromkeys(str(value or "").strip() for value in channels)
+        )
+        safe_channels = [value for value in safe_channels if value]
+        unsupported = [
+            value for value in safe_channels if _topic_for_channel(value) is None
+        ]
+        if unsupported:
+            raise ValueError(
+                "V3 stream received a channel outside the retained product contract"
+            )
+        with self._lock:
+            pending_channels = [
+                value
+                for value in safe_channels
+                if value not in self._subscribed_channels
+            ]
+            if not pending_channels:
+                return
+            websocket = self._websocket
+            if websocket is None or not bool(
+                getattr(websocket, "is_connected", False)
+            ):
+                raise RuntimeError("SSI V3 shared WebSocket is not connected")
+            pending_topics = [
+                topic
+                for topic in (
+                    _topic_for_channel(value) for value in pending_channels
+                )
+                if topic
+            ]
+            websocket.send(
+                {
+                    "method": "subscribe",
+                    "channel": V3_DATA_CHANNEL,
+                    "topics": pending_topics,
+                }
+            )
+            self._subscribed_channels.update(pending_channels)
 
 
 def build_v3_streaming_realtime_manager(
@@ -468,6 +568,35 @@ class SsiStreamingRealtimeReader:
 
     def get_foreign_room(self, symbol: str) -> Dict[str, Any]:
         return dict(self.streaming_realtime_manager.foreign_room(symbol))
+
+    def get_current_foreign_flow(self, symbol: str) -> Dict[str, Any]:
+        return dict(self.streaming_realtime_manager.current_foreign_flow(symbol))
+
+    def ensure_current_foreign_flow(
+        self,
+        symbol: str,
+        *,
+        recovery_trigger: str = "route_touch",
+    ) -> Dict[str, Any]:
+        return dict(
+            self.streaming_realtime_manager.ensure_symbol_subscription(
+                symbol,
+                recovery_trigger=recovery_trigger,
+            )
+        )
+
+    def ensure_current_foreign_flow_cohort(
+        self,
+        symbols: Iterable[str],
+        *,
+        recovery_trigger: str = "route_touch",
+    ) -> Dict[str, Any]:
+        return dict(
+            self.streaming_realtime_manager.ensure_symbol_subscriptions(
+                symbols,
+                recovery_trigger=recovery_trigger,
+            )
+        )
 
     def get_session_status(self, symbol: str) -> Dict[str, Any]:
         return dict(self.streaming_realtime_manager.session_status(symbol))

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowRight, RefreshCw } from 'lucide-react';
 import type {
   VietnamFlowDataResponse,
+  VietnamCurrentForeignFlowAggregateResponse,
   VietnamForeignFlowWatchlistResponse,
   VietnamVn30ForeignFlowComponent,
   VietnamVn30ForeignFlowDaily,
@@ -31,12 +32,14 @@ import {
   mapVn30FlowViewState,
   mapWatchlistFlowViewState,
 } from './foreignFlowViewState';
+import { selectForeignFlowDisplayStatus } from './latestForeignFlowSessionModel';
 
 type OverviewTarget = 'ticker' | 'industry' | 'watchlist' | 'details';
 
 type ForeignFlowOverviewProps = {
   vn30: VietnamVn30ForeignFlowResponse | null;
   industry: VietnamFlowDataResponse | null;
+  currentAggregate: VietnamCurrentForeignFlowAggregateResponse | null;
   loading: boolean;
   error: string | null;
   metric: ForeignFlowExplorerMetric;
@@ -346,6 +349,7 @@ const WatchlistOverview = ({
 export const ForeignFlowOverview = ({
   vn30,
   industry,
+  currentAggregate,
   loading,
   error,
   metric,
@@ -358,26 +362,73 @@ export const ForeignFlowOverview = ({
   const format = metricFormatter(metric);
   const vn30State = vn30 ? mapVn30FlowViewState(vn30) : null;
   const industryState = industry ? mapIndustryFlowViewState(industry) : null;
-  const latest = vn30?.decomposition.latest ?? vn30?.decomposition.series.at(-1) ?? null;
+  const latestCurrent = [...(currentAggregate?.displaySeries ?? [])].reverse().find(
+    (row) => row.sourceKind === 'current',
+  ) as VietnamVn30ForeignFlowDaily | undefined;
+  const latest = latestCurrent
+    ?? vn30?.decomposition.latest
+    ?? vn30?.decomposition.series.at(-1)
+    ?? null;
   const breadth = metric === 'value' ? latest?.valueBreadth : latest?.volumeBreadth;
   const kpis = vn30 ? (['1', '5', '20'] as const).map((item) => ({
-    label: `Net foreign flow ${item}D`,
-    value: windowMetric(vn30, metric, item),
+    label: `Net foreign flow ${item}D${currentAggregate?.displayWindows?.[item]?.isProvisional ? ' · provisional' : ''}`,
+    value: finite(currentAggregate?.displayWindows?.[item]?.[metricKeys(metric).net])
+      ? currentAggregate?.displayWindows[item][metricKeys(metric).net] as number
+      : windowMetric(vn30, metric, item),
   })) : [];
   const rankings = useMemo(
-    () => buildRankings(vn30?.components ?? [], metric, window),
-    [metric, vn30?.components, window],
+    () => {
+      const current = currentAggregate?.rankings?.[window === 'custom' ? '60' : window];
+      if (current) {
+        const map = (rows: Array<Record<string, unknown>>): RankedItem[] => {
+          const values = rows
+            .map((row) => ({
+              label: asText(row.ticker),
+              value: finite(row.value) ? row.value : null,
+            }))
+            .filter((row): row is { label: string; value: number } => Boolean(row.label) && row.value !== null);
+          const absoluteTotal = values.reduce((sum, row) => sum + Math.abs(row.value), 0);
+          return values.map((row) => ({
+            ...row,
+            contribution: absoluteTotal > 0 ? Math.abs(row.value) / absoluteTotal : null,
+          }));
+        };
+        return { buyers: map(current.topBuy), sellers: map(current.topSell) };
+      }
+      return buildRankings(vn30?.components ?? [], metric, window);
+    },
+    [currentAggregate?.rankings, metric, vn30?.components, window],
   );
   const history = useMemo(
-    () => buildChartRows(vn30?.decomposition.series ?? [], metric, window),
-    [metric, vn30?.decomposition.series, window],
+    () => buildChartRows(
+      (currentAggregate?.displaySeries?.length
+        ? currentAggregate.displaySeries
+        : vn30?.decomposition.series ?? []) as VietnamVn30ForeignFlowDaily[],
+      metric,
+      window,
+    ),
+    [currentAggregate, metric, vn30?.decomposition.series, window],
   );
   const industries = useMemo(
     () => industryRankings(industry, metric, window),
     [industry, metric, window],
   );
-  const latestSession = vn30?.decomposition.latestCompletedSession ?? latest?.tradingDate ?? null;
-  const publicationLag = latestSession && latestSession < new Date().toISOString().slice(0, 10);
+  const latestSession = latest?.tradingDate
+    ?? vn30?.decomposition.latestCompletedSession
+    ?? null;
+  const publicationLag = Boolean(
+    currentAggregate?.providerSessionDate
+    && latestSession
+    && latestSession < currentAggregate.providerSessionDate,
+  );
+  const currentDisplayStatus = currentAggregate ? selectForeignFlowDisplayStatus({
+    sourceKind: 'current',
+    finality: currentAggregate.finality ?? 'current_session_provisional',
+    currentState: currentAggregate.dataState,
+    providerStatus: currentAggregate.dataState,
+    usable: currentAggregate.usable,
+    hasUsableValues: Boolean(currentAggregate.aggregate),
+  }) : null;
 
   if (loading && !vn30) {
     return <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Loading Foreign Flow overview">
@@ -402,6 +453,13 @@ export const ForeignFlowOverview = ({
       {error ? <p role="alert" className="rounded-lg border border-warning/30 bg-warning/10 p-3 text-sm">{error}</p> : null}
       {vn30State.availability === 'partial' ? (
         <p className="text-sm text-warning" role="status">Partial data is usable. Missing coverage remains visible in Data Details.</p>
+      ) : null}
+      {currentAggregate?.usable ? (
+        <p className="text-sm text-secondary-text" role="status">
+          Current session: {currentDisplayStatus}
+          {' · '}{currentAggregate.coverage.observedSymbolCount}/{currentAggregate.coverage.requestedSymbolCount} symbols
+          {' · '}completed history remains authoritative below.
+        </p>
       ) : null}
 
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Foreign Flow primary KPIs">
@@ -438,8 +496,8 @@ export const ForeignFlowOverview = ({
         <div className="rounded-xl border border-border/70 bg-card p-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h2 className="font-semibold">Net foreign flow by completed session</h2>
-              <p className="mt-1 text-xs text-secondary-text">Missing values remain gaps; no forward fill or synthetic sessions.</p>
+              <h2 className="font-semibold">Net foreign flow through latest session</h2>
+              <p className="mt-1 text-xs text-secondary-text">Current provisional data is labelled; missing values remain gaps with no forward fill.</p>
             </div>
             <button type="button" className="text-xs text-secondary-text hover:text-foreground"
               aria-pressed={chartMode === 'buy-sell'}
