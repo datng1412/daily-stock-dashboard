@@ -43,7 +43,16 @@ const currentAggregate = (
     missingSymbols: [],
     staleSymbolCount: 0,
   },
-  diagnostics: { provisionalPersisted: false },
+  diagnostics: {
+    provisionalPersisted: false,
+    membershipRetained: true,
+    membershipAgeSeconds: 42,
+    membershipRefreshFailureClass: 'authentication_failed_retryable',
+    completedFallbackUsed: true,
+    currentSnapshotRetained: true,
+    negativeCacheBypassed: true,
+    recoveryStatus: 'scheduled',
+  },
   ...overrides,
 });
 
@@ -55,6 +64,14 @@ const vn30 = {
   cache: { status: 'hit', ageSeconds: 5 },
   historicalConstituentCorrect: false,
   membershipSource: 'SSI IndexComponents',
+  membership: {
+    status: 'ready',
+    retained: true,
+    ageSeconds: 42,
+    refreshFailureClass: 'authentication_failed_retryable',
+    negativeCacheBypassed: true,
+    recoveryStatus: 'scheduled',
+  },
   decompositionAggregationMode: 'CURRENT_MEMBERSHIP_DECOMPOSITION',
   decomposition: {
     latestCompletedSession: '2026-07-29',
@@ -99,6 +116,11 @@ describe('ForeignFlowDataDetails', () => {
     expect(within(vn30Details as HTMLElement).getAllByText('2026-07-30')).toHaveLength(2);
     expect(within(vn30Details as HTMLElement).getByText('Current provider session')).toBeInTheDocument();
     expect(within(vn30Details as HTMLElement).queryByText('Source session')).not.toBeInTheDocument();
+    expect(within(vn30Details as HTMLElement).getByText('Membership retained')).toBeInTheDocument();
+    expect(within(vn30Details as HTMLElement).getByText('Membership refresh failure')).toBeInTheDocument();
+    expect(within(vn30Details as HTMLElement).getByText('Current completed fallback used')).toBeInTheDocument();
+    expect(within(vn30Details as HTMLElement).getByText('Current snapshot retained')).toBeInTheDocument();
+    expect(within(vn30Details as HTMLElement).getAllByText('authentication_failed_retryable')).toHaveLength(2);
 
     const capabilityLabel = within(industryDetails as HTMLElement).getByText('Current capability state');
     expect(capabilityLabel).toBeInTheDocument();

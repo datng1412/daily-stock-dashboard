@@ -1,5 +1,36 @@
 # SSI FastConnect Integration
 
+## M2.6B-R6C idle authentication recovery
+
+The first collapse occurred after the five-minute current VN30 universe cache
+expired: an SSI membership authentication failure returned before retained
+stream snapshots or durable accepted DailyStockPrice history were read. The
+completed VN30 service had the same membership-first boundary. A separate REST
+adapter defect retained an authenticated client after an operation-level 401/
+403, so subsequent calls could reuse a poisoned client.
+
+R6C adds one process-local last-known-good SSI IndexComponents membership cache
+shared by the completed and current aggregate services. Failed, empty, or
+malformed refreshes keep the validated cohort with explicit retained/age/
+failure diagnostics. Durable accepted history and process-owned current
+snapshots remain eligible; a cold process with no validated cohort remains
+truthfully unavailable.
+
+The shared V3 REST adapter now invalidates its client after retryable
+authentication failure and exposes one single-flight, cooldown-bound bypass per
+failure generation. Route touches do not bypass the cooldown. Visibility resume
+and manual refresh request the bounded recovery but do not authenticate,
+connect, subscribe, or own streaming transport from the request handler.
+Explicit provider entitlement rejection remains non-retryable. No provisional
+snapshot or aggregate is persisted.
+
+Deterministic validation passed 173 focused backend tests and 123 affected
+frontend tests. System Chrome accepted 14 idle/recovery fixtures at 1366x768
+and 390x844 (28 assertions) in 56.879 seconds with no horizontal overflow or
+owned process/port leak. The full backend tree retained the known 69 failures
+and four skips, with 3,324 passes. No live request was made after the active
+Vietnam provider window, so fresh replacement publication remains pending.
+
 ## M2.6B-R6B finality propagation and diagnostics
 
 The current aggregate API was already preserving provider-backed session date,

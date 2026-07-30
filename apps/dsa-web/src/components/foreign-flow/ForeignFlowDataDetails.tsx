@@ -79,6 +79,14 @@ export const ForeignFlowDataDetails = ({
           ['Direct VN30 capability', vn30?.canonical.capabilityStatus],
           ['Historical constituent correctness', vn30?.historicalConstituentCorrect],
           ['Membership source', vn30?.membershipSource],
+          ['Membership state', vn30?.membership.status],
+          ['Membership retained', vn30?.membership.retained],
+          ['Membership age', vn30?.membership.ageSeconds === null || vn30?.membership.ageSeconds === undefined
+            ? null
+            : `${vn30.membership.ageSeconds}s`],
+          ['Membership refresh failure', vn30?.membership.refreshFailureClass],
+          ['Membership cache bypassed', vn30?.membership.negativeCacheBypassed],
+          ['Membership recovery', vn30?.membership.recoveryStatus],
           ['Aggregation mode', vn30?.decompositionAggregationMode],
           ['Latest display session', latestDisplaySession],
           ['Current provider session', currentAggregate?.providerSessionDate],
@@ -89,6 +97,13 @@ export const ForeignFlowDataDetails = ({
           ['Current complete value coverage', currentAggregate?.coverage.completeValueCount],
           ['Current complete volume coverage', currentAggregate?.coverage.completeVolumeCount],
           ['Current provisional persisted', currentAggregate?.diagnostics?.provisionalPersisted],
+          ['Current membership retained', currentAggregate?.diagnostics?.membershipRetained],
+          ['Current membership age', currentAggregate?.diagnostics?.membershipAgeSeconds],
+          ['Current membership refresh failure', currentAggregate?.diagnostics?.membershipRefreshFailureClass],
+          ['Current completed fallback used', currentAggregate?.diagnostics?.completedFallbackUsed],
+          ['Current snapshot retained', currentAggregate?.diagnostics?.currentSnapshotRetained],
+          ['Current cache bypassed', currentAggregate?.diagnostics?.negativeCacheBypassed],
+          ['Current recovery status', currentAggregate?.diagnostics?.recoveryStatus],
         ]} />
       </section>
 

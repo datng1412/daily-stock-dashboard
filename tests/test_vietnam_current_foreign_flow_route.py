@@ -11,6 +11,7 @@ from data_provider.ssi_streaming_realtime import SsiStreamingRealtimeManager
 from data_provider.ssi_v3_streaming import normalize_v3_streaming_messages
 from src.services import ssi_streaming_realtime_lifecycle as lifecycle
 from src.services import vietnam_flow_data_service as flow_service
+from src.services import vietnam_foreign_flow_service as history_service
 
 
 VN_TZ = timezone(timedelta(hours=7))
@@ -67,6 +68,8 @@ class _DailyProvider:
 
 
 def _route_client(monkeypatch: Any) -> tuple[TestClient, SsiStreamingRealtimeManager, _RecordingStreamClient]:
+    flow_service.reset_vietnam_flow_data_capability_cache()
+    history_service.reset_vietnam_foreign_flow_state()
     now = datetime(2026, 7, 29, 10, 8, tzinfo=VN_TZ).timestamp()
     stream_client = _RecordingStreamClient()
     manager = SsiStreamingRealtimeManager(

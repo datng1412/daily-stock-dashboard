@@ -11,6 +11,21 @@ Rules that apply to every state:
 - Missing object data renders as `null`.
 - Missing list data renders as `[]`.
 
+## R6C idle authentication recovery
+
+Backgrounding the page does not clear completed or current foreign-flow rows.
+One hidden-to-visible transition schedules one bounded refresh while the
+existing values remain visible. A retryable failure marks retained current data
+as disconnected; completed DailyStockPrice rows remain usable. Force Refresh
+uses the same guarded recovery owner, ignores repeated clicks while in flight,
+and never creates a browser-side provider connection.
+
+`Overview unavailable` is reserved for the cold state where neither accepted
+completed history nor a retained current snapshot is usable. Membership age,
+refresh failure, cache bypass, and recovery state stay in Data Details rather
+than primary cards. Null current fields remain em dashes and are not rendered
+as zero.
+
 ## R6B current finality and Industry diagnostics
 
 Finality takes precedence over completeness. Only accepted DailyStockPrice rows

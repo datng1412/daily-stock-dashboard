@@ -22,8 +22,15 @@ class FakeFlowService:
             "diagnostics": {},
         }
 
-    def current_foreign_by_symbol(self, ticker, *, force_refresh=False):
+    def current_foreign_by_symbol(
+        self,
+        ticker,
+        *,
+        force_refresh=False,
+        recovery_trigger="route_touch",
+    ):
         assert force_refresh is False
+        assert recovery_trigger == "route_touch"
         return {
             "status": "unavailable",
             "data_state": "waiting",

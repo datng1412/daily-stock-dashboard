@@ -1,6 +1,21 @@
 # Vietnam Foreign Flow Product, Data, and Delivery Plan
 
-Status: SSI-V3-M2.6B-R6B preserves current finality through display models and repairs bounded current-VN30 Industry diagnostics; active-session replacement publication remains pending
+Status: SSI-V3-M2.6B-R6C retains usable completed/current foreign-flow presentation through retryable idle authentication failure; active-session replacement publication remains pending
+
+R6C keeps the last validated SSI IndexComponents VN30 cohort when an idle
+refresh fails, allowing durable accepted DailyStockPrice history and retained
+process-owned current snapshots to remain visible. Current snapshots remain
+provisional/stale and are never persisted as completed history. Shared REST
+authentication recovery invalidates a poisoned client and permits one
+single-flight, cooldown-bound bypass per failure generation for visibility
+resume or manual refresh. The frontend retains one polling owner and keeps
+technical recovery details out of primary cards.
+
+Deterministic acceptance passes 173 focused backend and 123 affected frontend
+tests. System Chrome accepts the 14 required idle/recovery states at desktop
+and mobile sizes without overflow or process leakage. Full-suite failure/skip
+counts remain 69/4. Active-session replacement publication was not attempted
+after the Vietnam provider window and remains pending.
 
 R6B keeps current finality independent from field and symbol completeness.
 Accepted DailyStockPrice alone displays `Đủ`; current connected, stale/

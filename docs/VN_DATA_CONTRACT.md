@@ -4,6 +4,27 @@
 
 This document defines the public data contract for the VN dashboard and company research page. It is intentionally data-quality-first: valid daily SSI data should remain visible even when optional live or enrichment sections are unavailable.
 
+## Idle recovery and last-known-good aggregates (Phase SSI-V3-M2.6B-R6C)
+
+Retryable SSI authentication, authorization, timeout, empty, or malformed
+membership refreshes do not replace a previously validated VN30 cohort. The
+process retains the last-known-good normalized SSI IndexComponents membership
+and reports its age, source, retention state, and refresh failure. A cold
+process with no validated membership remains unavailable and does not invent
+members.
+
+Accepted DailyStockPrice rows remain the completed-session authority and can
+rebuild a usable completed VN30 display after a current refresh fails. Existing
+provider-dated `ForeignRoomMessage` snapshots may remain visible as stale, but
+are never added together locally, persisted as completed history, or converted
+to zero. Missing current data remains null/empty.
+
+`recovery_trigger=route_touch|visibility_resume|manual_refresh` is additive on
+the VN30, current-symbol, and current-aggregate routes. Visibility resume and
+manual refresh may bypass the current negative authentication cache once per
+failure generation. Authentication recovery is process-shared, single-flight,
+and cooldown-bound; it does not make request handlers own the stream.
+
 ## Current aggregate finality propagation (Phase SSI-V3-M2.6B-R6B)
 
 Every merged current/completed display row retains its trading date, source

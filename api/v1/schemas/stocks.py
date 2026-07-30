@@ -1446,6 +1446,14 @@ class VietnamVn30ForeignFlowMembership(BaseModel):
     reason: Optional[str] = None
     fetched_at: str
     resolved_at: str
+    retained: bool = False
+    age_seconds: Optional[int] = Field(default=None, ge=0)
+    refresh_failure_class: Optional[str] = None
+    validated_at: Optional[str] = None
+    provider_effective_date: Optional[str] = None
+    negative_cache_bypassed: bool = False
+    recovery_scheduled: bool = False
+    recovery_status: Optional[str] = None
 
 
 class VietnamVn30ForeignFlowCoverage(BaseModel):

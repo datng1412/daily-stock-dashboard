@@ -209,6 +209,139 @@ def test_current_vn30_aggregate_uses_one_cohort_and_excludes_mixed_session_dates
     assert payload["display_series"][-1]["is_partial"] is True
 
 
+def test_idle_membership_auth_failure_retains_cohort_completed_rows_and_stale_current() -> None:
+    class MembershipProvider(FakeProvider):
+        available = True
+        calls = 0
+
+        def get_securities_by_index(self, index_code: str) -> Dict[str, Any]:
+            self.calls += 1
+            if not self.available:
+                return {
+                    "status": "unavailable",
+                    "failure_class": "authentication_failed",
+                    "rows": [],
+                }
+            return super().get_securities_by_index(index_code)
+
+        def request_auth_recovery(self, *, trigger: str) -> Dict[str, Any]:
+            assert trigger == "visibility_resume"
+            return {
+                "status": "scheduled",
+                "recovery_scheduled": True,
+                "negative_cache_bypassed": True,
+            }
+
+    class CurrentReader:
+        failed = False
+        cohort_calls: list[tuple[list[str], str]] = []
+
+        def ensure_current_foreign_flow_cohort(
+            self,
+            symbols: list[str],
+            *,
+            recovery_trigger: str,
+        ) -> Dict[str, Any]:
+            self.cohort_calls.append((list(symbols), recovery_trigger))
+            return {
+                "status": "unavailable" if self.failed else "ok",
+                "recovery_requested": self.failed,
+                "recovery_status": "already_scheduled" if self.failed else None,
+                "subscription_added_count": 0,
+            }
+
+        def get_current_foreign_flow(self, symbol: str) -> Dict[str, Any]:
+            if self.failed:
+                return {
+                    "status": "partial",
+                    "data_state": "stale",
+                    "usable": True,
+                    "failure_class": "authentication_failed_retryable",
+                    "provider_session_date": "2026-07-29",
+                    "current": {
+                        "foreign_buy_volume": 10,
+                        "foreign_sell_volume": 4,
+                        "foreign_buy_value": 100,
+                        "foreign_sell_value": 40,
+                    },
+                    "stream_status": "reconnecting",
+                    "market_session": {"market_session_active": True},
+                }
+            return {
+                "status": "ok",
+                "data_state": "ready",
+                "usable": True,
+                "failure_class": None,
+                "provider_session_date": "2026-07-29",
+                "current": {
+                    "foreign_buy_volume": 10,
+                    "foreign_sell_volume": 4,
+                    "foreign_buy_value": 100,
+                    "foreign_sell_value": 40,
+                },
+                "stream_status": "cache_hit",
+                "market_session": {"market_session_active": True},
+            }
+
+    accepted = {
+        ticker: [{
+            "trading_date": "2026-07-28",
+            "foreign_buy_volume": 5,
+            "foreign_sell_volume": 2,
+            "foreign_net_volume": 3,
+            "foreign_buy_value": 50,
+            "foreign_sell_value": 20,
+            "foreign_net_value": 30,
+        }]
+        for ticker in ("FPT", "SSI")
+    }
+    provider = MembershipProvider()
+    reader = CurrentReader()
+    service = VietnamFlowDataService(provider, streaming_reader=reader)
+
+    with patch(
+        "src.services.vietnam_foreign_flow_service.accepted_vietnam_foreign_flow_history",
+        return_value=accepted,
+    ):
+        initial = service.current_foreign_aggregate(
+            index_code="VN30",
+            include_industries=True,
+        )
+        provider.available = False
+        reader.failed = True
+        after_idle = service.current_foreign_aggregate(
+            index_code="VN30",
+            include_industries=True,
+            force_refresh=True,
+            recovery_trigger="visibility_resume",
+        )
+
+    assert initial["coverage"]["requested_symbol_count"] == 2
+    assert after_idle["status"] == "partial"
+    assert after_idle["usable"] is True
+    assert after_idle["data_state"] == "stale"
+    assert after_idle["coverage"]["requested_symbol_count"] == 2
+    assert after_idle["coverage"]["observed_symbol_count"] == 2
+    assert after_idle["display_series"]
+    assert [row["trading_date"] for row in after_idle["display_series"]] == [
+        "2026-07-28",
+        "2026-07-29",
+    ]
+    assert after_idle["display_series"][-1]["status"] == "Mất kết nối"
+    diagnostics = after_idle["diagnostics"]
+    assert diagnostics["membership_retained"] is True
+    assert diagnostics["membership_refresh_failure_class"] == (
+        "authentication_failed_retryable"
+    )
+    assert diagnostics["negative_cache_bypassed"] is True
+    assert diagnostics["recovery_scheduled"] is True
+    assert diagnostics["current_snapshot_retained"] is True
+    assert reader.cohort_calls[-1] == (
+        ["FPT", "SSI"],
+        "visibility_resume",
+    )
+
+
 def test_index_foreign_history_uses_only_direct_provider_aggregate() -> None:
     payload = VietnamFlowDataService(FakeProvider()).foreign_history_by_index(
         "VN30", from_date="2026-07-23", to_date="2026-07-23"

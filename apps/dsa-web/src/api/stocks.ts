@@ -550,6 +550,7 @@ export type VietnamWatchlistResponse = {
 };
 
 export type VietnamForeignFlowDataState = 'ready' | 'partial' | 'stale' | 'empty' | 'unavailable';
+export type VietnamForeignFlowRecoveryTrigger = 'route_touch' | 'visibility_resume' | 'manual_refresh';
 
 export type VietnamForeignFlowHistoryRow = {
   tradingDate: string;
@@ -1130,6 +1131,14 @@ export type VietnamVn30ForeignFlowResponse = {
     reason?: string | null;
     fetchedAt: string;
     resolvedAt: string;
+    retained?: boolean;
+    ageSeconds?: number | null;
+    refreshFailureClass?: string | null;
+    validatedAt?: string | null;
+    providerEffectiveDate?: string | null;
+    negativeCacheBypassed?: boolean;
+    recoveryScheduled?: boolean;
+    recoveryStatus?: string | null;
   };
   aggregateSessionDates: string[];
   latest?: VietnamVn30ForeignFlowDaily | null;
@@ -2283,6 +2292,7 @@ export const stocksApi = {
       topN?: number;
       forceRefresh?: boolean;
       forceCapabilityRefresh?: boolean;
+      recoveryTrigger?: VietnamForeignFlowRecoveryTrigger;
       signal?: AbortSignal;
     },
   ): Promise<VietnamVn30ForeignFlowResponse> {
@@ -2291,6 +2301,7 @@ export const stocksApi = {
         top_n: options?.topN ?? 10,
         force_refresh: options?.forceRefresh ?? false,
         force_capability_refresh: options?.forceCapabilityRefresh ?? false,
+        recovery_trigger: options?.recoveryTrigger ?? 'route_touch',
       },
       timeout: 180000,
       signal: options?.signal,
@@ -2353,7 +2364,11 @@ export const stocksApi = {
 
   async getVietnamCurrentForeignFlow(
     rawTicker: string,
-    options?: { forceRefresh?: boolean; signal?: AbortSignal },
+    options?: {
+      forceRefresh?: boolean;
+      recoveryTrigger?: VietnamForeignFlowRecoveryTrigger;
+      signal?: AbortSignal;
+    },
   ): Promise<VietnamCurrentForeignFlowResponse> {
     const ticker = normalizeVietnamTicker(rawTicker);
     if (!/^[A-Z0-9]{1,10}$/.test(ticker) || ticker === 'ALL') {
@@ -2362,7 +2377,10 @@ export const stocksApi = {
     const response = await apiClient.get(`/api/v1/stocks/vn/foreign-flow/current/${ticker}`, {
       timeout: 120000,
       signal: options?.signal,
-      params: options?.forceRefresh ? { force_refresh: true } : undefined,
+      params: {
+        ...(options?.forceRefresh ? { force_refresh: true } : {}),
+        recovery_trigger: options?.recoveryTrigger ?? 'route_touch',
+      },
     });
     const { toCamelCase } = await import('./utils');
     return toCamelCase<VietnamCurrentForeignFlowResponse>(response.data);
@@ -2374,6 +2392,7 @@ export const stocksApi = {
       tickers?: string[];
       includeIndustries?: boolean;
       forceRefresh?: boolean;
+      recoveryTrigger?: VietnamForeignFlowRecoveryTrigger;
       signal?: AbortSignal;
     },
   ): Promise<VietnamCurrentForeignFlowAggregateResponse> {
@@ -2385,6 +2404,7 @@ export const stocksApi = {
         ...(options.tickers?.length ? { tickers: options.tickers.join(',') } : {}),
         include_industries: options.includeIndustries ?? options.scope === 'vn30',
         ...(options.forceRefresh ? { force_refresh: true } : {}),
+        recovery_trigger: options.recoveryTrigger ?? 'route_touch',
       },
     });
     const { toCamelCase } = await import('./utils');

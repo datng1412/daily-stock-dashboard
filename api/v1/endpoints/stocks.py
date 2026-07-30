@@ -840,12 +840,18 @@ def get_vietnam_vn30_foreign_flow(
         False,
         description="Explicitly re-probe the direct SSI VN30 foreign-field capability.",
     ),
+    recovery_trigger: str = Query(
+        "route_touch",
+        pattern="^(route_touch|visibility_resume|manual_refresh)$",
+        description="Bounded shared-provider recovery trigger.",
+    ),
 ) -> VietnamVn30ForeignFlowResponse:
     try:
         payload = VietnamForeignFlowVn30Service().get_vn30_aggregate(
             top_n=top_n,
             force_refresh=force_refresh,
             force_capability_refresh=force_capability_refresh,
+            recovery_trigger=recovery_trigger,
         )
         return VietnamVn30ForeignFlowResponse(**payload)
     except ValueError as exc:
@@ -903,6 +909,11 @@ def get_vietnam_current_foreign_flow(
         False,
         description="Re-read the shared cache without duplicating the SSI subscription.",
     ),
+    recovery_trigger: str = Query(
+        "route_touch",
+        pattern="^(route_touch|visibility_resume|manual_refresh)$",
+        description="Bounded shared-stream recovery trigger.",
+    ),
 ) -> VietnamCurrentForeignFlowResponse:
     response.headers["Cache-Control"] = "no-store, no-cache, max-age=0"
     response.headers["Pragma"] = "no-cache"
@@ -912,6 +923,7 @@ def get_vietnam_current_foreign_flow(
             **service.current_foreign_by_symbol(
                 ticker,
                 force_refresh=force_refresh,
+                recovery_trigger=recovery_trigger,
             )
         )
     except ValueError as exc:
@@ -944,6 +956,11 @@ def get_vietnam_current_foreign_flow_aggregate(
         False,
         description="Refresh membership metadata and re-read the shared stream cache.",
     ),
+    recovery_trigger: str = Query(
+        "route_touch",
+        pattern="^(route_touch|visibility_resume|manual_refresh)$",
+        description="Bounded shared REST/stream recovery trigger.",
+    ),
 ) -> VietnamCurrentForeignFlowAggregateResponse:
     response.headers["Cache-Control"] = "no-store, no-cache, max-age=0"
     response.headers["Pragma"] = "no-cache"
@@ -958,6 +975,7 @@ def get_vietnam_current_foreign_flow_aggregate(
             ),
             include_industries=include_industries and scope == "vn30",
             force_refresh=force_refresh,
+            recovery_trigger=recovery_trigger,
         )
         return VietnamCurrentForeignFlowAggregateResponse(**payload)
     except ValueError as exc:

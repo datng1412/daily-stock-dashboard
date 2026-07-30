@@ -40,7 +40,9 @@ when the shared client is disconnected or retryably failed. Repeated polls,
 manual refresh, and page reload share one scheduled attempt and cooldown;
 they do not create concurrent provider connections. `force_refresh=true`
 identifies an explicit recovery touch while retaining no-store response
-semantics and the existing subscription cohort.
+semantics and the existing subscription cohort. The additive
+`recovery_trigger=route_touch|visibility_resume|manual_refresh` query identifies
+the recovery cause; it does not transfer stream ownership to the route.
 
 A valid prior snapshot remains present with `data_state=stale` during
 reconnection. Without a usable snapshot, the current capability is
@@ -440,10 +442,11 @@ Purpose:
 
 ## `GET /api/v1/stocks/vn/foreign-flow/vn30`
 
-- Query: `top_n=1..10` (default 10), `force_refresh=false|true`.
+- Query: `top_n=1..10` (default 10), `force_refresh=false|true`, and additive
+  `recovery_trigger=route_touch|visibility_resume|manual_refresh`.
 - Uses exact SSI IndexComponents `VN30` membership and SSI DailyStockPrice only; no IndexList prerequisite, hardcoded members, or fallback.
 - Returns current-membership identity/disclosure, at most 60 observed dates, aligned latest/5/20/60 buy/sell/net value and volume, separate family coverage/breadth, member summaries, deterministic ranking pairs, cache/single-flight metadata, and bounded timing.
-- Membership unavailable is HTTP 200 typed `unavailable` with empty series/components/rankings and no component-history work.
+- A cold membership-unavailable state is HTTP 200 typed `unavailable` with empty series/components/rankings and no component-history work. A failed refresh may retain the last validated SSI membership and return partial usable completed data with explicit retained/age/failure diagnostics.
 - Reuse the Phase 4.12B SSI DailyStockPrice symbol service with a 60-session window; no price joins, realtime/current-session fields, foreign-room data, or market-wide aggregate are returned.
 
 Request body:
@@ -553,3 +556,9 @@ Response rules:
 - `display_series` retains source kind, finality, current/completed/partial/stale flags, coverage counts, values, and provider timestamps when available. Top-level `data_state` remains the aggregate current state that clients propagate into display models.
 - `display_series`, `display_windows`, `rankings`, `items`, and `groups` are provisional presentation data. Numeric completeness and coverage do not promote them to accepted data, and they do not mutate completed DailyStockPrice history.
 - Accepted DailyStockPrice for the same date has precedence. Proprietary flow is not part of this route.
+- Optional `recovery_trigger=route_touch|visibility_resume|manual_refresh`
+  identifies the bounded recovery cause. It does not start a stream.
+- Retryable membership/authentication failure may return a partial usable
+  response built from retained SSI membership, accepted completed history, and
+  stale process-owned snapshots. Diagnostics disclose retention, age, refresh
+  failure, cache bypass, and recovery state. A cold state remains unavailable.

@@ -369,6 +369,7 @@ def test_vn30_endpoint_exposes_typed_unavailable_state(monkeypatch):
         "top_n": 7,
         "force_refresh": True,
         "force_capability_refresh": False,
+        "recovery_trigger": "route_touch",
     }]
 
 

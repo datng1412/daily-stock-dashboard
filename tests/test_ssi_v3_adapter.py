@@ -519,6 +519,94 @@ def test_failed_initialization_leaves_no_partial_client_and_can_retry() -> None:
     assert len(attempts) == 2
 
 
+def test_operation_auth_failure_invalidates_shared_client_and_recovers_once() -> None:
+    class AuthenticationError(RuntimeError):
+        status_code = 401
+
+    auths = [FakeAuth(), FakeAuth()]
+    first_market = FakeMarketData()
+    first_market.error = AuthenticationError("401 Unauthorized")
+    second_market = FakeMarketData()
+    second_market.indexes = []
+    data_by_auth = {
+        id(auths[0]): FakeData(first_market),
+        id(auths[1]): FakeData(second_market),
+    }
+    auth_factory_calls = 0
+
+    def auth_factory(_settings: SsiV3RestSettings) -> FakeAuth:
+        nonlocal auth_factory_calls
+        auth = auths[auth_factory_calls]
+        auth_factory_calls += 1
+        return auth
+
+    adapter = SsiFastConnectV3Adapter(
+        complete_settings(),
+        auth_factory=auth_factory,
+        data_factory=lambda auth: data_by_auth[id(auth)],
+    )
+
+    failed = adapter.get_index_list()
+    cooled_down = adapter.get_index_list()
+    recovery = adapter.request_auth_recovery(trigger="visibility_resume")
+    duplicate = adapter.request_auth_recovery(trigger="manual_refresh")
+    recovered = adapter.get_index_list()
+
+    assert failed["failure_class"] == "authentication_failed"
+    assert failed["diagnostics"]["authentication_failure_retryable"] is True
+    assert cooled_down["failure_class"] == "authentication_failed"
+    assert auth_factory_calls == 2
+    assert recovery == {
+        "status": "scheduled",
+        "recovery_scheduled": True,
+        "negative_cache_bypassed": True,
+    }
+    assert duplicate["status"] == "cooldown"
+    assert duplicate["recovery_scheduled"] is False
+    assert recovered["status"] == "ok"
+    assert auths[0].close_calls == 1
+    assert data_by_auth[id(auths[0])].close_calls == 1
+
+
+def test_failed_auth_recovery_reenters_cooldown_without_another_bypass() -> None:
+    class AuthenticationError(RuntimeError):
+        status_code = 401
+
+    auths = [FakeAuth(), FakeAuth(), FakeAuth()]
+    markets = [FakeMarketData(), FakeMarketData(), FakeMarketData()]
+    for market in markets:
+        market.error = AuthenticationError("401 Unauthorized")
+    data_by_auth = {
+        id(auth): FakeData(market)
+        for auth, market in zip(auths, markets)
+    }
+    auth_factory_calls = 0
+
+    def auth_factory(_settings: SsiV3RestSettings) -> FakeAuth:
+        nonlocal auth_factory_calls
+        auth = auths[auth_factory_calls]
+        auth_factory_calls += 1
+        return auth
+
+    adapter = SsiFastConnectV3Adapter(
+        complete_settings(),
+        auth_factory=auth_factory,
+        data_factory=lambda auth: data_by_auth[id(auth)],
+    )
+
+    assert adapter.get_index_list()["failure_class"] == "authentication_failed"
+    assert adapter.request_auth_recovery(trigger="visibility_resume")["status"] == "scheduled"
+    assert adapter.get_index_list()["failure_class"] == "authentication_failed"
+
+    duplicate = adapter.request_auth_recovery(trigger="manual_refresh")
+    cooled_down = adapter.get_index_list()
+
+    assert duplicate["status"] == "cooldown"
+    assert duplicate["recovery_scheduled"] is False
+    assert cooled_down["failure_class"] == "authentication_failed"
+    assert auth_factory_calls == 2
+
+
 def test_close_is_idempotent_and_releases_data_before_auth() -> None:
     events: List[str] = []
     adapter, auth, market, data = make_adapter(events=events)
@@ -1020,7 +1108,7 @@ def test_error_normalization(error: Any, failure_class: str) -> None:
 
     errors = {
         "auth": AuthenticationError("rejected", status_code=401),
-        "entitlement": AuthenticationError("forbidden", status_code=403),
+        "entitlement": AuthenticationError("not entitled", status_code=403),
         "timeout": httpx.ReadTimeout("timeout"),
         "network": httpx.ConnectError("network"),
         "rate": RateLimitError("limited", retry_after=3.0),
@@ -1041,6 +1129,18 @@ def test_error_normalization(error: Any, failure_class: str) -> None:
     assert rate["limit"] is None and rate["remaining"] is None and rate["reset"] is None
     if error == "auth":
         assert result["diagnostics"]["http_status"] == 401
+
+
+def test_generic_403_is_retryable_auth_not_proven_entitlement() -> None:
+    from ssi_sdk.exceptions import AuthenticationError
+
+    adapter, _auth, market, _data = make_adapter()
+    market.error = AuthenticationError("forbidden", status_code=403)
+
+    result = adapter.get_index_list()
+
+    assert result["failure_class"] == "authentication_failed"
+    assert result["diagnostics"]["authentication_failure_retryable"] is True
 
 
 class StubV3Provider:

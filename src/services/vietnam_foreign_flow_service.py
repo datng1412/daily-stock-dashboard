@@ -26,6 +26,11 @@ from data_provider.ssi_provider_router import (
 from src.services.vietnam_foreign_flow_history_store import (
     VietnamForeignFlowHistoryStore,
 )
+from src.services.vietnam_vn30_membership_cache import (
+    get_last_known_vn30_membership,
+    remember_vn30_membership,
+    reset_last_known_vn30_membership,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -199,6 +204,7 @@ def reset_vietnam_foreign_flow_state() -> None:
         _VN30_WAITERS.clear()
         _METRICS.clear()
         _METRICS.update(deepcopy(_METRIC_DEFAULTS))
+    reset_last_known_vn30_membership()
 
 
 def vietnam_foreign_flow_observability_snapshot() -> Dict[str, Any]:
@@ -1756,6 +1762,7 @@ class VietnamForeignFlowVn30Service:
         top_n: int = BATCH_DEFAULT_TOP_N,
         force_refresh: bool = False,
         force_capability_refresh: bool = False,
+        recovery_trigger: str = "route_touch",
     ) -> Dict[str, Any]:
         requested_top_n = int(top_n)
         if not 1 <= requested_top_n <= BATCH_MAX_TOP_N:
@@ -1764,6 +1771,32 @@ class VietnamForeignFlowVn30Service:
         _metric_add("vn30_requests")
         if force_refresh:
             _metric_add("vn30_force_refresh_requests")
+
+        recovery: Dict[str, Any] = {
+            "status": "not_requested",
+            "recovery_scheduled": False,
+            "negative_cache_bypassed": False,
+        }
+        if force_refresh:
+            provider_getter = getattr(
+                self._symbol_service, "_get_rest_provider", None
+            )
+            if callable(provider_getter):
+                try:
+                    provider = provider_getter()
+                    request_recovery = getattr(
+                        provider, "request_auth_recovery", None
+                    )
+                    if callable(request_recovery):
+                        recovery = dict(
+                            request_recovery(trigger=recovery_trigger)
+                        )
+                except Exception:
+                    recovery = {
+                        "status": "unavailable",
+                        "recovery_scheduled": False,
+                        "negative_cache_bypassed": False,
+                    }
 
         membership_started = perf_counter()
         try:
@@ -1782,6 +1815,13 @@ class VietnamForeignFlowVn30Service:
             }
         membership_ms = max(0, int((perf_counter() - membership_started) * 1000))
         membership = self._normalize_membership(membership_payload)
+        membership.update(
+            negative_cache_bypassed=bool(
+                recovery.get("negative_cache_bypassed")
+            ),
+            recovery_scheduled=bool(recovery.get("recovery_scheduled")),
+            recovery_status=recovery.get("status"),
+        )
         membership_hash = hashlib.sha256(
             ",".join(membership["member_tickers"]).encode("ascii", errors="ignore")
         ).hexdigest()[:16]
@@ -2010,7 +2050,7 @@ class VietnamForeignFlowVn30Service:
         )
         published_members = members if ready else []
         resolved_at = _iso_now()
-        return {
+        fresh = {
             "status": "ready" if ready else "unavailable",
             "index_code": VN30_INDEX_CODE,
             "source": "SSI IndexComponents",
@@ -2028,6 +2068,52 @@ class VietnamForeignFlowVn30Service:
             "reason": None if ready else "SSI VN30 membership is unavailable.",
             "fetched_at": resolved_at,
             "resolved_at": resolved_at,
+            "retained": False,
+            "age_seconds": 0 if ready else None,
+            "refresh_failure_class": None,
+            "validated_at": resolved_at if ready else None,
+        }
+        if ready:
+            remembered = remember_vn30_membership(
+                published_members,
+                fetched_at=(
+                    payload.get("fetched_at")
+                    if isinstance(payload, dict)
+                    else None
+                ),
+                provider_effective_date=(
+                    payload.get("effective_date")
+                    if isinstance(payload, dict)
+                    else None
+                ),
+            )
+            if remembered:
+                fresh["validated_at"] = remembered["validated_at"]
+            return fresh
+
+        retained = get_last_known_vn30_membership()
+        if retained is None:
+            return fresh
+        return {
+            **fresh,
+            "status": "ready",
+            "member_count": retained["member_count"],
+            "component_count": retained["member_count"],
+            "member_tickers": list(retained["symbols"]),
+            "cache_status": "stale_hit",
+            "failure_class": None,
+            "reason": (
+                "SSI VN30 membership refresh failed; retained last-known-good "
+                "membership is in use."
+            ),
+            "fetched_at": retained["fetched_at"],
+            "retained": True,
+            "age_seconds": retained["age_seconds"],
+            "refresh_failure_class": fresh["failure_class"],
+            "validated_at": retained["validated_at"],
+            "provider_effective_date": retained.get(
+                "provider_effective_date"
+            ),
         }
 
     def _load_histories(self, tickers: List[str], *, force_refresh: bool) -> Dict[str, Dict[str, Any]]:
@@ -2668,6 +2754,8 @@ class VietnamForeignFlowVn30Service:
         elif latest and latest["data_state"] == "ready" and counts["usable"] == len(tickers):
             state = "ready"
         else:
+            state = "partial"
+        if membership.get("retained") and state == "ready":
             state = "partial"
         rankings = {
             "latest_net_value": self._ranking_pair(components, "foreign_net_value", "aggregate_latest_date", top_n),

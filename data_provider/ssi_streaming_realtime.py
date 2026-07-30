@@ -3054,9 +3054,9 @@ class SsiStreamingRealtimeManager:
     def _current_flow_failure_class(error_class: Any) -> Optional[str]:
         mapping = {
             "configuration": "credentials_missing",
-            "authentication": "authentication_rejected",
-            "authorization": "authentication_rejected",
-            "entitlement_rejected": "entitlement_rejected",
+            "authentication": "authentication_failed_retryable",
+            "authorization": "authentication_failed_retryable",
+            "entitlement_rejected": "explicit_entitlement_rejected",
             "subscription_failure": "subscription_failed",
             "network_closed": "connection_failed",
             "timeout": "connection_failed",

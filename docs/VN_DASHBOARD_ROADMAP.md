@@ -1,5 +1,14 @@
 ﻿# VN Dashboard Roadmap
 
+## Phase SSI-V3-M2.6B-R6C - Idle authentication recovery and LKG aggregate fallback (2026-07-30)
+
+- Retain the last validated SSI IndexComponents VN30 cohort when an idle/background refresh is retryably unavailable, empty, or malformed.
+- Keep accepted DailyStockPrice history and existing current snapshots visible; current snapshots are stale/provisional and never persisted as completed rows.
+- Invalidate poisoned shared V3 REST clients and permit one single-flight, cooldown-bound recovery bypass for visibility resume or explicit manual refresh.
+- Keep one frontend polling owner, preserve values while hidden/recovering, suppress repeated Force Refresh, and expose technical recovery metadata only in Data Details.
+- Active-window receipt of a fresh replacement `ForeignRoomMessage` remains a separate live acceptance gate.
+- Deterministic validation passes 173 backend and 123 frontend tests; the full backend failure/skip baseline is unchanged at 69/4. System Chrome passes 14 fixtures at two viewports with no overflow or process/port leak. Live replacement proof remains pending because validation finished after the active session.
+
 ## Phase SSI-V3-M2.6B-R6B - Current finality and Industry diagnostics (2026-07-30)
 
 - Preserve `source_kind`, `finality`, current state, stale state, coverage counts, and provider timestamps through the frontend display-series and session-table models. Numeric completeness and 30/30 coverage never promote a provisional current row to accepted data.

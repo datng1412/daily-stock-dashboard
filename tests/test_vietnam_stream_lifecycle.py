@@ -245,7 +245,7 @@ def test_current_foreign_snapshot_stays_stale_until_recovery_message_replaces_it
     assert stale["data_state"] == "stale"
     assert stale["usable"] is True
     assert stale["current"]["foreign_buy_volume"] == 10
-    assert stale["failure_class"] == "authentication_rejected"
+    assert stale["failure_class"] == "authentication_failed_retryable"
 
     now[0] += 2
     manager.monitor_tick(wants_streaming=True)
@@ -327,7 +327,7 @@ def test_authentication_failure_without_snapshot_is_current_only_unavailable():
     assert payload["data_state"] == "unavailable"
     assert payload["usable"] is False
     assert payload["current"] is None
-    assert payload["failure_class"] == "authentication_rejected"
+    assert payload["failure_class"] == "authentication_failed_retryable"
 
 
 def test_previous_session_event_does_not_restore_readiness():

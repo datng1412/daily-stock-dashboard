@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [fix] Retain last-known-good SSI VN30 membership, accepted completed foreign-flow history, and stale current snapshots across retryable idle authentication failures.
+- [improvement] Add one shared cooldown-bound REST authentication recovery path for visibility resume and manual refresh without creating frontend provider connections or duplicate polling owners.
+- [test] Cover idle authentication failure, retained membership and aggregates, negative-cache bypass, single-flight recovery, stale UI preservation, and desktop/mobile system-Chrome states.
 - [fix] Preserve provisional foreign-flow finality through VN30 and Industry display models, label stale current rows `Mất kết nối`, and replace obsolete Industry current diagnostics with aggregate-backed capability and coverage.
 - [test] Cover shared current/completed status selection, 30/30 stale finality, accepted same-date precedence, precise session provenance, and Industry ready/partial/stale/waiting states.
 - [documentation] Record current-finality independence from coverage, precise VN30 session labels, and bounded current-VN30 Industry diagnostics.

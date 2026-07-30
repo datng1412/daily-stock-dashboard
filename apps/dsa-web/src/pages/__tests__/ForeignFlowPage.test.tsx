@@ -443,7 +443,9 @@ describe('ForeignFlowPage', () => {
       expect.objectContaining({ forceRefresh: false }),
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /Force Refresh/ }));
+    const forceRefresh = screen.getByRole('button', { name: /Force Refresh/ });
+    fireEvent.click(forceRefresh);
+    fireEvent.click(forceRefresh);
     await act(async () => {
       vi.advanceTimersByTime(0);
       await Promise.resolve();
@@ -452,7 +454,10 @@ describe('ForeignFlowPage', () => {
     expect(currentFlow).toHaveBeenCalledTimes(3);
     expect(currentFlow).toHaveBeenLastCalledWith(
       'FPT',
-      expect.objectContaining({ forceRefresh: true }),
+      expect.objectContaining({
+        forceRefresh: true,
+        recoveryTrigger: 'manual_refresh',
+      }),
     );
   });
 
@@ -517,7 +522,10 @@ describe('ForeignFlowPage', () => {
     expect(currentFlow).toHaveBeenCalledTimes(2);
     expect(currentFlow).toHaveBeenLastCalledWith(
       'FPT',
-      expect.objectContaining({ forceRefresh: true }),
+      expect.objectContaining({
+        forceRefresh: true,
+        recoveryTrigger: 'visibility_resume',
+      }),
     );
     expect(within(screen.getByTestId('latest-foreign-flow-card')).getByText(/Session: 2026-07-29/)).toBeInTheDocument();
 
@@ -548,6 +556,114 @@ describe('ForeignFlowPage', () => {
       await Promise.resolve();
     });
     expect(within(screen.getByTestId('latest-foreign-flow-card')).getByText('Mất kết nối')).toBeInTheDocument();
+  });
+
+  it('retains the current VN30 row as stale when visibility recovery is unavailable', async () => {
+    vi.useFakeTimers();
+    let visibility: DocumentVisibilityState = 'visible';
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => visibility,
+    });
+    currentAggregate.mockResolvedValueOnce({
+      status: 'ok',
+      dataState: 'ready',
+      usable: true,
+      scope: 'current_foreign_flow_aggregate',
+      universe: 'index:VN30',
+      providerSessionDate: '2026-07-30',
+      isProvisional: true,
+      finality: 'current_session_provisional',
+      source: 'SSI FastConnect V3 ForeignRoomMessage',
+      providerVersion: 'v3',
+      endpoint: 'room.{symbol}',
+      updateSemantics: 'cumulative_replacement_snapshot',
+      aggregate: { foreignNetValue: 600 },
+      displaySeries: [{
+        tradingDate: '2026-07-30',
+        sourceKind: 'current',
+        finality: 'current_session_provisional',
+        foreignBuyValue: 1_000,
+        foreignSellValue: 400,
+        foreignNetValue: 600,
+        requestedCount: 30,
+        observedCount: 30,
+        completeValueCount: 30,
+        completeVolumeCount: 30,
+      }],
+      displayWindows: {},
+      rankings: {},
+      items: [],
+      groups: [],
+      coverage: {
+        requestedSymbolCount: 30,
+        classifiedSymbolCount: 30,
+        subscribedSymbolCount: 30,
+        observedSymbolCount: 30,
+        completeVolumeCount: 30,
+        completeValueCount: 30,
+        missingSymbols: [],
+        staleSymbolCount: 0,
+      },
+      diagnostics: {},
+    }).mockResolvedValueOnce({
+      status: 'unavailable',
+      dataState: 'unavailable',
+      usable: false,
+      failureClass: 'authentication_failed_retryable',
+      scope: 'current_foreign_flow_aggregate',
+      universe: 'index:VN30',
+      isProvisional: false,
+      source: 'SSI FastConnect V3 ForeignRoomMessage',
+      providerVersion: 'v3',
+      endpoint: 'room.{symbol}',
+      updateSemantics: 'cumulative_replacement_snapshot',
+      aggregate: null,
+      displaySeries: [],
+      displayWindows: {},
+      rankings: {},
+      items: [],
+      groups: [],
+      coverage: {
+        requestedSymbolCount: 30,
+        classifiedSymbolCount: 30,
+        subscribedSymbolCount: 30,
+        observedSymbolCount: 0,
+        completeVolumeCount: 0,
+        completeValueCount: 0,
+        missingSymbols: [],
+        staleSymbolCount: 0,
+      },
+      diagnostics: {},
+    });
+
+    renderPage('/foreign-flow?mode=vn30');
+    await act(async () => {
+      vi.advanceTimersByTime(0);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByTestId('current-session-flow-row')).toBeInTheDocument();
+
+    visibility = 'hidden';
+    fireEvent(document, new Event('visibilitychange'));
+    visibility = 'visible';
+    fireEvent(document, new Event('visibilitychange'));
+    fireEvent(document, new Event('visibilitychange'));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(currentAggregate).toHaveBeenCalledTimes(2);
+    expect(currentAggregate).toHaveBeenLastCalledWith(expect.objectContaining({
+      forceRefresh: true,
+      recoveryTrigger: 'visibility_resume',
+    }));
+    const retained = screen.getByTestId('current-session-flow-row');
+    expect(within(retained).getByText('2026-07-30')).toBeInTheDocument();
+    expect(within(retained).getByText('Mất kết nối')).toBeInTheDocument();
+    expect(screen.queryByText('Overview unavailable')).not.toBeInTheDocument();
   });
 
   it('ignores a stale current-flow response after the selected symbol changes', async () => {

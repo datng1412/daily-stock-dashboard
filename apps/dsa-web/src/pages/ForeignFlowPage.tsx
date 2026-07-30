@@ -333,6 +333,8 @@ const ForeignFlowPage = () => {
     loading: boolean;
     error: string | null;
   }>({ data: null, loading: false, error: null });
+  const recoveryInFlightRef = useRef(false);
+  const [recoveryInFlight, setRecoveryInFlight] = useState(false);
   const [modeStates, setModeStates] = useState<ModeStateMap>(initialModeStates);
   const modeStatesRef = useRef(modeStates);
   const requestIds = useRef<Record<DataMode, number>>({
@@ -448,6 +450,7 @@ const ForeignFlowPage = () => {
           payload: await stocksApi.getVietnamVn30ForeignFlow({
             topN: 10,
             forceRefresh,
+            recoveryTrigger: forceRefresh ? 'manual_refresh' : 'route_touch',
             signal: controller.signal,
           }),
         };
@@ -548,7 +551,10 @@ const ForeignFlowPage = () => {
     let inFlight = false;
     let controller: AbortController | null = null;
     let wasHidden = document.visibilityState === 'hidden';
-    const request = (forceRefresh = false) => {
+    const request = (
+      forceRefresh = false,
+      recoveryTrigger: 'route_touch' | 'visibility_resume' | 'manual_refresh' = 'route_touch',
+    ) => {
       if (inFlight || document.visibilityState === 'hidden') return;
       inFlight = true;
       controller = new AbortController();
@@ -560,11 +566,32 @@ const ForeignFlowPage = () => {
       }));
       void stocksApi.getVietnamCurrentForeignFlow(ticker, {
         forceRefresh,
+        recoveryTrigger,
         signal: controller.signal,
       })
         .then((payload) => {
           if (!controller?.signal.aborted) {
-            setCurrentFlow({ symbol: ticker, data: payload, loading: false, error: null });
+            setCurrentFlow((previous) => ({
+              symbol: ticker,
+              data: payload.usable
+                ? payload
+                : previous.symbol === ticker && previous.data?.usable
+                  ? {
+                    ...previous.data,
+                    status: 'partial',
+                    dataState: 'stale',
+                    freshnessStatus: 'stale',
+                    failureClass: payload.failureClass ?? previous.data.failureClass,
+                    streamReason: payload.streamReason || previous.data.streamReason,
+                    diagnostics: {
+                      ...previous.data.diagnostics,
+                      currentSnapshotRetained: true,
+                    },
+                  }
+                  : payload,
+              loading: false,
+              error: payload.usable ? null : previous.error,
+            }));
           }
         })
         .catch((caught: unknown) => {
@@ -572,6 +599,18 @@ const ForeignFlowPage = () => {
             setCurrentFlow((current) => ({
               ...current,
               symbol: ticker,
+              data: current.symbol === ticker && current.data?.usable
+                ? {
+                  ...current.data,
+                  status: 'partial',
+                  dataState: 'stale',
+                  freshnessStatus: 'stale',
+                  diagnostics: {
+                    ...current.data.diagnostics,
+                    currentSnapshotRetained: true,
+                  },
+                }
+                : current.data,
               loading: false,
               error: caught instanceof Error
                 ? 'Foreign flow could not be loaded.'
@@ -581,6 +620,10 @@ const ForeignFlowPage = () => {
         })
         .finally(() => {
           inFlight = false;
+          if (recoveryTrigger === 'manual_refresh') {
+            recoveryInFlightRef.current = false;
+            setRecoveryInFlight(false);
+          }
         });
     };
     const onVisibilityChange = () => {
@@ -590,10 +633,13 @@ const ForeignFlowPage = () => {
       }
       if (!wasHidden) return;
       wasHidden = false;
-      request(true);
+      request(true, 'visibility_resume');
     };
     const initialRequest = globalThis.setTimeout(
-      () => request(currentFlowRefreshGeneration > 0),
+      () => request(
+        currentFlowRefreshGeneration > 0,
+        currentFlowRefreshGeneration > 0 ? 'manual_refresh' : 'route_touch',
+      ),
       0,
     );
     const timer = globalThis.setInterval(() => request(false), CURRENT_FLOW_POLL_INTERVAL_MS);
@@ -611,7 +657,10 @@ const ForeignFlowPage = () => {
     let inFlight = false;
     let controller: AbortController | null = null;
     let wasHidden = document.visibilityState === 'hidden';
-    const request = (forceRefresh = false) => {
+    const request = (
+      forceRefresh = false,
+      recoveryTrigger: 'route_touch' | 'visibility_resume' | 'manual_refresh' = 'route_touch',
+    ) => {
       if (inFlight || document.visibilityState === 'hidden') return;
       inFlight = true;
       controller = new AbortController();
@@ -620,11 +669,25 @@ const ForeignFlowPage = () => {
         scope: 'vn30',
         includeIndustries: true,
         forceRefresh,
+        recoveryTrigger,
         signal: controller.signal,
       }).then((payload) => {
         if (!controller?.signal.aborted) {
           setCurrentAggregate((previous) => ({
-            data: payload.usable ? payload : previous.data,
+            data: payload.usable
+              ? payload
+              : previous.data?.usable
+                ? {
+                  ...previous.data,
+                  status: 'partial',
+                  dataState: 'stale',
+                  failureClass: payload.failureClass ?? previous.data.failureClass,
+                  diagnostics: {
+                    ...previous.data.diagnostics,
+                    currentSnapshotRetained: true,
+                  },
+                }
+                : payload,
             loading: false,
             error: null,
           }));
@@ -633,12 +696,27 @@ const ForeignFlowPage = () => {
         if (!controller?.signal.aborted) {
           setCurrentAggregate((previous) => ({
             ...previous,
+            data: previous.data?.usable
+              ? {
+                ...previous.data,
+                status: 'partial',
+                dataState: 'stale',
+                diagnostics: {
+                  ...previous.data.diagnostics,
+                  currentSnapshotRetained: true,
+                },
+              }
+              : previous.data,
             loading: false,
             error: 'Current-session aggregate is unavailable; completed sessions remain visible.',
           }));
         }
       }).finally(() => {
         inFlight = false;
+        if (recoveryTrigger === 'manual_refresh') {
+          recoveryInFlightRef.current = false;
+          setRecoveryInFlight(false);
+        }
       });
     };
     const onVisibilityChange = () => {
@@ -648,10 +726,13 @@ const ForeignFlowPage = () => {
       }
       if (!wasHidden) return;
       wasHidden = false;
-      request(true);
+      request(true, 'visibility_resume');
     };
     const initialRequest = globalThis.setTimeout(
-      () => request(currentAggregateRefreshGeneration > 0),
+      () => request(
+        currentAggregateRefreshGeneration > 0,
+        currentAggregateRefreshGeneration > 0 ? 'manual_refresh' : 'route_touch',
+      ),
       0,
     );
     const timer = globalThis.setInterval(() => request(false), CURRENT_FLOW_POLL_INTERVAL_MS);
@@ -847,6 +928,25 @@ const ForeignFlowPage = () => {
     downloadForeignFlowCsv(csv, `stockclock-${mode === 'proprietary' ? 'proprietary' : 'foreign'}-${subject}-${window}d.csv`);
   };
 
+  const requestRecoveryRefresh = () => {
+    if (recoveryInFlightRef.current) return;
+    recoveryInFlightRef.current = true;
+    setRecoveryInFlight(true);
+    const completedRequest = load(true);
+    if (mode === 'ticker' && ticker) {
+      setCurrentFlowRefreshGeneration((current) => current + 1);
+      return;
+    }
+    if (['overview', 'details', 'vn30', 'industry'].includes(mode)) {
+      setCurrentAggregateRefreshGeneration((current) => current + 1);
+      return;
+    }
+    void completedRequest.finally(() => {
+      recoveryInFlightRef.current = false;
+      setRecoveryInFlight(false);
+    });
+  };
+
   return (
     <AppPage className="space-y-5">
       <PageHeader
@@ -855,14 +955,9 @@ const ForeignFlowPage = () => {
         description="Inspect provider-backed foreign and proprietary flow while keeping current and completed session finality explicit."
         actions={DATA_MODES.includes(mode as DataMode) ? (
           <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={() => {
-              void load(true);
-              if (mode === 'ticker' && ticker) {
-                setCurrentFlowRefreshGeneration((current) => current + 1);
-              } else if (['vn30', 'industry'].includes(mode)) {
-                setCurrentAggregateRefreshGeneration((current) => current + 1);
-              }
-            }} isLoading={loading} disabled={Boolean(validationError) || (mode === 'ticker' && !ticker)}>
+            <Button variant="outline" size="sm" onClick={requestRecoveryRefresh}
+              isLoading={loading || recoveryInFlight}
+              disabled={recoveryInFlight || Boolean(validationError) || (mode === 'ticker' && !ticker)}>
               <RefreshCw className="h-4 w-4" /> Force Refresh
             </Button>
             <Button variant="outline" size="sm" onClick={exportCsv} disabled={!selection.rows.length}>
@@ -905,11 +1000,9 @@ const ForeignFlowPage = () => {
                 ? modeStates.vn30.data.payload.decomposition.latestCompletedSession
                 : null) ?? '—'}</span>
             </div>
-            <Button variant="outline" size="sm" onClick={() => {
-              void load(true);
-              setCurrentAggregateRefreshGeneration((current) => current + 1);
-            }}
-              isLoading={modeStates.vn30.loading || modeStates.industry.loading}>
+            <Button variant="outline" size="sm" onClick={requestRecoveryRefresh}
+              disabled={recoveryInFlight}
+              isLoading={recoveryInFlight || modeStates.vn30.loading || modeStates.industry.loading}>
               <RefreshCw className="h-4 w-4" /> Refresh
             </Button>
           </div>
@@ -970,10 +1063,7 @@ const ForeignFlowPage = () => {
           window={window}
           chartMode={chartMode === 'buy-sell' ? 'buy-sell' : 'net'}
           onChartModeChange={setChartMode}
-          onRefresh={() => {
-            void load(true);
-            setCurrentAggregateRefreshGeneration((current) => current + 1);
-          }}
+          onRefresh={requestRecoveryRefresh}
           onNavigate={navigateTo}
         />
       ) : null}

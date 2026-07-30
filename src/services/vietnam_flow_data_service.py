@@ -15,6 +15,11 @@ from data_provider.ssi_provider_router import (
     SsiRestProviderRouter,
     create_ssi_rest_provider_router,
 )
+from src.services.vietnam_vn30_membership_cache import (
+    get_last_known_vn30_membership,
+    remember_vn30_membership,
+    reset_last_known_vn30_membership,
+)
 
 
 _VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
@@ -44,6 +49,8 @@ _CURRENT_UNIVERSE_CACHE: Dict[
     str, Tuple[float, List[str], Dict[str, Dict[str, str]]]
 ] = {}
 _CURRENT_UNIVERSE_TTL_SECONDS = 300
+_CURRENT_UNIVERSE_FAILURE_TTL_SECONDS = 60
+_CURRENT_UNIVERSE_FAILURE_CACHE: Dict[str, Tuple[float, str]] = {}
 
 
 class ForeignFlowRequestValidationError(ValueError):
@@ -56,6 +63,8 @@ def reset_vietnam_flow_data_capability_cache() -> None:
         _DIRECT_INDEX_CAPABILITY_CACHE.clear()
     with _CURRENT_UNIVERSE_LOCK:
         _CURRENT_UNIVERSE_CACHE.clear()
+        _CURRENT_UNIVERSE_FAILURE_CACHE.clear()
+    reset_last_known_vn30_membership()
 
 
 def _iso_date(value: str, name: str) -> str:
@@ -136,6 +145,22 @@ def _provider_failure_class(result: Mapping[str, Any]) -> str:
     # generic internal bucket is provider-unavailable to this product surface,
     # not a caller validation error or a proven unsupported capability.
     return "provider_unavailable" if failure_class == "internal_error" else failure_class
+
+
+def _recovery_failure_class(result: Mapping[str, Any]) -> str:
+    """Expose retryable authentication separately from explicit entitlement."""
+
+    failure_class = _provider_failure_class(result)
+    if failure_class in {
+        "authentication",
+        "authentication_failed",
+        "auth_failed",
+        "authorization",
+    }:
+        return "authentication_failed_retryable"
+    if failure_class in {"entitlement_unavailable", "entitlement_rejected"}:
+        return "explicit_entitlement_rejected"
+    return failure_class
 
 
 class VietnamFlowDataService:
@@ -435,8 +460,11 @@ class VietnamFlowDataService:
         symbol: str,
         *,
         force_refresh: bool = False,
+        recovery_trigger: str = "route_touch",
     ) -> Dict[str, Any]:
         ticker = _symbols([symbol])[0]
+        if force_refresh and recovery_trigger == "route_touch":
+            recovery_trigger = "manual_refresh"
         reader = self._get_current_flow_reader()
         if reader is None or not callable(getattr(reader, "get_current_foreign_flow", None)):
             stream = {
@@ -460,9 +488,7 @@ class VietnamFlowDataService:
                 if callable(ensure):
                     ensure(
                         ticker,
-                        recovery_trigger=(
-                            "manual_refresh" if force_refresh else "route_touch"
-                        ),
+                        recovery_trigger=recovery_trigger,
                     )
                 stream = dict(reader.get_current_foreign_flow(ticker))
             except Exception:
@@ -505,7 +531,7 @@ class VietnamFlowDataService:
                     comparison["finality"] = "completed_session_authority"
                     comparison["source"] = "SSI V3 DailyStockPrice"
             else:
-                comparison_failure = _provider_failure_class(result)
+                comparison_failure = _recovery_failure_class(result)
 
         data_state = str(stream.get("data_state") or "unavailable")
         current_row = dict(stream.get("current") or {}) or None
@@ -559,12 +585,23 @@ class VietnamFlowDataService:
         index_code: Optional[str] = None,
         include_industries: bool = False,
         force_refresh: bool = False,
+        recovery_trigger: str = "route_touch",
     ) -> Dict[str, Any]:
         """Build a display-only current aggregate from the shared R cache."""
 
         if bool(symbols) == bool(index_code):
             raise ValueError("provide exactly one of symbols or index_code")
+        if force_refresh and recovery_trigger == "route_touch":
+            recovery_trigger = "manual_refresh"
         classifications: Dict[str, Dict[str, str]] = {}
+        membership_diagnostics: Dict[str, Any] = {
+            "membership_source": None,
+            "membership_retained": False,
+            "membership_age_seconds": None,
+            "membership_refresh_failure_class": None,
+            "negative_cache_bypassed": False,
+            "recovery_scheduled": False,
+        }
         normalized_index = str(index_code or "").strip().upper() or None
         if normalized_index:
             now = time.monotonic()
@@ -576,48 +613,130 @@ class VietnamFlowDataService:
                 else:
                     ticker_list = []
             if not ticker_list:
-                if self._provider is None:
-                    return self._unavailable_current_aggregate(
-                        universe=f"index:{normalized_index}",
-                        failure_class="provider_not_configured",
+                with _CURRENT_UNIVERSE_LOCK:
+                    failed = _CURRENT_UNIVERSE_FAILURE_CACHE.get(
+                        normalized_index
                     )
-                membership = self._provider.get_securities_by_index(normalized_index)
-                if membership.get("status") != "ok":
-                    return self._unavailable_current_aggregate(
-                        universe=f"index:{normalized_index}",
-                        failure_class=_provider_failure_class(membership),
+                failure_cooldown_active = bool(
+                    failed and failed[0] > now and not force_refresh
+                )
+                membership: Dict[str, Any] = {}
+                if not failure_cooldown_active and self._provider is not None:
+                    if force_refresh:
+                        request_recovery = getattr(
+                            self._provider, "request_auth_recovery", None
+                        )
+                        if callable(request_recovery):
+                            recovery = dict(
+                                request_recovery(trigger=recovery_trigger)
+                            )
+                            membership_diagnostics.update(
+                                negative_cache_bypassed=bool(
+                                    recovery.get("negative_cache_bypassed")
+                                ),
+                                recovery_scheduled=bool(
+                                    recovery.get("recovery_scheduled")
+                                ),
+                                recovery_status=recovery.get("status"),
+                            )
+                    membership = self._provider.get_securities_by_index(
+                        normalized_index
                     )
+                elif failed:
+                    membership = {
+                        "status": "unavailable",
+                        "failure_class": failed[1],
+                        "rows": [],
+                    }
+                elif self._provider is None:
+                    membership = {
+                        "status": "unavailable",
+                        "failure_class": "provider_not_configured",
+                        "rows": [],
+                    }
+
                 membership_rows = [
                     dict(row)
                     for row in membership.get("rows") or []
                     if isinstance(row, Mapping)
                 ]
-                try:
-                    ticker_list = _symbols(
-                        row.get("symbol") for row in membership_rows
+                if membership.get("status") == "ok":
+                    try:
+                        ticker_list = _symbols(
+                            row.get("symbol") for row in membership_rows
+                        )
+                    except ValueError:
+                        ticker_list = []
+                    if ticker_list:
+                        for row in membership_rows:
+                            ticker = str(
+                                row.get("symbol") or ""
+                            ).strip().upper()
+                            if ticker not in ticker_list:
+                                continue
+                            code = str(row.get("icb_code") or "").strip()
+                            name = str(row.get("icb_name") or "").strip()
+                            if code and name:
+                                classifications[ticker] = {
+                                    "icb_code": code,
+                                    "icb_name": name,
+                                }
+                        with _CURRENT_UNIVERSE_LOCK:
+                            _CURRENT_UNIVERSE_CACHE[normalized_index] = (
+                                now + _CURRENT_UNIVERSE_TTL_SECONDS,
+                                list(ticker_list),
+                                deepcopy(classifications),
+                            )
+                            _CURRENT_UNIVERSE_FAILURE_CACHE.pop(
+                                normalized_index, None
+                            )
+                        if normalized_index == "VN30":
+                            remember_vn30_membership(
+                                ticker_list,
+                                classifications=classifications,
+                                fetched_at=membership.get("fetched_at"),
+                            )
+                        membership_diagnostics["membership_source"] = (
+                            "SSI IndexComponents"
+                        )
+                if not ticker_list:
+                    failure_class = _recovery_failure_class(membership)
+                    membership_diagnostics[
+                        "membership_refresh_failure_class"
+                    ] = failure_class
+                    with _CURRENT_UNIVERSE_LOCK:
+                        _CURRENT_UNIVERSE_FAILURE_CACHE[normalized_index] = (
+                            now + _CURRENT_UNIVERSE_FAILURE_TTL_SECONDS,
+                            failure_class,
+                        )
+                    retained = (
+                        get_last_known_vn30_membership()
+                        if normalized_index == "VN30"
+                        else None
                     )
-                except ValueError:
-                    return self._unavailable_current_aggregate(
-                        universe=f"index:{normalized_index}",
-                        failure_class="membership_unavailable",
-                    )
-                for row in membership_rows:
-                    ticker = str(row.get("symbol") or "").strip().upper()
-                    if ticker not in ticker_list:
-                        continue
-                    code = str(row.get("icb_code") or "").strip()
-                    name = str(row.get("icb_name") or "").strip()
-                    if code and name:
-                        classifications[ticker] = {
-                            "icb_code": code,
-                            "icb_name": name,
-                        }
-                with _CURRENT_UNIVERSE_LOCK:
-                    _CURRENT_UNIVERSE_CACHE[normalized_index] = (
-                        now + _CURRENT_UNIVERSE_TTL_SECONDS,
-                        list(ticker_list),
-                        deepcopy(classifications),
-                    )
+                    if retained:
+                        ticker_list = list(retained["symbols"])
+                        classifications = deepcopy(
+                            retained["classifications"]
+                        )
+                        membership_diagnostics.update(
+                            membership_source=retained["source"],
+                            membership_retained=True,
+                            membership_age_seconds=retained["age_seconds"],
+                        )
+                    else:
+                        unavailable = self._unavailable_current_aggregate(
+                            universe=f"index:{normalized_index}",
+                            failure_class=failure_class,
+                        )
+                        unavailable["diagnostics"].update(
+                            membership_diagnostics
+                        )
+                        return unavailable
+            else:
+                membership_diagnostics["membership_source"] = (
+                    "SSI IndexComponents"
+                )
             universe = f"index:{normalized_index}"
         else:
             ticker_list = _symbols(symbols or [])
@@ -627,41 +746,68 @@ class VietnamFlowDataService:
         if reader is None or not callable(
             getattr(reader, "get_current_foreign_flow", None)
         ):
-            return self._unavailable_current_aggregate(
-                universe=universe,
-                failure_class="stream_manager_not_initialized",
-                symbols=ticker_list,
-            )
-
-        ensure_result: Dict[str, Any] = {}
-        try:
-            ensure_cohort = getattr(
-                reader, "ensure_current_foreign_flow_cohort", None
-            )
-            if callable(ensure_cohort):
-                ensure_result = dict(
-                    ensure_cohort(
-                        ticker_list,
-                        recovery_trigger=(
-                            "manual_refresh" if force_refresh else "route_touch"
-                        ),
-                    )
-                )
-            else:
-                for ticker in ticker_list:
-                    ensure = getattr(reader, "ensure_current_foreign_flow", None)
-                    if callable(ensure):
-                        ensure(ticker, recovery_trigger="route_touch")
             streams = {
-                ticker: dict(reader.get_current_foreign_flow(ticker))
+                ticker: {
+                    "status": "unavailable",
+                    "data_state": "unavailable",
+                    "usable": False,
+                    "failure_class": "stream_manager_not_initialized",
+                    "provider_session_date": None,
+                    "current": None,
+                    "stream_status": "manager_not_started",
+                    "market_session": {},
+                }
                 for ticker in ticker_list
             }
-        except Exception:
-            return self._unavailable_current_aggregate(
-                universe=universe,
-                failure_class="current_flow_reader_error",
-                symbols=ticker_list,
-            )
+            ensure_result: Dict[str, Any] = {
+                "status": "unavailable",
+                "recovery_requested": False,
+            }
+        else:
+            ensure_result = {}
+            try:
+                ensure_cohort = getattr(
+                    reader, "ensure_current_foreign_flow_cohort", None
+                )
+                if callable(ensure_cohort):
+                    ensure_result = dict(
+                        ensure_cohort(
+                            ticker_list,
+                            recovery_trigger=recovery_trigger,
+                        )
+                    )
+                else:
+                    for ticker in ticker_list:
+                        ensure = getattr(
+                            reader, "ensure_current_foreign_flow", None
+                        )
+                        if callable(ensure):
+                            ensure(
+                                ticker,
+                                recovery_trigger=recovery_trigger,
+                            )
+                streams = {
+                    ticker: dict(reader.get_current_foreign_flow(ticker))
+                    for ticker in ticker_list
+                }
+            except Exception:
+                streams = {
+                    ticker: {
+                        "status": "unavailable",
+                        "data_state": "error",
+                        "usable": False,
+                        "failure_class": "current_flow_reader_error",
+                        "provider_session_date": None,
+                        "current": None,
+                        "stream_status": "reader_error",
+                        "market_session": {},
+                    }
+                    for ticker in ticker_list
+                }
+                ensure_result = {
+                    "status": "unavailable",
+                    "recovery_requested": False,
+                }
 
         observed_dates = sorted({
             str(stream.get("provider_session_date"))
@@ -977,26 +1123,33 @@ class VietnamFlowDataService:
                     key=lambda row: (row["value"], row["ticker"]),
                 )[:10],
             }
-        return {
-            "status": (
-                "ok"
-                if observed_count == len(ticker_list)
-                and aggregate["complete_volume_count"] == len(ticker_list)
-                and aggregate["complete_value_count"] == len(ticker_list)
-                else "partial"
-                if observed_count
-                else "unavailable"
-            ),
-            "data_state": data_state,
-            "usable": bool(observed_count),
-            "failure_class": None if observed_count else next(
+        display_usable = bool(display_series)
+        current_failure_class = (
+            None
+            if observed_count
+            else next(
                 (
                     stream.get("failure_class")
                     for stream in streams.values()
                     if stream.get("failure_class")
                 ),
                 None,
+            )
+        )
+        return {
+            "status": (
+                "ok"
+                if observed_count == len(ticker_list)
+                and aggregate["complete_volume_count"] == len(ticker_list)
+                and aggregate["complete_value_count"] == len(ticker_list)
+                and not membership_diagnostics["membership_retained"]
+                else "partial"
+                if observed_count or display_usable
+                else "unavailable"
             ),
+            "data_state": data_state,
+            "usable": bool(observed_count or display_usable),
+            "failure_class": current_failure_class,
             "scope": "current_foreign_flow_aggregate",
             "universe": universe,
             "provider_session_date": provider_session_date,
@@ -1051,6 +1204,24 @@ class VietnamFlowDataService:
                     "subscription_added_count", 0
                 ),
                 "mixed_provider_session_dates_excluded": observed_dates[:-1],
+                "fallback_used": bool(
+                    display_usable
+                    and (
+                        not observed_count
+                        or membership_diagnostics["membership_retained"]
+                    )
+                ),
+                "completed_fallback_used": bool(
+                    display_usable and not observed_count
+                ),
+                "current_snapshot_retained": bool(
+                    observed_count and data_state == "stale"
+                ),
+                "recovery_in_flight": (
+                    ensure_result.get("recovery_status")
+                    == "already_scheduled"
+                ),
+                **membership_diagnostics,
                 "provisional_persisted": False,
             },
         }

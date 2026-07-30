@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* Bounded system-browser acceptance for the R6B foreign-flow presentation. */
+/* Bounded system-browser acceptance for R6C idle/authentication recovery. */
 
 import { createRequire } from 'node:module';
 import { createServer } from 'node:net';
@@ -25,22 +25,20 @@ const VIEWPORTS = [
   { name: 'mobile', width: 390, height: 844 },
 ];
 const SCENARIOS = [
-  ['current_connected_full', 'vn30'],
-  ['current_stale_full', 'vn30'],
-  ['current_stale_partial', 'vn30'],
-  ['current_post_close', 'vn30'],
-  ['accepted_same_date', 'vn30'],
-  ['completed_only', 'vn30'],
-  ['current_unavailable_completed', 'vn30'],
-  ['industry_current_ready', 'details'],
-  ['industry_current_partial', 'details'],
-  ['industry_current_stale', 'details'],
-  ['twenty_completed_plus_current', 'vn30'],
-  ['explicit_zero_current', 'vn30'],
-  ['missing_current_values', 'vn30'],
-  ['overview_current_stale', 'overview'],
-  ['industry_ranking_stale', 'industry'],
-  ['watchlist_current_stale', 'watchlist'],
+  ['initial_ready', 'vn30'],
+  ['tab_hidden_existing', 'vn30'],
+  ['idle_auth_completed_fallback', 'overview'],
+  ['idle_auth_stale_current', 'vn30'],
+  ['membership_refresh_retained', 'details'],
+  ['negative_cache_preserved', 'vn30'],
+  ['visibility_recovery_in_flight', 'vn30'],
+  ['visibility_recovery_failure', 'vn30'],
+  ['visibility_recovery_success', 'vn30'],
+  ['force_refresh_in_flight', 'vn30'],
+  ['force_refresh_failure', 'vn30'],
+  ['force_refresh_success', 'vn30'],
+  ['cold_unavailable', 'overview'],
+  ['twenty_accepted_stale_current', 'vn30'],
 ];
 const STATUS = {
   completed: '\u0110\u1ee7',
@@ -118,23 +116,19 @@ const completedRows = (endDay) => {
 
 const scenarioConfig = (name) => ({
   completedEnd: 29,
-  currentDate: name === 'accepted_same_date' ? '2026-07-29' : '2026-07-30',
-  currentUnavailable: ['completed_only', 'current_unavailable_completed'].includes(name),
-  postClose: name === 'current_post_close',
-  explicitZero: name === 'explicit_zero_current',
+  currentDate: '2026-07-30',
+  currentUnavailable: ['idle_auth_completed_fallback', 'cold_unavailable'].includes(name),
+  coldUnavailable: name === 'cold_unavailable',
+  postClose: false,
+  explicitZero: false,
   stale: [
-    'current_stale_full',
-    'current_stale_partial',
-    'industry_current_stale',
-    'overview_current_stale',
-    'industry_ranking_stale',
-    'watchlist_current_stale',
+    'idle_auth_stale_current',
+    'membership_refresh_retained',
+    'negative_cache_preserved',
+    'twenty_accepted_stale_current',
   ].includes(name),
-  partialCoverage: [
-    'current_stale_partial',
-    'industry_current_partial',
-  ].includes(name),
-  missingValues: name === 'missing_current_values',
+  partialCoverage: false,
+  missingValues: false,
   regressive: false,
 });
 
@@ -205,7 +199,7 @@ const fixturePayloads = (scenarioName) => {
     missing_symbols: observed < 3 ? ['HPG'] : [],
     stale_symbol_count: config.stale || config.postClose ? observed : 0,
   };
-  return {
+  const fixtures = {
     symbolHistory: {
       ticker: 'FPT',
       source: 'ssi_fastconnect',
@@ -336,20 +330,49 @@ const fixturePayloads = (scenarioName) => {
         },
       ],
       coverage,
+      diagnostics: {
+        membership_source: 'SSI IndexComponents',
+        membership_retained: config.stale,
+        membership_age_seconds: config.stale ? 42 : 1,
+        membership_refresh_failure_class: config.stale ? 'authentication_failed_retryable' : null,
+        completed_fallback_used: config.currentUnavailable && !config.coldUnavailable,
+        current_snapshot_retained: config.stale,
+        negative_cache_bypassed: false,
+        recovery_status: config.stale ? 'cooldown' : 'idle',
+        provisional_persisted: false,
+      },
     },
     vn30: {
+      status: config.coldUnavailable ? 'unavailable' : config.stale ? 'partial' : 'ready',
+      usable: !config.coldUnavailable,
+      capability_status: config.coldUnavailable ? 'unavailable' : 'available',
       source: 'ssi_fastconnect',
       source_endpoint: 'daily_stock_price',
-      data_state: config.partialCoverage ? 'partial' : 'ready',
-      membership: { member_count: 3, source: 'SSI IndexComponents' },
+      data_state: config.coldUnavailable ? 'unavailable' : config.stale ? 'stale' : 'ready',
+      membership_source: 'SSI IndexComponents',
+      membership: {
+        status: config.coldUnavailable ? 'unavailable' : 'ready',
+        index_code: 'VN30',
+        member_count: config.coldUnavailable ? 0 : 3,
+        component_count: config.coldUnavailable ? 0 : 3,
+        member_tickers: config.coldUnavailable ? [] : ['FPT', 'SSI', 'HPG'],
+        source: 'SSI IndexComponents',
+        retained: config.stale,
+        age_seconds: config.stale ? 42 : 1,
+        refresh_failure_class: config.stale ? 'authentication_failed_retryable' : null,
+        negative_cache_bypassed: false,
+        recovery_status: config.stale ? 'cooldown' : 'idle',
+        fetched_at: '2026-07-30T03:00:00Z',
+        resolved_at: '2026-07-30T03:00:00Z',
+      },
       components: [
         { ticker: 'FPT', foreign_net_value: 600_000_000, foreign_net_value_5d: 900_000_000, foreign_net_value_20d: 1_200_000_000, foreign_net_volume: 60_000 },
         { ticker: 'SSI', foreign_net_value: -200_000_000, foreign_net_value_5d: -300_000_000, foreign_net_value_20d: -500_000_000, foreign_net_volume: -20_000 },
       ],
       decomposition: {
-        status: 'ready',
-        data_state: 'ready',
-        usable: true,
+        status: config.coldUnavailable ? 'unavailable' : config.stale ? 'partial' : 'ready',
+        data_state: config.coldUnavailable ? 'unavailable' : config.stale ? 'stale' : 'ready',
+        usable: !config.coldUnavailable,
         latest_completed_session: rows.at(-1).trading_date,
         anomaly_sessions: [],
         anomaly_count: 0,
@@ -357,14 +380,14 @@ const fixturePayloads = (scenarioName) => {
           '5': { foreign_net_value: 900_000_000, foreign_net_volume: 90_000 },
           '20': { foreign_net_value: 1_200_000_000, foreign_net_volume: 120_000 },
         },
-        series: rows.map((row) => ({
+        series: (config.coldUnavailable ? [] : rows).map((row) => ({
           ...row,
           value_breadth: { net_buy_count: 2, net_sell_count: 1, zero_count: 0, unavailable_count: 0 },
           value_coverage_ratio: 1,
           data_state: 'ready',
           state: 'ready',
         })),
-        latest: {
+        latest: config.coldUnavailable ? null : {
           ...rows.at(-1),
           value_breadth: { net_buy_count: 2, net_sell_count: 1, zero_count: 0, unavailable_count: 0 },
           volume_breadth: { net_buy_count: 2, net_sell_count: 1, zero_count: 0, unavailable_count: 0 },
@@ -435,6 +458,68 @@ const fixturePayloads = (scenarioName) => {
       })),
     },
   };
+
+  if (config.coldUnavailable) {
+    fixtures.currentAggregate.display_series = [];
+    fixtures.currentAggregate.display_windows = {};
+    fixtures.currentAggregate.items = [];
+    fixtures.currentAggregate.groups = [];
+    fixtures.currentAggregate.provider_session_date = null;
+    fixtures.currentAggregate.failure_class = 'authentication_failed_retryable';
+    fixtures.vn30.components = [];
+    fixtures.vn30.membership.failure_class = 'authentication_failed_retryable';
+    fixtures.vn30.decomposition.latest_completed_session = null;
+    fixtures.vn30.decomposition.windows = { '5': {}, '20': {} };
+  }
+
+  const recoveryFailure = {
+    ...fixtures.currentAggregate,
+    status: 'unavailable',
+    data_state: 'unavailable',
+    usable: false,
+    failure_class: 'authentication_failed_retryable',
+    aggregate: null,
+    display_series: [],
+    display_windows: {},
+    rankings: {},
+    items: [],
+    groups: [],
+    diagnostics: {
+      ...fixtures.currentAggregate.diagnostics,
+      membership_retained: true,
+      completed_fallback_used: true,
+      current_snapshot_retained: true,
+      negative_cache_bypassed: true,
+      recovery_status: 'failed_retryable',
+    },
+  };
+  const recoveryVn30Failure = {
+    ...fixtures.vn30,
+    status: 'unavailable',
+    usable: false,
+    data_state: 'unavailable',
+    membership: {
+      ...fixtures.vn30.membership,
+      retained: true,
+      refresh_failure_class: 'authentication_failed_retryable',
+      negative_cache_bypassed: true,
+      recovery_status: 'failed_retryable',
+    },
+    decomposition: {
+      ...fixtures.vn30.decomposition,
+      status: 'unavailable',
+      data_state: 'unavailable',
+      usable: false,
+      series: [],
+      latest: null,
+    },
+  };
+  fixtures.recovery = {
+    delay_ms: scenarioName.endsWith('_in_flight') ? 800 : 0,
+    current_aggregate: scenarioName.endsWith('_failure') ? recoveryFailure : fixtures.currentAggregate,
+    vn30: scenarioName.endsWith('_failure') ? recoveryVn30Failure : fixtures.vn30,
+  };
+  return fixtures;
 };
 
 const routeForMode = (mode, scenario) => {
@@ -448,11 +533,18 @@ const routeForMode = (mode, scenario) => {
 };
 
 const responseForRequest = (url, fixtures) => {
-  const pathname = new URL(url).pathname;
+  const parsed = new URL(url);
+  const pathname = parsed.pathname;
+  const trigger = parsed.searchParams.get('recovery_trigger');
+  const isRecovery = trigger === 'visibility_resume' || trigger === 'manual_refresh';
   if (pathname.includes('/foreign-flow/symbol/')) return fixtures.symbolHistory;
-  if (pathname.includes('/foreign-flow/current-aggregate')) return fixtures.currentAggregate;
+  if (pathname.includes('/foreign-flow/current-aggregate')) {
+    return isRecovery ? fixtures.recovery.current_aggregate : fixtures.currentAggregate;
+  }
   if (pathname.includes('/foreign-flow/current/')) return fixtures.currentSymbol;
-  if (pathname.endsWith('/foreign-flow/vn30')) return fixtures.vn30;
+  if (pathname.endsWith('/foreign-flow/vn30')) {
+    return isRecovery ? fixtures.recovery.vn30 : fixtures.vn30;
+  }
   if (pathname.endsWith('/industry-flow')) return fixtures.industry;
   if (pathname.endsWith('/foreign-flow/watchlist')) return fixtures.watchlist;
   if (pathname.endsWith('/proprietary-flow')) {
@@ -467,6 +559,46 @@ const responseForRequest = (url, fixtures) => {
 const assertScenario = async (page, scenario, mode) => {
   await page.locator('[aria-label="Foreign Flow Explorer controls"]').waitFor({ state: 'visible' });
   await page.waitForFunction(() => document.fonts?.status !== 'loading');
+  if (scenario === 'tab_hidden_existing') {
+    await page.evaluate(() => {
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        get: () => 'hidden',
+      });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    if (await page.getByTestId('current-session-flow-row').count() !== 1) {
+      throw new Error(`${scenario}: hidden transition cleared the current row`);
+    }
+  }
+  if (scenario.startsWith('visibility_recovery_')) {
+    await page.evaluate(() => {
+      let state = 'hidden';
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        get: () => state,
+      });
+      document.dispatchEvent(new Event('visibilitychange'));
+      state = 'visible';
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    if (await page.getByTestId('current-session-flow-row').count() !== 1) {
+      throw new Error(`${scenario}: visibility recovery blanked the previous current row`);
+    }
+    // Visibility recovery is intentionally background-owned; the old row,
+    // rather than a page-level loading takeover, is the in-flight indicator.
+    await page.waitForTimeout(1_000);
+  }
+  if (scenario.startsWith('force_refresh_')) {
+    await page.getByRole('button', { name: /Force Refresh/ }).click();
+    if (await page.getByTestId('current-session-flow-row').count() !== 1) {
+      throw new Error(`${scenario}: Force Refresh blanked the previous current row`);
+    }
+    if (scenario.endsWith('_in_flight')) {
+      await page.getByRole('button', { name: 'Processing...' }).waitFor();
+    }
+    await page.waitForTimeout(1_000);
+  }
   const overflow = await page.evaluate(() => ({
     document: document.documentElement.scrollWidth - document.documentElement.clientWidth,
     body: document.body.scrollWidth - document.body.clientWidth,
@@ -476,6 +608,13 @@ const assertScenario = async (page, scenario, mode) => {
   }
 
   const config = scenarioConfig(scenario);
+  if (scenario === 'cold_unavailable') {
+    await page.getByText('Overview unavailable').waitFor();
+    if (await page.getByTestId('current-session-flow-row').count()) {
+      throw new Error(`${scenario}: fabricated current row was rendered`);
+    }
+    return;
+  }
   if (mode === 'ticker' || mode === 'vn30') {
     await page.locator('#symbol-flow-table-heading').waitFor();
     const table = page.locator('section:has(#symbol-flow-table-heading)');
@@ -527,9 +666,8 @@ const assertScenario = async (page, scenario, mode) => {
 
     const chart = page.locator('[role="img"][aria-label*="phi\u00ean"]').first();
     await chart.waitFor();
-    const totalExpectedPoints = scenario === 'accepted_same_date'
-      ? completedRows(29).length
-      : completedRows(config.completedEnd).length + (config.currentUnavailable ? 0 : 1);
+    const totalExpectedPoints = completedRows(config.completedEnd).length
+      + (config.currentUnavailable ? 0 : 1);
     const expectedPoints = Math.min(20, totalExpectedPoints);
     const chartLabel = await chart.getAttribute('aria-label');
     if (!chartLabel?.includes(`${expectedPoints} phi\u00ean`)) {
@@ -562,6 +700,15 @@ const assertScenario = async (page, scenario, mode) => {
     ]) {
       if (!body.includes(label)) throw new Error(`${scenario}: missing Industry coverage label ${label}`);
     }
+    for (const label of [
+      'Membership retained',
+      'Membership refresh failure',
+      'Current completed fallback used',
+      'Current snapshot retained',
+      'Current recovery status',
+    ]) {
+      if (!body.includes(label)) throw new Error(`${scenario}: missing recovery detail ${label}`);
+    }
   } else if (mode === 'industry') {
     await page.locator('[aria-label="industry rankings"]').waitFor();
     if (scenario === 'industry_ranking_stale') {
@@ -580,6 +727,13 @@ const assertScenario = async (page, scenario, mode) => {
   } else {
     await page.getByText('Top net bought').waitFor();
     await page.locator('[role="img"][aria-label*="phi\u00ean"]').first().waitFor();
+    const body = await page.locator('body').innerText();
+    if (body.includes('Overview unavailable')) {
+      throw new Error(`${scenario}: usable completed fallback was replaced by Overview unavailable`);
+    }
+    if (!body.includes('2026-07-29')) {
+      throw new Error(`${scenario}: completed fallback date is not visible`);
+    }
     if (scenario === 'overview_current_stale') {
       const body = await page.locator('body').innerText();
       if (!body.includes(STATUS.stale)) throw new Error(`${scenario}: Overview current status was not stale`);
@@ -592,8 +746,8 @@ const run = async () => {
   const browserSelection = discoverBrowser();
   const port = await freePort();
   const baseUrl = `http://127.0.0.1:${port}`;
-  const stdoutPath = join(root, '.tmp', `r6b-vite-${process.pid}.stdout.log`);
-  const stderrPath = join(root, '.tmp', `r6b-vite-${process.pid}.stderr.log`);
+  const stdoutPath = join(root, '.tmp', `r6c-vite-${process.pid}.stdout.log`);
+  const stderrPath = join(root, '.tmp', `r6c-vite-${process.pid}.stderr.log`);
   let stdoutFd = null;
   let stderrFd = null;
   let vite = null;
@@ -635,10 +789,18 @@ const run = async () => {
       });
       let activeFixtures = fixturePayloads(SCENARIOS[0][0]);
       await page.route('**/*', async (route) => {
-        const pathname = new URL(route.request().url()).pathname;
+        const requestUrl = new URL(route.request().url());
+        const pathname = requestUrl.pathname;
         if (!pathname.startsWith('/api/')) {
           await route.continue();
           return;
+        }
+        const trigger = requestUrl.searchParams.get('recovery_trigger');
+        if (
+          activeFixtures.recovery.delay_ms
+          && (trigger === 'visibility_resume' || trigger === 'manual_refresh')
+        ) {
+          await sleep(activeFixtures.recovery.delay_ms);
         }
         await route.fulfill({
           status: 200,
@@ -649,7 +811,7 @@ const run = async () => {
       try {
         for (const [scenario, mode] of SCENARIOS) {
           if (Date.now() - startedAt > 115_000) {
-            throw new Error('R6B browser harness exceeded its 120-second total deadline.');
+            throw new Error('R6C browser harness exceeded its 120-second total deadline.');
           }
           activeFixtures = fixturePayloads(scenario);
           await page.goto(`${baseUrl}${routeForMode(mode, scenario)}`, { waitUntil: 'domcontentloaded' });

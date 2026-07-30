@@ -233,6 +233,46 @@ def test_vn30_membership_unavailable_does_not_call_symbol_history():
     assert symbol_service.calls == []
 
 
+def test_vn30_failed_membership_refresh_uses_last_known_good_cohort() -> None:
+    histories = {
+        ticker: _history(
+            ticker,
+            [_row(
+                "2026-07-20",
+                buy_value=10,
+                sell_value=5,
+                buy_volume=2,
+                sell_volume=1,
+            )],
+        )
+        for ticker in ("FPT", "HPG")
+    }
+    market_service = FakeMarketService(["FPT", "HPG"])
+    symbol_service = FakeSymbolService(histories)
+    service = VietnamForeignFlowVn30Service(
+        symbol_service,
+        market_service,
+        flow_data_service=FakeFlowDataService([_direct_row("2026-07-20")]),
+        now_fn=NOW,
+    )
+
+    initial = service.get_vn30_aggregate(top_n=1)
+    market_service.available = False
+    retained = service.get_vn30_aggregate(top_n=1, force_refresh=True)
+
+    assert initial["membership"]["retained"] is False
+    assert retained["status"] == "partial"
+    assert retained["usable"] is True
+    assert retained["membership"]["retained"] is True
+    assert retained["membership"]["member_tickers"] == ["FPT", "HPG"]
+    assert retained["membership"]["refresh_failure_class"] == (
+        "index_components_unavailable"
+    )
+    assert retained["membership"]["cache_status"] == "stale_hit"
+    assert retained["decomposition"]["series"]
+    assert len(symbol_service.calls) == 4
+
+
 def test_vn30_provider_initialization_failure_is_typed_unavailable():
     class FailingMarketService:
         def build_index_components(self, *args, **kwargs):

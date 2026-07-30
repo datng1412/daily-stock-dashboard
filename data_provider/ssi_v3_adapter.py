@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from threading import RLock
+from time import monotonic
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 from zoneinfo import ZoneInfo
 
@@ -34,10 +35,15 @@ SSI_V3_DAILY_FRESHNESS_MAX_WEEKDAYS = 5
 SSI_V3_SECURITIES_SUMMARY_PATH = "/api/v3/data/securitiesSummary"
 _VN_TIMEZONE = ZoneInfo("Asia/Ho_Chi_Minh")
 _VALID_BOARDS = {"HOSE", "HNX", "UPCOM"}
+SSI_V3_AUTH_RECOVERY_COOLDOWN_SECONDS = 30.0
 
 
 class SsiV3MalformedResponse(RuntimeError):
     """Raised internally when the pinned SDK returns an invalid public shape."""
+
+
+class SsiV3AuthenticationCooldown(RuntimeError):
+    """Raised while a retryable shared REST authentication failure cools down."""
 
 
 class SsiV3PaginationGuard(RuntimeError):
@@ -389,8 +395,18 @@ def _error_result(capability: str, exc: BaseException) -> ProviderResult:
     failure_class = "internal_error"
     status_code = getattr(exc, "status_code", None)
     class_names = {cls.__name__ for cls in type(exc).__mro__}
-    if "AuthenticationError" in class_names:
-        failure_class = "entitlement_unavailable" if status_code == 403 else "authentication_failed"
+    explicit_entitlement = any(
+        marker in str(exc or "").lower()
+        for marker in ("not entitled", "entitlement rejected", "explicit entitlement")
+    )
+    if isinstance(exc, SsiV3AuthenticationCooldown):
+        failure_class = "authentication_failed"
+    elif "AuthenticationError" in class_names:
+        failure_class = (
+            "entitlement_unavailable"
+            if status_code == 403 and explicit_entitlement
+            else "authentication_failed"
+        )
     elif "RateLimitError" in class_names or status_code == 429:
         failure_class = "rate_limited"
     elif isinstance(exc, httpx.TimeoutException):
@@ -403,7 +419,11 @@ def _error_result(capability: str, exc: BaseException) -> ProviderResult:
         failure_class = "malformed_response"
     elif "APIError" in class_names or "SSIError" in class_names:
         if status_code in {401, 403}:
-            failure_class = "entitlement_unavailable" if status_code == 403 else "authentication_failed"
+            failure_class = (
+                "entitlement_unavailable"
+                if status_code == 403 and explicit_entitlement
+                else "authentication_failed"
+            )
         elif isinstance(status_code, int) and status_code >= 500:
             failure_class = "provider_unavailable"
         else:
@@ -463,6 +483,13 @@ class SsiFastConnectV3Adapter:
         self._data: Any = None
         self._symbol_board_cache: Dict[str, str] = {}
         self._closed = False
+        self._auth_failure_cooldown_until = 0.0
+        self._auth_failure_generation = 0
+        self._auth_recovery_bypass_generation = 0
+        self._last_auth_failure_at: Optional[str] = None
+        self._last_auth_recovery_trigger: Optional[str] = None
+        self._auth_recovery_request_count = 0
+        self._auth_recovery_suppressed_count = 0
 
     @property
     def settings(self) -> SsiV3RestSettings:
@@ -482,6 +509,10 @@ class SsiFastConnectV3Adapter:
                 raise RuntimeError("SSI V3 adapter is closed")
             if self.initialized:
                 return self._auth, self._data
+            if monotonic() < self._auth_failure_cooldown_until:
+                raise SsiV3AuthenticationCooldown(
+                    "SSI V3 authentication recovery is cooling down"
+                )
             auth: Any = None
             try:
                 auth = self._auth_factory(self._settings)
@@ -498,11 +529,122 @@ class SsiFastConnectV3Adapter:
             return auth, data
 
     def _run(self, capability: str, operation: Callable[[Any, Any], ProviderResult]) -> ProviderResult:
+        auth: Any = None
         try:
             auth, data = self._ensure_clients()
-            return operation(auth, data)
+            result = operation(auth, data)
+            self._mark_authenticated_operation_success(auth)
+            return result
         except Exception as exc:
-            return _error_result(capability, exc)
+            result = _error_result(capability, exc)
+            if (
+                result.get("failure_class") == "authentication_failed"
+                and not isinstance(exc, SsiV3AuthenticationCooldown)
+            ):
+                self._mark_retryable_auth_failure(auth)
+            diagnostics = result.setdefault("diagnostics", {})
+            diagnostics.update(self.auth_recovery_diagnostics())
+            return result
+
+    def _mark_authenticated_operation_success(self, expected_auth: Any) -> None:
+        """Close a retryable authentication episode only after a provider call succeeds."""
+
+        with self._lifecycle_lock:
+            if self._auth is not expected_auth:
+                return
+            self._auth_failure_cooldown_until = 0.0
+            self._auth_failure_generation = 0
+            self._auth_recovery_bypass_generation = 0
+            self._last_auth_failure_at = None
+
+    def _mark_retryable_auth_failure(self, expected_auth: Any) -> None:
+        """Invalidate one poisoned shared client and start a bounded cooldown."""
+
+        data_to_close: Any = None
+        auth_to_close: Any = None
+        with self._lifecycle_lock:
+            if (
+                (expected_auth is None and self._auth is not None)
+                or (expected_auth is not None and self._auth is not expected_auth)
+            ):
+                return
+            data_to_close, auth_to_close = self._data, self._auth
+            self._data = None
+            self._auth = None
+            if self._auth_failure_generation == 0:
+                self._auth_failure_generation = 1
+            self._auth_failure_cooldown_until = (
+                monotonic() + SSI_V3_AUTH_RECOVERY_COOLDOWN_SECONDS
+            )
+            self._last_auth_failure_at = datetime.now().astimezone().isoformat()
+        try:
+            data_close = getattr(data_to_close, "close", None)
+            if callable(data_close):
+                data_close()
+        finally:
+            auth_close = getattr(auth_to_close, "close", None)
+            if callable(auth_close):
+                auth_close()
+
+    def request_auth_recovery(self, *, trigger: str) -> Dict[str, Any]:
+        """Permit one explicit cooldown bypass for the current failure generation."""
+
+        safe_trigger = str(trigger or "manual_refresh").strip()[:64]
+        with self._lifecycle_lock:
+            if self._closed:
+                return {
+                    "status": "closed",
+                    "recovery_scheduled": False,
+                    "negative_cache_bypassed": False,
+                }
+            if self._auth_failure_generation == 0:
+                return {
+                    "status": "not_needed",
+                    "recovery_scheduled": False,
+                    "negative_cache_bypassed": False,
+                }
+            if (
+                self._auth_recovery_bypass_generation
+                == self._auth_failure_generation
+            ):
+                self._auth_recovery_suppressed_count += 1
+                return {
+                    "status": "cooldown",
+                    "recovery_scheduled": False,
+                    "negative_cache_bypassed": False,
+                }
+            self._auth_recovery_bypass_generation = self._auth_failure_generation
+            self._auth_failure_cooldown_until = 0.0
+            self._last_auth_recovery_trigger = safe_trigger
+            self._auth_recovery_request_count += 1
+            return {
+                "status": "scheduled",
+                "recovery_scheduled": True,
+                "negative_cache_bypassed": True,
+            }
+
+    def auth_recovery_diagnostics(self) -> Dict[str, Any]:
+        with self._lifecycle_lock:
+            return {
+                "authentication_failure_retryable": bool(
+                    self._auth_failure_generation
+                ),
+                "authentication_recovery_in_flight": False,
+                "authentication_recovery_cooldown_seconds": max(
+                    0,
+                    int(self._auth_failure_cooldown_until - monotonic()),
+                ),
+                "authentication_recovery_request_count": (
+                    self._auth_recovery_request_count
+                ),
+                "authentication_recovery_suppressed_count": (
+                    self._auth_recovery_suppressed_count
+                ),
+                "last_authentication_failure_at": self._last_auth_failure_at,
+                "last_authentication_recovery_trigger": (
+                    self._last_auth_recovery_trigger
+                ),
+            }
 
     def initialize_rest_access(self) -> ProviderResult:
         """Authenticate once and create the shared REST data client.
@@ -1821,6 +1963,7 @@ class SsiFastConnectV3Adapter:
             data, auth = self._data, self._auth
             self._data = None
             self._auth = None
+            self._auth_failure_cooldown_until = 0.0
             try:
                 data_close = getattr(data, "close", None)
                 if callable(data_close):

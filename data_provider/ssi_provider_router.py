@@ -296,6 +296,18 @@ class SsiRestProviderRouter:
             force_refresh=force_refresh,
         )
 
+    def request_auth_recovery(self, *, trigger: str) -> dict[str, Any]:
+        """Delegate one bounded recovery request to the process-shared V3 adapter."""
+
+        request = getattr(self._provider, "request_auth_recovery", None)
+        if not callable(request):
+            return {
+                "status": "unsupported",
+                "recovery_scheduled": False,
+                "negative_cache_bypassed": False,
+            }
+        return dict(request(trigger=trigger))
+
     def close(self) -> None:
         if self._closed:
             return
