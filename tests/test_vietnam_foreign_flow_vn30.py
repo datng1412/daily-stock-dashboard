@@ -405,7 +405,7 @@ def test_direct_index_uses_latest_completed_session_and_excludes_current_session
     assert payload["decomposition_date"] == "2026-07-23"
 
 
-def test_all_explicit_zero_component_session_is_preserved_but_suspicious():
+def test_all_explicit_zero_component_session_is_visible_but_not_usable():
     zero_presence = {
         name: "FIELD_PRESENT_EXPLICIT_ZERO"
         for name in (
@@ -437,13 +437,101 @@ def test_all_explicit_zero_component_session_is_preserved_but_suspicious():
     payload = service.get_vn30_aggregate()
     day = payload["decomposition"]["latest"]
 
-    assert day["foreign_net_value"] == 0
+    assert day["foreign_net_value"] is None
+    assert day["foreign_buy_value"] is None
+    assert day["foreign_sell_value"] is None
     assert day["all_constituents_zero"] is True
     assert day["explicit_zero_component_count"] == 2
     assert day["suspicious_zero_session"] is True
     assert day["anomaly"] == "all_constituents_explicit_zero"
-    assert day["anomaly_status"] == "provider_backed_suspect"
+    assert day["anomaly_status"] == "unresolved_provider_anomaly"
+    assert day["data_quality"] == "anomalous"
+    assert day["usable_for_windows"] is False
+    assert day["usable_for_rankings"] is False
+    assert day["usable_for_analytics"] is False
+    assert day["valid_session"] is False
+    assert day["recovery_attempted"] is False
+    assert day["recovery_succeeded"] is False
+    assert day["repair_failure_class"] == "provider_unavailable"
     assert payload["decomposition"]["windows"]["5"]["complete"] is False
+
+
+def test_exact_date_repair_rebuilds_vn30_aggregate_and_removes_anomaly():
+    zero_presence = {
+        name: "FIELD_PRESENT_EXPLICIT_ZERO"
+        for name in (
+            "foreign_buy_value",
+            "foreign_sell_value",
+            "foreign_buy_volume",
+            "foreign_sell_volume",
+        )
+    }
+    nonzero_presence = {
+        name: "FIELD_PRESENT_NONZERO" for name in zero_presence
+    }
+
+    class RepairProvider:
+        def __init__(self):
+            self.calls = []
+
+        def get_daily_stock_price(self, ticker, **kwargs):
+            self.calls.append((ticker, kwargs))
+            exact = kwargs.get("limit") == 1 and kwargs.get("from_date") == kwargs.get("to_date")
+            if exact:
+                buy_value, sell_value, buy_volume, sell_volume = (
+                    (100, 40, 10, 4) if ticker == "FPT" else (70, 20, 7, 2)
+                )
+                presence = nonzero_presence
+            else:
+                buy_value = sell_value = buy_volume = sell_volume = 0
+                presence = zero_presence
+            return {
+                "status": "ok",
+                "rows": [{
+                    "date": "2026-06-30",
+                    "foreign_buy_value": buy_value,
+                    "foreign_sell_value": sell_value,
+                    "foreign_buy_volume": buy_volume,
+                    "foreign_sell_volume": sell_volume,
+                    "_foreign_field_presence": presence,
+                }],
+            }
+
+    provider = RepairProvider()
+    symbol_service = VietnamForeignFlowService(provider)
+    payload = VietnamForeignFlowVn30Service(
+        symbol_service,
+        FakeMarketService(["FPT", "HPG"]),
+        flow_data_service=FakeFlowDataService(
+            status="unavailable",
+            capability_status="unsupported",
+            failure_class="DIRECT_INDEX_FOREIGN_FIELDS_UNSUPPORTED",
+        ),
+        now_fn=lambda: datetime(
+            2026, 7, 1, 10, tzinfo=ZoneInfo("Asia/Ho_Chi_Minh")
+        ),
+    ).get_vn30_aggregate()
+
+    repaired = payload["decomposition"]["latest"]
+    assert repaired["trading_date"] == "2026-06-30"
+    assert repaired["foreign_buy_value"] == 170
+    assert repaired["foreign_sell_value"] == 60
+    assert repaired["foreign_net_value"] == 110
+    assert repaired["suspicious_zero_session"] is False
+    assert repaired["anomaly"] is None
+    assert repaired["valid_session"] is True
+    assert payload["decomposition"]["anomaly_sessions"] == []
+    assert payload["decomposition"]["windows"]["5"]["foreign_net_value"] == 110
+    assert [row["ticker"] for row in payload["components"]] == [
+        "FPT",
+        "HPG",
+    ]
+    exact_calls = [
+        call for call in provider.calls
+        if call[1].get("limit") == 1
+        and call[1].get("from_date") == call[1].get("to_date")
+    ]
+    assert len(exact_calls) == 2
 
 
 def test_direct_unsupported_keeps_ready_decomposition_partial_and_usable():
@@ -582,7 +670,7 @@ def test_partial_decomposition_with_one_valid_session_remains_usable():
     assert payload["usable"] is True
 
 
-def test_provider_zero_session_stays_valid_and_sets_window_anomaly_metadata():
+def test_provider_zero_session_is_excluded_from_windows_until_recovered():
     days = [
         "2026-06-26",
         "2026-06-29",
@@ -631,18 +719,93 @@ def test_provider_zero_session_stays_valid_and_sets_window_anomaly_metadata():
         row["trading_date"]: row for row in payload["decomposition"]["series"]
     }
     for day in ("2026-06-29", "2026-06-30"):
-        assert by_date[day]["foreign_net_value"] == 0
-        assert by_date[day]["valid_session"] is True
+        assert by_date[day]["foreign_net_value"] is None
+        assert by_date[day]["valid_session"] is False
+        assert by_date[day]["usable_for_windows"] is False
+        assert by_date[day]["usable_for_rankings"] is False
+        assert by_date[day]["usable_for_analytics"] is False
+        assert by_date[day]["data_quality"] == "anomalous"
         assert by_date[day]["anomaly_code"] == "all_constituents_explicit_zero"
-        assert by_date[day]["anomaly_status"] == "provider_backed_suspect"
+        assert by_date[day]["anomaly_status"] == "unresolved_provider_anomaly"
         assert by_date[day]["explicit_zero_component_count"] == 2
         assert by_date[day]["missing_field_component_count"] == 0
     window = payload["decomposition"]["windows"]["5"]
-    assert window["complete"] is True
-    assert window["valid_sessions"] == 5
+    assert window["complete"] is False
+    assert window["valid_sessions"] == 3
     assert window["contains_provider_anomaly"] is True
     assert window["anomaly_sessions"] == ["2026-06-29", "2026-06-30"]
     assert window["anomaly_count"] == 2
+
+
+def test_incomplete_component_row_is_visible_but_excluded_from_windows_and_rankings():
+    days = [
+        "2026-07-24",
+        "2026-07-27",
+        "2026-07-28",
+        "2026-07-29",
+        "2026-07-30",
+    ]
+    fpt_rows = [
+        _row(day, buy_value=10, sell_value=5, buy_volume=2, sell_volume=1)
+        for day in days
+    ]
+    fpt_rows[-1].update({
+        "foreign_buy_value": 100,
+        "foreign_sell_value": 40,
+        "foreign_net_value": 60,
+        "foreign_buy_volume": None,
+        "foreign_sell_volume": None,
+        "foreign_net_volume": None,
+        "complete": False,
+        "data_quality": "incomplete",
+        "field_presence": {
+            "foreign_buy_volume": "FIELD_ABSENT",
+            "foreign_sell_volume": "FIELD_ABSENT",
+            "foreign_buy_value": "FIELD_PRESENT_NONZERO",
+            "foreign_sell_value": "FIELD_PRESENT_NONZERO",
+        },
+    })
+    hpg_rows = [
+        _row(day, buy_value=2, sell_value=1, buy_volume=2, sell_volume=1)
+        for day in days
+    ]
+    payload = VietnamForeignFlowVn30Service(
+        FakeSymbolService({
+            "FPT": _history("FPT", fpt_rows),
+            "HPG": _history("HPG", hpg_rows),
+        }),
+        FakeMarketService(["FPT", "HPG"]),
+        flow_data_service=FakeFlowDataService(
+            status="unavailable",
+            capability_status="unsupported",
+            failure_class="DIRECT_INDEX_FOREIGN_FIELDS_UNSUPPORTED",
+        ),
+        now_fn=lambda: datetime(
+            2026, 7, 30, 10, tzinfo=ZoneInfo("Asia/Ho_Chi_Minh")
+        ),
+    ).get_vn30_aggregate()
+
+    latest = payload["decomposition"]["latest"]
+    assert latest["trading_date"] == "2026-07-30"
+    assert latest["data_state"] == "partial"
+    assert latest["foreign_net_value"] == 1
+    assert latest["missing_field_component_count"] == 1
+    window = payload["decomposition"]["windows"]["5"]
+    assert window["complete"] is False
+    assert window["partial_sessions"] == 1
+    assert window["foreign_net_value"] == 24
+    fpt = next(row for row in payload["components"] if row["ticker"] == "FPT")
+    assert fpt["data_state"] == "unavailable"
+    assert all(
+        item["ticker"] != "FPT"
+        for side in ("top_buy", "top_sell")
+        for item in payload["rankings"]["latest_net_value"][side]
+    )
+    assert all(
+        item["ticker"] != "FPT"
+        for side in ("top_buy", "top_sell")
+        for item in payload["rankings"]["net_value_5d"][side]
+    )
 
 
 def test_component_missing_canonical_date_is_unavailable_not_backfilled():

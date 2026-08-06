@@ -1,5 +1,4 @@
 import type {
-  VietnamCurrentForeignFlowDataState,
   VietnamCurrentForeignFlowDisplayRow,
   VietnamCurrentForeignFlowAggregateResponse,
   VietnamForeignFlowWatchlistItem,
@@ -22,6 +21,25 @@ const hasFlowValues = (row: ForeignFlowDisplayRow) => [
   row.foreignSellValue,
   row.foreignNetValue,
 ].some(finite);
+const isAnomalousCompleted = (row: ForeignFlowDisplayRow) => Boolean(
+  row.suspiciousZeroSession
+  || row.anomaly
+  || row.anomalyCode
+  || row.anomalyStatus === 'unresolved_provider_anomaly'
+  || row.dataQuality === 'anomalous',
+);
+const completedSuppressesCurrent = (row: ForeignFlowDisplayRow) => Boolean(
+  dateOf(row)
+  && row.complete !== false
+  && row.dataQuality !== 'incomplete'
+  && row.dataQuality !== 'anomalous'
+  && row.isPartial !== true
+  && !isAnomalousCompleted(row),
+);
+const currentDisplayEligible = (current: VietnamCurrentForeignFlowAggregateResponse) => (
+  current.usable
+  && ['ready', 'partial', 'stale', 'market_closed'].includes(current.dataState)
+);
 
 export type IndustryCurrentCapability = 'ready' | 'partial' | 'stale' | 'waiting' | 'unavailable';
 
@@ -57,9 +75,22 @@ const normalizeCompletedRow = (row: ForeignFlowDisplayRow): ForeignFlowDisplayRo
   displayStatus: selectForeignFlowDisplayStatus({
     sourceKind: 'completed',
     finality: 'completed_accepted',
+    isPartial: (
+      row.isPartial === true
+      || row.complete === false
+      || row.dataQuality === 'incomplete'
+    ),
+    isAnomalous: isAnomalousCompleted(row),
   }),
   isCurrent: false,
   isCompleted: true,
+  isPartial: (
+    row.isPartial === true
+    || row.complete === false
+    || row.dataQuality === 'incomplete'
+    || row.dataQuality === 'anomalous'
+    || isAnomalousCompleted(row)
+  ),
   isStale: false,
 });
 
@@ -111,7 +142,7 @@ export const mergeCurrentAggregateRows = (
   mode: 'vn30' | 'industry',
 ): ForeignFlowDisplayRow[] => {
   const normalizedCompleted = completedRows.map(normalizeCompletedRow);
-  if (!current?.usable) return normalizedCompleted;
+  if (!current || !currentDisplayEligible(current)) return normalizedCompleted;
   if (mode === 'vn30') {
     const currentRows = current.displaySeries
       .filter((row) => (
@@ -119,28 +150,36 @@ export const mergeCurrentAggregateRows = (
         || row.finality === 'current_session_provisional'
       ))
       .map((row) => normalizeCurrentRow(row, current));
-    const completedDates = new Set(normalizedCompleted.map(dateOf).filter(Boolean));
+    const completedDates = new Set(
+      normalizedCompleted.filter(completedSuppressesCurrent).map(dateOf).filter(Boolean),
+    );
+    const currentDates = new Set(currentRows.map(dateOf).filter(Boolean));
     return [
-      ...normalizedCompleted,
+      ...normalizedCompleted.filter((row) => (
+        !currentDates.has(dateOf(row)) || completedSuppressesCurrent(row)
+      )),
       ...currentRows.filter((row) => row.tradingDate && !completedDates.has(row.tradingDate)),
     ];
   }
-  const completedKeys = new Set(
-    normalizedCompleted.map((row) => `${dateOf(row)}:${text(row.icbCode)}`),
+  const currentDate = text(current.providerSessionDate);
+  const completedDates = new Set(
+    normalizedCompleted.filter(completedSuppressesCurrent).map(dateOf).filter(Boolean),
   );
-  const currentRows = current.groups.map((group) => normalizeCurrentRow({
-    ...group,
-    icbCode: text(group.icbCode),
-    icbName: text(group.icbName),
-    tradingDate: text(group.providerSessionDate || current.providerSessionDate),
-    currentState: (group.dataState ?? current.dataState) as VietnamCurrentForeignFlowDataState,
-  }, current));
+  const aggregate = current.aggregate ?? null;
+  if (!aggregate || !currentDate || !hasFlowValues(aggregate)) {
+    return normalizedCompleted;
+  }
+  const currentRow = normalizeCurrentRow({
+    ...aggregate,
+    tradingDate: currentDate,
+    currentState: current.dataState,
+    source: current.source,
+  }, current);
   return [
-    ...normalizedCompleted,
-    ...currentRows.filter((row) => (
-      row.tradingDate
-      && !completedKeys.has(`${row.tradingDate}:${text(row.icbCode)}`)
+    ...normalizedCompleted.filter((row) => (
+      dateOf(row) !== currentDate || completedSuppressesCurrent(row)
     )),
+    ...(completedDates.has(currentDate) ? [] : [currentRow]),
   ];
 };
 

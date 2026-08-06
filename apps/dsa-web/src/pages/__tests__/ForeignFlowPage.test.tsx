@@ -40,8 +40,8 @@ const tickerPayload = (): VietnamForeignFlowSymbolHistoryResponse => ({
   dataState: 'ready',
   freshness: 'fresh',
   rows: [
-    { tradingDate: '2026-07-20', foreignBuyValue: 0, foreignSellValue: null, foreignNetValue: null, foreignBuyVolume: 0, foreignSellVolume: null, foreignNetVolume: null },
-    { tradingDate: '2026-07-21', foreignBuyValue: 200, foreignSellValue: 50, foreignNetValue: 150, foreignBuyVolume: 20, foreignSellVolume: 5, foreignNetVolume: 15 },
+    { tradingDate: '2026-07-20', foreignBuyValue: 0, foreignSellValue: null, foreignNetValue: null, foreignBuyVolume: 0, foreignSellVolume: null, foreignNetVolume: null, dataQuality: 'incomplete', complete: false },
+    { tradingDate: '2026-07-21', foreignBuyValue: 200, foreignSellValue: 50, foreignNetValue: 150, foreignBuyVolume: 20, foreignSellVolume: 5, foreignNetVolume: 15, dataQuality: 'complete', complete: true },
   ],
   windows: {} as VietnamForeignFlowSymbolHistoryResponse['windows'],
   analytics: null,
@@ -199,20 +199,23 @@ beforeEach(() => {
     ],
   });
   proprietary.mockResolvedValue({
-    status: 'ok',
+    status: 'unavailable',
+    dataState: 'unavailable',
+    usable: false,
+    failureClass: 'proprietary_fields_unsupported',
+    capabilityStatus: 'unsupported',
     source: 'ssi_fastconnect',
     providerVersion: 'v3',
     scope: 'index',
     identifier: 'VNINDEX',
-    endpoint: 'indexSummary',
+    endpoint: 'none',
     fetchedAt: '2026-07-21T09:00:00Z',
-    cache: { status: 'miss', ageSeconds: null },
-    rows: [{
-      tradingDate: '2026-07-21',
-      proprietaryBuyValue: 300,
-      proprietarySellValue: 100,
-      proprietaryNetValue: 200,
-    }],
+    cache: { status: 'not_applicable', ageSeconds: null },
+    rows: [],
+    diagnostics: {
+      attemptedOperation: 'none',
+      reason: 'no_proven_proprietary_flow_fields',
+    },
   });
   watchlist.mockResolvedValue({
     status: 'partial',
@@ -881,22 +884,99 @@ describe('ForeignFlowPage', () => {
     expect(within(rankings).getByText(/Technology/)).toBeInTheDocument();
   });
 
-  it('offers only proven proprietary scopes and force refresh stays scoped', async () => {
+  it('uses current industry groups for rankings while the detail row stays canonical', async () => {
+    currentAggregate.mockResolvedValue({
+      status: 'ok',
+      dataState: 'ready',
+      usable: true,
+      scope: 'current_foreign_flow_aggregate',
+      universe: 'index:VN30',
+      providerSessionDate: '2026-07-22',
+      isProvisional: true,
+      finality: 'current_session_provisional',
+      source: 'SSI FastConnect V3 ForeignRoomMessage',
+      providerVersion: 'v3',
+      endpoint: 'room.{symbol}',
+      updateSemantics: 'cumulative_replacement_snapshot',
+      aggregate: {
+        foreignBuyValue: 600,
+        foreignSellValue: 300,
+        foreignNetValue: 300,
+      },
+      displaySeries: [],
+      displayWindows: {},
+      rankings: {},
+      items: [],
+      groups: [
+        {
+          icbCode: '10',
+          icbName: 'Technology',
+          foreignBuyValue: 400,
+          foreignSellValue: 200,
+          foreignNetValue: 200,
+          coverageRatio: 1,
+        },
+        {
+          icbCode: '20',
+          icbName: 'Banks',
+          foreignBuyValue: 200,
+          foreignSellValue: 100,
+          foreignNetValue: 100,
+          coverageRatio: 1,
+        },
+        {
+          icbCode: '30',
+          icbName: 'Missing Industry',
+          foreignBuyValue: null,
+          foreignSellValue: null,
+          foreignNetValue: null,
+          coverageRatio: 0,
+        },
+      ],
+      coverage: {
+        requestedSymbolCount: 2,
+        classifiedSymbolCount: 2,
+        subscribedSymbolCount: 2,
+        observedSymbolCount: 2,
+        completeVolumeCount: 2,
+        completeValueCount: 2,
+        missingSymbols: [],
+        staleSymbolCount: 0,
+      },
+    });
+
+    renderPage('/foreign-flow?mode=industry');
+
+    const rankings = await screen.findByRole('region', { name: 'industry rankings' });
+    expect(within(rankings).getByText('Technology (10)')).toBeInTheDocument();
+    expect(within(rankings).getByText('Banks (20)')).toBeInTheDocument();
+    expect(within(rankings).queryByText(/Missing Industry/)).not.toBeInTheDocument();
+    expect(within(rankings).queryByText(/unclassified/i)).not.toBeInTheDocument();
+    expect(within(rankings).getByText('350')).toBeInTheDocument();
+    const currentDetailRow = await screen.findByTestId('current-session-flow-row');
+    expect(within(currentDetailRow).getAllByText('300')).toHaveLength(2);
+  });
+
+  it('renders unsupported proprietary capability without fake zero data or repeat actions', async () => {
     renderPage();
     fireEvent.click(screen.getByRole('button', { name: 'Proprietary' }));
     await waitFor(() => expect(proprietary).toHaveBeenCalledTimes(1));
-    const select = screen.getByLabelText('Supported scope');
+    const select = screen.getByLabelText('Requested scope');
     expect(within(select).getByRole('option', { name: 'VNINDEX' })).toBeInTheDocument();
     expect(within(select).getByRole('option', { name: 'VN30' })).toBeInTheDocument();
     expect(within(select).getByRole('option', { name: 'HOSE' })).toBeInTheDocument();
     expect(within(select).queryByRole('option', { name: /ticker|industry/i })).not.toBeInTheDocument();
-    expect(screen.getAllByText('200').length).toBeGreaterThan(0);
-    fireEvent.click(screen.getByRole('button', { name: /Force Refresh/ }));
-    await waitFor(() => expect(proprietary).toHaveBeenLastCalledWith(
-      'index',
-      'VNINDEX',
-      expect.objectContaining({ forceRefresh: true }),
-    ));
+    expect(screen.getByText(/does not currently expose proven securities-company proprietary-flow fields/)).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Selected window summary' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Gross buy')).not.toBeInTheDocument();
+    expect(screen.queryByText('Quality')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Proprietary capability details')).toHaveTextContent(
+      'Capability statusunsupportedAttempted operationnoneReasonno_proven_proprietary_flow_fields',
+    );
+    expect(screen.queryByRole('heading', { name: 'Chi tiết phiên' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Force Refresh/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /Export CSV/ })).toBeDisabled();
+    expect(proprietary).toHaveBeenCalledTimes(1);
   });
 
   it('renders ticker network failure as unavailable instead of empty chart content', async () => {
@@ -913,6 +993,73 @@ describe('ForeignFlowPage', () => {
     expect(await screen.findByRole('heading', { name: 'Dữ liệu hiện không khả dụng' })).toBeInTheDocument();
     expect(screen.getByText(/Không thể kết nối tới nguồn dữ liệu/)).toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'Selected window summary' })).not.toBeInTheDocument();
+  });
+
+  it('renders missing completed fields as dashes and keeps explicit provider zero', async () => {
+    symbolHistory.mockResolvedValue({
+      ...tickerPayload(),
+      rows: [{
+        tradingDate: '2026-06-29',
+        foreignBuyValue: null,
+        foreignSellValue: null,
+        foreignNetValue: null,
+        foreignBuyVolume: null,
+        foreignSellVolume: null,
+        foreignNetVolume: null,
+        dataQuality: 'incomplete',
+        complete: false,
+        missingForeignFields: [
+          'foreign_buy_volume',
+          'foreign_sell_volume',
+          'foreign_buy_value',
+          'foreign_sell_value',
+        ],
+      }, {
+        tradingDate: '2026-06-30',
+        foreignBuyValue: 0,
+        foreignSellValue: 0,
+        foreignNetValue: 0,
+        foreignBuyVolume: 0,
+        foreignSellVolume: 0,
+        foreignNetVolume: 0,
+        dataQuality: 'complete',
+        complete: true,
+      }],
+      coverage: { requestedSessions: 20, coveredSessions: 2, complete: false },
+    });
+    currentFlow.mockResolvedValue({
+      status: 'unavailable',
+      dataState: 'unavailable',
+      usable: false,
+      source: 'SSI FastConnect V3 ForeignRoomMessage',
+      providerVersion: 'v3',
+      symbol: 'FPT',
+      tradingDate: null,
+      freshnessStatus: 'unavailable',
+      isCurrentSession: false,
+      isProvisional: false,
+      current: null,
+      streamStatus: 'unavailable',
+      streamReason: '',
+      endpoint: 'room.FPT',
+      cache: {},
+    });
+
+    renderPage('/foreign-flow?mode=ticker&ticker=FPT');
+
+    const table = await screen.findByRole('heading', { name: 'Chi tiết phiên' });
+    const section = table.closest('section');
+    expect(section).not.toBeNull();
+    const rows = within(section as HTMLElement).getAllByRole('row').slice(1);
+    const missing = rows.find((row) => within(row).queryByText('2026-06-29'));
+    const explicitZero = rows.find((row) => within(row).queryByText('2026-06-30'));
+    expect(missing).toBeDefined();
+    expect(within(missing as HTMLElement).getAllByText('—').length).toBeGreaterThanOrEqual(3);
+    expect(within(missing as HTMLElement).getByText('Thiếu dữ liệu')).toBeInTheDocument();
+    expect(within(missing as HTMLElement).queryByText('0')).not.toBeInTheDocument();
+    expect(explicitZero).toBeDefined();
+    expect(within(explicitZero as HTMLElement).getAllByText('0').length).toBeGreaterThanOrEqual(3);
+    expect(within(explicitZero as HTMLElement).getByText('Đủ')).toBeInTheDocument();
   });
 
   it('keeps successful empty ticker response distinct from provider failure', async () => {

@@ -62,14 +62,16 @@ def _free_port() -> int:
         return int(listener.getsockname()[1])
 
 
-def _deduplicated_environment() -> dict[str, str]:
+def _deduplicated_environment(*, enable_streaming: bool = False) -> dict[str, str]:
     by_lower_name: dict[str, tuple[str, str]] = {}
     for name, value in os.environ.items():
         if name.lower() in _HOST_PORT_KEYS:
             continue
         by_lower_name[name.lower()] = (name, value)
     environment = {name: value for name, value in by_lower_name.values()}
-    environment["SSI_STREAMING_REALTIME_ENABLED"] = "false"
+    environment["SSI_STREAMING_REALTIME_ENABLED"] = (
+        "true" if enable_streaming else "false"
+    )
     environment["SSI_V3_MAX_RETRIES"] = "0"
     environment["PYTHONUTF8"] = "1"
     return environment
@@ -198,6 +200,12 @@ def _summary(
     )
     items = payload.get("items") if isinstance(payload.get("items"), list) else []
     rows = payload.get("rows") if isinstance(payload.get("rows"), list) else []
+    groups = payload.get("groups") if isinstance(payload.get("groups"), list) else []
+    aggregate = (
+        payload.get("aggregate")
+        if isinstance(payload.get("aggregate"), dict)
+        else {}
+    )
     series = (
         decomposition.get("series")
         if isinstance(decomposition.get("series"), list)
@@ -226,22 +234,31 @@ def _summary(
     )
     first_item = items[0] if items and isinstance(items[0], dict) else {}
 
-    row_count = len(series) if mode == "vn30" else len(rows)
+    row_count = (
+        1 if mode == "current_industry" and aggregate else
+        len(series) if mode == "vn30" else len(rows)
+    )
     item_count = len(items)
     latest_session = (
-        decomposition.get("latest_completed_session")
+        payload.get("provider_session_date")
+        if mode == "current_industry"
+        else decomposition.get("latest_completed_session")
         if mode == "vn30"
         else first_item.get("latest_session")
         if mode == "watchlist"
         else latest_row.get("trading_date")
     )
     requested_sessions = (
-        payload.get("requested_session_count")
+        coverage.get("requested_symbol_count")
+        if mode == "current_industry"
+        else payload.get("requested_session_count")
         if mode == "watchlist"
         else requested.get("requested_limit")
     )
     actual_sessions = (
-        max(
+        coverage.get("observed_symbol_count")
+        if mode == "current_industry"
+        else max(
             (
                 int(item.get("actual_session_count") or 0)
                 for item in items
@@ -283,6 +300,37 @@ def _summary(
         for row in rows
         if isinstance(row, dict) and row.get("icb_code")
     }
+    flow_fields = (
+        "foreign_buy_volume",
+        "foreign_sell_volume",
+        "foreign_net_volume",
+        "foreign_buy_value",
+        "foreign_sell_value",
+        "foreign_net_value",
+    )
+    safe_aggregate = {
+        field: aggregate.get(field)
+        for field in flow_fields
+        if isinstance(aggregate.get(field), (int, float))
+        and not isinstance(aggregate.get(field), bool)
+    }
+    group_dates = {
+        str(group.get("provider_session_date"))
+        for group in groups
+        if isinstance(group, dict) and group.get("provider_session_date")
+    }
+    group_reconciles = None
+    if mode == "current_industry" and groups and safe_aggregate:
+        group_reconciles = all(
+            sum(
+                group.get(field)
+                for group in groups
+                if isinstance(group, dict)
+                and isinstance(group.get(field), (int, float))
+                and not isinstance(group.get(field), bool)
+            ) == safe_aggregate.get(field)
+            for field in safe_aggregate
+        )
 
     return {
         "mode": mode,
@@ -302,6 +350,11 @@ def _summary(
         "cache_state": payload.get("cache_state") or cache.get("status"),
         "source_endpoint": payload.get("source_endpoint") or payload.get("endpoint"),
         "industry_count": len(industry_codes) if mode == "industry" else None,
+        "group_count": len(groups) if mode == "current_industry" else None,
+        "aggregate": safe_aggregate if mode == "current_industry" else None,
+        "aggregate_present": bool(aggregate) if mode == "current_industry" else None,
+        "group_dates": sorted(group_dates) if mode == "current_industry" else None,
+        "groups_reconcile": group_reconciles,
         "member_count": (
             payload.get("requested_symbol_count") if mode == "industry" else None
         ),
@@ -559,6 +612,11 @@ def _parse_args() -> argparse.Namespace:
         "--completed-session",
         help="Explicit latest completed provider session in YYYY-MM-DD format.",
     )
+    parser.add_argument(
+        "--current-industry",
+        action="store_true",
+        help="Enable SSI streaming and inspect only the current VN30 Industry aggregate.",
+    )
     return parser.parse_args()
 
 
@@ -580,7 +638,7 @@ def main() -> int:
         process = subprocess.Popen(
             _child_command(port),
             cwd=ROOT,
-            env=_deduplicated_environment(),
+            env=_deduplicated_environment(enable_streaming=args.current_industry),
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -630,6 +688,24 @@ def main() -> int:
             stderr_capture=stderr_capture,
         ):
             return 2
+        if args.current_industry:
+            path = (
+                "/api/v1/stocks/vn/foreign-flow/current-aggregate?"
+                "scope=vn30&include_industries=true&force_refresh=true&"
+                "recovery_trigger=manual_refresh"
+            )
+            for attempt in range(2):
+                summary = _request_once(
+                    port=port,
+                    mode="current_industry",
+                    path=path,
+                    deadline=deadline,
+                )
+                if summary.get("usable") and summary.get("aggregate_present"):
+                    break
+                if attempt == 0 and time.monotonic() < deadline - 20:
+                    time.sleep(10)
+            return 0
         initial_summaries: list[dict[str, Any]] = []
         for mode, path, method, body in _routes(completed_session)[:2]:
             initial_summaries.append(_request_once(

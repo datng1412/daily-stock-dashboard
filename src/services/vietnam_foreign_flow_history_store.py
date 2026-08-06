@@ -35,8 +35,16 @@ _ROW_FIELDS = {
     "trading_date",
     *_ROW_NUMERIC_FIELDS,
     "field_presence",
+    "missing_foreign_fields",
+    "data_quality",
+    "complete",
+    "usable_for_volume_net",
+    "usable_for_value_net",
     "suspicious_zero_session",
     "anomaly_code",
+    "repair_source",
+    "repair_status",
+    "repair_verified_at",
 }
 
 
@@ -101,9 +109,61 @@ def _safe_row(value: Any) -> Optional[Dict[str, Any]]:
     row: Dict[str, Any] = {"trading_date": trading_date}
     for field in _ROW_NUMERIC_FIELDS:
         row[field] = _safe_int(value.get(field))
-    if not any(row[field] is not None for field in _ROW_NUMERIC_FIELDS):
+    field_presence = _safe_field_presence(value.get("field_presence"))
+    missing_presence_states = {
+        "FIELD_ABSENT",
+        "FIELD_NULL",
+        "PARSE_FAILURE",
+        "PROVIDER_ROW_MISSING",
+    }
+    for field in (
+        "foreign_buy_volume",
+        "foreign_sell_volume",
+        "foreign_buy_value",
+        "foreign_sell_value",
+    ):
+        if field_presence.get(field) in missing_presence_states:
+            row[field] = None
+    if (
+        row["foreign_buy_volume"] is None
+        or row["foreign_sell_volume"] is None
+    ):
+        row["foreign_net_volume"] = None
+    if (
+        row["foreign_buy_value"] is None
+        or row["foreign_sell_value"] is None
+    ):
+        row["foreign_net_value"] = None
+    if (
+        not any(row[field] is not None for field in _ROW_NUMERIC_FIELDS)
+        and not field_presence
+    ):
         return None
-    row["field_presence"] = _safe_field_presence(value.get("field_presence"))
+    row["field_presence"] = field_presence
+    derived_missing_fields = [
+        field
+        for field in (
+            "foreign_buy_volume",
+            "foreign_sell_volume",
+            "foreign_buy_value",
+            "foreign_sell_value",
+        )
+        if row[field] is None
+    ]
+    row["missing_foreign_fields"] = derived_missing_fields
+    derived_complete = not derived_missing_fields
+    row["data_quality"] = (
+        "complete" if derived_complete else "incomplete"
+    )
+    row["complete"] = derived_complete
+    row["usable_for_volume_net"] = (
+        row["foreign_buy_volume"] is not None
+        and row["foreign_sell_volume"] is not None
+    )
+    row["usable_for_value_net"] = (
+        row["foreign_buy_value"] is not None
+        and row["foreign_sell_value"] is not None
+    )
     row["suspicious_zero_session"] = value.get("suspicious_zero_session") is True
     anomaly_code = value.get("anomaly_code")
     row["anomaly_code"] = (
@@ -111,6 +171,11 @@ def _safe_row(value: Any) -> Optional[Dict[str, Any]]:
         if isinstance(anomaly_code, str) and 0 < len(anomaly_code) <= 80
         else None
     )
+    for field in ("repair_source", "repair_status", "repair_verified_at"):
+        raw = value.get(field)
+        row[field] = (
+            raw if isinstance(raw, str) and 0 < len(raw) <= 96 else None
+        )
     return row
 
 
@@ -220,6 +285,8 @@ class VietnamForeignFlowHistoryStore:
                     coverage_metadata={
                         "field_presence": deepcopy(row.get("field_presence") or {}),
                         "suspicious_zero_session": row.get("suspicious_zero_session") is True,
+                        "repair_source": row.get("repair_source"),
+                        "repair_status": row.get("repair_status"),
                     },
                 )
         return {

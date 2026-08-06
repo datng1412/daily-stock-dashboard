@@ -1006,6 +1006,42 @@ Stream-backed responses may add `stream_state`, `last_event_at`, `event_age_seco
 
 The broad `/api/v1/stocks/vn/observability` response adds `streaming.scope=process_local`, deterministic `overall_state`, one sanitized logical channel-cohort transport summary, per-context state for X/X-QUOTE/X-TRADE/F/R/MI, schedule-derived Vietnam session context, and a multi-worker limitation note. The endpoint is read-only/no-store and does not expose full subscriptions, payloads, URLs, exception text, headers, or credentials. `/intraday-chart/health` remains unchanged and contains only REST SSI IntradayOhlc worker health.
 
+## Completed foreign-flow field integrity
+
+Completed SSI DailyStockPrice field presence is authoritative. `FIELD_ABSENT`,
+`FIELD_NULL`, `PARSE_FAILURE`, and `PROVIDER_ROW_MISSING` remain `null` even
+when an SDK/model default is numeric zero. `FIELD_PRESENT_EXPLICIT_ZERO`
+remains zero. A completed row with any missing gross foreign-flow field is
+`data_quality=incomplete`, `complete=false`, and displays `Thiếu dữ liệu`;
+it remains inspectable but is excluded from complete-only charts, rolling
+windows, analytics, and rankings. CSV output leaves missing values empty.
+
+An all-constituent explicit-zero VN30 aggregate is a separate cross-symbol
+anomaly, not a legitimate completed zero session. It triggers a bounded
+exact-date `securitiesSummary?symbol=` verification through the shared SSI V3
+REST provider. Same-date evidence uses deterministic strength ordering, and a
+weaker broad-range zero or partial row cannot overwrite a stronger repaired or
+durably accepted row. Successful exact-date repairs persist atomically with
+repair provenance. If SSI still returns zero, no row, null fields, or an error,
+the aggregate remains `data_quality=anomalous`, `complete=false`, and
+`valid_session=false`, with all `usable_for_*` flags false and public aggregate
+numbers null. Repair results are single-flight, cooldown-bound, and permit one
+manual Force Refresh bypass per cooldown episode.
+
+The Proprietary mode is an explicit unsupported capability until an official
+SSI contract exposes proven securities-company own-account flow fields.
+`indexSummary` is market-index summary data and must not be reinterpreted as
+proprietary flow. Unsupported responses contain no rows, coverage, chart,
+ranking, or export data.
+
+Industry current detail uses the canonical `current-aggregate.aggregate` row.
+`current-aggregate.groups` remains the group-level ranking source. Both use the
+same provider session date and same-date accepted completed data has precedence,
+so the detail series contains exactly one row per session. Only a complete,
+non-anomalous accepted row suppresses current data; an incomplete or anomalous
+same-date shell does not. Usable `ready`, `partial`, `stale`, and
+`market_closed` current aggregates remain display eligible and provisional.
+
 ## Continuous foreign flow through the latest session
 
 Completed foreign-flow history is an accepted SSI DailyStockPrice set keyed by symbol and `trading_date`. Accepted dates are monotonic within the running process: a later response that is empty, partial, differently ranged, failed, or older cannot delete a newer accepted row. Symbol-history responses may expose `response_regressive`, `preserved_latest_completed`, `provider_latest_returned`, and `cached_latest_retained`; a regressive response is stale/partial evidence, not a replacement for accepted history.

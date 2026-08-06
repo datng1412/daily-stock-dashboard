@@ -1,4 +1,4 @@
-"""Provider-backed SSI V3 foreign, proprietary, and ICB-industry flow data."""
+"""Provider-backed SSI V3 foreign/industry flow and capability truth."""
 
 from __future__ import annotations
 
@@ -27,10 +27,6 @@ _MAX_SYMBOLS = 30
 _MAX_RANGE_DAYS = 120
 _SOURCE = "ssi_fastconnect"
 _PROVIDER_VERSION = "v3"
-_PROP_CACHE_LOCK = RLock()
-_PROP_CACHE: Dict[Tuple[str, str, Optional[str]], Tuple[float, Dict[str, Any]]] = {}
-_PROP_COMPLETED_TTL_SECONDS = 3_600
-_PROP_CURRENT_TTL_SECONDS = 60
 _DIRECT_INDEX_CAPABILITY = "foreign_flow_direct_index"
 _DIRECT_INDEX_CAPABILITY_SCHEMA_VERSION = "v1"
 _DIRECT_INDEX_CAPABILITY_TTL_SECONDS = 86_400
@@ -58,7 +54,7 @@ class ForeignFlowRequestValidationError(ValueError):
 
 
 def reset_vietnam_flow_data_capability_cache() -> None:
-    """Reset the process-local direct-index capability cache for tests."""
+    """Reset process-local foreign-flow capability caches for tests."""
     with _DIRECT_INDEX_CAPABILITY_LOCK:
         _DIRECT_INDEX_CAPABILITY_CACHE.clear()
     with _CURRENT_UNIVERSE_LOCK:
@@ -916,7 +912,11 @@ class VietnamFlowDataService:
                     "source_kind": "completed",
                     "source": "SSI DailyStockPrice",
                     "finality": "completed_accepted",
-                    "status": "Đủ",
+                    "status": (
+                        "Đủ"
+                        if row.get("complete") is not False
+                        else "Thiếu dữ liệu"
+                    ),
                     "is_current": False,
                     "is_completed": True,
                     "is_partial": any(
@@ -1057,7 +1057,11 @@ class VietnamFlowDataService:
                     if has_current and data_state == "stale"
                     else "Đang diễn ra"
                     if has_current
-                    else "Đủ"
+                    else (
+                        "Đủ"
+                        if not aggregate_row["is_partial"]
+                        else "Thiếu dữ liệu"
+                    )
                 ),
                 "is_current": has_current,
                 "is_completed": not has_current,
@@ -1098,6 +1102,27 @@ class VietnamFlowDataService:
                     ),
                     **group,
                 })
+        group_reconciliation: Dict[str, Optional[bool]] = {}
+        for field in (
+            "foreign_buy_volume",
+            "foreign_sell_volume",
+            "foreign_buy_value",
+            "foreign_sell_value",
+        ):
+            values = [
+                _number(group, field)
+                for group in groups
+                if _number(group, field) is not None
+            ]
+            group_total = sum(values) if values else None
+            aggregate_value = _number(aggregate, field)
+            group_reconciliation[field] = (
+                group_total == aggregate_value
+                if len(classifications) == len(ticker_list)
+                and group_total is not None
+                and aggregate_value is not None
+                else None
+            )
         rankings: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
         for size in (1, 5, 20, 60):
             candidates = []
@@ -1204,6 +1229,16 @@ class VietnamFlowDataService:
                     "subscription_added_count", 0
                 ),
                 "mixed_provider_session_dates_excluded": observed_dates[:-1],
+                "industry_group_count": len(groups),
+                "industry_group_requested_count": sum(
+                    int(group.get("requested_count") or 0)
+                    for group in groups
+                ),
+                "industry_group_observed_count": sum(
+                    int(group.get("observed_count") or 0)
+                    for group in groups
+                ),
+                "industry_group_reconciliation": group_reconciliation,
                 "fallback_used": bool(
                     display_usable
                     and (
@@ -1375,112 +1410,34 @@ class VietnamFlowDataService:
         normalized_identifier = str(identifier or "").strip().upper()
         if normalized_scope not in {"board", "index"}:
             raise ValueError("scope must be board or index")
-        requested_dates = (
+        if bool(from_date) != bool(to_date):
+            raise ValueError("from_date and to_date must be provided together")
+        if from_date and to_date:
             self._date_range(from_date, to_date)
-            if from_date and to_date
-            else [None]
-            if not from_date and not to_date
-            else (_ for _ in ()).throw(ValueError("from_date and to_date must be provided together"))
-        )
-        if self._provider is None:
-            return {
-                "status": "unavailable",
-                "scope": normalized_scope,
-                "identifier": normalized_identifier,
-                "rows": [],
-                "source": _SOURCE,
-                "provider_version": _PROVIDER_VERSION,
-                "endpoint": "indexSummary",
-                "unsupported_scopes": ["symbol", "icb_industry"],
-                "fetched_at": datetime.now(tz=ZoneInfo("UTC")).isoformat(),
-                "cache": {"status": "unavailable", "age_seconds": None},
-                "diagnostics": {"failure_class": "provider_not_configured"},
-            }
-        rows: List[Dict[str, Any]] = []
-        failures = 0
-        provider_operations = 0
-        cache_hits = 0
-        for requested_date in requested_dates:
-            cache_key = (normalized_scope, normalized_identifier, requested_date)
-            now = time.monotonic()
-            with _PROP_CACHE_LOCK:
-                cached = _PROP_CACHE.get(cache_key)
-                if cached and cached[0] > now and not force_refresh:
-                    result = deepcopy(cached[1])
-                    cache_hits += 1
-                else:
-                    result = None
-                    if cached:
-                        _PROP_CACHE.pop(cache_key, None)
-            if result is None:
-                result = (
-                    self._provider.get_index_summary(
-                        normalized_identifier,
-                        index_code=normalized_identifier,
-                        trading_date=requested_date,
-                    )
-                    if normalized_scope == "index"
-                    else self._provider.get_market_summary(
-                        normalized_scope,
-                        normalized_identifier,
-                        trading_date=requested_date,
-                    )
-                )
-                provider_operations += 1
-                if result.get("status") == "ok" and result.get("rows"):
-                    ttl = (
-                        _PROP_COMPLETED_TTL_SECONDS
-                        if requested_date is not None
-                        and requested_date < datetime.now(_VN_TZ).date().isoformat()
-                        else _PROP_CURRENT_TTL_SECONDS
-                    )
-                    with _PROP_CACHE_LOCK:
-                        _PROP_CACHE[cache_key] = (now + ttl, deepcopy(result))
-            if result.get("status") != "ok":
-                failures += 1
-                continue
-            for raw in result.get("rows") or []:
-                if not isinstance(raw, Mapping):
-                    continue
-                row = dict(raw)
-                provider_date = row.get("date")
-                today = datetime.now(_VN_TZ).date().isoformat()
-                row.update({
-                    "scope": normalized_scope,
-                    "identifier": normalized_identifier,
-                    "trading_date": provider_date,
-                    "freshness_status": (
-                        "current_session_provisional"
-                        if provider_date == today
-                        else "latest_completed_session"
-                        if provider_date
-                        else "unavailable"
-                    ),
-                })
-                rows.append(row)
-        by_date = {str(row.get("trading_date")): row for row in rows if row.get("trading_date")}
-        ordered = [by_date[key] for key in sorted(by_date)]
         return {
-            "status": "ok" if ordered and failures == 0 else ("partial" if ordered else "unavailable"),
+            "status": "unavailable",
+            "data_state": "unavailable",
+            "usable": False,
+            "failure_class": "proprietary_fields_unsupported",
+            "capability_status": "unsupported",
             "scope": normalized_scope,
             "identifier": normalized_identifier,
-            "rows": ordered,
+            "rows": [],
             "source": _SOURCE,
             "provider_version": _PROVIDER_VERSION,
-            "endpoint": "indexSummary",
+            "endpoint": "none",
             "unsupported_scopes": ["symbol", "icb_industry"],
             "requested_from_date": from_date,
             "requested_to_date": to_date,
             "fetched_at": datetime.now(tz=ZoneInfo("UTC")).isoformat(),
-            "cache": {
-                "status": "refresh" if force_refresh else "hit" if cache_hits and provider_operations == 0 else "partial_hit" if cache_hits else "miss",
-                "age_seconds": None,
-            },
+            "cache": {"status": "not_applicable", "age_seconds": None},
             "diagnostics": {
-                "provider_operation_count": provider_operations,
-                "cache_hit_count": cache_hits,
-                "failed_operation_count": failures,
-                "requested_provider_dates": len(requested_dates),
+                "failure_class": "proprietary_fields_unsupported",
+                "capability_status": "unsupported",
+                "attempted_operation": "none",
+                "reason": "no_proven_proprietary_flow_fields",
+                "provider_operation_count": 0,
+                "index_summary_reinterpreted": False,
             },
         }
 

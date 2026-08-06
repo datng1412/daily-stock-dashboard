@@ -13,6 +13,13 @@ Conventions:
 
 ## Symbol foreign-flow analytics
 
+- `data_quality=anomalous` on a VN30 daily aggregate identifies an unresolved
+  all-constituent explicit-zero session. Its aggregate numeric values are null,
+  `complete` and `valid_session` are false, and `usable_for_windows`,
+  `usable_for_rankings`, and `usable_for_analytics` are false.
+- `recovery_attempted`, `recovery_succeeded`, `repair_status`, `repair_source`,
+  `repair_failure_class`, and `repair_diagnostics` describe bounded exact-date
+  verification without exposing credentials or raw provider payloads.
 - `analytics.max_sessions`: fixed bound `60`; `observed_sessions` counts accepted provider rows used.
 - `analytics.value` / `analytics.volume`: independent net-value (VND) and net-volume (shares) families.
 - `windows.{5,20,60}`: requested/observed/covered counts, completeness, dates, net sum, average, average absolute net, sign counts, and deterministic most-recent extrema.
@@ -107,6 +114,10 @@ These fields are additive Phase 4.8A metrics. They live under watchlist `indicat
 | `foreign_buy_value` | Latest available daily foreign buy value | SSI DailyStockPrice `ForeignBuyValTotal` | VND | yes | source-specific | Foreign flow | Direct provider field, normalized without scaling; never reconstructed from volume and price. |
 | `foreign_sell_value` | Latest available daily foreign sell value | SSI DailyStockPrice `ForeignSellValTotal` | VND | yes | source-specific | Foreign flow | Direct provider field, normalized without scaling; never reconstructed from volume and price. |
 | `foreign_net_value` | Latest available daily foreign net value | SSI DailyStockPrice `NetBuySellVal` | VND | yes | source-specific | Foreign flow | Direct provider net is preferred; compatible buy minus sell is the only fallback arithmetic. Null is not zero. |
+| `field_presence` | Raw foreign-flow field-presence audit before typed SDK defaults | SSI DailyStockPrice normalization | object | no | source-specific | Foreign flow diagnostics | Presence states are authoritative. Absent, null, parse-failed, or provider-row-missing fields remain null; explicit provider zero remains zero. |
+| `missing_foreign_fields` | Gross foreign-flow fields absent from an accepted completed row | Derived from `field_presence` and normalized values | field names | no, empty list when complete | no | Foreign flow quality detail | Does not synthesize a value for a missing field. |
+| `data_quality` / `complete` | Whether all four gross foreign-flow fields are usable | Service-derived | enum / boolean | no | no | Foreign flow status | Complete rows are eligible for complete-only charts, windows, analytics, and rankings. Incomplete rows remain inspectable and display `Thiếu dữ liệu`. |
+| `usable_for_volume_net` / `usable_for_value_net` | Whether the corresponding gross buy/sell pair supports a net value | Service-derived | boolean | no | no | Foreign flow diagnostics | Net is null unless its pair is complete or a compatible direct provider net is present under the same field-integrity rules. |
 | `foreign_net_5d_latest_available` | Five trading-row net foreign volume summary | SSI DailyStockPrice recent rows | shares | yes | no | Selected ticker foreign flow | StockClock rolling sum over the latest 5 distinct dated rows with usable `foreign_net_volume`; includes the latest provider date when usable; null below 5 rows. |
 | `foreign_net_20d_latest_available` | Twenty trading-row net foreign volume summary | SSI DailyStockPrice recent rows | shares | yes | no | Selected ticker foreign flow | StockClock rolling sum over the latest 20 distinct dated rows with usable `foreign_net_volume`; includes the latest provider date when usable; null below 20 rows. |
 | `foreign_net_history_count` | Count of recent DailyStockPrice rows with usable foreign net volume | SSI DailyStockPrice recent rows | rows | no | no | Selected ticker foreign flow/diagnostics | Counts provider-returned rows, not an exchange trading calendar. |

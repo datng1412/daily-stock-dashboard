@@ -55,15 +55,22 @@ class FakeFlowService:
 
     def proprietary_flow(self, scope, identifier, **kwargs):
         return {
-            "status": "ok",
+            "status": "unavailable",
+            "data_state": "unavailable",
+            "usable": False,
+            "failure_class": "proprietary_fields_unsupported",
+            "capability_status": "unsupported",
             "scope": scope,
             "identifier": identifier,
-            "rows": [{"proprietary_net_value": 0}],
+            "rows": [],
             "source": "ssi_fastconnect",
             "provider_version": "v3",
-            "endpoint": "indexSummary",
+            "endpoint": "none",
             "unsupported_scopes": ["symbol", "icb_industry"],
-            "diagnostics": {},
+            "diagnostics": {
+                "attempted_operation": "none",
+                "reason": "no_proven_proprietary_flow_fields",
+            },
         }
 
     def industry_history(self, **kwargs):
@@ -120,7 +127,9 @@ def test_flow_routes_preserve_zero_partial_coverage_and_blocked_stream(monkeypat
     assert current.json()["data_state"] == "waiting"
     assert current.json()["stream_status"] == "subscribed_no_event"
     assert current.json()["diagnostics"]["provisional_appended_to_history"] is False
-    assert prop.json()["rows"][0]["proprietary_net_value"] == 0
+    assert prop.json()["capability_status"] == "unsupported"
+    assert prop.json()["rows"] == []
+    assert prop.json()["endpoint"] == "none"
     assert industry.json()["rows"][0]["matched_value"] == 0
     assert industry.json()["proprietary_industry_status"] == "unsupported"
 

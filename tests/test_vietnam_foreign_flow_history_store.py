@@ -176,6 +176,74 @@ def test_symbol_scoping_and_bounds_are_preserved(tmp_path):
     assert loaded["FPT"]["2026-07-28"]["foreign_net_value"] == 80
 
 
+def test_restore_reapplies_authoritative_missing_presence_before_zero_defaults(tmp_path):
+    path = tmp_path / "accepted.json"
+    store = VietnamForeignFlowHistoryStore(path)
+    missing_presence = {
+        name: "FIELD_ABSENT"
+        for name in (
+            "foreign_buy_volume",
+            "foreign_sell_volume",
+            "foreign_buy_value",
+            "foreign_sell_value",
+        )
+    }
+    assert store.write({
+        "FPT": {
+            "2026-06-30": {
+                "trading_date": "2026-06-30",
+                "foreign_buy_volume": 0,
+                "foreign_sell_volume": 0,
+                "foreign_net_volume": 0,
+                "foreign_buy_value": 0,
+                "foreign_sell_value": 0,
+                "foreign_net_value": 0,
+                "field_presence": missing_presence,
+            }
+        }
+    })
+
+    restored = store.load()["FPT"]["2026-06-30"]
+    assert restored["foreign_buy_value"] is None
+    assert restored["foreign_sell_value"] is None
+    assert restored["foreign_net_value"] is None
+    assert restored["foreign_net_volume"] is None
+    assert restored["data_quality"] == "incomplete"
+    assert restored["complete"] is False
+
+
+def test_exact_date_repair_metadata_and_values_survive_store_reload(tmp_path):
+    path = tmp_path / "accepted.json"
+    store = VietnamForeignFlowHistoryStore(path)
+    row = {
+        "trading_date": "2026-06-29",
+        "foreign_buy_volume": 140,
+        "foreign_sell_volume": 40,
+        "foreign_net_volume": 100,
+        "foreign_buy_value": 1_400,
+        "foreign_sell_value": 400,
+        "foreign_net_value": 1_000,
+        "field_presence": {
+            "foreign_buy_volume": "FIELD_PRESENT_NONZERO",
+            "foreign_sell_volume": "FIELD_PRESENT_NONZERO",
+            "foreign_buy_value": "FIELD_PRESENT_NONZERO",
+            "foreign_sell_value": "FIELD_PRESENT_NONZERO",
+        },
+        "repair_source": "exact_date_daily_stock_price",
+        "repair_status": "recovered",
+        "repair_verified_at": "2026-08-04T02:00:00+00:00",
+    }
+
+    assert store.write({"FPT": {"2026-06-29": row}})
+    restored = VietnamForeignFlowHistoryStore(path).load()["FPT"]["2026-06-29"]
+
+    assert restored["foreign_net_value"] == 1_000
+    assert restored["complete"] is True
+    assert restored["repair_source"] == "exact_date_daily_stock_price"
+    assert restored["repair_status"] == "recovered"
+    assert restored["repair_verified_at"] == "2026-08-04T02:00:00+00:00"
+
+
 def test_corrupt_and_schema_mismatched_files_fail_closed(tmp_path):
     path = tmp_path / "accepted.json"
     path.write_text("{bad-json", encoding="utf-8")

@@ -92,15 +92,98 @@ def test_window_summaries_are_latest_session_based_null_aware_and_incomplete():
     assert window["complete"] is False
     assert window["start_date"] == "2026-06-01"
     assert window["end_date"] == "2026-06-04"
-    assert window["cumulative_foreign_net_volume"] == 8
-    assert window["cumulative_foreign_net_value"] == 26
-    assert window["net_volume_contributing_sessions"] == 3
-    assert window["null_net_volume_sessions"] == 1
-    assert window["positive_net_volume_sessions"] == 1
+    assert window["cumulative_foreign_net_volume"] == -2
+    assert window["cumulative_foreign_net_value"] == 30
+    assert window["net_volume_contributing_sessions"] == 2
+    assert window["net_value_contributing_sessions"] == 2
+    assert window["null_net_volume_sessions"] == 2
+    assert window["positive_net_volume_sessions"] == 0
     assert window["negative_net_volume_sessions"] == 1
     assert window["zero_net_volume_sessions"] == 1
     assert payload["windows"]["20"]["complete"] is False
     assert payload["windows"]["60"]["complete"] is False
+
+
+def test_authoritative_field_presence_keeps_missing_distinct_from_explicit_zero():
+    missing_presence = {
+        name: "FIELD_ABSENT"
+        for name in (
+            "foreign_buy_volume",
+            "foreign_sell_volume",
+            "foreign_buy_value",
+            "foreign_sell_value",
+        )
+    }
+    explicit_zero_presence = {
+        name: "FIELD_PRESENT_EXPLICIT_ZERO"
+        for name in missing_presence
+    }
+    fetcher = _Fetcher([{
+        "status": "ok",
+        "rows": [
+            _row(
+                28,
+                foreign_buy_volume=0,
+                foreign_sell_volume=0,
+                foreign_net_volume=0,
+                foreign_buy_value=0,
+                foreign_sell_value=0,
+                foreign_net_value=0,
+                _foreign_field_presence=explicit_zero_presence,
+            ),
+            _row(
+                29,
+                foreign_buy_volume=0,
+                foreign_sell_volume=0,
+                foreign_net_volume=0,
+                foreign_buy_value=0,
+                foreign_sell_value=0,
+                foreign_net_value=0,
+                _foreign_field_presence=missing_presence,
+            ),
+            _row(
+                30,
+                foreign_buy_volume=0,
+                foreign_sell_volume=0,
+                foreign_net_volume=0,
+                foreign_buy_value=0,
+                foreign_sell_value=0,
+                foreign_net_value=0,
+                _foreign_field_presence=missing_presence,
+            ),
+        ],
+    }])
+
+    payload = VietnamForeignFlowService(fetcher).get_symbol_history("FPT", limit=3)
+    explicit_zero, missing_29, missing_30 = payload["rows"]
+
+    for missing, expected_date in (
+        (missing_29, "2026-06-29"),
+        (missing_30, "2026-06-30"),
+    ):
+        assert missing["trading_date"] == expected_date
+        assert missing["foreign_buy_volume"] is None
+        assert missing["foreign_sell_volume"] is None
+        assert missing["foreign_net_volume"] is None
+        assert missing["foreign_buy_value"] is None
+        assert missing["foreign_sell_value"] is None
+        assert missing["foreign_net_value"] is None
+        assert missing["data_quality"] == "incomplete"
+        assert missing["missing_foreign_fields"] == [
+            "foreign_buy_volume",
+            "foreign_sell_volume",
+            "foreign_buy_value",
+            "foreign_sell_value",
+        ]
+        assert missing["complete"] is False
+    assert explicit_zero["trading_date"] == "2026-06-28"
+    assert explicit_zero["foreign_net_volume"] == 0
+    assert explicit_zero["foreign_net_value"] == 0
+    assert explicit_zero["data_quality"] == "complete"
+    assert explicit_zero["complete"] is True
+    assert payload["coverage"]["complete"] is False
+    assert payload["windows"]["5"]["cumulative_foreign_net_value"] == 0
+    assert payload["windows"]["5"]["net_value_contributing_sessions"] == 1
 
 
 def test_recent_mode_expands_calendar_lookback_and_caps_rows():
@@ -279,3 +362,196 @@ def test_identical_force_and_normal_requests_share_one_provider_fetch():
     assert calls == 1
     assert metrics["coalesced_waiters"] == 1
     assert metrics["active_in_flight"] == 0
+
+
+def test_exact_date_repair_replaces_zero_and_survives_weaker_refresh():
+    explicit_zero = {
+        name: "FIELD_PRESENT_EXPLICIT_ZERO"
+        for name in (
+            "foreign_buy_volume",
+            "foreign_sell_volume",
+            "foreign_buy_value",
+            "foreign_sell_value",
+        )
+    }
+    explicit_nonzero = {
+        name: "FIELD_PRESENT_NONZERO"
+        for name in explicit_zero
+    }
+    zero = _row(
+        29,
+        foreign_buy_volume=0,
+        foreign_sell_volume=0,
+        foreign_net_volume=0,
+        foreign_buy_value=0,
+        foreign_sell_value=0,
+        foreign_net_value=0,
+        _foreign_field_presence=explicit_zero,
+    )
+    repaired = _row(
+        29,
+        foreign_buy_volume=140,
+        foreign_sell_volume=40,
+        foreign_net_volume=100,
+        foreign_buy_value=1_400,
+        foreign_sell_value=400,
+        foreign_net_value=1_000,
+        _foreign_field_presence=explicit_nonzero,
+    )
+    fetcher = _Fetcher([
+        {"status": "ok", "rows": [zero]},
+        {"status": "ok", "rows": [repaired]},
+        {"status": "ok", "rows": [zero]},
+    ])
+    service = VietnamForeignFlowService(fetcher)
+
+    first = service.get_symbol_history(
+        "FPT", from_date="2026-06-29", to_date="2026-06-29"
+    )
+    repair = service.repair_suspicious_session(["FPT"], "2026-06-29")
+    refreshed = service.get_symbol_history(
+        "FPT",
+        from_date="2026-06-29",
+        to_date="2026-06-29",
+        force_refresh=True,
+    )
+
+    assert first["rows"][0]["foreign_net_value"] == 0
+    assert repair["status"] == "recovered"
+    assert repair["replacement_count"] == 1
+    assert refreshed["rows"][0]["foreign_net_value"] == 1_000
+    assert refreshed["rows"][0]["repair_source"] == "exact_date_daily_stock_price"
+    assert len(fetcher.calls) == 3
+
+
+def test_unresolved_zero_repair_is_cooled_down_with_one_manual_bypass():
+    explicit_zero = {
+        name: "FIELD_PRESENT_EXPLICIT_ZERO"
+        for name in (
+            "foreign_buy_volume",
+            "foreign_sell_volume",
+            "foreign_buy_value",
+            "foreign_sell_value",
+        )
+    }
+    zero = _row(
+        30,
+        foreign_buy_volume=0,
+        foreign_sell_volume=0,
+        foreign_net_volume=0,
+        foreign_buy_value=0,
+        foreign_sell_value=0,
+        foreign_net_value=0,
+        _foreign_field_presence=explicit_zero,
+    )
+    fetcher = _Fetcher([{"status": "ok", "rows": [zero]}])
+    service = VietnamForeignFlowService(fetcher)
+
+    first = service.repair_suspicious_session(["FPT"], "2026-06-30")
+    cached = service.repair_suspicious_session(["FPT"], "2026-06-30")
+    bypass = service.repair_suspicious_session(
+        ["FPT"], "2026-06-30", force_refresh=True
+    )
+    cached_after_bypass = service.repair_suspicious_session(
+        ["FPT"], "2026-06-30", force_refresh=True
+    )
+
+    assert first["status"] == "unresolved"
+    assert first["explicit_zero_row_count"] == 1
+    assert cached["repair_cache_state"] == "cooldown"
+    assert bypass["status"] == "unresolved"
+    assert cached_after_bypass["repair_cache_state"] == "cooldown"
+    assert len(fetcher.calls) == 2
+    metrics = vietnam_foreign_flow_observability_snapshot()
+    assert metrics["anomaly_repair_provider_calls"] == 2
+    assert metrics["anomaly_repair_cache_hits"] == 2
+    assert metrics["anomaly_repair_manual_bypasses"] == 1
+
+
+def test_exact_date_zero_cannot_replace_stronger_existing_nonzero_row():
+    explicit_nonzero = {
+        name: "FIELD_PRESENT_NONZERO"
+        for name in (
+            "foreign_buy_volume",
+            "foreign_sell_volume",
+            "foreign_buy_value",
+            "foreign_sell_value",
+        )
+    }
+    explicit_zero = {
+        name: "FIELD_PRESENT_EXPLICIT_ZERO" for name in explicit_nonzero
+    }
+    existing = _row(29, _foreign_field_presence=explicit_nonzero)
+    zero = _row(
+        29,
+        foreign_buy_volume=0,
+        foreign_sell_volume=0,
+        foreign_net_volume=0,
+        foreign_buy_value=0,
+        foreign_sell_value=0,
+        foreign_net_value=0,
+        _foreign_field_presence=explicit_zero,
+    )
+    fetcher = _Fetcher([
+        {"status": "ok", "rows": [existing]},
+        {"status": "ok", "rows": [zero]},
+    ])
+    service = VietnamForeignFlowService(fetcher)
+
+    service.get_symbol_history(
+        "FPT", from_date="2026-06-29", to_date="2026-06-29"
+    )
+    repair = service.repair_suspicious_session(["FPT"], "2026-06-29")
+    preserved = service.get_symbol_history(
+        "FPT", from_date="2026-06-29", to_date="2026-06-29"
+    )
+
+    assert repair["status"] == "recovered"
+    assert repair["replacement_count"] == 0
+    assert preserved["rows"][0]["foreign_net_value"] == existing["foreign_net_value"]
+    assert preserved["rows"][0].get("repair_source") is None
+
+
+def test_concurrent_exact_date_repairs_are_single_flight():
+    started = Event()
+    release = Event()
+    calls_lock = Lock()
+    calls = 0
+    presence = {
+        name: "FIELD_PRESENT_NONZERO"
+        for name in (
+            "foreign_buy_volume",
+            "foreign_sell_volume",
+            "foreign_buy_value",
+            "foreign_sell_value",
+        )
+    }
+
+    class BlockingRepairFetcher:
+        def get_daily_stock_price(self, ticker, **kwargs):
+            nonlocal calls
+            with calls_lock:
+                calls += 1
+            started.set()
+            assert release.wait(timeout=3)
+            return {
+                "status": "ok",
+                "rows": [_row(29, _foreign_field_presence=presence)],
+            }
+
+    service = VietnamForeignFlowService(BlockingRepairFetcher())
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        owner = executor.submit(
+            service.repair_suspicious_session, ["FPT"], "2026-06-29"
+        )
+        assert started.wait(timeout=3)
+        waiter = executor.submit(
+            service.repair_suspicious_session, ["FPT"], "2026-06-29"
+        )
+        release.set()
+        assert owner.result(timeout=3)["status"] == "recovered"
+        assert waiter.result(timeout=3)["status"] == "recovered"
+
+    assert calls == 1
+    metrics = vietnam_foreign_flow_observability_snapshot()
+    assert metrics["anomaly_repair_coalesced_waiters"] == 1

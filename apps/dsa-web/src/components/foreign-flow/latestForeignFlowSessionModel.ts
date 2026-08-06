@@ -2,6 +2,8 @@ import type { VietnamCurrentForeignFlowResponse } from '../../api/stocks';
 
 export type LatestForeignFlowStatus =
   | 'Đủ'
+  | 'Thiếu dữ liệu'
+  | 'Bất thường dữ liệu'
   | 'Đang diễn ra'
   | 'Tạm tính'
   | 'Chờ dữ liệu'
@@ -13,6 +15,7 @@ export type ForeignFlowFinality = 'current_session_provisional' | 'completed_acc
 export type ForeignFlowCurrentState =
   | 'waiting'
   | 'ready'
+  | 'partial'
   | 'stale'
   | 'market_closed'
   | 'unavailable'
@@ -25,6 +28,8 @@ export const selectForeignFlowDisplayStatus = ({
   providerStatus,
   usable,
   hasUsableValues,
+  isPartial,
+  isAnomalous,
 }: {
   sourceKind?: ForeignFlowSourceKind | null;
   finality?: ForeignFlowFinality | null;
@@ -32,8 +37,13 @@ export const selectForeignFlowDisplayStatus = ({
   providerStatus?: string | null;
   usable?: boolean;
   hasUsableValues?: boolean;
+  isPartial?: boolean;
+  isAnomalous?: boolean;
 }): LatestForeignFlowStatus => {
-  if (sourceKind === 'completed' || finality === 'completed_accepted') return 'Đủ';
+  if (sourceKind === 'completed' || finality === 'completed_accepted') {
+    if (isAnomalous) return 'Bất thường dữ liệu';
+    return isPartial ? 'Thiếu dữ liệu' : 'Đủ';
+  }
 
   const current = sourceKind === 'current' || finality === 'current_session_provisional';
   if (!current) return 'Không khả dụng';
@@ -49,7 +59,7 @@ export const selectForeignFlowDisplayStatus = ({
     return usable || hasUsableValues ? 'Mất kết nối' : 'Không khả dụng';
   }
   if (currentState === 'unavailable') return 'Không khả dụng';
-  if (currentState === 'ready' || (
+  if (currentState === 'ready' || currentState === 'partial' || (
     currentState === null
     && /connected|cache_hit/i.test(providerStatus ?? '')
   )) {
@@ -67,6 +77,13 @@ export type CompletedForeignFlowSessionInput = {
   foreignBuyValue?: number | null;
   foreignSellValue?: number | null;
   foreignNetValue?: number | null;
+  dataQuality?: 'complete' | 'incomplete' | string | null;
+  complete?: boolean | null;
+  isPartial?: boolean | null;
+  suspiciousZeroSession?: boolean | null;
+  anomaly?: string | null;
+  anomalyCode?: string | null;
+  anomalyStatus?: string | null;
 };
 
 export type LatestForeignFlowSessionView = {
@@ -144,7 +161,22 @@ const completedView = (
   sourceKind: 'completed',
   source: completed.source || 'SSI DailyStockPrice',
   finality: 'completed_accepted',
-  status: 'Đủ',
+  status: selectForeignFlowDisplayStatus({
+    sourceKind: 'completed',
+    finality: 'completed_accepted',
+    isPartial: (
+      completed.isPartial === true
+      || completed.complete === false
+      || completed.dataQuality === 'incomplete'
+    ),
+    isAnomalous: Boolean(
+      completed.suspiciousZeroSession
+      || completed.anomaly
+      || completed.anomalyCode
+      || completed.anomalyStatus === 'unresolved_provider_anomaly'
+      || completed.dataQuality === 'anomalous'
+    ),
+  }),
   foreignBuyVolume: finiteOrNull(completed.foreignBuyVolume),
   foreignSellVolume: finiteOrNull(completed.foreignSellVolume),
   foreignNetVolume: finiteOrNull(completed.foreignNetVolume),

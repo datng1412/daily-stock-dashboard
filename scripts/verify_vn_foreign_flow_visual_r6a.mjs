@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* Bounded system-browser acceptance for R6C idle/authentication recovery. */
+/* Bounded system-browser acceptance for R6E historical repair and Industry current flow. */
 
 import { createRequire } from 'node:module';
 import { createServer } from 'node:net';
@@ -25,23 +25,25 @@ const VIEWPORTS = [
   { name: 'mobile', width: 390, height: 844 },
 ];
 const SCENARIOS = [
-  ['initial_ready', 'vn30'],
-  ['tab_hidden_existing', 'vn30'],
-  ['idle_auth_completed_fallback', 'overview'],
-  ['idle_auth_stale_current', 'vn30'],
-  ['membership_refresh_retained', 'details'],
-  ['negative_cache_preserved', 'vn30'],
-  ['visibility_recovery_in_flight', 'vn30'],
-  ['visibility_recovery_failure', 'vn30'],
-  ['visibility_recovery_success', 'vn30'],
-  ['force_refresh_in_flight', 'vn30'],
-  ['force_refresh_failure', 'vn30'],
-  ['force_refresh_success', 'vn30'],
-  ['cold_unavailable', 'overview'],
-  ['twenty_accepted_stale_current', 'vn30'],
+  ['historical_unresolved_anomaly', 'vn30'],
+  ['historical_repaired', 'vn30'],
+  ['historical_repair_in_flight', 'vn30'],
+  ['historical_repair_cooldown', 'vn30'],
+  ['historical_manual_retry', 'vn30'],
+  ['historical_normal_explicit_zero', 'ticker'],
+  ['industry_current_ready', 'industry'],
+  ['industry_current_partial', 'industry'],
+  ['industry_current_stale', 'industry'],
+  ['industry_current_closed', 'industry'],
+  ['industry_completed_only', 'industry'],
+  ['industry_same_date_accepted', 'industry'],
+  ['industry_same_date_suspicious', 'industry'],
+  ['industry_twenty_plus_current', 'industry'],
 ];
 const STATUS = {
   completed: '\u0110\u1ee7',
+  incomplete: 'Thi\u1ebfu d\u1eef li\u1ec7u',
+  anomalous: 'B\u1ea5t th\u01b0\u1eddng d\u1eef li\u1ec7u',
   active: '\u0110ang di\u1ec5n ra',
   stale: 'M\u1ea5t k\u1ebft n\u1ed1i',
   closed: 'T\u1ea1m t\u00ednh',
@@ -99,11 +101,11 @@ const waitForVite = async (url, deadline) => {
 };
 
 const completedRows = (endDay) => {
-  const count = endDay === 28 ? 20 : 21;
+  const count = 20;
   return Array.from({ length: count }, (_, index) => {
     const day = endDay - count + index + 1;
     return {
-      trading_date: `2026-07-${String(day).padStart(2, '0')}`,
+      trading_date: `2026-06-${String(day).padStart(2, '0')}`,
       foreign_buy_value: 1_000_000_000 + index * 10_000_000,
       foreign_sell_value: 700_000_000 + index * 5_000_000,
       foreign_net_value: 300_000_000 + index * 5_000_000,
@@ -115,26 +117,135 @@ const completedRows = (endDay) => {
 };
 
 const scenarioConfig = (name) => ({
-  completedEnd: 29,
-  currentDate: '2026-07-30',
-  currentUnavailable: ['idle_auth_completed_fallback', 'cold_unavailable'].includes(name),
-  coldUnavailable: name === 'cold_unavailable',
-  postClose: false,
-  explicitZero: false,
-  stale: [
-    'idle_auth_stale_current',
-    'membership_refresh_retained',
-    'negative_cache_preserved',
-    'twenty_accepted_stale_current',
+  completedEnd: 30,
+  currentDate: ['industry_same_date_accepted', 'industry_same_date_suspicious'].includes(name)
+    ? '2026-06-30'
+    : '2026-07-30',
+  currentUnavailable: [
+    'historical_unresolved_anomaly',
+    'historical_repaired',
+    'historical_repair_in_flight',
+    'historical_repair_cooldown',
+    'historical_manual_retry',
+    'historical_normal_explicit_zero',
+    'industry_completed_only',
   ].includes(name),
-  partialCoverage: false,
+  coldUnavailable: false,
+  postClose: name === 'industry_current_closed',
+  explicitZero: name === 'historical_normal_explicit_zero',
+  stale: name === 'industry_current_stale',
+  partialCoverage: name === 'industry_current_partial',
   missingValues: false,
   regressive: false,
+  historicalMissing: false,
+  historicalExplicitZero: name === 'historical_normal_explicit_zero',
+  historicalAnomaly: [
+    'historical_unresolved_anomaly',
+    'historical_repair_in_flight',
+    'historical_repair_cooldown',
+    'historical_manual_retry',
+  ].includes(name),
+  historicalRepaired: name === 'historical_repaired',
 });
 
 const fixturePayloads = (scenarioName) => {
   const config = scenarioConfig(scenarioName);
   const rows = completedRows(config.completedEnd);
+  const missingRowIndexes = scenarioName === 'chart_missing_gap'
+    ? [10]
+    : config.historicalMissing
+      ? [18, 19]
+      : [];
+  missingRowIndexes.forEach((index) => {
+    rows[index] = {
+      ...rows[index],
+      foreign_buy_value: null,
+      foreign_sell_value: null,
+      foreign_net_value: null,
+      foreign_buy_volume: null,
+      foreign_sell_volume: null,
+      foreign_net_volume: null,
+      field_presence: {
+        foreign_buy_value: 'FIELD_ABSENT',
+        foreign_sell_value: 'FIELD_ABSENT',
+        foreign_buy_volume: 'FIELD_ABSENT',
+        foreign_sell_volume: 'FIELD_ABSENT',
+      },
+      missing_foreign_fields: [
+        'foreign_buy_volume',
+        'foreign_sell_volume',
+        'foreign_buy_value',
+        'foreign_sell_value',
+      ],
+      data_quality: 'incomplete',
+      complete: false,
+    };
+  });
+  if (config.historicalExplicitZero) {
+    rows[19] = {
+      ...rows[19],
+      foreign_buy_value: 0,
+      foreign_sell_value: 0,
+      foreign_net_value: 0,
+      foreign_buy_volume: 0,
+      foreign_sell_volume: 0,
+      foreign_net_volume: 0,
+      field_presence: {
+        foreign_buy_value: 'FIELD_PRESENT_EXPLICIT_ZERO',
+        foreign_sell_value: 'FIELD_PRESENT_EXPLICIT_ZERO',
+        foreign_buy_volume: 'FIELD_PRESENT_EXPLICIT_ZERO',
+        foreign_sell_volume: 'FIELD_PRESENT_EXPLICIT_ZERO',
+      },
+      missing_foreign_fields: [],
+      data_quality: 'complete',
+      complete: true,
+    };
+  }
+  if (config.historicalAnomaly) {
+    rows[19] = {
+      ...rows[19],
+      foreign_buy_value: null,
+      foreign_sell_value: null,
+      foreign_net_value: null,
+      foreign_buy_volume: null,
+      foreign_sell_volume: null,
+      foreign_net_volume: null,
+      field_presence: {
+        foreign_buy_value: 'FIELD_PRESENT_EXPLICIT_ZERO',
+        foreign_sell_value: 'FIELD_PRESENT_EXPLICIT_ZERO',
+        foreign_buy_volume: 'FIELD_PRESENT_EXPLICIT_ZERO',
+        foreign_sell_volume: 'FIELD_PRESENT_EXPLICIT_ZERO',
+      },
+      data_quality: 'anomalous',
+      complete: false,
+      suspicious_zero_session: true,
+      anomaly: 'all_constituents_explicit_zero',
+      anomaly_code: 'all_constituents_explicit_zero',
+      anomaly_status: 'unresolved_provider_anomaly',
+      valid_session: false,
+      usable_for_windows: false,
+      usable_for_rankings: false,
+      usable_for_analytics: false,
+      recovery_attempted: true,
+      recovery_succeeded: false,
+      repair_status: scenarioName === 'historical_repair_in_flight'
+        ? 'in_flight'
+        : scenarioName === 'historical_repair_cooldown'
+          ? 'cooldown'
+          : 'unresolved',
+    };
+  }
+  if (config.historicalRepaired) {
+    rows[19] = {
+      ...rows[19],
+      repair_source: 'exact_date_daily_stock_price',
+      repair_status: 'recovered',
+      recovery_attempted: true,
+      recovery_succeeded: true,
+      complete: true,
+      data_quality: 'complete',
+    };
+  }
   const current = config.currentUnavailable ? null : {
     foreign_buy_value: config.explicitZero ? 0 : 1_500_000_000,
     foreign_sell_value: config.explicitZero ? 0 : config.missingValues ? null : 900_000_000,
@@ -152,9 +263,21 @@ const fixturePayloads = (scenarioName) => {
     source_kind: 'current',
     source: 'SSI FastConnect V3 ForeignRoomMessage aggregate',
     finality: 'current_session_provisional',
-    current_state: config.postClose ? 'market_closed' : config.stale ? 'stale' : 'ready',
+    current_state: config.postClose
+      ? 'market_closed'
+      : config.stale
+        ? 'stale'
+        : config.partialCoverage
+          ? 'partial'
+          : 'ready',
     provider_status: config.stale ? 'disconnected' : 'connected',
-    status: config.postClose ? 'market_closed' : config.stale ? 'stale' : 'ready',
+    status: config.postClose
+      ? 'market_closed'
+      : config.stale
+        ? 'stale'
+        : config.partialCoverage
+          ? 'partial'
+          : 'ready',
     is_provisional: true,
     is_current: true,
     is_completed: false,
@@ -171,10 +294,15 @@ const fixturePayloads = (scenarioName) => {
       source_kind: 'completed',
       source: 'SSI DailyStockPrice current-membership aggregate',
       finality: 'completed_accepted',
-      status: 'ready',
+      status: row.data_quality === 'anomalous'
+        ? STATUS.anomalous
+        : row.complete === false
+          ? STATUS.incomplete
+          : STATUS.completed,
       is_provisional: false,
       is_current: false,
       is_completed: true,
+      is_partial: row.complete === false,
       is_stale: false,
     })),
     ...(displayCurrent && displayCurrent.trading_date > rows.at(-1).trading_date
@@ -223,7 +351,13 @@ const fixturePayloads = (scenarioName) => {
     currentSymbol: {
       status: current ? 'ok' : 'unavailable',
       data_state: current
-        ? (config.postClose ? 'market_closed' : config.stale ? 'stale' : 'ready')
+        ? config.postClose
+          ? 'market_closed'
+          : config.stale
+            ? 'stale'
+            : config.partialCoverage
+              ? 'partial'
+              : 'ready'
         : 'waiting',
       usable: Boolean(current),
       source: 'SSI FastConnect V3 ForeignRoomMessage',
@@ -243,7 +377,15 @@ const fixturePayloads = (scenarioName) => {
     },
     currentAggregate: {
       status: current ? (observed < 3 ? 'partial' : 'ok') : 'unavailable',
-      data_state: current ? (config.postClose ? 'market_closed' : config.stale ? 'stale' : 'ready') : 'waiting',
+      data_state: current
+        ? config.postClose
+          ? 'market_closed'
+          : config.stale
+            ? 'stale'
+            : config.partialCoverage
+              ? 'partial'
+              : 'ready'
+        : 'waiting',
       usable: Boolean(current),
       scope: 'current_foreign_flow_aggregate',
       universe: 'index:VN30',
@@ -318,11 +460,35 @@ const fixturePayloads = (scenarioName) => {
           icb_code: '10',
           icb_name: 'Technology',
           provider_session_date: config.currentDate,
-          ...(aggregate || {}),
-          requested_count: 3,
-          observed_count: observed,
-          complete_value_count: completeValues,
-          complete_volume_count: observed,
+          foreign_buy_value: current ? 900_000_000 : null,
+          foreign_sell_value: current ? 300_000_000 : null,
+          foreign_net_value: current ? 600_000_000 : null,
+          foreign_buy_volume: current ? 90_000 : null,
+          foreign_sell_volume: current ? 30_000 : null,
+          foreign_net_volume: current ? 60_000 : null,
+          requested_count: 2,
+          observed_count: current ? Math.min(observed, 2) : 0,
+          complete_value_count: current ? Math.min(completeValues, 2) : 0,
+          complete_volume_count: current ? Math.min(observed, 2) : 0,
+          is_partial: config.partialCoverage || config.missingValues,
+          is_stale: config.stale,
+          data_state: config.stale ? 'stale' : 'ready',
+          usable: Boolean(current),
+        },
+        {
+          icb_code: '20',
+          icb_name: 'Banks',
+          provider_session_date: config.currentDate,
+          foreign_buy_value: current ? 600_000_000 : null,
+          foreign_sell_value: current ? 600_000_000 : null,
+          foreign_net_value: current ? 0 : null,
+          foreign_buy_volume: current ? 60_000 : null,
+          foreign_sell_volume: current ? 60_000 : null,
+          foreign_net_volume: current ? 0 : null,
+          requested_count: 1,
+          observed_count: current && observed > 2 ? 1 : 0,
+          complete_value_count: current && completeValues > 2 ? 1 : 0,
+          complete_volume_count: current && observed > 2 ? 1 : 0,
           is_partial: config.partialCoverage || config.missingValues,
           is_stale: config.stale,
           data_state: config.stale ? 'stale' : 'ready',
@@ -374,8 +540,8 @@ const fixturePayloads = (scenarioName) => {
         data_state: config.coldUnavailable ? 'unavailable' : config.stale ? 'stale' : 'ready',
         usable: !config.coldUnavailable,
         latest_completed_session: rows.at(-1).trading_date,
-        anomaly_sessions: [],
-        anomaly_count: 0,
+        anomaly_sessions: config.historicalAnomaly ? [rows.at(-1).trading_date] : [],
+        anomaly_count: config.historicalAnomaly ? 1 : 0,
         windows: {
           '5': { foreign_net_value: 900_000_000, foreign_net_volume: 90_000 },
           '20': { foreign_net_value: 1_200_000_000, foreign_net_volume: 120_000 },
@@ -384,16 +550,16 @@ const fixturePayloads = (scenarioName) => {
           ...row,
           value_breadth: { net_buy_count: 2, net_sell_count: 1, zero_count: 0, unavailable_count: 0 },
           value_coverage_ratio: 1,
-          data_state: 'ready',
-          state: 'ready',
+          data_state: row.data_quality === 'anomalous' ? 'partial' : 'ready',
+          state: row.data_quality === 'anomalous' ? 'partial' : 'ready',
         })),
         latest: config.coldUnavailable ? null : {
           ...rows.at(-1),
           value_breadth: { net_buy_count: 2, net_sell_count: 1, zero_count: 0, unavailable_count: 0 },
           volume_breadth: { net_buy_count: 2, net_sell_count: 1, zero_count: 0, unavailable_count: 0 },
           value_coverage_ratio: 1,
-          data_state: 'ready',
-          state: 'ready',
+          data_state: rows.at(-1).data_quality === 'anomalous' ? 'partial' : 'ready',
+          state: rows.at(-1).data_quality === 'anomalous' ? 'partial' : 'ready',
         },
       },
       canonical: { capability_status: 'unsupported', diagnostics: {}, windows: { '5': {}, '20': {} }, series: [] },
@@ -412,8 +578,21 @@ const fixturePayloads = (scenarioName) => {
       cache: { status: 'hit', age_seconds: 1 },
       current_session_status: 'CURRENT_FOREIGN_STREAM_BLOCKED_SEMANTICS',
       rows: [
-        { trading_date: rows.at(-1).trading_date, icb_code: '10', icb_name: 'Technology', foreign_buy_value: 700_000_000, foreign_sell_value: 100_000_000, foreign_net_value: 600_000_000, matched_value: 2_000_000_000, coverage_ratio: config.partialCoverage ? 0.5 : 1 },
-        { trading_date: rows.at(-1).trading_date, icb_code: '20', icb_name: 'Banks', foreign_buy_value: 100_000_000, foreign_sell_value: 300_000_000, foreign_net_value: -200_000_000, matched_value: 4_000_000_000, coverage_ratio: 1 },
+        ...rows.flatMap((row) => [
+          { trading_date: row.trading_date, icb_code: '10', icb_name: 'Technology', foreign_buy_value: 700_000_000, foreign_sell_value: 100_000_000, foreign_net_value: 600_000_000, matched_value: 2_000_000_000, coverage_ratio: config.partialCoverage ? 0.5 : 1 },
+          { trading_date: row.trading_date, icb_code: '20', icb_name: 'Banks', foreign_buy_value: 100_000_000, foreign_sell_value: 300_000_000, foreign_net_value: -200_000_000, matched_value: 4_000_000_000, coverage_ratio: 1 },
+        ]),
+        ...(scenarioName === 'ranking_excludes_missing' ? [{
+          trading_date: rows.at(-1).trading_date,
+          icb_code: '30',
+          icb_name: 'Missing Industry',
+          foreign_buy_value: null,
+          foreign_sell_value: null,
+          foreign_net_value: null,
+          data_quality: 'incomplete',
+          complete: false,
+          coverage_ratio: 0,
+        }] : []),
       ],
     },
     watchlist: {
@@ -458,6 +637,24 @@ const fixturePayloads = (scenarioName) => {
       })),
     },
   };
+
+  if (scenarioName === 'industry_same_date_suspicious') {
+    fixtures.industry.rows = fixtures.industry.rows.map((row) => (
+      row.trading_date === config.currentDate
+        ? {
+          ...row,
+          foreign_buy_value: null,
+          foreign_sell_value: null,
+          foreign_net_value: null,
+          complete: false,
+          data_quality: 'anomalous',
+          suspicious_zero_session: true,
+          anomaly: 'all_constituents_explicit_zero',
+          anomaly_status: 'unresolved_provider_anomaly',
+        }
+        : row
+    ));
+  }
 
   if (config.coldUnavailable) {
     fixtures.currentAggregate.display_series = [];
@@ -528,6 +725,7 @@ const routeForMode = (mode, scenario) => {
   if (mode === 'vn30') return `/foreign-flow?mode=vn30&${suffix}`;
   if (mode === 'industry') return `/foreign-flow?mode=industry&${suffix}`;
   if (mode === 'watchlist') return `/foreign-flow?mode=watchlist&tickers=FPT,SSI,HPG&${suffix}`;
+  if (mode === 'proprietary') return `/foreign-flow?mode=proprietary&${suffix}`;
   if (mode === 'details') return `/foreign-flow?mode=details&${suffix}`;
   return `/foreign-flow?${suffix}`;
 };
@@ -548,7 +746,24 @@ const responseForRequest = (url, fixtures) => {
   if (pathname.endsWith('/industry-flow')) return fixtures.industry;
   if (pathname.endsWith('/foreign-flow/watchlist')) return fixtures.watchlist;
   if (pathname.endsWith('/proprietary-flow')) {
-    return { status: 'ok', data_state: 'ready', usable: true, rows: [], source: 'ssi_fastconnect', provider_version: 'v3', cache: { status: 'hit' } };
+    return {
+      status: 'unavailable',
+      data_state: 'unavailable',
+      usable: false,
+      failure_class: 'proprietary_fields_unsupported',
+      capability_status: 'unsupported',
+      rows: [],
+      source: 'ssi_fastconnect',
+      provider_version: 'v3',
+      endpoint: 'none',
+      fetched_at: '2026-07-30T03:00:00Z',
+      cache: { status: 'not_applicable', age_seconds: null },
+      diagnostics: {
+        attempted_operation: 'none',
+        reason: 'no_proven_proprietary_flow_fields',
+        index_summary_reinterpreted: false,
+      },
+    };
   }
   if (pathname.endsWith('/index-components')) {
     return { status: 'ok', data_state: 'ready', tickers: ['FPT', 'SSI', 'HPG'], components: [{ ticker: 'FPT' }, { ticker: 'SSI' }, { ticker: 'HPG' }] };
@@ -559,6 +774,13 @@ const responseForRequest = (url, fixtures) => {
 const assertScenario = async (page, scenario, mode) => {
   await page.locator('[aria-label="Foreign Flow Explorer controls"]').waitFor({ state: 'visible' });
   await page.waitForFunction(() => document.fonts?.status !== 'loading');
+  if (scenario === 'industry_twenty_plus_current') {
+    await page.getByRole('button', { name: '60D' }).click();
+  }
+  if (scenario === 'historical_manual_retry') {
+    await page.getByRole('button', { name: /Force Refresh/ }).click();
+    await page.waitForTimeout(250);
+  }
   if (scenario === 'tab_hidden_existing') {
     await page.evaluate(() => {
       Object.defineProperty(document, 'visibilityState', {
@@ -622,7 +844,8 @@ const assertScenario = async (page, scenario, mode) => {
     const trimmed = dates.map((value) => value.trim()).filter(Boolean);
     if (new Set(trimmed).size !== trimmed.length) throw new Error(`${scenario}: duplicate date row`);
 
-    const hasCurrentRow = await page.getByTestId('current-session-flow-row').count();
+    const currentTableRow = table.getByTestId('current-session-flow-row');
+    const hasCurrentRow = await currentTableRow.count();
     if (scenario === 'accepted_same_date' && hasCurrentRow !== 0) {
       throw new Error(`${scenario}: accepted same-date row did not suppress provisional row`);
     }
@@ -631,20 +854,24 @@ const assertScenario = async (page, scenario, mode) => {
     }
     if (config.currentUnavailable) {
       const content = await page.locator('body').innerText();
-      if (!content.includes('2026-07-29')) throw new Error(`${scenario}: completed history disappeared`);
-      const currentText = hasCurrentRow ? await page.getByTestId('current-session-flow-row').innerText() : '';
+      if (!content.includes(completedRows(config.completedEnd).at(-1)?.trading_date ?? '2026-06-30')) {
+        throw new Error(`${scenario}: completed history disappeared`);
+      }
+      const currentText = hasCurrentRow ? await currentTableRow.innerText() : '';
       if (/\b0\b/.test(currentText)) throw new Error(`${scenario}: missing current values were rendered as zero`);
     }
-    if (scenario === 'explicit_zero_current') {
-      const currentText = await page.getByTestId('current-session-flow-row').innerText();
-      if (!/\b0\b/.test(currentText)) throw new Error(`${scenario}: explicit provider zero was not visible`);
+    if (scenario === 'historical_normal_explicit_zero') {
+      const zeroRow = await table.locator('tbody tr', { hasText: '2026-06-30' }).innerText();
+      if (!zeroRow.includes(STATUS.completed) || !/\t0(?:\t|$)/.test(zeroRow)) {
+        throw new Error(`${scenario}: normal explicit provider zero was not preserved`);
+      }
     }
     if (scenario === 'missing_current_values') {
-      const currentText = await page.getByTestId('current-session-flow-row').innerText();
+      const currentText = await currentTableRow.innerText();
       if (!currentText.includes('\u2014')) throw new Error(`${scenario}: missing values were not rendered as dashes`);
     }
-    if (hasCurrentRow) {
-      const currentText = await page.getByTestId('current-session-flow-row').innerText();
+    if (hasCurrentRow && !config.currentUnavailable) {
+      const currentText = await currentTableRow.innerText();
       const expectedStatus = config.postClose ? STATUS.closed : config.stale ? STATUS.stale : STATUS.active;
       if (!currentText.includes(expectedStatus)) {
         throw new Error(`${scenario}: expected ${expectedStatus}, received ${currentText}`);
@@ -656,6 +883,45 @@ const assertScenario = async (page, scenario, mode) => {
     const tableText = await table.locator('tbody').innerText();
     if (!tableText.includes(STATUS.completed)) {
       throw new Error(`${scenario}: accepted rows lost completed status`);
+    }
+    if (['historical_missing_fields', 'historical_mixed_quality'].includes(scenario)) {
+      const missingDates = scenario === 'historical_missing_fields'
+        ? ['2026-06-29', '2026-06-30']
+        : ['2026-06-29'];
+      for (const missingDate of missingDates) {
+        const rowText = await table.locator('tbody tr', { hasText: missingDate }).innerText();
+        if (!rowText.includes('\u2014') || !rowText.includes(STATUS.incomplete)) {
+          throw new Error(`${scenario}: ${missingDate} did not preserve missing/incomplete display`);
+        }
+        if (/\t0(?:\t|$)/.test(rowText)) {
+          throw new Error(`${scenario}: ${missingDate} rendered a missing field as zero`);
+        }
+      }
+    }
+    if (config.historicalAnomaly) {
+      const anomalyRow = await table.locator('tbody tr', { hasText: '2026-06-30' }).innerText();
+      if (!anomalyRow.includes(STATUS.anomalous) || !anomalyRow.includes('\u2014')) {
+        throw new Error(`${scenario}: unresolved anomaly was not rendered truthfully`);
+      }
+      if (/\t0(?:\t|$)/.test(anomalyRow)) {
+        throw new Error(`${scenario}: unresolved anomaly rendered a fake zero`);
+      }
+    }
+    if (config.historicalRepaired) {
+      const repairedRow = await table.locator('tbody tr', { hasText: '2026-06-30' }).innerText();
+      if (!repairedRow.includes(STATUS.completed) || !repairedRow.includes('1.19')) {
+        throw new Error(`${scenario}: repaired historical values were not visible`);
+      }
+    }
+    if (scenario === 'chart_missing_gap') {
+      const gapRow = await table.locator('tbody tr', { hasText: '2026-06-21' }).innerText();
+      if (!gapRow.includes('\u2014') || !gapRow.includes(STATUS.incomplete)) {
+        throw new Error(`${scenario}: chart-gap source row did not remain missing`);
+      }
+      const chartCopy = await page.locator('#symbol-flow-chart-heading').locator('..').innerText();
+      if (!chartCopy.includes('kh\u00f4ng \u0111\u01b0\u1ee3c thay b\u1eb1ng 0')) {
+        throw new Error(`${scenario}: chart did not explain the missing-data gap`);
+      }
     }
     const tableScroller = table.locator('.overflow-x-auto');
     const scrollerUsable = await tableScroller.evaluate((element) => {
@@ -711,9 +977,72 @@ const assertScenario = async (page, scenario, mode) => {
     }
   } else if (mode === 'industry') {
     await page.locator('[aria-label="industry rankings"]').waitFor();
-    if (scenario === 'industry_ranking_stale') {
-      const currentText = await page.getByTestId('current-session-flow-row').innerText();
-      if (!currentText.includes(STATUS.stale)) throw new Error(`${scenario}: Industry status was not stale`);
+    const rankings = page.locator('[aria-label="industry rankings"]');
+    if (scenario === 'ranking_excludes_missing') {
+      if ((await rankings.innerText()).includes('Missing Industry')) {
+        throw new Error(`${scenario}: missing observation remained in rankings`);
+      }
+      return;
+    }
+    const table = page.locator('section:has(#symbol-flow-table-heading)');
+    const dates = (await table.locator('tbody tr td:first-child').allTextContents())
+      .map((value) => value.trim())
+      .filter(Boolean);
+    if (new Set(dates).size !== dates.length) {
+      throw new Error(`${scenario}: duplicate Industry session date`);
+    }
+    const currentRows = await page.getByTestId('current-session-flow-row').count();
+    if (scenario === 'industry_completed_only') {
+      if (currentRows) throw new Error(`${scenario}: unavailable aggregate created a placeholder row`);
+      if (!dates.includes('2026-06-30')) throw new Error(`${scenario}: completed history disappeared`);
+      return;
+    }
+    if (scenario === 'industry_same_date_accepted') {
+      if (currentRows) throw new Error(`${scenario}: accepted same-date row did not replace provisional`);
+      const accepted = await table.locator('tbody tr', { hasText: '2026-06-30' }).innerText();
+      if (!accepted.includes(STATUS.completed)) throw new Error(`${scenario}: accepted row lost completed status`);
+      return;
+    }
+    if (currentRows !== 1) throw new Error(`${scenario}: expected exactly one current Industry row`);
+    const currentText = await page.getByTestId('current-session-flow-row').innerText();
+    if (!currentText.includes('1.50') || !currentText.includes('900,000,000') || !currentText.includes('600,000,000')) {
+      throw new Error(`${scenario}: Industry detail row did not use the canonical aggregate`);
+    }
+    const expectedStatus = config.postClose ? STATUS.closed : config.stale ? STATUS.stale : STATUS.active;
+    if (!currentText.includes(expectedStatus) || currentText.includes(STATUS.completed)) {
+      throw new Error(`${scenario}: Industry current finality/status was incorrect`);
+    }
+    if (scenario === 'industry_twenty_plus_current' && dates.length !== 21) {
+      throw new Error(`${scenario}: expected 20 completed rows plus one current row, received ${dates.length}`);
+    }
+  } else if (mode === 'proprietary') {
+    const unavailable = page.locator('[aria-label="proprietary foreign flow unavailable"]');
+    await unavailable.waitFor();
+    const body = await page.locator('body').innerText();
+    for (const label of [
+      'Capability status',
+      'unsupported',
+      'Attempted operation',
+      'none',
+      'no_proven_proprietary_flow_fields',
+    ]) {
+      if (!body.includes(label)) throw new Error(`${scenario}: missing proprietary detail ${label}`);
+    }
+    const unavailableText = await unavailable.innerText();
+    for (const label of ['Gross buy', 'Gross sell', 'Net flow', 'Quality', '20/20 Complete']) {
+      if (unavailableText.includes(label)) throw new Error(`${scenario}: rendered fake proprietary ${label}`);
+    }
+    if (await page.locator('[role="img"][aria-label*="phi\u00ean"]').count()) {
+      throw new Error(`${scenario}: rendered a fake proprietary chart`);
+    }
+    if (await page.locator('#symbol-flow-table-heading').count()) {
+      throw new Error(`${scenario}: rendered fake proprietary detail rows`);
+    }
+    if (!(await page.getByRole('button', { name: /Force Refresh/ }).isDisabled())) {
+      throw new Error(`${scenario}: Force Refresh remained enabled for unsupported capability`);
+    }
+    if (!(await page.getByRole('button', { name: /Export CSV/ }).isDisabled())) {
+      throw new Error(`${scenario}: CSV remained enabled for unsupported capability`);
     }
   } else if (mode === 'watchlist') {
     await page.locator('[aria-label="Watchlist foreign flow table"]').waitFor();
@@ -746,8 +1075,8 @@ const run = async () => {
   const browserSelection = discoverBrowser();
   const port = await freePort();
   const baseUrl = `http://127.0.0.1:${port}`;
-  const stdoutPath = join(root, '.tmp', `r6c-vite-${process.pid}.stdout.log`);
-  const stderrPath = join(root, '.tmp', `r6c-vite-${process.pid}.stderr.log`);
+  const stdoutPath = join(root, '.tmp', `r6d-vite-${process.pid}.stdout.log`);
+  const stderrPath = join(root, '.tmp', `r6d-vite-${process.pid}.stderr.log`);
   let stdoutFd = null;
   let stderrFd = null;
   let vite = null;
@@ -811,7 +1140,7 @@ const run = async () => {
       try {
         for (const [scenario, mode] of SCENARIOS) {
           if (Date.now() - startedAt > 115_000) {
-            throw new Error('R6C browser harness exceeded its 120-second total deadline.');
+            throw new Error('R6D browser harness exceeded its 120-second total deadline.');
           }
           activeFixtures = fixturePayloads(scenario);
           await page.goto(`${baseUrl}${routeForMode(mode, scenario)}`, { waitUntil: 'domcontentloaded' });

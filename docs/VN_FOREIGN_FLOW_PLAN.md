@@ -1,6 +1,42 @@
 # Vietnam Foreign Flow Product, Data, and Delivery Plan
 
-Status: SSI-V3-M2.6B-R6C retains usable completed/current foreign-flow presentation through retryable idle authentication failure; active-session replacement publication remains pending
+Status: SSI-V3-M2.6B-R6E adds bounded explicit-zero anomaly repair and completes canonical current Industry display; historical replacement values remain unavailable from SSI for the two verified dates
+
+R6E verifies all-constituent explicit-zero VN30 dates with exact-date symbol
+requests through the shared SSI V3 REST owner. Row replacement is strength-
+ordered and monotonic; successful nonzero repairs persist atomically, while
+zero/missing/error verification remains an unresolved anomaly excluded from
+numeric windows, rankings, charts, analytics, and CSV. Automatic attempts are
+single-flight and cooldown-bound, with one Force Refresh bypass.
+
+Industry detail reads the canonical current aggregate and accepts usable ready,
+partial, stale, and market-closed states. Current groups remain ranking input.
+Only complete non-anomalous accepted same-date data suppresses provisional
+current data, and duplicate session dates are never rendered.
+
+R6E deterministic acceptance passes 73 focused backend and 69 focused
+frontend tests, compile/TypeScript/ESLint/Vite, and the full backend tree at
+3,332 passed, 69 failed, and 4 skipped. System Chrome passes 14 fixtures at
+desktop and mobile sizes without overflow or owned process/port leakage. The
+bounded current-Industry smoke reached health but remained typed
+`unavailable`/`network_error` with bounded streaming authorization failures;
+fresh live Industry publication is still pending.
+
+R6D treats raw DailyStockPrice field presence as authoritative before typed
+defaults: missing remains null, explicit provider zero remains zero, and an
+accepted incomplete date remains visible as `Thiếu dữ liệu` while complete-only
+charts, windows, analytics, and rankings exclude it. Securities-company
+own-account flow is explicitly unsupported because the current SSI integration
+has no proven proprietary fields; `indexSummary` is no longer reinterpreted.
+Current Industry detail uses the canonical current-VN30 aggregate while
+Industry groups remain the ranking source, with provider date, provisional
+finality, same-date accepted precedence, and no provisional persistence.
+
+R6D acceptance passed 126 focused backend and 65 focused frontend tests,
+compile/TypeScript/ESLint/Vite, and the full backend baseline at 3,326 passed,
+69 failed, and 4 skipped. System Chrome passed 13 fixtures at desktop and
+mobile sizes (26 assertions) without overflow or owned process/port leakage.
+Fresh active-session Industry publication remains pending.
 
 R6C keeps the last validated SSI IndexComponents VN30 cohort when an idle
 refresh fails, allowing durable accepted DailyStockPrice history and retained

@@ -74,6 +74,20 @@ describe('selectForeignFlowDisplayStatus', () => {
       hasUsableValues: true,
     })).toBe('Mất kết nối');
   });
+
+  it('distinguishes anomalous completed rows and accepts partial current rows', () => {
+    expect(selectForeignFlowDisplayStatus({
+      sourceKind: 'completed',
+      finality: 'completed_accepted',
+      isAnomalous: true,
+    })).toBe('B\u1ea5t th\u01b0\u1eddng d\u1eef li\u1ec7u');
+    expect(selectForeignFlowDisplayStatus({
+      sourceKind: 'current',
+      finality: 'current_session_provisional',
+      currentState: 'partial',
+      usable: true,
+    })).toBe('\u0110ang di\u1ec5n ra');
+  });
 });
 
 describe('selectLatestForeignFlowSession', () => {
@@ -275,6 +289,29 @@ describe('selectLatestForeignFlowSession', () => {
       status: 'Đủ',
       foreignBuyValue: 50,
       foreignSellValue: 20,
+      foreignNetValue: null,
+    });
+  });
+
+  it('keeps accepted finality but labels a missing-field completed row incomplete', () => {
+    const selected = selectLatestForeignFlowSession({
+      completed: completed({
+        sessionDate: '2026-06-30',
+        foreignBuyValue: null,
+        foreignSellValue: null,
+        foreignNetValue: null,
+        dataQuality: 'incomplete',
+        complete: false,
+      }),
+    });
+
+    expect(selected).toMatchObject({
+      sessionDate: '2026-06-30',
+      sourceKind: 'completed',
+      finality: 'completed_accepted',
+      status: 'Thiếu dữ liệu',
+      foreignBuyValue: null,
+      foreignSellValue: null,
       foreignNetValue: null,
     });
   });

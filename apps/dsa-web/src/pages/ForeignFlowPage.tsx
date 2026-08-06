@@ -132,6 +132,7 @@ const fieldsFor = (metric: ForeignFlowExplorerMetric) => metric === 'value'
 const CURRENT_FLOW_STATES: ForeignFlowCurrentState[] = [
   'waiting',
   'ready',
+  'partial',
   'stale',
   'market_closed',
   'unavailable',
@@ -168,7 +169,11 @@ const toFlowRows = (data: ExplorerData | null): FlowRow[] => {
   return (data.payload.rows ?? []) as FlowRow[];
 };
 
-const aggregateBySession = (rows: FlowRow[], metric: ForeignFlowExplorerMetric): SymbolForeignFlowMetricRow[] => {
+const aggregateBySession = (
+  rows: FlowRow[],
+  metric: ForeignFlowExplorerMetric,
+  completeOnly = false,
+): SymbolForeignFlowMetricRow[] => {
   const [buyKey, sellKey, netKey] = fieldsFor(metric);
   const grouped = new Map<string, FlowRow[]>();
   rows.forEach((row) => {
@@ -177,11 +182,6 @@ const aggregateBySession = (rows: FlowRow[], metric: ForeignFlowExplorerMetric):
   });
   let cumulative = 0;
   return [...grouped.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([tradingDate, entries]) => {
-    const buy = sumNullable(entries.map((row) => numberOf(row, buyKey)));
-    const sell = sumNullable(entries.map((row) => numberOf(row, sellKey)));
-    const net = sumNullable(entries.map((row) => numberOf(row, netKey)));
-    if (net !== null) cumulative += net;
-    const present = [buy, sell, net].filter((value) => value !== null).length;
     const semantic = entries.find((row) => (
       row.sourceKind === 'current'
       || row.finality === 'current_session_provisional'
@@ -196,6 +196,26 @@ const aggregateBySession = (rows: FlowRow[], metric: ForeignFlowExplorerMetric):
       || semantic?.finality === 'current_session_provisional'
       || semantic?.isCurrent === true,
     );
+    const incompleteCompleted = !isCurrent && entries.some((row) => (
+      row.isPartial === true
+      || row.complete === false
+      || row.dataQuality === 'incomplete'
+      || row.dataQuality === 'anomalous'
+      || text(row.dataState) === 'partial'
+      || anomalyOf(row)
+    ));
+    const excludeIncomplete = completeOnly && incompleteCompleted;
+    const buy = excludeIncomplete
+      ? null
+      : sumNullable(entries.map((row) => numberOf(row, buyKey)));
+    const sell = excludeIncomplete
+      ? null
+      : sumNullable(entries.map((row) => numberOf(row, sellKey)));
+    const net = excludeIncomplete
+      ? null
+      : sumNullable(entries.map((row) => numberOf(row, netKey)));
+    if (net !== null) cumulative += net;
+    const present = [buy, sell, net].filter((value) => value !== null).length;
     const hasSemantics = Boolean(semantic);
     const sourceKind = hasSemantics ? isCurrent ? 'current' : 'completed' : undefined;
     const finality = hasSemantics
@@ -213,6 +233,8 @@ const aggregateBySession = (rows: FlowRow[], metric: ForeignFlowExplorerMetric):
         providerStatus,
         usable: present > 0,
         hasUsableValues: present > 0,
+        isPartial: incompleteCompleted,
+        isAnomalous: !isCurrent && entries.some(anomalyOf),
       })
       : undefined;
     return {
@@ -227,6 +249,7 @@ const aggregateBySession = (rows: FlowRow[], metric: ForeignFlowExplorerMetric):
       sign: net === null ? 'unavailable' : net > 0 ? 'positive' : net < 0 ? 'negative' : 'zero',
       state: present === 0 ? 'unavailable' : present === 3 ? 'ready' : 'partial',
       unit: metric === 'value' ? 'VND' : 'shares',
+      isPartial: incompleteCompleted || present < 3,
       ...(hasSemantics ? {
         displayOrigin: isCurrent ? 'current_session_provisional' as const : 'completed_session' as const,
         sourceKind,
@@ -238,7 +261,7 @@ const aggregateBySession = (rows: FlowRow[], metric: ForeignFlowExplorerMetric):
         statusLabel: displayStatus,
         isCurrent,
         isCompleted: !isCurrent,
-        isPartial: entries.some((row) => row.isPartial === true) || present < 3,
+        isPartial: incompleteCompleted || entries.some((row) => row.isPartial === true) || present < 3,
         isStale: isCurrent && (
           entries.some((row) => row.isStale === true)
           || currentState === 'stale'
@@ -272,6 +295,9 @@ const viewStateFor = (data: ExplorerData | null): FlowViewState | null => {
 };
 
 const safeFailureMessage = (failureClass: string | null) => {
+  if (failureClass === 'proprietary_fields_unsupported') {
+    return 'SSI FastConnect V3 does not currently expose proven securities-company proprietary-flow fields.';
+  }
   if (failureClass === 'network_error' || failureClass === 'dns_error'
     || failureClass === 'connection_refused' || failureClass === 'proxy_error'
     || failureClass === 'tls_error') {
@@ -759,7 +785,14 @@ const ForeignFlowPage = () => {
     () => selectForeignFlowWindow(rawRows, window, dateOf, anomalyOf, customFrom, customTo),
     [customFrom, customTo, rawRows, window],
   );
-  const chartRows = useMemo(() => aggregateBySession(selection.rows, metric), [metric, selection.rows]);
+  const chartRows = useMemo(
+    () => aggregateBySession(selection.rows, metric, true),
+    [metric, selection.rows],
+  );
+  const detailSeriesRows = useMemo(
+    () => aggregateBySession(selection.rows, metric),
+    [metric, selection.rows],
+  );
   const currentFlowData = currentFlow.symbol === ticker ? currentFlow.data : null;
   const latestCompletedTickerSession = useMemo(() => {
     if (!data || data.mode !== 'ticker') return null;
@@ -780,6 +813,8 @@ const ForeignFlowPage = () => {
       foreignBuyValue: latest.foreignBuyValue,
       foreignSellValue: latest.foreignSellValue,
       foreignNetValue: latest.foreignNetValue,
+      dataQuality: latest.dataQuality,
+      complete: latest.complete,
     } : null;
   }, [data]);
   const latestTickerSession = useMemo(
@@ -792,13 +827,13 @@ const ForeignFlowPage = () => {
   const detailRows = useMemo(
     () => mode === 'ticker'
       ? mergeCurrentFlowSessionDisplayRow(
-        chartRows,
+        detailSeriesRows,
         currentFlowData,
         metric,
         latestCompletedTickerSession?.sessionDate,
       )
-      : chartRows,
-    [chartRows, currentFlowData, latestCompletedTickerSession?.sessionDate, metric, mode],
+      : detailSeriesRows,
+    [currentFlowData, detailSeriesRows, latestCompletedTickerSession?.sessionDate, metric, mode],
   );
   const totalBuy = sumMetric(selection.rows, metric, 'buy');
   const totalSell = sumMetric(selection.rows, metric, 'sell');
@@ -864,8 +899,45 @@ const ForeignFlowPage = () => {
         .filter((row) => row.net !== null)
         .sort((left, right) => (right.net ?? 0) - (left.net ?? 0));
     }
+    const completedRankingRows = selection.rows.filter((row) => !(
+      row.sourceKind === 'current'
+      || row.finality === 'current_session_provisional'
+      || row.isCurrent === true
+    ));
+    const currentDate = text(currentAggregate.data?.providerSessionDate);
+    const completedDates = new Set(
+      completedRankingRows
+        .filter((row) => (
+          row.complete !== false
+          && row.dataQuality !== 'incomplete'
+          && row.dataQuality !== 'anomalous'
+          && row.isPartial !== true
+          && !anomalyOf(row)
+        ))
+        .map(dateOf)
+        .filter(Boolean),
+    );
+    const includeCurrentGroups = Boolean(
+      currentAggregate.data?.usable
+      && currentDate
+      && selection.sessionDates.includes(currentDate)
+      && !completedDates.has(currentDate),
+    );
+    const rankingRows: FlowRow[] = [
+      ...completedRankingRows,
+      ...(includeCurrentGroups
+        ? (currentAggregate.data?.groups ?? []).map((row) => ({
+          ...row,
+          tradingDate: dateOf(row) || currentDate,
+          sourceKind: 'current' as const,
+          finality: 'current_session_provisional' as const,
+          isCurrent: true,
+          isCompleted: false,
+        }))
+        : []),
+    ];
     const grouped = new Map<string, { label: string; net: number[]; turnover: number[]; coverage: number[] }>();
-    selection.rows.forEach((row) => {
+    rankingRows.forEach((row) => {
       const code = text(row.icbCode) || 'unclassified';
       const current = grouped.get(code) ?? { label: text(row.icbName) || code, net: [], turnover: [], coverage: [] };
       const net = numberOf(row, fieldsFor(metric)[2]);
@@ -881,8 +953,10 @@ const ForeignFlowPage = () => {
       net: item.net.length ? item.net.reduce((sum, value) => sum + value, 0) : null,
       turnover: item.turnover.length ? item.turnover.reduce((sum, value) => sum + value, 0) : null,
       coverage: item.coverage.length ? item.coverage.reduce((sum, value) => sum + value, 0) / item.coverage.length : null,
-    })).sort((left, right) => (right.net ?? Number.NEGATIVE_INFINITY) - (left.net ?? Number.NEGATIVE_INFINITY));
-  }, [currentAggregate.data?.items, data, metric, selection.rows, window]);
+    }))
+      .filter((row) => row.net !== null)
+      .sort((left, right) => (right.net ?? Number.NEGATIVE_INFINITY) - (left.net ?? Number.NEGATIVE_INFINITY));
+  }, [currentAggregate.data, data, metric, selection.rows, selection.sessionDates, window]);
   const vn30Latest = data?.mode === 'vn30'
     ? data.payload.decomposition.latest ?? data.payload.decomposition.series.at(-1) ?? null
     : null;
@@ -952,15 +1026,25 @@ const ForeignFlowPage = () => {
       <PageHeader
         eyebrow="Vietnam · SSI FastConnect V3"
         title="Foreign Flow Explorer"
-        description="Inspect provider-backed foreign and proprietary flow while keeping current and completed session finality explicit."
+        description="Inspect provider-backed foreign flow and explicit capability states while keeping current and completed session finality clear."
         actions={DATA_MODES.includes(mode as DataMode) ? (
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={requestRecoveryRefresh}
               isLoading={loading || recoveryInFlight}
-              disabled={recoveryInFlight || Boolean(validationError) || (mode === 'ticker' && !ticker)}>
+              disabled={
+                recoveryInFlight
+                || Boolean(validationError)
+                || (mode === 'ticker' && !ticker)
+                || (
+                  mode === 'proprietary'
+                  && data?.mode === 'proprietary'
+                  && data.payload.capabilityStatus === 'unsupported'
+                )
+              }>
               <RefreshCw className="h-4 w-4" /> Force Refresh
             </Button>
-            <Button variant="outline" size="sm" onClick={exportCsv} disabled={!selection.rows.length}>
+            <Button variant="outline" size="sm" onClick={exportCsv}
+              disabled={!selection.rows.length || (mode === 'proprietary' && data?.mode === 'proprietary' && data.payload.capabilityStatus === 'unsupported')}>
               <Download className="h-4 w-4" /> Export CSV
             </Button>
           </div>
@@ -1016,7 +1100,7 @@ const ForeignFlowPage = () => {
               trailingAction={<button type="button" aria-label="Load ticker" onClick={applyTicker}><Search className="h-4 w-4" /></button>} />
           ) : null}
           {mode === 'proprietary' ? (
-            <Select label="Supported scope" value={proprietaryTarget} onChange={setProprietaryTarget}
+            <Select label="Requested scope" value={proprietaryTarget} onChange={setProprietaryTarget}
               options={[
                 { value: 'index:VNINDEX', label: 'VNINDEX' },
                 { value: 'index:VN30', label: 'VN30' },
@@ -1109,6 +1193,13 @@ const ForeignFlowPage = () => {
             <div><dt className="text-secondary-text">Fetched at</dt><dd>{provenance?.fetchedAt ?? '—'}</dd></div>
             <div><dt className="text-secondary-text">Cache</dt><dd>{provenance?.cache ?? '—'}</dd></div>
           </dl>
+          {mode === 'proprietary' && data.mode === 'proprietary' ? (
+            <dl className="mt-3 grid gap-2 text-sm sm:grid-cols-3" aria-label="Proprietary capability details">
+              <div><dt className="text-secondary-text">Capability status</dt><dd>{data.payload.capabilityStatus ?? 'unsupported'}</dd></div>
+              <div><dt className="text-secondary-text">Attempted operation</dt><dd>{text(data.payload.diagnostics?.attemptedOperation) || 'none'}</dd></div>
+              <div><dt className="text-secondary-text">Reason</dt><dd>{text(data.payload.diagnostics?.reason) || 'no_proven_proprietary_flow_fields'}</dd></div>
+            </dl>
+          ) : null}
         </section>
       ) : null}
 

@@ -11,6 +11,44 @@ Rules that apply to every state:
 - Missing object data renders as `null`.
 - Missing list data renders as `[]`.
 
+## R6E historical anomaly repair and Industry current states
+
+When every retained VN30 constituent reports all four foreign-flow fields as
+explicit zero for one completed session, that aggregate is not presented as a
+normal zero-flow session. The backend performs one cooldown-bound exact-date
+SSI verification. Until real provider-backed values are recovered, the date
+remains visible as an unresolved data anomaly with empty numeric cells and is
+excluded from charts, complete windows, rankings, analytics, and numeric CSV
+cells. A successful repair restores the provider values and normal completed
+status; a failed repair remains inspectable and does not poll on every refresh.
+
+Industry current detail accepts usable `ready`, `partial`, `stale`, and
+`market_closed` aggregates. It uses the canonical current aggregate for the
+detail row and current groups for rankings. A complete accepted same-date row
+suppresses the provisional row. An incomplete or anomalous same-date shell is
+replaced by the provisional row so exactly one session date remains visible.
+
+## R6D missing, Proprietary, and Industry states
+
+An accepted completed foreign-flow date may still be incomplete. Missing gross
+fields render `—` and the row status is `Thiếu dữ liệu`; an explicitly supplied
+provider zero renders `0` and may be `Đủ` when all required gross fields are
+present. Incomplete rows stay visible in detail tables but do not create zero
+chart points or enter complete-only calculations and rankings. CSV leaves
+missing cells empty.
+
+The Proprietary mode means securities-company own-account trading. Because the
+current SSI integration has no proven proprietary buy/sell fields, the mode
+shows a concise unsupported state, no Clean/zero summary, no chart, no detail
+rows, and disabled export/refresh actions. It does not reinterpret
+`indexSummary`, room capacity, foreign flow, price, or turnover.
+
+Industry rankings continue to use current-VN30 Industry groups. The current
+Industry detail row uses the canonical aggregate returned with those groups:
+`Đang diễn ra` when ready, `Mất kết nối` when stale, and `Tạm tính` after close.
+It never becomes `Đủ`; accepted same-date history replaces it, and an
+unavailable canonical aggregate creates no placeholder row.
+
 ## R6C idle authentication recovery
 
 Backgrounding the page does not clear completed or current foreign-flow rows.
@@ -38,7 +76,8 @@ Data Details labels latest completed, latest display, and current provider
 sessions separately. Current Industry capability is shown as `ready`, `partial`,
 `stale`, `waiting`, or `unavailable`, with the bounded current-VN30 universe and
 coverage. Completed Industry content remains visible if current data is waiting
-or unavailable. Proprietary zero semantics remain a separate issue.
+or unavailable. R6D supersedes the earlier Proprietary zero presentation with
+an explicit unsupported capability state.
 
 ## R6A restart and system-browser acceptance
 

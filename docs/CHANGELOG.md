@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [documentation] Record the installed FiinQuantX proprietary gross-field contract and repeated post-close/pre-open authentication failure without conflating FiinQuantX with FiinGroup DataFeed.
+- [test] Extend the proprietary-provider P0 diagnostic with credential-safe FiinQuantX contract inspection, bounded login gating, typed outcomes, and raw field-presence coverage.
+- [documentation] Record the FiinGroup and Vnstock Data proprietary-flow capability gap and keep P1 integration gated on active-session and licence proof.
+- [test] Add a bounded, sanitized proprietary-provider P0 diagnostic and offline coverage for schema presence, freshness classification, reconciliation, rate limits, and failure states.
+- [fix] Verify all-constituent explicit-zero VN30 sessions with bounded exact-date SSI requests, preserve stronger repaired rows, and exclude unresolved anomalies from numeric analytics.
+- [fix] Render usable ready, partial, stale, and market-closed Industry current aggregates from the canonical current total with strict same-date completed-row precedence.
+- [test] Cover exact-date repair, cooldown, manual bypass, single-flight, durable repair metadata, unresolved anomaly exclusion, Industry current states, and the 14-fixture R6E browser matrix.
+- [fix] Preserve missing-versus-explicit-zero SSI foreign-flow lineage, label incomplete accepted sessions truthfully, remove indexSummary proprietary-flow reinterpretation, and use the canonical current aggregate for Industry detail.
+- [test] Cover missing historical fields, explicit zero, durable restore, unsupported Proprietary state, canonical Industry values, current state labels, same-date precedence, CSV nulls, and desktop/mobile visual states.
+- [documentation] Document R6D foreign-flow quality fields, unsupported Proprietary capability, and canonical current Industry-series ownership.
 - [fix] Retain last-known-good SSI VN30 membership, accepted completed foreign-flow history, and stale current snapshots across retryable idle authentication failures.
 - [improvement] Add one shared cooldown-bound REST authentication recovery path for visibility resume and manual refresh without creating frontend provider connections or duplicate polling owners.
 - [test] Cover idle authentication failure, retained membership and aggregates, negative-cache bypass, single-flight recovery, stale UI preservation, and desktop/mobile system-Chrome states.

@@ -1104,6 +1104,12 @@ class VietnamForeignFlowRow(BaseModel):
     foreign_buy_value: Optional[int] = None
     foreign_sell_value: Optional[int] = None
     foreign_net_value: Optional[int] = None
+    field_presence: Dict[str, str] = Field(default_factory=dict)
+    missing_foreign_fields: List[str] = Field(default_factory=list, max_length=4)
+    data_quality: Literal["complete", "incomplete"] = "incomplete"
+    complete: bool = False
+    usable_for_volume_net: bool = False
+    usable_for_value_net: bool = False
     suspicious_zero_session: bool = False
     anomaly_code: Optional[str] = None
 
@@ -1497,6 +1503,17 @@ class VietnamVn30ForeignFlowDaily(BaseModel):
     anomaly: Optional[str] = None
     anomaly_code: Optional[str] = None
     anomaly_status: Optional[str] = None
+    complete: Optional[bool] = None
+    data_quality: Optional[Literal["complete", "incomplete", "anomalous"]] = None
+    usable_for_windows: Optional[bool] = None
+    usable_for_rankings: Optional[bool] = None
+    usable_for_analytics: Optional[bool] = None
+    recovery_attempted: bool = False
+    recovery_succeeded: bool = False
+    repair_status: Optional[str] = None
+    repair_source: Optional[str] = None
+    repair_failure_class: Optional[str] = None
+    repair_diagnostics: Dict[str, Any] = Field(default_factory=dict)
     explicit_zero_component_count: int = Field(0, ge=0, le=30)
     missing_field_component_count: int = Field(0, ge=0, le=30)
     missing_field_count: int = 0
@@ -1761,6 +1778,13 @@ class VietnamForeignFlowObservability(BaseModel):
     vn30_latency_count: int = Field(0, ge=0)
     vn30_latency_total_ms: int = Field(0, ge=0)
     vn30_latency_max_ms: int = Field(0, ge=0)
+    anomaly_repair_requests: int = Field(0, ge=0)
+    anomaly_repair_provider_calls: int = Field(0, ge=0)
+    anomaly_repair_cache_hits: int = Field(0, ge=0)
+    anomaly_repair_manual_bypasses: int = Field(0, ge=0)
+    anomaly_repair_coalesced_waiters: int = Field(0, ge=0)
+    anomaly_repair_successes: int = Field(0, ge=0)
+    anomaly_repair_failures: int = Field(0, ge=0)
 
 
 class VietnamMozyfinObservability(BaseModel):
@@ -1919,7 +1943,7 @@ class VietnamCurrentForeignFlowResponse(BaseModel):
 
     status: Literal["ok", "partial", "unavailable"]
     data_state: Literal[
-        "waiting", "ready", "stale", "market_closed", "unavailable", "error"
+        "waiting", "ready", "partial", "stale", "market_closed", "unavailable", "error"
     ] = "unavailable"
     usable: bool = False
     failure_class: Optional[str] = None
@@ -1947,7 +1971,7 @@ class VietnamCurrentForeignFlowAggregateResponse(BaseModel):
 
     status: Literal["ok", "partial", "unavailable"]
     data_state: Literal[
-        "waiting", "ready", "stale", "market_closed", "unavailable", "error"
+        "waiting", "ready", "partial", "stale", "market_closed", "unavailable", "error"
     ] = "unavailable"
     usable: bool = False
     failure_class: Optional[str] = None
@@ -1974,9 +1998,13 @@ class VietnamCurrentForeignFlowAggregateResponse(BaseModel):
 
 
 class VietnamProprietaryFlowResponse(BaseModel):
-    """SSI V3 proprietary summary for a supported board or index scope."""
+    """Truthful SSI V3 proprietary capability result."""
 
     status: Literal["ok", "partial", "unavailable"]
+    data_state: Literal["ready", "partial", "unavailable"] = "unavailable"
+    usable: bool = False
+    failure_class: Optional[str] = None
+    capability_status: Literal["unsupported"] = "unsupported"
     scope: Literal["board", "index"]
     identifier: str
     rows: List[Dict[str, Any]] = Field(default_factory=list)

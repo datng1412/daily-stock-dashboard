@@ -64,6 +64,8 @@ VN30_HISTORY_SESSIONS = 60
 VN30_AGGREGATE_CACHE_TTL_SECONDS = 300
 VN30_AGGREGATE_NEGATIVE_CACHE_TTL_SECONDS = 60
 VN30_AGGREGATE_CACHE_MAX_ENTRIES = 16
+ANOMALY_REPAIR_COOLDOWN_SECONDS = 3_600
+ANOMALY_REPAIR_MAX_CONCURRENCY = 4
 VN30_PUBLIC_SOURCE_ENDPOINT = "DailyStockPrice"
 VN30_CANONICAL_ENDPOINT = "securitiesSummary?index="
 VN30_CANONICAL_MODE = "DIRECT_INDEX_CANONICAL"
@@ -91,6 +93,13 @@ class _CacheEntry:
     stale_until: datetime
 
 
+@dataclass
+class _AnomalyRepairEntry:
+    result: Dict[str, Any]
+    expires_at: datetime
+    manual_bypass_used: bool
+
+
 _LOCK = RLock()
 _ACCEPTED_HISTORY_PERSIST_LOCK = RLock()
 _CACHE: "OrderedDict[Tuple[Any, ...], _CacheEntry]" = OrderedDict()
@@ -101,6 +110,8 @@ _WAITERS: Dict[Tuple[Any, ...], int] = {}
 _VN30_CACHE: "OrderedDict[Tuple[Any, ...], _CacheEntry]" = OrderedDict()
 _VN30_IN_FLIGHT: Dict[Tuple[Any, ...], Future] = {}
 _VN30_WAITERS: Dict[Tuple[Any, ...], int] = {}
+_ANOMALY_REPAIR_CACHE: Dict[Tuple[Any, ...], _AnomalyRepairEntry] = {}
+_ANOMALY_REPAIR_IN_FLIGHT: Dict[Tuple[Any, ...], Future] = {}
 _METRIC_DEFAULTS: Dict[str, Any] = {
     "scope": "process_local",
     "endpoint_requests": 0,
@@ -174,6 +185,13 @@ _METRIC_DEFAULTS: Dict[str, Any] = {
     "vn30_latency_count": 0,
     "vn30_latency_total_ms": 0,
     "vn30_latency_max_ms": 0,
+    "anomaly_repair_requests": 0,
+    "anomaly_repair_provider_calls": 0,
+    "anomaly_repair_cache_hits": 0,
+    "anomaly_repair_manual_bypasses": 0,
+    "anomaly_repair_coalesced_waiters": 0,
+    "anomaly_repair_successes": 0,
+    "anomaly_repair_failures": 0,
 }
 _METRICS = deepcopy(_METRIC_DEFAULTS)
 
@@ -202,6 +220,8 @@ def reset_vietnam_foreign_flow_state() -> None:
         _VN30_CACHE.clear()
         _VN30_IN_FLIGHT.clear()
         _VN30_WAITERS.clear()
+        _ANOMALY_REPAIR_CACHE.clear()
+        _ANOMALY_REPAIR_IN_FLIGHT.clear()
         _METRICS.clear()
         _METRICS.update(deepcopy(_METRIC_DEFAULTS))
     reset_last_known_vn30_membership()
@@ -229,6 +249,66 @@ def accepted_vietnam_foreign_flow_history(
         }
 
 
+_GROSS_FOREIGN_FIELDS = (
+    "foreign_buy_volume",
+    "foreign_sell_volume",
+    "foreign_buy_value",
+    "foreign_sell_value",
+)
+_RAW_PRESENT_STATES = {
+    "FIELD_PRESENT_NONZERO",
+    "FIELD_PRESENT_EXPLICIT_ZERO",
+}
+
+
+def _row_strength(row: Optional[Dict[str, Any]]) -> Tuple[int, int, int]:
+    """Rank same-date evidence without comparing financial magnitudes."""
+
+    if not isinstance(row, dict):
+        return (0, 0, 0)
+    presence = dict(row.get("field_presence") or {})
+    present_count = sum(
+        presence.get(field) in _RAW_PRESENT_STATES
+        for field in _GROSS_FOREIGN_FIELDS
+    )
+    numeric_count = sum(
+        row.get(field) is not None for field in _GROSS_FOREIGN_FIELDS
+    )
+    complete = bool(row.get("complete") is not False and numeric_count == 4)
+    exact_repair = row.get("repair_source") == "exact_date_daily_stock_price"
+    any_nonzero = any(
+        row.get(field) not in (None, 0) for field in _GROSS_FOREIGN_FIELDS
+    )
+    all_explicit_zero = present_count == 4 and all(
+        presence.get(field) == "FIELD_PRESENT_EXPLICIT_ZERO"
+        for field in _GROSS_FOREIGN_FIELDS
+    )
+    if exact_repair and complete and any_nonzero:
+        tier = 7
+    elif complete and present_count == 4 and any_nonzero:
+        tier = 6
+    elif present_count and not complete:
+        tier = 5
+    elif complete and all_explicit_zero:
+        tier = 4
+    elif numeric_count:
+        tier = 3
+    else:
+        tier = 1
+    return (tier, present_count, numeric_count)
+
+
+def _stronger_row(
+    existing: Optional[Dict[str, Any]],
+    incoming: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Keep stronger evidence; allow equal-strength provider corrections."""
+
+    if existing is None or _row_strength(incoming) >= _row_strength(existing):
+        return deepcopy(incoming)
+    return deepcopy(existing)
+
+
 def _merge_accepted_history(
     history: Dict[str, Dict[str, Dict[str, Any]]],
 ) -> int:
@@ -237,7 +317,9 @@ def _merge_accepted_history(
         for ticker, rows_by_date in history.items():
             accepted = _ACCEPTED_HISTORY.setdefault(ticker, {})
             for trading_date, row in rows_by_date.items():
-                accepted[trading_date] = deepcopy(row)
+                accepted[trading_date] = _stronger_row(
+                    accepted.get(trading_date), row
+                )
                 merged_rows += 1
             for old_date in sorted(accepted)[:-MAX_ROWS]:
                 accepted.pop(old_date, None)
@@ -381,14 +463,38 @@ def _normalize_rows(rows: Optional[Iterable[Dict[str, Any]]]) -> Tuple[List[Dict
         if trading_date is None:
             stats["rejected_rows"] += 1
             continue
-        buy_volume = _nullable_int(raw.get("foreign_buy_volume"))
-        sell_volume = _nullable_int(raw.get("foreign_sell_volume"))
-        buy_value = _nullable_int(raw.get("foreign_buy_value"))
-        sell_value = _nullable_int(raw.get("foreign_sell_value"))
+        field_presence = deepcopy(raw.get("_foreign_field_presence") or {})
+        gross_values = {
+            "foreign_buy_volume": _nullable_int(raw.get("foreign_buy_volume")),
+            "foreign_sell_volume": _nullable_int(raw.get("foreign_sell_volume")),
+            "foreign_buy_value": _nullable_int(raw.get("foreign_buy_value")),
+            "foreign_sell_value": _nullable_int(raw.get("foreign_sell_value")),
+        }
+        # V3 raw REST presence is authoritative. This prevents SDK/model defaults
+        # from turning an omitted field into an apparently explicit provider zero.
+        missing_presence_states = {
+            "FIELD_ABSENT",
+            "FIELD_NULL",
+            "PARSE_FAILURE",
+            "PROVIDER_ROW_MISSING",
+        }
+        for name, presence in field_presence.items():
+            if name in gross_values and presence in missing_presence_states:
+                gross_values[name] = None
+        buy_volume = gross_values["foreign_buy_volume"]
+        sell_volume = gross_values["foreign_sell_volume"]
+        buy_value = gross_values["foreign_buy_value"]
+        sell_value = gross_values["foreign_sell_value"]
         net_volume = _nullable_int(raw.get("foreign_net_volume"))
         net_value = _nullable_int(raw.get("foreign_net_value"))
         volume_source = raw.get("_foreign_net_volume_source")
         value_source = raw.get("_foreign_net_value_source")
+        if buy_volume is None or sell_volume is None:
+            net_volume = None
+            volume_source = None
+        if buy_value is None or sell_value is None:
+            net_value = None
+            value_source = None
         if net_volume is None and buy_volume is not None and sell_volume is not None:
             net_volume = buy_volume - sell_volume
             volume_source = "derived"
@@ -415,13 +521,29 @@ def _normalize_rows(rows: Optional[Iterable[Dict[str, Any]]]) -> Tuple[List[Dict
             "foreign_buy_value": buy_value,
             "foreign_sell_value": sell_value,
             "foreign_net_value": net_value,
-            "field_presence": deepcopy(raw.get("_foreign_field_presence") or {}),
+            "field_presence": field_presence,
         }
         gross_fields = (
             "foreign_buy_volume",
             "foreign_sell_volume",
             "foreign_buy_value",
             "foreign_sell_value",
+        )
+        missing_fields = [name for name in gross_fields if row.get(name) is None]
+        row.update(
+            {
+                "missing_foreign_fields": missing_fields,
+                "data_quality": "complete" if not missing_fields else "incomplete",
+                "complete": not missing_fields,
+                "usable_for_volume_net": (
+                    row["foreign_buy_volume"] is not None
+                    and row["foreign_sell_volume"] is not None
+                ),
+                "usable_for_value_net": (
+                    row["foreign_buy_value"] is not None
+                    and row["foreign_sell_value"] is not None
+                ),
+            }
         )
         explicit_zero = all(
             row["field_presence"].get(name) == "FIELD_PRESENT_EXPLICIT_ZERO"
@@ -439,7 +561,7 @@ def _normalize_rows(rows: Optional[Iterable[Dict[str, Any]]]) -> Tuple[List[Dict
                 "foreign_sell_value",
                 "foreign_net_value",
             )
-        ):
+        ) and not row["field_presence"]:
             stats["rejected_rows"] += 1
             continue
         if trading_date in by_date:
@@ -452,11 +574,23 @@ def _normalize_rows(rows: Optional[Iterable[Dict[str, Any]]]) -> Tuple[List[Dict
 
 def _window(rows: List[Dict[str, Any]], requested: int) -> Dict[str, Any]:
     selected = rows[-requested:]
-    volume_values = [row["foreign_net_volume"] for row in selected if row["foreign_net_volume"] is not None]
-    value_values = [row["foreign_net_value"] for row in selected if row["foreign_net_value"] is not None]
+    complete_rows = [row for row in selected if row.get("complete") is not False]
+    volume_values = [
+        row["foreign_net_volume"]
+        for row in complete_rows
+        if row["foreign_net_volume"] is not None
+    ]
+    value_values = [
+        row["foreign_net_value"]
+        for row in complete_rows
+        if row["foreign_net_value"] is not None
+    ]
 
     def counts(field: str) -> Tuple[int, int, int, int]:
-        values = [row[field] for row in selected]
+        values = [
+            row[field] if row.get("complete") is not False else None
+            for row in selected
+        ]
         return (
             sum(value is not None and value > 0 for value in values),
             sum(value is not None and value < 0 for value in values),
@@ -469,7 +603,10 @@ def _window(rows: List[Dict[str, Any]], requested: int) -> Dict[str, Any]:
     return {
         "requested_sessions": requested,
         "covered_sessions": len(selected),
-        "complete": len(selected) == requested,
+        "complete": (
+            len(selected) == requested
+            and len(complete_rows) == len(selected)
+        ),
         "start_date": selected[0]["trading_date"] if selected else None,
         "end_date": selected[-1]["trading_date"] if selected else None,
         "cumulative_foreign_net_volume": sum(volume_values) if volume_values else None,
@@ -485,6 +622,25 @@ def _window(rows: List[Dict[str, Any]], requested: int) -> Dict[str, Any]:
         "zero_net_value_sessions": xz,
         "null_net_value_sessions": xnull,
     }
+
+
+def _complete_only_calculation_rows(
+    rows: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    return [
+        {
+            **row,
+            **(
+                {}
+                if row.get("complete") is not False
+                else {
+                    "foreign_net_volume": None,
+                    "foreign_net_value": None,
+                }
+            ),
+        }
+        for row in rows
+    ]
 
 
 def _metric_sign(value: Optional[int]) -> Optional[str]:
@@ -645,7 +801,7 @@ def _rolling_series(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 def _symbol_analytics(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
-    bounded = rows[-60:]
+    bounded = _complete_only_calculation_rows(rows[-60:])
 
     def family(field: str) -> Dict[str, Any]:
         latest = bounded[-1] if bounded else None
@@ -1007,7 +1163,10 @@ class VietnamForeignFlowService:
                 accepted = _ACCEPTED_HISTORY.setdefault(ticker, {})
                 cached_latest_before = max(accepted) if accepted else None
                 for row in rows:
-                    accepted[str(row["trading_date"])] = deepcopy(row)
+                    trading_date = str(row["trading_date"])
+                    accepted[trading_date] = _stronger_row(
+                        accepted.get(trading_date), row
+                    )
                 if len(accepted) > MAX_ROWS:
                     for old_date in sorted(accepted)[:-MAX_ROWS]:
                         accepted.pop(old_date, None)
@@ -1108,6 +1267,276 @@ class VietnamForeignFlowService:
             },
         )
 
+    def repair_suspicious_session(
+        self,
+        tickers: Iterable[str],
+        trading_date: str,
+        *,
+        force_refresh: bool = False,
+    ) -> Dict[str, Any]:
+        """Verify one all-constituent zero session with bounded exact-date calls."""
+
+        normalized = tuple(sorted({_normalize_ticker(value) for value in tickers}))
+        if not normalized or len(normalized) > BATCH_MAX_TICKERS:
+            raise ValueError("anomaly repair requires between 1 and 30 symbols")
+        verified_date = _parse_iso_date(trading_date, "trading_date")
+        if verified_date is None:
+            raise ValueError("trading_date is required")
+        key = ("foreign_flow_anomaly_repair", verified_date.isoformat(), normalized)
+        _metric_add("anomaly_repair_requests")
+        now = _utc_now()
+        with _LOCK:
+            active = _ANOMALY_REPAIR_IN_FLIGHT.get(key)
+            if active is not None:
+                _METRICS["anomaly_repair_coalesced_waiters"] += 1
+                future = active
+                owner = False
+            else:
+                entry = _ANOMALY_REPAIR_CACHE.get(key)
+                cache_eligible = entry is not None and entry.expires_at > now
+                manual_bypass = bool(
+                    force_refresh
+                    and cache_eligible
+                    and not entry.manual_bypass_used
+                )
+                if cache_eligible and not manual_bypass:
+                    _METRICS["anomaly_repair_cache_hits"] += 1
+                    cached = deepcopy(entry.result)
+                    cached["repair_cache_state"] = "cooldown"
+                    cached["cooldown_remaining_seconds"] = max(
+                        0, int((entry.expires_at - now).total_seconds())
+                    )
+                    return cached
+                if manual_bypass:
+                    _METRICS["anomaly_repair_manual_bypasses"] += 1
+                future = Future()
+                _ANOMALY_REPAIR_IN_FLIGHT[key] = future
+                owner = True
+        if not owner:
+            try:
+                result = deepcopy(future.result(timeout=45.0))
+                result["repair_cache_state"] = "coalesced"
+                return result
+            except Exception:
+                return {
+                    "trading_date": verified_date.isoformat(),
+                    "status": "in_flight",
+                    "recovery_attempted": True,
+                    "recovery_succeeded": False,
+                    "repair_cache_state": "coalesced_timeout",
+                    "failure_class": "repair_in_flight",
+                }
+
+        previous = None
+        with _LOCK:
+            previous = _ANOMALY_REPAIR_CACHE.get(key)
+        try:
+            result = self._execute_exact_date_repair(
+                list(normalized), verified_date.isoformat()
+            )
+            with _LOCK:
+                _ANOMALY_REPAIR_CACHE[key] = _AnomalyRepairEntry(
+                    result=deepcopy(result),
+                    expires_at=_utc_now()
+                    + timedelta(seconds=ANOMALY_REPAIR_COOLDOWN_SECONDS),
+                    manual_bypass_used=bool(
+                        force_refresh
+                        or (previous and previous.manual_bypass_used)
+                    ),
+                )
+            future.set_result(deepcopy(result))
+            return result
+        except Exception as exc:
+            result = {
+                "trading_date": verified_date.isoformat(),
+                "status": "unresolved",
+                "recovery_attempted": True,
+                "recovery_succeeded": False,
+                "repair_cache_state": "stored",
+                "failure_class": _public_failure_class(type(exc).__name__),
+                "provider_operation": "securitiesSummary?symbol=",
+            }
+            with _LOCK:
+                _ANOMALY_REPAIR_CACHE[key] = _AnomalyRepairEntry(
+                    result=deepcopy(result),
+                    expires_at=_utc_now()
+                    + timedelta(seconds=ANOMALY_REPAIR_COOLDOWN_SECONDS),
+                    manual_bypass_used=bool(force_refresh),
+                )
+            future.set_result(deepcopy(result))
+            return result
+        finally:
+            with _LOCK:
+                _ANOMALY_REPAIR_IN_FLIGHT.pop(key, None)
+
+    def _execute_exact_date_repair(
+        self,
+        tickers: List[str],
+        trading_date: str,
+    ) -> Dict[str, Any]:
+        provider = self._get_rest_provider()
+        workers = min(ANOMALY_REPAIR_MAX_CONCURRENCY, len(tickers))
+        executor = ThreadPoolExecutor(
+            max_workers=workers,
+            thread_name_prefix="vn30-zero-repair",
+        )
+        futures: Dict[Future, str] = {}
+
+        def fetch(ticker: str) -> Dict[str, Any]:
+            _metric_add("anomaly_repair_provider_calls")
+            return provider.get_daily_stock_price(
+                ticker,
+                from_date=trading_date,
+                to_date=trading_date,
+                limit=1,
+            )
+
+        try:
+            futures = {executor.submit(fetch, ticker): ticker for ticker in tickers}
+            done, pending = wait(list(futures), timeout=45.0)
+            for future in pending:
+                future.cancel()
+            normalized_by_ticker: Dict[str, Optional[Dict[str, Any]]] = {}
+            status_counts: Dict[str, int] = {}
+            failure_classes: Dict[str, int] = {}
+            for future, ticker in futures.items():
+                if future not in done:
+                    normalized_by_ticker[ticker] = None
+                    status_counts["timeout"] = status_counts.get("timeout", 0) + 1
+                    continue
+                try:
+                    provider_result = future.result()
+                except Exception as exc:
+                    normalized_by_ticker[ticker] = None
+                    failure = _public_failure_class(type(exc).__name__) or "unknown"
+                    failure_classes[failure] = failure_classes.get(failure, 0) + 1
+                    continue
+                status = str(provider_result.get("status") or "unknown")
+                status_counts[status] = status_counts.get(status, 0) + 1
+                rows, _ = _normalize_rows(provider_result.get("rows"))
+                normalized_by_ticker[ticker] = next(
+                    (
+                        row
+                        for row in rows
+                        if row.get("trading_date") == trading_date
+                    ),
+                    None,
+                )
+                failure = _public_failure_class(provider_result.get("failure_class"))
+                if failure:
+                    failure_classes[failure] = failure_classes.get(failure, 0) + 1
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
+
+        with _LOCK:
+            existing = {
+                ticker: deepcopy(
+                    _ACCEPTED_HISTORY.get(ticker, {}).get(trading_date)
+                )
+                for ticker in tickers
+            }
+        exact_rows = {
+            ticker: row
+            for ticker, row in normalized_by_ticker.items()
+            if isinstance(row, dict)
+        }
+        exact_complete = {
+            ticker: row
+            for ticker, row in exact_rows.items()
+            if row.get("complete") is not False
+            and all(row.get(field) is not None for field in _GROSS_FOREIGN_FIELDS)
+        }
+        exact_nonzero = {
+            ticker: row
+            for ticker, row in exact_complete.items()
+            if any(row.get(field) != 0 for field in _GROSS_FOREIGN_FIELDS)
+        }
+        existing_nonzero = {
+            ticker: row
+            for ticker, row in existing.items()
+            if isinstance(row, dict)
+            and row.get("complete") is not False
+            and any(row.get(field) not in (None, 0) for field in _GROSS_FOREIGN_FIELDS)
+        }
+        real_values_observed = bool(exact_nonzero or existing_nonzero)
+        replacements = 0
+        if real_values_observed:
+            verified_at = _iso_now()
+            with _LOCK:
+                for ticker, row in exact_complete.items():
+                    candidate = {
+                        **row,
+                        "repair_source": "exact_date_daily_stock_price",
+                        "repair_status": "recovered",
+                        "repair_verified_at": verified_at,
+                    }
+                    accepted = _ACCEPTED_HISTORY.setdefault(ticker, {})
+                    selected = _stronger_row(
+                        accepted.get(trading_date), candidate
+                    )
+                    if selected != accepted.get(trading_date):
+                        replacements += 1
+                    accepted[trading_date] = selected
+            if replacements:
+                self._persist_completed_history()
+                with _LOCK:
+                    for cache_key in list(_CACHE):
+                        if len(cache_key) > 2 and cache_key[2] in tickers:
+                            _CACHE.pop(cache_key, None)
+                    _VN30_CACHE.clear()
+
+        with _LOCK:
+            final_rows = {
+                ticker: deepcopy(
+                    _ACCEPTED_HISTORY.get(ticker, {}).get(trading_date)
+                )
+                for ticker in tickers
+            }
+        final_complete = all(
+            isinstance(row, dict)
+            and row.get("complete") is not False
+            and all(row.get(field) is not None for field in _GROSS_FOREIGN_FIELDS)
+            for row in final_rows.values()
+        )
+        final_nonzero = any(
+            isinstance(row, dict)
+            and any(row.get(field) not in (None, 0) for field in _GROSS_FOREIGN_FIELDS)
+            for row in final_rows.values()
+        )
+        recovered = bool(final_complete and final_nonzero)
+        if recovered:
+            _metric_add("anomaly_repair_successes")
+        else:
+            _metric_add("anomaly_repair_failures")
+        return {
+            "trading_date": trading_date,
+            "status": "recovered" if recovered else "unresolved",
+            "recovery_attempted": True,
+            "recovery_succeeded": recovered,
+            "repair_cache_state": "stored",
+            "provider_operation": "securitiesSummary?symbol=",
+            "provider_operation_count": len(futures),
+            "requested_symbol_count": len(tickers),
+            "returned_row_count": len(exact_rows),
+            "complete_row_count": len(exact_complete),
+            "nonzero_row_count": len(exact_nonzero),
+            "explicit_zero_row_count": sum(
+                all(
+                    (row.get("field_presence") or {}).get(field)
+                    == "FIELD_PRESENT_EXPLICIT_ZERO"
+                    for field in _GROSS_FOREIGN_FIELDS
+                )
+                for row in exact_complete.values()
+            ),
+            "replacement_count": replacements,
+            "status_counts": status_counts,
+            "failure_classes": failure_classes,
+            "alternative_operation": "securitiesSummary?index=VN30",
+            "alternative_operation_usable": False,
+            "alternative_reason": "no_proven_symbol_level_historical_foreign_fields",
+            "cooldown_seconds": ANOMALY_REPAIR_COOLDOWN_SECONDS,
+        }
+
     @staticmethod
     def _build_payload(
         ticker: str,
@@ -1144,7 +1573,12 @@ class VietnamForeignFlowService:
             "coverage": {
                 "requested_sessions": requested_sessions,
                 "covered_sessions": len(rows),
-                "complete": len(rows) >= requested_sessions if requested_sessions is not None else None,
+                "complete": (
+                    len(rows) >= requested_sessions
+                    and all(row.get("complete") is not False for row in rows[-requested_sessions:])
+                    if requested_sessions is not None
+                    else None
+                ),
                 "start_date": rows[0]["trading_date"] if rows else None,
                 "end_date": rows[-1]["trading_date"] if rows else None,
             },
@@ -1424,6 +1858,8 @@ class VietnamForeignFlowBatchService:
         selected = rows[-sessions:]
         if len(selected) != sessions:
             return None
+        if any(row.get("complete") is False for row in selected):
+            return None
         values = [row.get(field) for row in selected]
         if any(value is None for value in values):
             return None
@@ -1465,7 +1901,10 @@ class VietnamForeignFlowBatchService:
         else:
             availability = "partial"
 
-        streak = _current_streak(rows, "foreign_net_value")
+        streak = _current_streak(
+            _complete_only_calculation_rows(rows),
+            "foreign_net_value",
+        )
         direction = streak.get("direction")
         anomaly_sessions = [
             str(row["trading_date"])
@@ -1930,12 +2369,59 @@ class VietnamForeignFlowVn30Service:
                     histories,
                     canonical,
                     requested_top_n,
+                    repair_results={},
                     membership_ms=membership_ms,
                     direct_ms=direct_ms,
                     histories_ms=histories_ms,
                     build_started=aggregate_started,
                     request_started=request_started,
                 )
+                suspicious_dates = list(
+                    payload.get("decomposition", {}).get("anomaly_sessions") or []
+                )
+                repair_results: Dict[str, Dict[str, Any]] = {}
+                repair = getattr(
+                    self._symbol_service, "repair_suspicious_session", None
+                )
+                for suspicious_date in suspicious_dates:
+                    if callable(repair):
+                        repair_results[suspicious_date] = dict(
+                            repair(
+                                membership["member_tickers"],
+                                suspicious_date,
+                                force_refresh=force_refresh,
+                            )
+                        )
+                    else:
+                        repair_results[suspicious_date] = {
+                            "trading_date": suspicious_date,
+                            "status": "unresolved",
+                            "recovery_attempted": False,
+                            "recovery_succeeded": False,
+                            "failure_class": "provider_unavailable",
+                            "provider_operation": "securitiesSummary?symbol=",
+                        }
+                if repair_results:
+                    if any(
+                        result.get("recovery_succeeded")
+                        for result in repair_results.values()
+                    ):
+                        histories = self._overlay_accepted_histories(
+                            histories, membership["member_tickers"]
+                        )
+                    aggregate_started = perf_counter()
+                    payload = self._build_aggregate(
+                        membership,
+                        histories,
+                        canonical,
+                        requested_top_n,
+                        repair_results=repair_results,
+                        membership_ms=membership_ms,
+                        direct_ms=direct_ms,
+                        histories_ms=histories_ms,
+                        build_started=aggregate_started,
+                        request_started=request_started,
+                    )
                 result_state = payload["data_state"]
                 component_counts = payload["component_counts"]
                 kind = (
@@ -2462,7 +2948,7 @@ class VietnamForeignFlowVn30Service:
 
     @staticmethod
     def _metric_family_coverage(row: Optional[Dict[str, Any]], family: str) -> bool:
-        if not row:
+        if not row or row.get("complete") is False:
             return False
         return all(row.get(f"foreign_{side}_{family}") is not None for side in ("buy", "sell", "net"))
 
@@ -2473,6 +2959,8 @@ class VietnamForeignFlowVn30Service:
         tickers: List[str],
         rows_by_ticker: Dict[str, Dict[str, Dict[str, Any]]],
         histories: Dict[str, Dict[str, Any]],
+        *,
+        repair: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         result: Dict[str, Any] = {"trading_date": trading_date}
         any_numeric = False
@@ -2482,7 +2970,11 @@ class VietnamForeignFlowVn30Service:
                 values = []
                 for ticker in tickers:
                     row = rows_by_ticker[ticker].get(trading_date)
-                    value = row.get(f"foreign_{side}_{family}") if row else None
+                    value = (
+                        row.get(f"foreign_{side}_{family}")
+                        if row and row.get("complete") is not False
+                        else None
+                    )
                     if value is not None:
                         values.append(value)
                 result[f"foreign_{side}_{family}"] = sum(values) if values else None
@@ -2560,10 +3052,45 @@ class VietnamForeignFlowVn30Service:
         )
         result["anomaly_code"] = result["anomaly"]
         result["anomaly_status"] = (
-            "provider_backed_suspect"
+            "unresolved_provider_anomaly"
             if result["all_constituents_zero"]
             else None
         )
+        if result["all_constituents_zero"]:
+            for family in ("volume", "value"):
+                for side in ("buy", "sell", "net"):
+                    result[f"foreign_{side}_{family}"] = None
+                result[f"{family}_coverage_count"] = 0
+                result[f"{family}_coverage_ratio"] = 0.0
+                result[f"{family}_coverage"] = {
+                    "covered_components": 0,
+                    "expected_components": len(tickers),
+                    "coverage_ratio": 0.0,
+                    "complete": False,
+                }
+                result[f"{family}_breadth"] = {
+                    "net_buy_count": 0,
+                    "net_sell_count": 0,
+                    "zero_count": 0,
+                    "unavailable_count": len(tickers),
+                }
+            result.update(
+                positive_components=0,
+                negative_components=0,
+                zero_components=0,
+                missing_components=len(tickers),
+                complete=False,
+                data_quality="anomalous",
+                usable_for_windows=False,
+                usable_for_rankings=False,
+                usable_for_analytics=False,
+                recovery_attempted=bool((repair or {}).get("recovery_attempted")),
+                recovery_succeeded=False,
+                repair_status=str((repair or {}).get("status") or "pending"),
+                repair_source=(repair or {}).get("provider_operation"),
+                repair_failure_class=(repair or {}).get("failure_class"),
+                repair_diagnostics=deepcopy(repair or {}),
+            )
         contributing = [
             ticker
             for ticker in tickers
@@ -2575,7 +3102,11 @@ class VietnamForeignFlowVn30Service:
         ]
         all_stale = bool(contributing) and all(histories[ticker].get("freshness") == "stale" for ticker in contributing)
         full = result["value_coverage_count"] == len(tickers) and result["volume_coverage_count"] == len(tickers)
-        if not any_numeric:
+        if result["all_constituents_zero"]:
+            result["data_state"] = "partial"
+        elif not any_numeric and missing_field_components:
+            result["data_state"] = "partial"
+        elif not any_numeric:
             result["data_state"] = "unavailable"
         elif all_stale:
             result["data_state"] = "stale"
@@ -2584,13 +3115,20 @@ class VietnamForeignFlowVn30Service:
         else:
             result["data_state"] = "partial"
         result["state"] = result["data_state"]
-        result["valid_session"] = result["data_state"] in {"ready", "stale"}
+        result["valid_session"] = bool(
+            not result["all_constituents_zero"]
+            and result["data_state"] in {"ready", "stale"}
+        )
         return result
 
     @staticmethod
     def _aggregate_window(series: List[Dict[str, Any]], requested_sessions: int, member_count: int) -> Dict[str, Any]:
         selected = series[-requested_sessions:]
-        valid = [row for row in selected if row.get("data_state") == "ready"]
+        valid = [
+            row
+            for row in selected
+            if row.get("data_state") in {"ready", "stale"}
+        ]
         partial_count = sum(row.get("data_state") == "partial" for row in selected)
         suspicious_count = sum(
             bool(row.get("suspicious_zero_session")) for row in selected
@@ -2618,7 +3156,11 @@ class VietnamForeignFlowVn30Service:
         }
         for family in ("volume", "value"):
             for side in ("buy", "sell", "net"):
-                values = [row[f"foreign_{side}_{family}"] for row in selected if row.get(f"foreign_{side}_{family}") is not None]
+                values = [
+                    row[f"foreign_{side}_{family}"]
+                    for row in valid
+                    if row.get(f"foreign_{side}_{family}") is not None
+                ]
                 result[f"foreign_{side}_{family}"] = sum(values) if values else None
             observed = sum(int(row.get(f"{family}_coverage_count") or 0) for row in selected)
             expected = member_count * requested_sessions
@@ -2638,13 +3180,21 @@ class VietnamForeignFlowVn30Service:
         history: Dict[str, Any],
         rows_by_date: Dict[str, Dict[str, Any]],
         session_dates: List[str],
+        *,
+        excluded_dates: Optional[set[str]] = None,
     ) -> Dict[str, Any]:
         global_latest = session_dates[-1] if session_dates else None
-        latest = rows_by_date.get(global_latest) if global_latest else None
+        excluded = excluded_dates or set()
+        latest = (
+            rows_by_date.get(global_latest)
+            if global_latest and global_latest not in excluded
+            else None
+        )
         own_dates = sorted(rows_by_date)
         has_same_date = latest is not None
         has_any_same_date_value = bool(
             latest
+            and latest.get("complete") is not False
             and any(
                 latest.get(f"foreign_{side}_{family}") is not None
                 for family in ("volume", "value")
@@ -2682,7 +3232,13 @@ class VietnamForeignFlowVn30Service:
                 result[f"foreign_{side}_{family}"] = latest.get(f"foreign_{side}_{family}") if latest else None
         for size, suffix in ((5, "5d"), (20, "20d"), (60, "60d")):
             selected_dates = session_dates[-size:]
-            selected_rows = [rows_by_date[day] for day in selected_dates if day in rows_by_date]
+            selected_rows = [
+                rows_by_date[day]
+                for day in selected_dates
+                if day in rows_by_date
+                and day not in excluded
+                and rows_by_date[day].get("complete") is not False
+            ]
             for family in ("volume", "value"):
                 for side in ("buy", "sell", "net"):
                     values = [row[f"foreign_{side}_{family}"] for row in selected_rows if row.get(f"foreign_{side}_{family}") is not None]
@@ -2710,6 +3266,25 @@ class VietnamForeignFlowVn30Service:
             "top_sell": sorted((item for item in entries if item["value"] < 0), key=lambda item: (item["value"], item["ticker"]))[:top_n],
         }
 
+    @staticmethod
+    def _overlay_accepted_histories(
+        histories: Dict[str, Dict[str, Any]],
+        tickers: List[str],
+    ) -> Dict[str, Dict[str, Any]]:
+        accepted = accepted_vietnam_foreign_flow_history(tickers)
+        overlaid = deepcopy(histories)
+        for ticker in tickers:
+            rows = accepted.get(ticker) or []
+            if not rows:
+                continue
+            history = dict(overlaid.get(ticker) or {})
+            history["rows"] = rows[-MAX_ROWS:]
+            history["latest_row"] = history["rows"][-1]
+            history["data_state"] = "ready"
+            history["freshness"] = "fresh"
+            overlaid[ticker] = history
+        return overlaid
+
     def _build_aggregate(
         self,
         membership: Dict[str, Any],
@@ -2717,6 +3292,7 @@ class VietnamForeignFlowVn30Service:
         canonical: Dict[str, Any],
         top_n: int,
         *,
+        repair_results: Dict[str, Dict[str, Any]],
         membership_ms: int,
         direct_ms: int,
         histories_ms: int,
@@ -2738,8 +3314,31 @@ class VietnamForeignFlowVn30Service:
             day for day in available_dates
             if decomposition_date is None or day <= decomposition_date
         ][-VN30_HISTORY_SESSIONS:]
-        series = [self._aggregate_day(day, tickers, rows_by_ticker, histories) for day in session_dates]
-        components = [self._compose_component(ticker, histories[ticker], rows_by_ticker[ticker], session_dates) for ticker in tickers]
+        series = [
+            self._aggregate_day(
+                day,
+                tickers,
+                rows_by_ticker,
+                histories,
+                repair=repair_results.get(day),
+            )
+            for day in session_dates
+        ]
+        anomaly_dates = {
+            row["trading_date"]
+            for row in series
+            if row.get("suspicious_zero_session")
+        }
+        components = [
+            self._compose_component(
+                ticker,
+                histories[ticker],
+                rows_by_ticker[ticker],
+                session_dates,
+                excluded_dates=anomaly_dates,
+            )
+            for ticker in tickers
+        ]
         counts = {
             "usable": sum(row["data_state"] in {"ready", "stale"} for row in components),
             "stale": sum(row["data_state"] == "stale" or row["freshness"] == "stale" for row in components),
@@ -2830,6 +3429,7 @@ class VietnamForeignFlowVn30Service:
                 "anomaly_count": sum(
                     bool(row.get("suspicious_zero_session")) for row in series
                 ),
+                "repair_results": deepcopy(repair_results),
             },
             "cache": {},
             "timing": {

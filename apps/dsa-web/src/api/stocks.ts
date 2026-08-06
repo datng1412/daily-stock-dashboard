@@ -560,6 +560,12 @@ export type VietnamForeignFlowHistoryRow = {
   foreignBuyValue?: number | null;
   foreignSellValue?: number | null;
   foreignNetValue?: number | null;
+  fieldPresence?: Record<string, string>;
+  missingForeignFields?: string[];
+  dataQuality?: 'complete' | 'incomplete';
+  complete?: boolean;
+  usableForVolumeNet?: boolean;
+  usableForValueNet?: boolean;
 };
 
 export type VietnamForeignFlowHistoryWindow = {
@@ -1015,6 +1021,17 @@ export type VietnamVn30ForeignFlowDaily = {
   anomaly?: string | null;
   anomalyCode?: string | null;
   anomalyStatus?: string | null;
+  complete?: boolean | null;
+  dataQuality?: 'complete' | 'incomplete' | 'anomalous' | null;
+  usableForWindows?: boolean | null;
+  usableForRankings?: boolean | null;
+  usableForAnalytics?: boolean | null;
+  recoveryAttempted?: boolean;
+  recoverySucceeded?: boolean;
+  repairStatus?: string | null;
+  repairSource?: string | null;
+  repairFailureClass?: string | null;
+  repairDiagnostics?: Record<string, unknown>;
   explicitZeroComponentCount?: number;
   missingFieldComponentCount?: number;
   freshness?: string | null;
@@ -1624,6 +1641,7 @@ export type VietnamFlowDataResponse = {
   dataState?: 'ready' | 'partial' | 'unavailable';
   usable?: boolean;
   failureClass?: string | null;
+  capabilityStatus?: 'unsupported' | string | null;
   source: string;
   providerVersion: string;
   scope?: string | null;
@@ -1646,6 +1664,7 @@ export type VietnamFlowDataResponse = {
 export type VietnamCurrentForeignFlowDataState =
   | 'waiting'
   | 'ready'
+  | 'partial'
   | 'stale'
   | 'market_closed'
   | 'unavailable'

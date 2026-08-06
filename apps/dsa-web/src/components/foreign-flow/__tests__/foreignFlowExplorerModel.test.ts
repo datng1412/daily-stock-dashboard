@@ -17,7 +17,7 @@ describe('foreignFlowExplorerModel', () => {
     const selected = selectForeignFlowWindow(rows, '60', (row) => row.tradingDate, (row) => row.anomaly);
     expect(selected.actualSessionCount).toBe(60);
     expect(selected.rows).toHaveLength(60);
-    expect(selected.complete).toBe(true);
+    expect(selected.complete).toBe(false);
     expect(selected.containsProviderAnomaly).toBe(true);
   });
 
@@ -43,5 +43,19 @@ describe('foreignFlowExplorerModel', () => {
     expect(csv).toContain('ticker,value,20,2026-07-21,123456789');
     expect(csv).not.toContain('123.46M');
     vi.restoreAllMocks();
+  });
+
+  it('exports missing fields as empty cells while retaining explicit zero', () => {
+    const csv = buildForeignFlowCsv([
+      { tradingDate: '2026-06-29', foreignBuyValue: null },
+      { tradingDate: '2026-06-30', foreignBuyValue: 0 },
+    ], {
+      mode: 'ticker',
+      metric: 'value',
+      window: '20',
+    });
+
+    expect(csv).toContain('ticker,value,20,2026-06-29,');
+    expect(csv).toContain('ticker,value,20,2026-06-30,0');
   });
 });

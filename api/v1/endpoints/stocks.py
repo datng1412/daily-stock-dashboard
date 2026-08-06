@@ -993,7 +993,7 @@ def get_vietnam_current_foreign_flow_aggregate(
 @router.get(
     "/vn/proprietary-flow",
     response_model=VietnamProprietaryFlowResponse,
-    summary="Vietnam proprietary flow for one SSI board or index",
+    summary="Vietnam SSI proprietary-flow capability for one board or index",
 )
 def get_vietnam_proprietary_flow(
     scope: str = Query(..., pattern="^(board|index)$"),

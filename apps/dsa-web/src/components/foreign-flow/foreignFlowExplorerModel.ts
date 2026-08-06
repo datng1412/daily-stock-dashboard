@@ -75,7 +75,11 @@ export const selectForeignFlowWindow = <T,>(
     sessionDates,
     requestedSessionCount: requested,
     actualSessionCount: sessionDates.length,
-    complete: requested === null ? Boolean(sessionDates.length) : sessionDates.length === requested,
+    complete: (
+      requested === null
+        ? Boolean(sessionDates.length) && anomalySessions.length === 0
+        : sessionDates.length === requested && anomalySessions.length === 0
+    ),
     missingSessions: requested === null ? null : Math.max(0, requested - sessionDates.length),
     containsProviderAnomaly: anomalySessions.length > 0,
     anomalySessions,

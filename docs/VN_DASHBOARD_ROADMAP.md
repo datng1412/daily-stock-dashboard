@@ -1,5 +1,32 @@
 ﻿# VN Dashboard Roadmap
 
+## Phase VN-PROPRIETARY-P0 - Alternative-provider capability gate (2026-08-05)
+
+- Verified the official FiinGroup DataFeed and Vnstock Data Sponsor operation contracts, plus the installed `FiinQuantX==0.1.62` public `PriceStatistics.get_value_by_investor()` contract, without reusing SSI price, foreign flow, room, volume, turnover, or `indexSummary` values.
+- FiinQuantX declares 12 total/matched/deal proprietary gross fields, but bounded post-close and next-day pre-open logins both left public `is_login=false`. The result remains `VN_PROPRIETARY_FIINQUANT_AUTH_FAILED`; no authenticated proprietary-data request began, so entitlement, historical rows, same-day data, cadence, and active-session updates remain unproven. The pre-open repetition rules out market-session inactivity as the login-state explanation but does not distinguish invalid credentials from provider-side account authorization.
+- FiinGroup is locally `UNAVAILABLE` / `CONFIGURATION_REQUIRED`: no DataFeed client/configuration/entitlement, runtime publication cadence, rate limit, or application-rights proof exists. `FIINQUANT_*` belongs to a different product.
+- Vnstock Data is locally `UNAVAILABLE` / `PROVIDER_PACKAGE_MISSING`: free `vnstock==4.0.4` is installed, while Sponsor `vnstock_data` is absent. The documented Insights net-window schema does not prove gross buy/sell fields.
+- The initial post-close gate made zero provider calls; the continuation made bounded credential-safe FiinQuantX login attempts but zero proprietary-data requests because authentication did not establish a logged-in state. P1 remains closed and the existing unsupported Proprietary API/UI behavior remains unchanged.
+- Added one bounded, sanitized, cache-isolated diagnostic with JSON/CSV output, FiinQuantX contract/authentication classification, and 33 passing offline tests. See `docs/VN_PROPRIETARY_PROVIDER_GATE.md`.
+
+## Phase SSI-V3-M2.6B-R6E - Historical anomaly repair and Industry current runtime (2026-08-04)
+
+- Verify any all-constituent explicit-zero completed VN30 session through bounded exact-date SSI V3 symbol calls using one shared provider, four-call concurrency, per-session single-flight, one-hour cooldown, and one manual bypass.
+- Preserve stronger accepted same-date evidence. Exact-date nonzero corrections persist atomically and survive weaker broad-range refreshes; unresolved zero/missing/error results remain non-complete diagnostic anomalies and contribute no numeric chart, window, ranking, analytics, or CSV value.
+- Use the canonical current aggregate for the Industry detail row and current groups for rankings. Usable ready, partial, stale, and market-closed states are eligible; only a complete non-anomalous accepted same-date row suppresses current, leaving exactly one display row per date.
+- Bounded live verification of 2026-06-29 and 2026-06-30 found raw explicit zeros in all four symbol foreign fields for all 30 retained VN30 members. The first zero-producing layer is the SSI V3 raw `securitiesSummary?symbol=` payload, and no official alternative supplied proven symbol-level replacement values.
+- Validation passes 73 focused backend and 69 focused frontend tests, compile/TypeScript/ESLint/Vite, and the full backend tree at 3,332 passed, 69 failed, and 4 skipped. System Chrome accepts 14 desktop/mobile fixtures (28 assertions) without overflow or owned process/port leaks.
+- A bounded current-Industry smoke reached application health but returned typed `unavailable`/`network_error`; bounded stream backoff reported authorization failures, so fresh live Industry publication remains pending rather than inferred.
+
+## Phase SSI-V3-M2.6B-R6D - Foreign-flow integrity and capability truth (2026-07-30)
+
+- Preserve raw SSI V3 DailyStockPrice foreign-field presence before numeric normalization. A field marked absent/null/parse-failed remains `null`; an explicitly supplied zero remains `0`.
+- Keep accepted dates with incomplete gross fields visible as `Thiếu dữ liệu`, while excluding those rows from complete-only windows, analytics, rankings, and chart points. Durable history retains the same quality metadata and reapplies it on restore.
+- Mark securities-company proprietary flow `unsupported`: the current SSI integration has no proven proprietary buy/sell fields. `indexSummary` remains legitimate index-market data and is no longer reinterpreted as proprietary flow.
+- Build the current Industry detail row from the canonical current-VN30 aggregate returned beside the Industry groups. The groups remain the ranking source; current provider date/state/finality remain provisional, accepted same-date history wins, and no zero placeholder is emitted.
+- Deterministic validation passes 126 focused backend and 65 focused frontend tests; Python compile, TypeScript, ESLint, and Vite build pass. The full backend tree is 3,326 passed, 69 failed, and 4 skipped, preserving the accepted failure/skip baseline.
+- System Chrome accepts 13 fixtures at 1366x768 and 390x844 (26 assertions) in 40.971 seconds with no page-level overflow, owned-process leak, temporary-log leak, or occupied port. Fresh active-session Industry publication remains a separate live gate.
+
 ## Phase SSI-V3-M2.6B-R6C - Idle authentication recovery and LKG aggregate fallback (2026-07-30)
 
 - Retain the last validated SSI IndexComponents VN30 cohort when an idle/background refresh is retryably unavailable, empty, or malformed.
@@ -2778,7 +2805,7 @@ The MVP is limited to summary, top buyers/sellers, watchlist table, and symbol d
 - Separated cache freshness from source-session freshness, added expected-session-aware cache identity, and retained explicit provider zero sessions with anomaly metadata while keeping absent/null fields unavailable.
 - Updated the foreign-flow workspace to label the SSI index aggregate and current-basket decomposition separately. Direct totals no longer display constituent coverage.
 - Bounded live acceptance on 2026-07-24 returned 44 direct `symbol=VN30` sessions through 2026-07-23 but no non-null foreign gross field on any row. Outcome is `VN30_CANONICAL_BLOCKED_DIRECT_INDEX`; current-member totals are not promoted as canonical.
-- The live current-basket decomposition reached 2026-07-23 with 30/30 same-date coverage. Both 2026-06-29 and 2026-06-30 were proven as 30/30 explicit four-field zero sessions, not missing-field normalization. They remain visible with `all_constituents_explicit_zero` anomaly metadata.
+- The live current-basket decomposition reached 2026-07-23 with 30/30 same-date coverage. Both 2026-06-29 and 2026-06-30 were proven as 30/30 explicit four-field zero sessions, not missing-field normalization. R6E supersedes their earlier numeric display: they remain visible as unresolved anomaly diagnostics, while public aggregate numbers and complete-only calculations exclude the zero-shaped values.
 
 ### SSI-V3-M2.5-R3 — VN30 decomposition fallback and capability finalization
 

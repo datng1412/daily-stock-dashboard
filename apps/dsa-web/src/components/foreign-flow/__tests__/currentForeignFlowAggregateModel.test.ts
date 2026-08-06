@@ -170,6 +170,163 @@ describe('currentForeignFlowAggregateModel', () => {
     expect(merged[0].displayStatus).toBe('Đủ');
   });
 
+  it.each([
+    ['ready', 'Đang diễn ra'],
+    ['stale', 'Mất kết nối'],
+    ['market_closed', 'Tạm tính'],
+  ] as const)('uses the canonical current aggregate for an %s industry detail row', (dataState, status) => {
+    const current = currentAggregate({
+      dataState,
+      providerSessionDate: '2026-07-30',
+      aggregate: {
+        foreignBuyValue: 900,
+        foreignSellValue: 350,
+        foreignNetValue: 550,
+        foreignBuyVolume: 90,
+        foreignSellVolume: 35,
+        foreignNetVolume: 55,
+        requestedCount: 2,
+        observedCount: 2,
+        completeValueCount: 2,
+        completeVolumeCount: 2,
+      },
+      groups: [{
+        providerSessionDate: '2026-07-30',
+        icbCode: '10',
+        icbName: 'Technology',
+        foreignBuyValue: 500,
+        foreignSellValue: 200,
+        foreignNetValue: 300,
+      }, {
+        providerSessionDate: '2026-07-30',
+        icbCode: '20',
+        icbName: 'Banks',
+        foreignBuyValue: 400,
+        foreignSellValue: 150,
+        foreignNetValue: 250,
+      }],
+    });
+
+    const merged = mergeCurrentAggregateRows([], current, 'industry');
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toMatchObject({
+      tradingDate: '2026-07-30',
+      foreignBuyValue: 900,
+      foreignSellValue: 350,
+      foreignNetValue: 550,
+      sourceKind: 'current',
+      finality: 'current_session_provisional',
+      currentState: dataState,
+      displayStatus: status,
+    });
+  });
+
+  it('keeps accepted same-date Industry history authoritative and emits no duplicate', () => {
+    const completed: ForeignFlowDisplayRow[] = [{
+      tradingDate: '2026-07-30',
+      foreignBuyValue: 1_000,
+      foreignSellValue: 400,
+      foreignNetValue: 600,
+      sourceKind: 'completed',
+    }];
+
+    const merged = mergeCurrentAggregateRows(completed, currentAggregate({
+      providerSessionDate: '2026-07-30',
+      aggregate: {
+        foreignBuyValue: 900,
+        foreignSellValue: 350,
+        foreignNetValue: 550,
+      },
+    }), 'industry');
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toMatchObject({
+      tradingDate: '2026-07-30',
+      foreignNetValue: 600,
+      sourceKind: 'completed',
+      finality: 'completed_accepted',
+      displayStatus: 'Đủ',
+    });
+  });
+
+  it('keeps a usable partial Industry aggregate visible as provisional current data', () => {
+    const merged = mergeCurrentAggregateRows([], currentAggregate({
+      dataState: 'partial',
+      providerSessionDate: '2026-07-30',
+      aggregate: {
+        foreignBuyValue: 900,
+        foreignSellValue: 350,
+        foreignNetValue: 550,
+      },
+    }), 'industry');
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toMatchObject({
+      sourceKind: 'current',
+      finality: 'current_session_provisional',
+      currentState: 'partial',
+      displayStatus: '\u0110ang di\u1ec5n ra',
+      isPartial: true,
+    });
+  });
+
+  it.each([
+    [{ complete: false, dataQuality: 'incomplete' }, 'incomplete'],
+    [{
+      complete: false,
+      dataQuality: 'anomalous',
+      suspiciousZeroSession: true,
+      anomalyStatus: 'unresolved_provider_anomaly',
+    }, 'suspicious'],
+  ] as const)('lets current Industry replace a %s same-date completed shell', (completedState, label) => {
+    void label;
+    const completed: ForeignFlowDisplayRow[] = [{
+      tradingDate: '2026-07-30',
+      foreignBuyValue: null,
+      foreignSellValue: null,
+      foreignNetValue: null,
+      sourceKind: 'completed',
+      ...completedState,
+    }];
+
+    const merged = mergeCurrentAggregateRows(completed, currentAggregate({
+      providerSessionDate: '2026-07-30',
+      aggregate: {
+        foreignBuyValue: 900,
+        foreignSellValue: 350,
+        foreignNetValue: 550,
+      },
+    }), 'industry');
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toMatchObject({
+      tradingDate: '2026-07-30',
+      foreignNetValue: 550,
+      sourceKind: 'current',
+      finality: 'current_session_provisional',
+    });
+  });
+
+  it('does not create an Industry placeholder when the canonical current aggregate is missing', () => {
+    const completed: ForeignFlowDisplayRow[] = [{
+      tradingDate: '2026-07-29',
+      foreignNetValue: 50,
+    }];
+
+    const merged = mergeCurrentAggregateRows(completed, currentAggregate({
+      aggregate: null,
+      groups: [{
+        providerSessionDate: '2026-07-30',
+        icbCode: '10',
+        foreignNetValue: 0,
+      }],
+    }), 'industry');
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0].tradingDate).toBe('2026-07-29');
+  });
+
   it('preserves explicit zero and missing values when current windows hydrate a watchlist', () => {
     const item = {
       ticker: 'FPT',

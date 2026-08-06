@@ -11,6 +11,23 @@ Global rules:
 - KBS is legacy optional only and disabled by default.
 - News is disabled until a separate provider exists.
 
+## Foreign-flow missing-field and Proprietary capability contract
+
+Completed symbol-history rows expose additive `field_presence`,
+`missing_foreign_fields`, `data_quality`, `complete`,
+`usable_for_volume_net`, and `usable_for_value_net` fields. Missing provider
+gross fields serialize as `null`; explicit provider zero remains numeric zero;
+net is derived only from a valid gross pair. Incomplete accepted dates remain
+in `rows` but are excluded from complete-only windows and analytics.
+
+`GET /api/v1/stocks/vn/proprietary-flow` is a capability-status route for the
+requested board/index scope. It returns `capability_status=unsupported`,
+`usable=false`, `rows=[]`, `endpoint=none`, and
+`failure_class=proprietary_fields_unsupported`. It performs no provider
+operation because the current SSI contract does not prove securities-company
+proprietary buy/sell fields. `indexSummary` is not called or mapped by this
+route.
+
 ## Completed foreign-flow restart behavior
 
 The existing symbol-history and aggregate routes keep their public schemas.
@@ -555,7 +572,12 @@ Response rules:
 - Missing fields remain null and are excluded from sums; explicit audited provider zero remains zero.
 - `display_series` retains source kind, finality, current/completed/partial/stale flags, coverage counts, values, and provider timestamps when available. Top-level `data_state` remains the aggregate current state that clients propagate into display models.
 - `display_series`, `display_windows`, `rankings`, `items`, and `groups` are provisional presentation data. Numeric completeness and coverage do not promote them to accepted data, and they do not mutate completed DailyStockPrice history.
+- `aggregate` is the canonical current-universe total. Industry detail uses this aggregate, while `groups` remain the current-VN30 Industry ranking partition; clients must not independently create a zero current row.
 - Accepted DailyStockPrice for the same date has precedence. Proprietary flow is not part of this route.
+- Industry detail clients use `aggregate` for the one current session row and
+  `groups` for rankings. Usable `ready`, `partial`, `stale`, and
+  `market_closed` states are display eligible. A completed same-date row
+  suppresses current only when it is complete and not an unresolved anomaly.
 - Optional `recovery_trigger=route_touch|visibility_resume|manual_refresh`
   identifies the bounded recovery cause. It does not start a stream.
 - Retryable membership/authentication failure may return a partial usable

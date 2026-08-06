@@ -36,6 +36,8 @@ export const ForeignFlowSymbolHistoryTable = ({ rows, metric }: { rows: SymbolFo
           const status = row.statusLabel
             ?? (isCurrent
               ? 'Không khả dụng'
+              : row.isPartial
+                ? 'Thiếu dữ liệu'
               : row.sourceKind === 'completed' || row.finality === 'completed_accepted'
                 ? 'Đủ'
                 : row.state === 'ready'

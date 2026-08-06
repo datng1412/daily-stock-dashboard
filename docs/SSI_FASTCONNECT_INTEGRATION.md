@@ -1,5 +1,71 @@
 # SSI FastConnect Integration
 
+## M2.6B-R6E historical anomaly repair and Industry current runtime
+
+An all-constituent explicit-zero VN30 session now triggers a bounded exact-date
+DailyStockPrice verification using the shared V3 REST provider, at most four
+concurrent symbol calls, one single-flight owner per session, a one-hour
+cooldown, and one manual refresh bypass per cooldown episode. Raw aliases are
+classified before typed defaults. Stronger same-date evidence is monotonic:
+an exact-date nonzero or durably accepted complete row cannot be overwritten by
+a broad-range zero or partial row. Successful corrections persist atomically
+and invalidate only affected symbol/VN30 caches.
+
+If exact-date symbol calls still return explicit zero, missing rows, null
+fields, or errors, the session remains an unresolved provider anomaly. Public
+aggregate numbers are null and it is excluded from complete windows, rankings,
+analytics, charts, and numeric CSV cells. `securitiesSummary?index=VN30` was
+also inspected but does not provide a proven symbol-level historical repair
+contract; index summaries, room capacity, and unretained streaming snapshots
+are not reinterpreted.
+
+Industry detail now accepts usable `ready`, `partial`, `stale`, and
+`market_closed` current aggregates and reads the canonical `aggregate`; current
+`groups` remain ranking data. Only a complete, non-anomalous accepted same-date
+row suppresses current. An incomplete/anomalous shell does not, and the display
+still emits exactly one row per session date.
+
+Deterministic acceptance passes 73 focused backend and 69 focused frontend
+tests, compile/TypeScript/ESLint/Vite, the 3,405-test backend tree with the
+unchanged 69-failure/4-skip baseline, and 14 system-Chrome fixtures at desktop
+and mobile sizes. A bounded application smoke reached health but current
+Industry remained typed `unavailable`/`network_error` while streaming
+subscription restoration reported authorization failures under bounded
+backoff. Fresh live Industry publication therefore remains pending.
+
+## M2.6B-R6D missing-field and capability integrity
+
+DailyStockPrice foreign fields are read from the authenticated raw V3 REST
+mapping before any typed SDK default can be mistaken for provider data.
+`FIELD_ABSENT`, `FIELD_NULL`, `PARSE_FAILURE`, and
+`PROVIDER_ROW_MISSING` force the corresponding normalized gross field to
+`null`; net is available only from a valid gross pair. Explicit provider zero
+remains numeric zero. Accepted incomplete dates remain visible and durable with
+`data_quality=incomplete`, `complete=false`, and `missing_foreign_fields`, but
+complete-only calculations omit them.
+
+The installed/current SSI integration does not prove securities-company
+own-account buy/sell value or volume fields. The Proprietary capability is
+therefore `unsupported`, performs no provider operation, returns no rows, and
+offers no chart or CSV. SSI `indexSummary` remains available only for its
+legitimate index-market purpose and is not a proprietary-flow source.
+
+Current Industry groups and the canonical current-VN30 aggregate are derived
+once from the same process-owned `ForeignRoomMessage` symbol snapshots. Groups
+remain available for rankings; the detail series uses the canonical aggregate
+with the provider session date and `current_session_provisional` finality.
+Accepted DailyStockPrice retains same-date precedence. No current Industry
+aggregate is persisted.
+
+R6D deterministic validation passed 126 focused backend and 65 focused
+frontend tests. Python compile, TypeScript, ESLint, and the Vite production
+build passed. The full backend tree reported 3,326 passes with the established
+69 failures and four skips. System Chrome accepted all 13 required fixtures at
+1366x768 and 390x844 (26 assertions) in 40.971 seconds with no horizontal
+overflow or owned process, temporary artifact, or port leak. Validation
+finished after the active Vietnam provider session, so a fresh live Industry
+replacement message remains pending.
+
 ## M2.6B-R6C idle authentication recovery
 
 The first collapse occurred after the five-minute current VN30 universe cache
@@ -1267,7 +1333,7 @@ industries.
 - Gross-field presence is retained as explicit zero, nonzero, absent, or null. All-explicit-zero sessions are preserved and marked suspicious; absent/null fields remain unavailable and reduce completeness.
 - Canonical and decomposition cache identities are mode-, date-, session-count-, provider-version-, schema-version-, and membership-aware. Expected-session advancement prevents an old date-bounded response from remaining source-fresh.
 - Live acceptance on 2026-07-24 found 44 direct `symbol=VN30` rows from 2026-05-25 through 2026-07-23, but `foreign_buy_volume`, `foreign_sell_volume`, `foreign_buy_value`, and `foreign_sell_value` were null on every direct row. The direct canonical contract is therefore `unavailable` under the observed response; StockClock does not replace it with the current-member decomposition.
-- The same bounded decomposition read reached 2026-07-23 with 30/30 same-date value coverage. On both 2026-06-29 and 2026-06-30, all 30 members had all four gross fields explicitly present as zero, with no missing fields. Those sessions remain provider-backed zero anomalies; affected windows expose anomaly metadata without deleting, nulling, or changing the provider values.
+- The same bounded decomposition read reached 2026-07-23 with 30/30 same-date value coverage. On both 2026-06-29 and 2026-06-30, all 30 members had all four gross fields explicitly present as zero, with no missing fields. R6E exact-date verification again received provider-backed explicit zeros, so the dates remain diagnostic unresolved anomalies with null public aggregate numbers and are excluded from complete-only calculations; no replacement values are inferred.
 
 ### SSI-V3-M2.5-R3 VN30 decomposition fallback contract
 

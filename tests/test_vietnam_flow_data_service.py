@@ -205,6 +205,14 @@ def test_current_vn30_aggregate_uses_one_cohort_and_excludes_mixed_session_dates
         "8770",
         "9530",
     }
+    assert payload["diagnostics"]["industry_group_requested_count"] == 3
+    assert payload["diagnostics"]["industry_group_observed_count"] == 2
+    assert payload["diagnostics"]["industry_group_reconciliation"] == {
+        "foreign_buy_volume": True,
+        "foreign_sell_volume": True,
+        "foreign_buy_value": True,
+        "foreign_sell_value": True,
+    }
     assert payload["display_series"][-1]["source_kind"] == "current"
     assert payload["display_series"][-1]["is_partial"] is True
 
@@ -695,29 +703,22 @@ def test_index_industry_empty_membership_is_typed_unavailable() -> None:
     assert payload["diagnostics"]["provider_operation_count"] == 1
 
 
-def test_proprietary_scope_is_board_or_index_and_unsupported_symbol_is_explicit() -> None:
+def test_proprietary_scope_is_truthfully_unsupported_without_provider_call() -> None:
     payload = VietnamFlowDataService(FakeProvider()).proprietary_flow("board", "HOSE")
 
-    assert payload["status"] == "ok"
-    assert payload["rows"][0]["proprietary_net_value"] == 70
+    assert payload["status"] == "unavailable"
+    assert payload["data_state"] == "unavailable"
+    assert payload["usable"] is False
+    assert payload["capability_status"] == "unsupported"
+    assert payload["failure_class"] == "proprietary_fields_unsupported"
+    assert payload["rows"] == []
+    assert payload["endpoint"] == "none"
     assert payload["unsupported_scopes"] == ["symbol", "icb_industry"]
+    assert payload["diagnostics"]["attempted_operation"] == "none"
+    assert payload["diagnostics"]["reason"] == "no_proven_proprietary_flow_fields"
 
 
-def test_completed_proprietary_summary_is_reused_without_provider_failure_poisoning() -> None:
-    service = VietnamFlowDataService(FakeProvider())
-    first = service.proprietary_flow(
-        "index", "HNX30", from_date="2026-07-23", to_date="2026-07-23"
-    )
-    second = service.proprietary_flow(
-        "index", "HNX30", from_date="2026-07-23", to_date="2026-07-23"
-    )
-
-    assert first["diagnostics"]["provider_operation_count"] == 1
-    assert second["diagnostics"]["provider_operation_count"] == 0
-    assert second["diagnostics"]["cache_hit_count"] == 1
-
-
-def test_index_proprietary_flow_uses_proven_direct_index_summary_path() -> None:
+def test_proprietary_flow_does_not_call_or_reinterpret_index_summary() -> None:
     class RecordingIndexProvider(FakeProvider):
         index_calls = []
         market_calls = []
@@ -759,8 +760,10 @@ def test_index_proprietary_flow_uses_proven_direct_index_summary_path() -> None:
         force_refresh=True,
     )
 
-    assert payload["status"] == "ok"
-    assert provider.index_calls == [("VN30", "VN30", "2026-07-24")]
+    assert payload["status"] == "unavailable"
+    assert payload["capability_status"] == "unsupported"
+    assert payload["rows"] == []
+    assert provider.index_calls == []
     assert provider.market_calls == []
 
 
