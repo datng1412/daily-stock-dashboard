@@ -46,6 +46,9 @@ FIINQUANT_OPERATION = "FiinSession.PriceStatistics().get_value_by_investor()"
 FIINQUANT_PACKAGE = "FiinQuantX"
 FIINQUANT_TIMEOUT_SECONDS = 60.0
 FIINQUANT_HISTORY_DAYS = 14
+FIINQUANT_MAX_PROVIDER_REQUESTS = 2
+CREDENTIAL_SOURCES = ("auto", "dotenv", "process")
+PERMISSION_DENIED_MARKER = "you do not have permission to access"
 VNSTOCK_SYMBOL_OPERATION = "Market().equity(symbol).proprietary_flow()"
 VNSTOCK_BULK_OPERATION = "Insights().flow.proprietary(exchange='HOSE', group_by='stock')"
 CAPABILITIES = {
@@ -135,7 +138,24 @@ class ProbeResult:
     contract_fields: tuple[str, ...] = ()
     observed_fields: tuple[str, ...] = ()
     error_type: str | None = None
+    exception_class: str | None = None
     error_location: str | None = None
+    credential_source: str | None = None
+    process_env_username_present: bool = False
+    process_env_password_present: bool = False
+    dotenv_username_present: bool = False
+    dotenv_password_present: bool = False
+    username_sources_match: bool | None = None
+    password_sources_match: bool | None = None
+    authentication_attempt_count: int = 0
+    login_call_returned: bool | None = None
+    login_return_type: str | None = None
+    is_login_after_call: bool | None = None
+    symbols_requested: tuple[str, ...] = ()
+    request_duration_ms: int = 0
+    result_type: str | None = None
+    returned_row_count: int | None = None
+    provider_result_class: str | None = None
 
 
 def _first(row: Mapping[str, Any], aliases: Sequence[str]) -> tuple[Any, str | None]:
@@ -360,14 +380,107 @@ def inspect_fiinquant_contract() -> dict[str, Any]:
         }
 
 
-def _load_repo_dotenv() -> None:
-    try:
-        from dotenv import load_dotenv
-    except ImportError:
-        return
-    env_path = ROOT / ".env"
-    if env_path.exists():
-        load_dotenv(env_path, override=False)
+def resolve_credential_source(
+    process_env: Mapping[str, Any],
+    dotenv_data: Mapping[str, Any],
+    policy: str,
+) -> dict[str, Any]:
+    """Resolve credential provenance without returning credential values."""
+
+    if policy not in CREDENTIAL_SOURCES:
+        raise ValueError(f"Unsupported credential source: {policy}")
+
+    process_username = str(process_env.get("FIINQUANT_USERNAME") or "").strip()
+    process_password = str(process_env.get("FIINQUANT_PASSWORD") or "").strip()
+    dotenv_username = str(dotenv_data.get("FIINQUANT_USERNAME") or "").strip()
+    dotenv_password = str(dotenv_data.get("FIINQUANT_PASSWORD") or "").strip()
+    process_complete = bool(process_username and process_password)
+    dotenv_complete = bool(dotenv_username and dotenv_password)
+    username_match = (
+        process_username == dotenv_username
+        if process_username and dotenv_username
+        else None
+    )
+    password_match = (
+        process_password == dotenv_password
+        if process_password and dotenv_password
+        else None
+    )
+    selected_source: str | None = None
+    failure_class: str | None = None
+
+    if policy == "dotenv":
+        selected_source = "dotenv" if dotenv_complete else None
+    elif policy == "process":
+        selected_source = "process" if process_complete else None
+    elif process_complete and dotenv_complete:
+        if username_match is True and password_match is True:
+            selected_source = "dotenv"
+        else:
+            failure_class = "ENV_PRECEDENCE_CONFLICT"
+    elif dotenv_complete:
+        selected_source = "dotenv"
+    elif process_complete:
+        selected_source = "process"
+
+    if selected_source is None and failure_class is None:
+        failure_class = "CONFIGURATION_REQUIRED"
+
+    return {
+        "credential_source": selected_source,
+        "credential_source_policy": policy,
+        "process_env_username_present": bool(process_username),
+        "process_env_password_present": bool(process_password),
+        "dotenv_username_present": bool(dotenv_username),
+        "dotenv_password_present": bool(dotenv_password),
+        "username_sources_match": username_match,
+        "password_sources_match": password_match,
+        "failure_class": failure_class,
+    }
+
+
+def _selected_credentials(
+    process_env: Mapping[str, Any],
+    dotenv_data: Mapping[str, Any],
+    selected_source: str,
+) -> tuple[str, str]:
+    source = dotenv_data if selected_source == "dotenv" else process_env
+    return (
+        str(source.get("FIINQUANT_USERNAME") or "").strip(),
+        str(source.get("FIINQUANT_PASSWORD") or "").strip(),
+    )
+
+
+def _permission_denied(text: str) -> bool:
+    normalized = " ".join(str(text or "").casefold().split())
+    return PERMISSION_DENIED_MARKER in normalized
+
+
+def classify_provider_result(
+    *,
+    captured_output: str,
+    result_returned: bool,
+    row_count: int,
+    exception: BaseException | None = None,
+) -> str:
+    """Classify one provider call without retaining provider output."""
+
+    if _permission_denied(captured_output):
+        return "ENTITLEMENT_FAILURE"
+    if exception is not None:
+        classified = classify_error(type(exception).__name__ + ":" + str(exception)[:160])
+        if classified == "PROVIDER_PACKAGE_ERROR":
+            return "PACKAGE_FAILURE"
+        if classified == "NETWORK_FAILURE":
+            return "NETWORK_FAILURE"
+        if classified == "ENTITLEMENT_FAILURE":
+            return "ENTITLEMENT_FAILURE"
+        return "PROVIDER_FAILURE"
+    if result_returned and row_count > 0:
+        return "VALID_NONEMPTY_RESPONSE"
+    if result_returned:
+        return "VALID_EMPTY_RESPONSE"
+    return "PROVIDER_FAILURE"
 
 
 def _safe_error_location(exc: BaseException) -> str | None:
@@ -381,10 +494,183 @@ def _safe_error_location(exc: BaseException) -> str | None:
 def _fiinquant_logged_in(client: Any) -> bool:
     """Use the package's public login-state flag; never inspect token values."""
 
-    return getattr(client, "is_login", None) is True
+    return bool(getattr(client, "is_login", False))
 
 
-def _fiinquant_worker(output: Any, symbols: tuple[str, ...], history_days: int) -> None:
+def _run_fiinquant_probe(
+    symbols: tuple[str, ...],
+    history_days: int,
+    credential_source: str,
+    max_provider_requests: int,
+    *,
+    process_env: Mapping[str, Any] | None = None,
+    dotenv_data: Mapping[str, Any] | None = None,
+    session_factory: Any = None,
+    package_version: str | None = None,
+) -> dict[str, Any]:
+    """Run one sanitized login and a bounded sequence of public data calls."""
+
+    if process_env is None:
+        process_env = os.environ
+    if dotenv_data is None:
+        from dotenv import dotenv_values
+
+        dotenv_data = dotenv_values(ROOT / ".env")
+    provenance = resolve_credential_source(process_env, dotenv_data, credential_source)
+    payload = dict(provenance)
+    payload.update({
+        "authentication": "NOT_ATTEMPTED",
+        "authentication_attempt_count": 0,
+        "request_count": 0,
+        "symbols_requested": (),
+        "request_duration_ms": 0,
+        "returned_row_count": None,
+    })
+    if provenance["failure_class"]:
+        return payload
+
+    selected_source = str(provenance["credential_source"])
+    username, password = _selected_credentials(
+        process_env, dotenv_data, selected_source
+    )
+    if session_factory is None:
+        import importlib.metadata as metadata
+        from FiinQuantX import FiinSession
+
+        session_factory = FiinSession
+        package_version = package_version or metadata.version(FIINQUANT_PACKAGE)
+    payload["package_version"] = package_version
+    payload["authentication_attempt_count"] = 1
+
+    login_stdout = io.StringIO()
+    login_stderr = io.StringIO()
+    try:
+        with redirect_stdout(login_stdout), redirect_stderr(login_stderr):
+            session = session_factory(username=username, password=password)
+            client = session.login()
+        payload["login_call_returned"] = True
+        if client is None:
+            client = session
+        payload["login_return_type"] = type(client).__name__
+        payload["is_login_after_call"] = _fiinquant_logged_in(client)
+    except BaseException as exc:
+        payload.update({
+            "login_call_returned": False,
+            "login_return_type": None,
+            "is_login_after_call": False,
+            "authentication": "FAILED",
+            "failure_class": classify_error(
+                type(exc).__name__ + ":" + str(exc)[:160]
+            ),
+            "error_type": type(exc).__name__,
+            "exception_class": type(exc).__name__,
+            "error_location": _safe_error_location(exc),
+        })
+        return payload
+
+    if not payload["is_login_after_call"]:
+        payload.update({
+            "authentication": "FAILED",
+            "failure_class": "AUTHENTICATION_FAILURE",
+            "error_type": "LoginStateFalse",
+        })
+        return payload
+
+    payload["authentication"] = "AUTHENTICATED"
+    payload["failure_class"] = None
+    to_date = datetime.now().astimezone().date()
+    from_date = to_date - timedelta(days=max(1, history_days))
+    observations: list[dict[str, Any]] = []
+    observed_fields: set[str] = set()
+    requested: list[str] = []
+    total_duration_ms = 0
+    last_result_type: str | None = None
+    last_row_count: int | None = None
+    provider_result_class: str | None = None
+
+    try:
+        statistics = client.PriceStatistics()
+    except BaseException as exc:
+        payload.update({
+            "failure_class": "PROVIDER_PACKAGE_ERROR",
+            "provider_result_class": "PACKAGE_FAILURE",
+            "error_type": type(exc).__name__,
+            "exception_class": type(exc).__name__,
+            "error_location": _safe_error_location(exc),
+        })
+        return payload
+
+    budget = max(1, min(int(max_provider_requests), FIINQUANT_MAX_PROVIDER_REQUESTS))
+    for symbol in symbols[:budget]:
+        call_stdout = io.StringIO()
+        call_stderr = io.StringIO()
+        frame: Any = None
+        exception: BaseException | None = None
+        started = monotonic()
+        requested.append(symbol)
+        try:
+            with redirect_stdout(call_stdout), redirect_stderr(call_stderr):
+                frame = statistics.get_value_by_investor(
+                    tickers=[symbol],
+                    from_date=from_date.isoformat(),
+                    to_date=to_date.isoformat(),
+                )
+        except BaseException as exc:
+            exception = exc
+        elapsed_ms = round((monotonic() - started) * 1_000)
+        total_duration_ms += elapsed_ms
+        rows = _frame_records(frame)
+        last_result_type = type(frame).__name__ if frame is not None else None
+        last_row_count = len(rows)
+        provider_result_class = classify_provider_result(
+            captured_output=call_stdout.getvalue() + "\n" + call_stderr.getvalue(),
+            result_returned=frame is not None,
+            row_count=len(rows),
+            exception=exception,
+        )
+        if rows:
+            received = datetime.now().astimezone().isoformat(timespec="seconds")
+            observed_fields.update(str(key) for row in rows for key in row)
+            observations.extend(
+                normalize_observation(
+                    "FiinQuantX", FIINQUANT_OPERATION, row, received_at=received
+                )
+                for row in rows
+            )
+        if provider_result_class in {
+            "ENTITLEMENT_FAILURE", "NETWORK_FAILURE", "PACKAGE_FAILURE",
+            "PROVIDER_FAILURE",
+        }:
+            break
+
+    failure_map = {
+        "ENTITLEMENT_FAILURE": "ENTITLEMENT_FAILURE",
+        "NETWORK_FAILURE": "NETWORK_FAILURE",
+        "PACKAGE_FAILURE": "PROVIDER_PACKAGE_ERROR",
+        "PROVIDER_FAILURE": "PROVIDER_ERROR",
+    }
+    payload.update({
+        "request_count": len(requested),
+        "symbols_requested": tuple(requested),
+        "request_duration_ms": total_duration_ms,
+        "result_type": last_result_type,
+        "returned_row_count": last_row_count,
+        "provider_result_class": provider_result_class,
+        "failure_class": failure_map.get(provider_result_class),
+        "exception_class": type(exception).__name__ if exception is not None else None,
+        "observations": tuple(observations),
+        "observed_fields": tuple(sorted(observed_fields)),
+    })
+    return payload
+
+
+def _fiinquant_worker(
+    output: Any,
+    symbols: tuple[str, ...],
+    history_days: int,
+    credential_source: str,
+    max_provider_requests: int,
+) -> None:
     """Authenticate and make one bounded logical proprietary-history request.
 
     Provider stdout/stderr are captured in-process and discarded so an
@@ -397,89 +683,12 @@ def _fiinquant_worker(output: Any, symbols: tuple[str, ...], history_days: int) 
     try:
         with redirect_stdout(captured_stdout), redirect_stderr(captured_stderr):
             logging.disable(logging.CRITICAL)
-            _load_repo_dotenv()
-            username = (os.getenv("FIINQUANT_USERNAME") or "").strip()
-            password = (os.getenv("FIINQUANT_PASSWORD") or "").strip()
-            if not username or not password:
-                output.put({
-                    "failure_class": "CONFIGURATION_REQUIRED",
-                    "authentication": "NOT_ATTEMPTED",
-                })
-                return
-
-            import importlib.metadata as metadata
-            from FiinQuantX import FiinSession
-
-            try:
-                session = FiinSession(username=username, password=password)
-                client = session.login()
-                if client is None:
-                    client = session
-            except BaseException as exc:
-                output.put({
-                    "failure_class": classify_error(
-                        type(exc).__name__ + ":" + str(exc)[:160]
-                    ),
-                    "authentication": "FAILED",
-                    "package_version": metadata.version(FIINQUANT_PACKAGE),
-                    "error_type": type(exc).__name__,
-                    "error_location": _safe_error_location(exc),
-                })
-                return
-
-            if not _fiinquant_logged_in(client):
-                output.put({
-                    "failure_class": "AUTHENTICATION_FAILURE",
-                    "authentication": "FAILED",
-                    "package_version": metadata.version(FIINQUANT_PACKAGE),
-                    "request_count": 0,
-                    "error_type": "LoginStateFalse",
-                })
-                return
-
-            to_date = datetime.now().astimezone().date()
-            from_date = to_date - timedelta(days=max(1, history_days))
-            request_started = False
-            try:
-                statistics = client.PriceStatistics()
-                request_started = True
-                frame = statistics.get_value_by_investor(
-                    tickers=list(symbols),
-                    from_date=from_date.isoformat(),
-                    to_date=to_date.isoformat(),
-                )
-            except BaseException as exc:
-                output.put({
-                    "failure_class": classify_error(
-                        type(exc).__name__ + ":" + str(exc)[:160]
-                    ),
-                    "authentication": "AUTHENTICATED",
-                    "package_version": metadata.version(FIINQUANT_PACKAGE),
-                    "request_count": int(request_started),
-                    "error_type": type(exc).__name__,
-                    "error_location": _safe_error_location(exc),
-                })
-                return
-
-            rows = _frame_records(frame)
-            observed_fields = tuple(sorted({str(key) for row in rows for key in row}))
-            received = datetime.now().astimezone().isoformat(timespec="seconds")
-            observations = tuple(
-                normalize_observation(
-                    "FiinQuantX",
-                    FIINQUANT_OPERATION,
-                    row,
-                    received_at=received,
-                )
-                for row in rows
-            )
-            output.put({
-                "authentication": "AUTHENTICATED",
-                "package_version": metadata.version(FIINQUANT_PACKAGE),
-                "request_count": 1,
-                "observations": observations,
-                "observed_fields": observed_fields,
-            })
+            output.put(_run_fiinquant_probe(
+                symbols,
+                history_days,
+                credential_source,
+                max_provider_requests,
+            ))
     except ModuleNotFoundError:
         output.put({
             "failure_class": "PROVIDER_PACKAGE_MISSING",
@@ -496,9 +705,47 @@ def _fiinquant_worker(output: Any, symbols: tuple[str, ...], history_days: int) 
         logging.disable(logging.NOTSET)
 
 
-def inspect_fiinquant(*, live: bool, symbols: tuple[str, ...]) -> ProbeResult:
+def _credential_diagnostics(policy: str) -> dict[str, Any]:
+    try:
+        from dotenv import dotenv_values
+    except ImportError:
+        dotenv_data: Mapping[str, Any] = {}
+    else:
+        dotenv_data = dotenv_values(ROOT / ".env")
+    return resolve_credential_source(os.environ, dotenv_data, policy)
+
+
+def _probe_metadata(payload: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "credential_source": payload.get("credential_source"),
+        "process_env_username_present": bool(payload.get("process_env_username_present")),
+        "process_env_password_present": bool(payload.get("process_env_password_present")),
+        "dotenv_username_present": bool(payload.get("dotenv_username_present")),
+        "dotenv_password_present": bool(payload.get("dotenv_password_present")),
+        "username_sources_match": payload.get("username_sources_match"),
+        "password_sources_match": payload.get("password_sources_match"),
+        "authentication_attempt_count": int(payload.get("authentication_attempt_count") or 0),
+        "login_call_returned": payload.get("login_call_returned"),
+        "login_return_type": payload.get("login_return_type"),
+        "is_login_after_call": payload.get("is_login_after_call"),
+        "symbols_requested": tuple(payload.get("symbols_requested") or ()),
+        "request_duration_ms": int(payload.get("request_duration_ms") or 0),
+        "result_type": payload.get("result_type"),
+        "returned_row_count": payload.get("returned_row_count"),
+        "provider_result_class": payload.get("provider_result_class"),
+    }
+
+
+def inspect_fiinquant(
+    *,
+    live: bool,
+    symbols: tuple[str, ...],
+    credential_source: str = "auto",
+    max_provider_requests: int = FIINQUANT_MAX_PROVIDER_REQUESTS,
+) -> ProbeResult:
     contract = inspect_fiinquant_contract()
     contract_fields = tuple(contract["contract_fields"])
+    credential_metadata = _credential_diagnostics(credential_source)
     if not contract["package_available"]:
         return ProbeResult(
             provider="FiinQuantX",
@@ -507,6 +754,7 @@ def inspect_fiinquant(*, live: bool, symbols: tuple[str, ...]) -> ProbeResult:
             observations=(),
             failure_class="PROVIDER_PACKAGE_MISSING",
             authentication="NOT_ATTEMPTED",
+            **_probe_metadata(credential_metadata),
         )
     if not contract["operation_available"] or len(contract_fields) != len(
         FIINQUANT_PROPRIETARY_FIELDS
@@ -519,6 +767,7 @@ def inspect_fiinquant(*, live: bool, symbols: tuple[str, ...]) -> ProbeResult:
             failure_class="PROVIDER_CONTRACT_MISSING",
             authentication="NOT_ATTEMPTED",
             contract_fields=contract_fields,
+            **_probe_metadata(credential_metadata),
         )
     if not live:
         return ProbeResult(
@@ -530,13 +779,20 @@ def inspect_fiinquant(*, live: bool, symbols: tuple[str, ...]) -> ProbeResult:
             authentication="NOT_ATTEMPTED",
             contract_fields=contract_fields,
             note="Use --live for the bounded authenticated manual proof.",
+            **_probe_metadata(credential_metadata),
         )
 
     context = mp.get_context("spawn")
     output = context.Queue(maxsize=1)
     process = context.Process(
         target=_fiinquant_worker,
-        args=(output, symbols, FIINQUANT_HISTORY_DAYS),
+        args=(
+            output,
+            symbols,
+            FIINQUANT_HISTORY_DAYS,
+            credential_source,
+            max_provider_requests,
+        ),
     )
     process.start()
     try:
@@ -558,6 +814,7 @@ def inspect_fiinquant(*, live: bool, symbols: tuple[str, ...]) -> ProbeResult:
             authentication="UNKNOWN",
             contract_fields=contract_fields,
             note="Hard 60-second deadline reached; owned child was terminated.",
+            **_probe_metadata(credential_metadata),
         )
     try:
         payload = output.get_nowait()
@@ -581,7 +838,9 @@ def inspect_fiinquant(*, live: bool, symbols: tuple[str, ...]) -> ProbeResult:
         contract_fields=contract_fields,
         observed_fields=tuple(payload.get("observed_fields") or ()),
         error_type=payload.get("error_type"),
+        exception_class=payload.get("exception_class"),
         error_location=payload.get("error_location"),
+        **_probe_metadata(payload),
         note=(
             "Historical/post-close request only; active-session publication cadence "
             "and update semantics remain unproven."
@@ -728,27 +987,34 @@ def market_phase(now: datetime) -> str:
 def fiinquant_outcome(result: ProbeResult, *, phase: str) -> str | None:
     if result.provider != "FiinQuantX":
         return None
+    if result.failure_class == "ENV_PRECEDENCE_CONFLICT":
+        return "VN_PROPRIETARY_FIINQUANT_ENV_PRECEDENCE_CONFLICT"
     if result.failure_class == "PROVIDER_PACKAGE_MISSING":
         return "VN_PROPRIETARY_FIINQUANT_PACKAGE_BLOCKED"
-    if result.failure_class == "AUTHENTICATION_FAILURE":
+    if result.failure_class == "AUTHENTICATION_FAILURE" and result.request_count == 0:
         return "VN_PROPRIETARY_FIINQUANT_AUTH_FAILED"
     if result.failure_class == "ENTITLEMENT_FAILURE":
         return "VN_PROPRIETARY_FIINQUANT_ENTITLEMENT_REQUIRED"
     if result.failure_class in {"NETWORK_FAILURE", "RATE_LIMITED"}:
         return "VN_PROPRIETARY_FIINQUANT_NETWORK_BLOCKED"
-    if result.failure_class in {"PROVIDER_PACKAGE_ERROR", "PROVIDER_ERROR"}:
+    if result.failure_class == "PROVIDER_PACKAGE_ERROR":
         return "VN_PROPRIETARY_FIINQUANT_PACKAGE_BLOCKED"
-    gross = [
+    if result.failure_class == "PROVIDER_ERROR":
+        return "VN_PROPRIETARY_FIINQUANT_PROVIDER_FAILURE"
+    usable_gross = [
         row for row in result.observations
-        if row.get("buy_volume") is not None and row.get("sell_volume") is not None
-        and row.get("buy_value") is not None and row.get("sell_value") is not None
+        if (
+            row.get("buy_volume") is not None
+            and row.get("sell_volume") is not None
+        ) or (
+            row.get("buy_value") is not None
+            and row.get("sell_value") is not None
+        )
     ]
-    if result.authentication == "AUTHENTICATED" and gross:
-        return "VN_PROPRIETARY_FIINQUANT_PROPRIETARY_CAPABILITY_FOUND_POST_CLOSE"
-    if result.authentication == "AUTHENTICATED" and phase == "active":
-        return "VN_PROPRIETARY_FIINQUANT_AUTHENTICATED_ACTIVE_SESSION_PENDING"
+    if result.authentication == "AUTHENTICATED" and usable_gross:
+        return "VN_PROPRIETARY_FIINQUANT_AUTHENTICATED_DATA_AVAILABLE"
     if result.authentication == "AUTHENTICATED":
-        return "VN_PROPRIETARY_FIINQUANT_AUTHENTICATED_NO_PROPRIETARY_CONTRACT"
+        return "VN_PROPRIETARY_FIINQUANT_PROVIDER_FAILURE"
     return "VN_PROPRIETARY_FIINQUANT_PACKAGE_BLOCKED"
 
 
@@ -769,11 +1035,28 @@ def _summary(result: ProbeResult) -> dict[str, Any]:
         "capability": result.capability,
         "failure_class": result.failure_class,
         "error_type": result.error_type,
+        "exception_class": result.exception_class,
         "error_location": result.error_location,
         "authentication": result.authentication,
+        "authentication_attempt_count": result.authentication_attempt_count,
+        "login_call_returned": result.login_call_returned,
+        "login_return_type": result.login_return_type,
+        "is_login_after_call": result.is_login_after_call,
+        "credential_source": result.credential_source,
+        "process_env_username_present": result.process_env_username_present,
+        "process_env_password_present": result.process_env_password_present,
+        "dotenv_username_present": result.dotenv_username_present,
+        "dotenv_password_present": result.dotenv_password_present,
+        "username_sources_match": result.username_sources_match,
+        "password_sources_match": result.password_sources_match,
         "package_version": result.package_version,
         "routed_source": result.routed_source,
         "request_count": result.request_count,
+        "symbols_requested": list(result.symbols_requested),
+        "request_duration_ms": result.request_duration_ms,
+        "result_type": result.result_type,
+        "returned_row_count": result.returned_row_count,
+        "provider_result_class": result.provider_result_class,
         "observation_count": len(result.observations),
         "gross_history_row_count": len(gross_rows),
         "current_date_present": bool(current),
@@ -828,6 +1111,18 @@ def _symbols(value: str) -> tuple[str, ...]:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--live", action="store_true")
+    parser.add_argument(
+        "--credential-source",
+        choices=CREDENTIAL_SOURCES,
+        default="auto",
+        help="Diagnostic-only FiinQuant credential source policy.",
+    )
+    parser.add_argument(
+        "--max-provider-requests",
+        type=int,
+        default=FIINQUANT_MAX_PROVIDER_REQUESTS,
+        help="Bounded FiinQuant request count (clamped to 1-2).",
+    )
     parser.add_argument("--symbols", type=_symbols, default=TEST_SYMBOLS)
     parser.add_argument("--duration-seconds", type=float, default=DEFAULT_DURATION_SECONDS)
     parser.add_argument("--interval-seconds", type=float, default=DEFAULT_INTERVAL_SECONDS)
@@ -836,9 +1131,17 @@ def main() -> int:
     args = parser.parse_args()
     duration = max(0.0, min(float(args.duration_seconds), MAX_DURATION_SECONDS))
     interval = max(MIN_INTERVAL_SECONDS, float(args.interval_seconds))
+    max_provider_requests = max(
+        1, min(int(args.max_provider_requests), FIINQUANT_MAX_PROVIDER_REQUESTS)
+    )
     started = monotonic()
     results = [
-        inspect_fiinquant(live=args.live, symbols=args.symbols),
+        inspect_fiinquant(
+            live=args.live,
+            symbols=args.symbols,
+            credential_source=args.credential_source,
+            max_provider_requests=max_provider_requests,
+        ),
         inspect_fiin(),
         inspect_vnstock(live=args.live, symbols=args.symbols, duration=duration, interval=interval),
     ]
@@ -849,6 +1152,8 @@ def main() -> int:
         "live_requested": bool(args.live),
         "duration_seconds": duration,
         "interval_seconds": interval,
+        "credential_source_policy": args.credential_source,
+        "max_provider_requests": max_provider_requests,
         "elapsed_ms": round((monotonic() - started) * 1_000),
         "providers": [_summary(result) for result in results],
         "artifacts": [] if args.cleanup else [str(json_path), str(csv_path)],

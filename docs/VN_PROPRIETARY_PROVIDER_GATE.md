@@ -5,23 +5,23 @@ Last updated: 2026-08-06
 ## Outcome
 
 Phase VN-PROPRIETARY-P0 FiinQuantX continuation result:
-`VN_PROPRIETARY_FIINQUANT_AUTH_FAILED`.
+`VN_PROPRIETARY_FIINQUANT_ENTITLEMENT_REQUIRED`.
 
 The installed `FiinQuantX==0.1.62` package contains a public candidate
-operation and an explicit proprietary gross-field registry. A bounded
-credential-safe post-close acceptance loaded `FIINQUANT_USERNAME` and
-`FIINQUANT_PASSWORD` through the existing repo `.env` convention and called
-`FiinSession(...).login()`. The call returned without raising, but the
-package's public `is_login` state remained false. The final diagnostic therefore
-classified authentication as failed and did not start a proprietary-data
-request. No entitlement, row, date, freshness, or update-semantics conclusion
-can be drawn.
+operation and an explicit proprietary gross-field registry. A direct manual
+proof loaded credentials from the repository `.env`, authenticated with
+`FiinSession(...).login()`, and observed `is_login=true`. Authenticated
+`get_value_by_investor()` requests for FPT, SSI, HPG, VPB, VIC, VNINDEX, VN30,
+and HOSE each printed the narrow permission-denied marker and returned an empty
+DataFrame. The empty frames are swallowed entitlement failures, not valid zero
+or ordinary empty data.
 
 P1 was not entered, and the existing truthful unsupported Proprietary API/UI
 remains unchanged. The probe mutated no production cache, retained no output
-artifact, and exposed no credential value. Correct authentication plus a
-future active-session observation remain mandatory before any current
-proprietary-flow integration.
+artifact, and exposed no credential value. Dataset entitlement plus a future
+active-session observation remain mandatory before any current
+proprietary-flow integration. Runtime schemas, values, publication cadence,
+and realtime behavior remain unobserved.
 
 ## Candidate evidence
 
@@ -51,27 +51,25 @@ fields `bu`, `sd`, `fb`, `fs`, `fn`, price, volume, turnover, room, foreign
 room, and order imbalance. None of those generic fields is reinterpreted as
 proprietary flow.
 
-Post-close acceptance at 17:16 Vietnam time:
+Corrected evidence and current acceptance boundary:
 
-- bounded symbols: FPT, SSI, HPG, VPB, and VIC;
-- package import and public-method/field-registry inspection: passed;
-- configured credential names: present; values were not printed or retained;
-- `FiinSession(...).login()`: returned, but `is_login` was false;
-- authentication: `FAILED` / `AUTHENTICATION_FAILURE`;
-- proprietary request count: zero because the login gate failed;
-- observed proprietary rows/fields/dates: none;
-- final outcome: `VN_PROPRIETARY_FIINQUANT_AUTH_FAILED`.
-
-A fresh pre-open retry at 08:03 Vietnam time on 2026-08-06 reproduced the
-same result with the same installed package and configured environment names:
-`FiinSession.login()` returned, public `is_login` remained false, and the
-diagnostic stopped before `get_value_by_investor()` could start. The bounded
-run completed in 2.382 seconds, retained no artifact, and confirmed zero
-authenticated proprietary requests. This repetition narrows the gate to
-FiinQuantX authentication/account access rather than market-session inactivity;
-it still does not distinguish invalid credentials from provider-side account
-authorization because the diagnostic intentionally suppresses raw provider
-login text.
+- The earlier diagnostic used dotenv loading equivalent to `override=False`,
+  which could silently select stale process-environment credentials instead of
+  the repository `.env`.
+- The corrected diagnostic reads `.env` with `dotenv_values()`, never mutates
+  `os.environ`, and requires an explicit choice when complete process and
+  dotenv credentials conflict.
+- The direct manual proof authenticated from repository `.env` and then
+  observed one permission-denied message plus one empty DataFrame per requested
+  symbol or aggregate candidate. This establishes
+  `authentication_success + proprietary_dataset_entitlement_denied`.
+- Declared registry fields are not runtime-observed fields. No denied empty
+  frame is converted to zero.
+- One bounded automated correction run on 2026-08-06 selected the dotenv source
+  but returned `is_login=false` before any dataset request. It completed in
+  under five seconds and did not retry. This non-reproduction does not erase
+  the direct entitlement proof, but current authentication availability must be
+  reconfirmed after entitlement is granted.
 
 The package also exposes FiinGroup gateway-backed research helpers, but no
 installed evidence proves that FiinQuantX credentials authorize the separate
@@ -146,22 +144,30 @@ The manual diagnostic is
   package, request-count, schema-presence, and freshness evidence;
 - emits sanitized JSON and CSV under `.tmp`;
 - supports cleanup and graceful interruption;
+- reports process/dotenv credential presence and equality only, never values;
+- supports diagnostic-only `auto`, `dotenv`, and `process` source policies;
+- captures package stdout/stderr only long enough to recognize the narrow
+  permission-denied marker, then discards it;
+- stops after the first entitlement failure and makes at most two dataset calls;
 - never writes application cache or enables a production provider.
 
-Post-close or active-session retry after credentials are corrected:
+Only after `get_value_by_investor()` entitlement succeeds, use this bounded
+active-session command:
 
 ```powershell
 python scripts\diagnose_vn_proprietary_capability.py `
   --live `
-  --duration-seconds 0 `
+  --credential-source dotenv `
+  --symbols FPT,SSI,HPG,VPB,VIC `
+  --duration-seconds 1200 `
   --interval-seconds 15 `
   --output-dir .tmp\vn-proprietary-p0 `
   --cleanup
 ```
 
-Do not use a sampling interval below five seconds. A 15-second product cadence
-is not authorized until a configured provider demonstrates repeated
-active-session changes and sufficient rate-limit headroom.
+Do not run that 20-minute probe while entitlement remains denied. A 15-second
+product cadence is not authorized until a configured provider demonstrates
+repeated active-session changes and sufficient rate-limit headroom.
 
 ## P1 gate
 

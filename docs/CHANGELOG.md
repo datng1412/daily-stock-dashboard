@@ -9,8 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-- [documentation] Record the installed FiinQuantX proprietary gross-field contract and repeated post-close/pre-open authentication failure without conflating FiinQuantX with FiinGroup DataFeed.
-- [test] Extend the proprietary-provider P0 diagnostic with credential-safe FiinQuantX contract inspection, bounded login gating, typed outcomes, and raw field-presence coverage.
+- [fix] Correct the FiinQuantX proprietary diagnostic with explicit dotenv/process credential provenance, one-login authentication, narrow entitlement detection, and bounded no-retry provider calls.
+- [test] Cover FiinQuantX credential-source conflicts, value-safe output, authentication states, permission-marked empty responses, valid empty/nonempty responses, typed failures, and request bounds.
+- [documentation] Correct the FiinQuantX P0 outcome to entitlement-required from direct authenticated permission evidence while keeping P1 and active-session probing gated.
 - [documentation] Record the FiinGroup and Vnstock Data proprietary-flow capability gap and keep P1 integration gated on active-session and licence proof.
 - [test] Add a bounded, sanitized proprietary-provider P0 diagnostic and offline coverage for schema presence, freshness classification, reconciliation, rate limits, and failure states.
 - [fix] Verify all-constituent explicit-zero VN30 sessions with bounded exact-date SSI requests, preserve stronger repaired rows, and exclude unresolved anomalies from numeric analytics.
