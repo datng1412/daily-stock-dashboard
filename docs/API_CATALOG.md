@@ -14,10 +14,11 @@ Global rules:
   separate enablement and terms boundaries; they are not universal hosted
   production providers.
 
-Current Foreign Flow routes are implemented but still need retained
-active-session production acceptance. Completed DailyStockPrice history and
-analytics are mature; current symbol/VN30/Industry publication remains
-`IMPLEMENTED_NEEDS_LIVE_ACCEPTANCE`. No route starts or owns the provider
+Current Foreign Flow is `PRODUCTION_READY`. Retained active-session evidence
+covers the process-shared SSI V3 stream, symbol route, current VN30 and Industry
+aggregation, FastAPI, and desktop/mobile browser publication. Completed
+DailyStockPrice history remains the accepted authority, current values remain
+provisional and non-persistent, and no route starts or owns the provider
 connection.
 
 ## Verified manual HOSE proprietary-flow EOD
@@ -93,12 +94,11 @@ reconnection. Without a usable snapshot, the current capability is
 usable. Successful connection clears the prior retryable stream failure, and
 only a newer provider message replaces the cached snapshot.
 
-Live acceptance status: the route, schema, shared cache, and frontend mapping
-are deterministic and implemented, but a fresh active-session
-`ForeignRoomMessage` has not yet been retained as end-to-end production/browser
-acceptance evidence. `VN-FF-LIVE-1` owns that acceptance gate; authorization,
-entitlement, or network failure remains typed provider unavailability rather
-than an application-synthesized value.
+Live acceptance status: `VN-FF-LIVE-1` was accepted on 2026-08-10 with retained
+active-session `ForeignRoomMessage`, symbol route, current VN30/Industry,
+FastAPI, and browser evidence. Authorization, entitlement, or network failure
+still remains typed provider unavailability rather than an
+application-synthesized value.
 
 ## `POST /api/v1/stocks/vn/industry-flow`
 
@@ -634,9 +634,10 @@ Response rules:
   response built from retained SSI membership, accepted completed history, and
   stale process-owned snapshots. Diagnostics disclose retention, age, refresh
   failure, cache bypass, and recovery state. A cold state remains unavailable.
-- Current VN30 and Industry aggregation share the same VN-FF-LIVE-1 acceptance
-  boundary as the symbol route. Existing implementation does not itself prove
-  fresh production publication.
+- Current VN30 and Industry aggregation share the accepted VN-FF-LIVE-1
+  process-owned publication boundary with the symbol route. Freshness remains
+  explicit per response and is never inferred from deterministic capability
+  status alone.
 
 ## Known completed-session Foreign Flow anomalies
 

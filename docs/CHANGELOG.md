@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [documentation] Align the API catalog and UI state contract with the retained VN-FF-LIVE-1 production acceptance evidence.
 - [fix] Normalize digit-suffixed Foreign Flow signal fields before rendering so valid VN30 responses cannot crash the workspace.
 - [new feature] Add backend-owned explainable completed Foreign Flow direction, momentum, reversal, and unusual-intensity signals to symbol detail and VN30 Overview without new requests or polling.
 - [test] Cover numeric signal formulas, incomplete and explicit-zero semantics, anomaly exclusion, neutral frontend labels, and no-request VN30 rendering.

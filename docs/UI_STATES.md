@@ -283,12 +283,12 @@ These states apply only to existing X/X-QUOTE/X-TRADE/F/R/MI consumers. They do 
 
 ## SSI-V3-M2.6B current symbol flow states
 
-These UI states are implemented deterministically but remain
-`IMPLEMENTED_NEEDS_LIVE_ACCEPTANCE` for fresh production publication.
-`VN-FF-LIVE-1` must prove a real active-session message through symbol, VN30,
-Industry, FastAPI, and browser while preserving one polling owner. A typed
-authorization, entitlement, or network failure remains an unavailable current
-section and does not hide completed Foreign Flow.
+These UI states are `PRODUCTION_READY`. `VN-FF-LIVE-1` was accepted on
+2026-08-10 with retained active-session symbol, VN30, Industry, FastAPI, and
+desktop/mobile browser evidence while preserving one polling owner. Per-request
+freshness remains explicit: a typed authorization, entitlement, or network
+failure still renders an unavailable or retained-stale current section and does
+not hide completed Foreign Flow.
 
 - `waiting`: show that the bounded subscription is awaiting its first usable
   current-session room update; show no metric-shaped zeros.
