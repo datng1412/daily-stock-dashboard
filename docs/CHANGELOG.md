@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [new feature] Add verified manual HOSE proprietary-flow EOD ingestion, atomic storage, read-only latest/history APIs, and an EOD-only Proprietary workspace.
+- [test] Cover proprietary EOD validation, PDF hashing, null-versus-zero, storage conflicts/replacement, GET-only APIs, request ownership, refresh retention, and completed-session rendering.
+- [documentation] Document manual official-publication evidence, no PDF parsing/OCR, completed-EOD ownership, API/store contracts, and pending live entry.
+- [documentation] Record that no free source-originated HOSE proprietary EOD spreadsheet schema is proven and specify the exact real sample required.
+- [test] Add 45 synthetic cases for proprietary EOD file scope, gross fields, units, dates, missing-versus-zero lineage, reconciliation, formats, safety, and cleanup.
+- [new feature] Add a network-free diagnostic for user-supplied proprietary EOD CSV/XLS/XLSX schema proof without production ingestion.
 - [fix] Correct the FiinQuantX proprietary diagnostic with explicit dotenv/process credential provenance, one-login authentication, narrow entitlement detection, and bounded no-retry provider calls.
 - [test] Cover FiinQuantX credential-source conflicts, value-safe output, authentication states, permission-marked empty responses, valid empty/nonempty responses, typed failures, and request bounds.
 - [documentation] Correct the FiinQuantX P0 outcome to entitlement-required from direct authenticated permission evidence while keeping P1 and active-session probing gated.

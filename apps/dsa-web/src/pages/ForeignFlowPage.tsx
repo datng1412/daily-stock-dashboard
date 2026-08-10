@@ -15,6 +15,7 @@ import { ForeignFlowSymbolHistoryTable } from '../components/foreign-flow/Foreig
 import { ForeignFlowWatchlistScreener } from '../components/foreign-flow/ForeignFlowWatchlistScreener';
 import { ForeignFlowOverview } from '../components/foreign-flow/ForeignFlowOverview';
 import { ForeignFlowDataDetails } from '../components/foreign-flow/ForeignFlowDataDetails';
+import { ProprietaryFlowEodView } from '../components/foreign-flow/ProprietaryFlowEodView';
 import LatestForeignFlowCard from '../components/foreign-flow/LatestForeignFlowCard';
 import { mergeCurrentFlowSessionDisplayRow } from '../components/foreign-flow/currentForeignFlowTableModel';
 import {
@@ -336,7 +337,7 @@ const ForeignFlowPage = () => {
   const initialTicker = normalizeVietnamTicker(searchParams.get('ticker') ?? readTickerPreference());
   const [tickerDraft, setTickerDraft] = useState(initialTicker);
   const [ticker, setTicker] = useState(TICKER_RE.test(initialTicker) ? initialTicker : '');
-  const [proprietaryTarget, setProprietaryTarget] = useState('index:VNINDEX');
+  const proprietaryTarget = 'board:HOSE';
   const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
   const [customFrom, setCustomFrom] = useState(() => {
     const date = new Date();
@@ -420,6 +421,7 @@ const ForeignFlowPage = () => {
     requestMode: DataMode,
     forceRefresh = false,
   ) => {
+    if (requestMode === 'proprietary') return;
     if (requestMode === 'ticker' && !ticker) {
       updateModeState('ticker', (current) => ({ ...current, error: null }));
       return;
@@ -558,7 +560,7 @@ const ForeignFlowPage = () => {
     void load(false);
     const requestModes: DataMode[] = mode === 'overview' || mode === 'details'
       ? ['vn30', 'industry']
-      : DATA_MODES.includes(mode as DataMode)
+      : DATA_MODES.includes(mode as DataMode) && mode !== 'proprietary'
         ? [mode as DataMode]
         : [];
     if (!requestModes.length) return undefined;
@@ -1027,7 +1029,7 @@ const ForeignFlowPage = () => {
         eyebrow="Vietnam · SSI FastConnect V3"
         title="Foreign Flow Explorer"
         description="Inspect provider-backed foreign flow and explicit capability states while keeping current and completed session finality clear."
-        actions={DATA_MODES.includes(mode as DataMode) ? (
+        actions={DATA_MODES.includes(mode as DataMode) && mode !== 'proprietary' ? (
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={requestRecoveryRefresh}
               isLoading={loading || recoveryInFlight}
@@ -1035,16 +1037,11 @@ const ForeignFlowPage = () => {
                 recoveryInFlight
                 || Boolean(validationError)
                 || (mode === 'ticker' && !ticker)
-                || (
-                  mode === 'proprietary'
-                  && data?.mode === 'proprietary'
-                  && data.payload.capabilityStatus === 'unsupported'
-                )
               }>
               <RefreshCw className="h-4 w-4" /> Force Refresh
             </Button>
             <Button variant="outline" size="sm" onClick={exportCsv}
-              disabled={!selection.rows.length || (mode === 'proprietary' && data?.mode === 'proprietary' && data.payload.capabilityStatus === 'unsupported')}>
+              disabled={!selection.rows.length}>
               <Download className="h-4 w-4" /> Export CSV
             </Button>
           </div>
@@ -1091,21 +1088,13 @@ const ForeignFlowPage = () => {
             </Button>
           </div>
         ) : null}
-        {DATA_MODES.includes(mode as DataMode) ? <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {DATA_MODES.includes(mode as DataMode) && mode !== 'proprietary' ? <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           {mode === 'ticker' ? (
             <Input label="Ticker" value={tickerDraft} placeholder="Enter ticker"
               onChange={(event) => setTickerDraft(normalizeVietnamTicker(event.target.value))}
               onKeyDown={(event) => { if (event.key === 'Enter') applyTicker(); }}
               error={validationError ?? undefined}
               trailingAction={<button type="button" aria-label="Load ticker" onClick={applyTicker}><Search className="h-4 w-4" /></button>} />
-          ) : null}
-          {mode === 'proprietary' ? (
-            <Select label="Requested scope" value={proprietaryTarget} onChange={setProprietaryTarget}
-              options={[
-                { value: 'index:VNINDEX', label: 'VNINDEX' },
-                { value: 'index:VN30', label: 'VN30' },
-                { value: 'board:HOSE', label: 'HOSE' },
-              ]} />
           ) : null}
           <Select label="Sort direction" value={sortDirection} onChange={(value) => setSortDirection(value as 'asc' | 'desc')}
             options={[{ value: 'desc', label: 'Highest first' }, { value: 'asc', label: 'Lowest first' }]} />
@@ -1116,7 +1105,7 @@ const ForeignFlowPage = () => {
               { value: 'cumulative', label: 'Cumulative net' },
             ]} />
         </div> : null}
-        {DATA_MODES.includes(mode as DataMode) ? <div className="flex flex-wrap gap-3">
+        {DATA_MODES.includes(mode as DataMode) && mode !== 'proprietary' ? <div className="flex flex-wrap gap-3">
           <div className="inline-flex rounded-lg border border-border/70 p-1" role="group" aria-label="Time window">
             {WINDOWS.map((item) => <button key={item} type="button" aria-pressed={window === item}
               className={`rounded-md px-3 py-1.5 text-sm ${window === item ? 'bg-cyan/15 text-cyan' : 'text-secondary-text'}`}
@@ -1161,6 +1150,8 @@ const ForeignFlowPage = () => {
       ) : null}
 
       {mode === 'watchlist' ? <ForeignFlowWatchlistScreener /> : null}
+
+      {mode === 'proprietary' ? <ProprietaryFlowEodView /> : null}
 
       {mode === 'ticker' && !ticker ? (
         <EmptyState icon={<Search className="h-8 w-8" />} title="Enter a ticker"

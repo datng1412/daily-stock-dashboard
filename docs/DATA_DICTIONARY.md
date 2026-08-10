@@ -11,6 +11,24 @@ Conventions:
 - Missing lists should be `[]`.
 - Missing objects should be `null`.
 
+## HOSE proprietary-flow EOD fields
+
+| Field | Meaning | Unit / values | Nullable | Source rule |
+| --- | --- | --- | --- | --- |
+| `trading_date` / `exchange` | Completed HOSE session identity | `YYYY-MM-DD` / `HOSE` | no | User-verified official publication |
+| `buy_value`, `sell_value` | Required gross proprietary values | integer VND, nonnegative | no | Entered directly; never inferred from net |
+| `net_value` | Completed daily net value | integer VND | no | Exactly `buy_value - sell_value` |
+| `buy_volume`, `sell_volume` | Optional gross proprietary volume | integer shares | yes | Both supplied together or both null |
+| `net_volume` | Optional completed daily net volume | integer shares | yes | Gross pair difference; null when gross volume is absent |
+| `source_type` | Ingestion/source identity | `official_exchange_pdf_manual_entry` | no | Manual verified workflow only |
+| `source_evidence_strength` | Evidence retained with the row | `OFFICIAL_PDF_HASHED` or `OFFICIAL_URL_USER_VERIFIED` | no | `INSUFFICIENT` cannot persist |
+| `source_file_name/hash/size` | Sanitized PDF evidence | basename / SHA-256 / bytes | yes | No full local path or PDF content |
+| `finality` | Product finality | `completed_daily` | no | Never realtime or intraday |
+| `complete_value`, `complete_volume`, `complete` | Family completeness | boolean | no | Value is required; volume is optional |
+| `data_quality` | Accepted row state | `accepted`, `accepted_value_only`, `replacement`, `suspicious` | no | Missing volume does not make a valid value row incomplete |
+
+Explicit numeric zero remains `0`; missing optional volume remains `null`.
+
 ## Symbol foreign-flow analytics
 
 - `data_quality=anomalous` on a VN30 daily aggregate identifies an unresolved

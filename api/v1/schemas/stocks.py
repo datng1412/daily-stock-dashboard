@@ -2019,6 +2019,65 @@ class VietnamProprietaryFlowResponse(BaseModel):
     diagnostics: Dict[str, Any] = Field(default_factory=dict)
 
 
+class VietnamProprietaryFlowEodRow(BaseModel):
+    """One verified manual HOSE completed-session aggregate."""
+
+    trading_date: str
+    exchange: Literal["HOSE"]
+    buy_volume: Optional[int] = None
+    sell_volume: Optional[int] = None
+    net_volume: Optional[int] = None
+    buy_value: int
+    sell_value: int
+    net_value: int
+    source_type: Literal["official_exchange_pdf_manual_entry"]
+    source_url: str
+    source_title: Optional[str] = None
+    source_file_name: Optional[str] = None
+    source_file_hash: Optional[str] = None
+    source_file_size: Optional[int] = None
+    source_evidence_strength: Literal[
+        "OFFICIAL_PDF_HASHED", "OFFICIAL_URL_USER_VERIFIED"
+    ]
+    verified_by_user: bool
+    imported_at: str
+    finality: Literal["completed_daily"]
+    complete_value: bool
+    complete_volume: bool
+    complete: bool
+    data_quality: Literal[
+        "accepted", "accepted_value_only", "replacement", "suspicious"
+    ]
+    warnings: List[str] = Field(default_factory=list)
+    replacement_reason: Optional[str] = None
+    replaced_at: Optional[str] = None
+    previous_source_file_hash: Optional[str] = None
+    previous_imported_at: Optional[str] = None
+
+
+class VietnamProprietaryFlowEodLatestResponse(BaseModel):
+    status: Literal["ok", "empty", "error"]
+    data_state: Literal[
+        "ready", "no_data", "incomplete", "suspicious", "storage_error"
+    ]
+    exchange: Literal["HOSE"]
+    latest: Optional[VietnamProprietaryFlowEodRow] = None
+    source: Literal["official_exchange_pdf_manual_entry"]
+    warnings: List[str] = Field(default_factory=list)
+
+
+class VietnamProprietaryFlowEodHistoryResponse(BaseModel):
+    status: Literal["ok", "empty", "error"]
+    data_state: Literal[
+        "ready", "no_data", "incomplete", "suspicious", "storage_error"
+    ]
+    exchange: Literal["HOSE"]
+    count: int = Field(ge=0, le=250)
+    series: List[VietnamProprietaryFlowEodRow] = Field(default_factory=list, max_length=250)
+    source_summary: Dict[str, Any] = Field(default_factory=dict)
+    warnings: List[str] = Field(default_factory=list)
+
+
 class VietnamIndustryFlowRequest(BaseModel):
     """Bounded explicit-universe ICB industry history request."""
 

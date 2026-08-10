@@ -1661,6 +1661,67 @@ export type VietnamFlowDataResponse = {
   diagnostics?: Record<string, unknown>;
 };
 
+export type VietnamProprietaryFlowEodDataState =
+  | 'ready'
+  | 'no_data'
+  | 'incomplete'
+  | 'suspicious'
+  | 'storage_error';
+
+export type VietnamProprietaryFlowEodRow = {
+  tradingDate: string;
+  exchange: 'HOSE';
+  buyVolume: number | null;
+  sellVolume: number | null;
+  netVolume: number | null;
+  buyValue: number;
+  sellValue: number;
+  netValue: number;
+  sourceType: 'official_exchange_pdf_manual_entry';
+  sourceUrl: string;
+  sourceTitle: string | null;
+  sourceFileName: string | null;
+  sourceFileHash: string | null;
+  sourceFileSize: number | null;
+  sourceEvidenceStrength: 'OFFICIAL_PDF_HASHED' | 'OFFICIAL_URL_USER_VERIFIED';
+  verifiedByUser: boolean;
+  importedAt: string;
+  finality: 'completed_daily';
+  completeValue: boolean;
+  completeVolume: boolean;
+  complete: boolean;
+  dataQuality: 'accepted' | 'accepted_value_only' | 'replacement' | 'suspicious';
+  warnings: string[];
+  replacementReason?: string | null;
+  replacedAt?: string | null;
+  previousSourceFileHash?: string | null;
+  previousImportedAt?: string | null;
+};
+
+export type VietnamProprietaryFlowEodLatestResponse = {
+  status: 'ok' | 'empty' | 'error';
+  dataState: VietnamProprietaryFlowEodDataState;
+  exchange: 'HOSE';
+  latest: VietnamProprietaryFlowEodRow | null;
+  source: 'official_exchange_pdf_manual_entry';
+  warnings: string[];
+};
+
+export type VietnamProprietaryFlowEodHistoryResponse = {
+  status: 'ok' | 'empty' | 'error';
+  dataState: VietnamProprietaryFlowEodDataState;
+  exchange: 'HOSE';
+  count: number;
+  series: VietnamProprietaryFlowEodRow[];
+  sourceSummary: {
+    sourceType?: string;
+    finality?: string;
+    valueUnit?: 'VND';
+    volumeUnit?: 'shares';
+  };
+  warnings: string[];
+};
+
 export type VietnamCurrentForeignFlowDataState =
   | 'waiting'
   | 'ready'
@@ -2448,6 +2509,28 @@ export const stocksApi = {
     });
     const { toCamelCase } = await import('./utils');
     return toCamelCase<VietnamFlowDataResponse>(response.data);
+  },
+
+  async getVietnamProprietaryFlowEodLatest(
+    options?: { exchange?: 'HOSE'; signal?: AbortSignal },
+  ): Promise<VietnamProprietaryFlowEodLatestResponse> {
+    const response = await apiClient.get('/api/v1/stocks/vn/proprietary-flow/eod/latest', {
+      params: { exchange: options?.exchange ?? 'HOSE' },
+      signal: options?.signal,
+    });
+    const { toCamelCase } = await import('./utils');
+    return toCamelCase<VietnamProprietaryFlowEodLatestResponse>(response.data);
+  },
+
+  async getVietnamProprietaryFlowEodHistory(
+    options?: { exchange?: 'HOSE'; limit?: number; signal?: AbortSignal },
+  ): Promise<VietnamProprietaryFlowEodHistoryResponse> {
+    const response = await apiClient.get('/api/v1/stocks/vn/proprietary-flow/eod/history', {
+      params: { exchange: options?.exchange ?? 'HOSE', limit: options?.limit ?? 60 },
+      signal: options?.signal,
+    });
+    const { toCamelCase } = await import('./utils');
+    return toCamelCase<VietnamProprietaryFlowEodHistoryResponse>(response.data);
   },
 
   async getVietnamIndustryFlow(

@@ -41,6 +41,8 @@ from api.v1.schemas.stocks import (
     VietnamCurrentForeignFlowResponse,
     VietnamCurrentForeignFlowAggregateResponse,
     VietnamProprietaryFlowResponse,
+    VietnamProprietaryFlowEodLatestResponse,
+    VietnamProprietaryFlowEodHistoryResponse,
     VietnamIndustryFlowRequest,
     VietnamIndustryFlowResponse,
     VietnamVn30ForeignFlowResponse,
@@ -68,6 +70,10 @@ from src.services.import_parser import (
 from src.services.stock_service import StockService
 from src.services.system_config_service import SystemConfigService
 from src.services.vietnam_company_research_service import VietnamCompanyResearchService
+from src.services.vietnam_proprietary_flow_eod_service import (
+    ProprietaryFlowValidationError,
+    VietnamProprietaryFlowEodService,
+)
 from src.services.vietnam_foreign_flow_service import (
     VietnamForeignFlowBatchService,
     VietnamForeignFlowService,
@@ -1015,6 +1021,53 @@ def get_vietnam_proprietary_flow(
         raise HTTPException(status_code=422, detail={"error": "vn_proprietary_flow_invalid_request", "message": str(exc)}) from exc
     finally:
         service.close()
+
+
+@router.get(
+    "/vn/proprietary-flow/eod/latest",
+    response_model=VietnamProprietaryFlowEodLatestResponse,
+    summary="Latest verified manual HOSE proprietary-flow EOD aggregate",
+)
+def get_vietnam_proprietary_flow_eod_latest(
+    exchange: str = Query("hose"),
+) -> VietnamProprietaryFlowEodLatestResponse:
+    service = VietnamProprietaryFlowEodService()
+    try:
+        return VietnamProprietaryFlowEodLatestResponse(
+            **service.get_latest(exchange)
+        )
+    except ProprietaryFlowValidationError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "vn_proprietary_flow_eod_invalid_request",
+                "message": str(exc),
+            },
+        ) from exc
+
+
+@router.get(
+    "/vn/proprietary-flow/eod/history",
+    response_model=VietnamProprietaryFlowEodHistoryResponse,
+    summary="Verified manual HOSE proprietary-flow EOD history",
+)
+def get_vietnam_proprietary_flow_eod_history(
+    exchange: str = Query("hose"),
+    limit: int = Query(60, ge=1, le=250),
+) -> VietnamProprietaryFlowEodHistoryResponse:
+    service = VietnamProprietaryFlowEodService()
+    try:
+        return VietnamProprietaryFlowEodHistoryResponse(
+            **service.get_history(exchange, limit)
+        )
+    except ProprietaryFlowValidationError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "vn_proprietary_flow_eod_invalid_request",
+                "message": str(exc),
+            },
+        ) from exc
 
 
 @router.post(

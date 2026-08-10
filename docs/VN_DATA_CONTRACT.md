@@ -4,6 +4,32 @@
 
 This document defines the public data contract for the VN dashboard and company research page. It is intentionally data-quality-first: valid daily SSI data should remain visible even when optional live or enrichment sections are unavailable.
 
+## Verified manual HOSE proprietary-flow EOD
+
+The Proprietary product is a separate completed-session aggregate sourced by a
+user who reads an official HOSE publication and supplies required gross buy and
+sell values to `scripts/record_vn_proprietary_eod.py`. The application does not
+download, parse, OCR, or scrape that publication. If a PDF is supplied, it is
+only signature-checked and SHA-256 hashed; only its sanitized basename, hash,
+and byte size are retained.
+
+Canonical values are integer VND and net equals gross buy minus gross sell.
+Optional gross volumes are integer shares and must be supplied as a pair; their
+net is derived. Missing volume remains null and explicit zero remains zero.
+Rows require user verification, an official HTTP(S) source URL, and either
+hashed-PDF evidence or an explicit file-unavailable acknowledgement. The
+schema-v1 atomic store is
+`DATA_CACHE_DIR/vietnam_proprietary_flow_eod.v1.json`, keyed by `HOSE` and
+trading date and isolated from accepted SSI foreign-flow history.
+
+Same canonical input is idempotent. Conflicting same-date input is rejected
+unless explicit replacement and reason are supplied; evidence cannot be
+downgraded, and replacement audit metadata is retained. Public writes are not
+exposed. Latest/history GET responses use `ready`, `no_data`, `incomplete`,
+`suspicious`, or `storage_error`. The frontend reads at selection/reload/manual
+refresh only, retains last-known-good data after refresh failure, and never
+polls or labels these rows as current-session data.
+
 ## Idle recovery and last-known-good aggregates (Phase SSI-V3-M2.6B-R6C)
 
 Retryable SSI authentication, authorization, timeout, empty, or malformed

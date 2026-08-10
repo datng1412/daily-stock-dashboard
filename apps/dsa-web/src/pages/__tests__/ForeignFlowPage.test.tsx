@@ -17,6 +17,8 @@ vi.mock('../../api/stocks', () => ({
     getVietnamVn30ForeignFlow: vi.fn(),
     getVietnamIndustryFlow: vi.fn(),
     getVietnamProprietaryFlow: vi.fn(),
+    getVietnamProprietaryFlowEodLatest: vi.fn(),
+    getVietnamProprietaryFlowEodHistory: vi.fn(),
     getVietnamForeignFlowWatchlist: vi.fn(),
     getVietnamIndexComponents: vi.fn(),
   },
@@ -28,6 +30,8 @@ const currentAggregate = vi.mocked(stocksApi.getVietnamCurrentForeignFlowAggrega
 const vn30 = vi.mocked(stocksApi.getVietnamVn30ForeignFlow);
 const industry = vi.mocked(stocksApi.getVietnamIndustryFlow);
 const proprietary = vi.mocked(stocksApi.getVietnamProprietaryFlow);
+const proprietaryEodLatest = vi.mocked(stocksApi.getVietnamProprietaryFlowEodLatest);
+const proprietaryEodHistory = vi.mocked(stocksApi.getVietnamProprietaryFlowEodHistory);
 const watchlist = vi.mocked(stocksApi.getVietnamForeignFlowWatchlist);
 
 const tickerPayload = (): VietnamForeignFlowSymbolHistoryResponse => ({
@@ -216,6 +220,23 @@ beforeEach(() => {
       attemptedOperation: 'none',
       reason: 'no_proven_proprietary_flow_fields',
     },
+  });
+  proprietaryEodLatest.mockResolvedValue({
+    status: 'empty',
+    dataState: 'no_data',
+    exchange: 'HOSE',
+    latest: null,
+    source: 'official_exchange_pdf_manual_entry',
+    warnings: [],
+  });
+  proprietaryEodHistory.mockResolvedValue({
+    status: 'empty',
+    dataState: 'no_data',
+    exchange: 'HOSE',
+    count: 0,
+    series: [],
+    sourceSummary: { sourceType: 'official_exchange_pdf_manual_entry', finality: 'completed_daily', valueUnit: 'VND', volumeUnit: 'shares' },
+    warnings: [],
   });
   watchlist.mockResolvedValue({
     status: 'partial',
@@ -957,26 +978,15 @@ describe('ForeignFlowPage', () => {
     expect(within(currentDetailRow).getAllByText('300')).toHaveLength(2);
   });
 
-  it('renders unsupported proprietary capability without fake zero data or repeat actions', async () => {
+  it('renders the dedicated EOD proprietary empty state without calling the unsupported SSI capability', async () => {
     renderPage();
     fireEvent.click(screen.getByRole('button', { name: 'Proprietary' }));
-    await waitFor(() => expect(proprietary).toHaveBeenCalledTimes(1));
-    const select = screen.getByLabelText('Requested scope');
-    expect(within(select).getByRole('option', { name: 'VNINDEX' })).toBeInTheDocument();
-    expect(within(select).getByRole('option', { name: 'VN30' })).toBeInTheDocument();
-    expect(within(select).getByRole('option', { name: 'HOSE' })).toBeInTheDocument();
-    expect(within(select).queryByRole('option', { name: /ticker|industry/i })).not.toBeInTheDocument();
-    expect(screen.getByText(/does not currently expose proven securities-company proprietary-flow fields/)).toBeInTheDocument();
-    expect(screen.queryByRole('region', { name: 'Selected window summary' })).not.toBeInTheDocument();
-    expect(screen.queryByText('Gross buy')).not.toBeInTheDocument();
-    expect(screen.queryByText('Quality')).not.toBeInTheDocument();
-    expect(screen.getByLabelText('Proprietary capability details')).toHaveTextContent(
-      'Capability statusunsupportedAttempted operationnoneReasonno_proven_proprietary_flow_fields',
-    );
-    expect(screen.queryByRole('heading', { name: 'Chi tiết phiên' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Force Refresh/ })).toBeDisabled();
-    expect(screen.getByRole('button', { name: /Export CSV/ })).toBeDisabled();
-    expect(proprietary).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(proprietaryEodLatest).toHaveBeenCalledTimes(1));
+    expect(proprietaryEodHistory).toHaveBeenCalledTimes(1);
+    expect(proprietary).not.toHaveBeenCalled();
+    expect(screen.getByRole('heading', { name: 'Dữ liệu tự doanh HOSE cuối ngày' })).toBeInTheDocument();
+    expect(screen.getByText('Chưa có dữ liệu')).toBeInTheDocument();
+    expect(screen.queryByText(/Realtime|Đang diễn ra|Tạm tính|15 giây/i)).not.toBeInTheDocument();
   });
 
   it('renders ticker network failure as unavailable instead of empty chart content', async () => {
@@ -1077,7 +1087,7 @@ describe('ForeignFlowPage', () => {
     expect(screen.queryByText('Dữ liệu hiện không khả dụng')).not.toBeInTheDocument();
   });
 
-  it('renders VN30, Industry, and Proprietary typed unavailable states explicitly', async () => {
+  it('renders VN30 and Industry typed unavailable states while Proprietary uses its EOD state', async () => {
     vn30.mockResolvedValue({
       ...vn30Payload(),
       status: 'unavailable',
@@ -1119,7 +1129,7 @@ describe('ForeignFlowPage', () => {
     expect(await screen.findByRole('region', { name: 'industry foreign flow unavailable' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Proprietary' }));
-    expect(await screen.findByRole('region', { name: 'proprietary foreign flow unavailable' })).toBeInTheDocument();
+    expect(await screen.findByText('Chưa có dữ liệu')).toBeInTheDocument();
     view.unmount();
   });
 
@@ -1204,7 +1214,8 @@ describe('ForeignFlowPage', () => {
     watchlistView.unmount();
 
     renderPage('/foreign-flow?mode=proprietary');
-    await waitFor(() => expect(proprietary).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(proprietaryEodLatest).toHaveBeenCalledTimes(1));
+    expect(proprietaryEodHistory).toHaveBeenCalledTimes(1);
     expect(screen.getByRole('button', { name: 'Proprietary' })).toHaveAttribute('aria-pressed', 'true');
   });
 

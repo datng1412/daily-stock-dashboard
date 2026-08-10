@@ -11,6 +11,28 @@ Rules that apply to every state:
 - Missing object data renders as `null`.
 - Missing list data renders as `[]`.
 
+## Verified manual Proprietary EOD states
+
+The Proprietary tab now renders `Dữ liệu tự doanh HOSE cuối ngày` from the
+separate manual EOD latest/history routes. It never uses the current foreign
+stream, SSI proprietary capability diagnostic, or a timer. One component owns
+the initial latest/history load and manual refresh; repeated clicks are ignored
+while in flight, stale requests are discarded, and a refresh failure retains
+the last successful rows with a warning.
+
+| Data state | Primary UI | Numeric behavior |
+| --- | --- | --- |
+| `ready` | Latest card, completed badge `Đủ`, source verification, chart, table | Required values render; optional null volume renders `—`; explicit zero renders `0` |
+| `no_data` | `Chưa có dữ liệu` | No placeholder financial values |
+| `incomplete` | `Thiếu dữ liệu` | Missing fields remain null; no zero coercion |
+| `suspicious` | `Bất thường dữ liệu` | Row remains inspectable and clearly labeled |
+| `storage_error` | `Không khả dụng` | No store failure is presented as an empty market session |
+
+The table scrolls horizontally on narrow screens. Source identity and completed
+finality remain visible; diagnostic hash details do not dominate the latest
+card. The tab never displays `Realtime`, `Đang diễn ra`, `Tạm tính`, or a
+15-second update claim.
+
 ## R6E historical anomaly repair and Industry current states
 
 When every retained VN30 constituent reports all four foreign-flow fields as
@@ -37,11 +59,10 @@ present. Incomplete rows stay visible in detail tables but do not create zero
 chart points or enter complete-only calculations and rankings. CSV leaves
 missing cells empty.
 
-The Proprietary mode means securities-company own-account trading. Because the
-current SSI integration has no proven proprietary buy/sell fields, the mode
-shows a concise unsupported state, no Clean/zero summary, no chart, no detail
-rows, and disabled export/refresh actions. It does not reinterpret
-`indexSummary`, room capacity, foreign flow, price, or turnover.
+The SSI proprietary capability route remains unsupported and does not
+reinterpret `indexSummary`, room capacity, foreign flow, price, or turnover.
+The user-facing Proprietary tab is instead supplied only by the separate
+verified manual HOSE completed-EOD contract above.
 
 Industry rankings continue to use current-VN30 Industry groups. The current
 Industry detail row uses the canonical aggregate returned with those groups:

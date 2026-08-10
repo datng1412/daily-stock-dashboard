@@ -1,5 +1,20 @@
 ﻿# VN Dashboard Roadmap
 
+## Phase VN-PROPRIETARY-EOD-1 - Verified manual HOSE aggregate MVP (2026-08-06)
+
+- Added a network-free CLI for user-verified official HOSE completed-EOD gross buy/sell values, optional gross volume, exact net reconciliation, optional PDF signature/hash evidence, dry-run, atomic persistence, idempotency, and audited replacement. No PDF parsing, OCR, download, scraping, or full local path retention is used.
+- Added a separate schema-v1 `DATA_CACHE_DIR/vietnam_proprietary_flow_eod.v1.json` store plus read-only latest/history APIs. SSI foreign-flow history, SSI proprietary capability diagnostics, latest price, stream lifecycle, and foreign-flow polling ownership are unchanged.
+- Replaced the user-facing Proprietary unsupported panel with a dedicated EOD-only HOSE latest card, source evidence, completed-history chart/table, empty/storage-error states, and single-flight manual refresh. Missing volume remains `—`, explicit zero remains `0`, and no realtime/current-session language or timer is present.
+- Validation passes 103 focused/shared backend tests, 36 focused frontend tests, compile, TypeScript, ESLint, Vite, and 28 Chrome desktop/mobile fixture checks without page overflow or an owned port leak. The full backend baseline remains 69 failed/4 skipped; all EOD tests pass. The full frontend run retains eight unrelated existing failures across seven files while the changed-area suites pass.
+- Deterministic backend/frontend implementation is ready. No official financial row or PDF was persisted or committed in this phase; live manual entry remains pending. The structured-source automation/reuse-rights gate and realtime proprietary capability remain future work.
+
+## Phase VN-PROPRIETARY-EOD-0 - Free EOD source and file-schema gate (2026-08-06)
+
+- Narrowed the future Proprietary product to completed daily HOSE total gross buy/sell volume and value. Realtime, polling, symbol UI, VN30, industry, and top-symbol behavior are outside this phase.
+- No relevant XLSX/XLS/CSV sample exists in the permitted local locations. Observed HOSE/HNX public exchange publication paths use PDF; FiinTrade Excel export is authenticated/paid with automation restrictions; FiinQuantX remains entitlement-blocked; news reports do not prove complete gross families.
+- Added a network-free local-file diagnostic with bounded CSV/Excel inspection, date/unit/scope proof, total/detail/component reconciliation, missing-versus-zero lineage, sanitized reports, strict mode, and cleanup. Forty-five synthetic tests pass.
+- Outcome: `VN_PROPRIETARY_EOD_SOURCE_SAMPLE_REQUIRED` remains the structured-ingestion gate. An original recent completed-session XLSX/XLS/CSV is still required before automated structured ingestion; no converted PDF, scraped HTML, copied news table, or hand-built schema is acceptable. EOD-1 proceeds only through verified manual aggregate entry and does not claim that gate is satisfied.
+
 ## Phase VN-PROPRIETARY-P0 - Alternative-provider capability gate (2026-08-05)
 
 - Verified the official FiinGroup DataFeed and Vnstock Data Sponsor operation contracts, plus the installed `FiinQuantX==0.1.62` public `PriceStatistics.get_value_by_investor()` contract, without reusing SSI price, foreign flow, room, volume, turnover, or `indexSummary` values.

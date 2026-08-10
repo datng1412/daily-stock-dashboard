@@ -11,6 +11,23 @@ Global rules:
 - KBS is legacy optional only and disabled by default.
 - News is disabled until a separate provider exists.
 
+## Verified manual HOSE proprietary-flow EOD
+
+`GET /api/v1/stocks/vn/proprietary-flow/eod/latest?exchange=hose` returns the
+latest accepted completed HOSE aggregate, or `latest=null` with
+`data_state=no_data`. `GET /api/v1/stocks/vn/proprietary-flow/eod/history`
+accepts `exchange=hose` and `limit=1..250` (default 60), and returns ascending
+completed-session rows. Both routes are read-only; the only write path is
+`scripts/record_vn_proprietary_eod.py`.
+
+Values are integer VND. Volumes are integer shares when supplied and remain
+`null` when the official manual entry omits them. Each row exposes official
+source URL, sanitized PDF filename/hash/size when available, evidence strength,
+verification, finality, completeness, quality, and replacement audit metadata.
+No full local path, PDF content, credential, raw provider payload, realtime, or
+intraday claim is exposed. The older `GET /vn/proprietary-flow` route below
+remains a separate SSI capability diagnostic and remains unsupported.
+
 ## Foreign-flow missing-field and Proprietary capability contract
 
 Completed symbol-history rows expose additive `field_presence`,
