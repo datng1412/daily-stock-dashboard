@@ -363,6 +363,22 @@ overflow. The 20-row ticker fixture retained the existing table scroller and
 
 ## Phase 4.12 Foreign Flow States
 
+### Explainable completed signals
+
+Foreign Flow symbol detail and VN30 Overview may render `Tích lũy`, `Phân
+phối`, `Trung tính`, or `Không đủ dữ liệu` for completed 1/5/20-session
+direction. Momentum renders `Gia tốc`, `Chậm lại`, `Ổn định`, `Đảo chiều`, or
+`Không đủ dữ liệu`; intensity renders `Bất thường cao`, `Bình thường`, or
+`Không đủ dữ liệu`. Text, numeric basis, and coverage remain visible so color
+is never the sole carrier. The block says it is descriptive rather than
+predictive and shows the completed date/finality.
+
+Missing or incomplete inputs render a dash and incomplete coverage, never a
+fake zero. Accepted explicit zero renders `Trung tính`. Current-session cards
+remain independently labelled `Đang diễn ra`, `Tạm tính`, `Mất kết nối`, `Chờ
+dữ liệu`, or `Không khả dụng` and do not alter completed signals. VN30 signal
+copy discloses current-membership historical decomposition.
+
 Phase 4.12D-1 implements the daily watchlist batch subset below. Current-session provisional states and market aggregates remain planned.
 
 | State | Display behavior | Preserve | Never show |

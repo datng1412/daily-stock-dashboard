@@ -21,11 +21,19 @@ at their original dates and do not override this section.
 
 ## Active next phase
 
-`VN-FF-SIGNAL-1 — Explainable Foreign Flow Signals` is the immediate phase.
-It may use accepted completed-history inputs and may use current data only with
-its existing provisional/freshness/finality metadata. Neutral descriptive
-signals must expose formula basis and coverage; prediction, recommendation,
-target price, anomaly reconstruction, and inferred flow remain excluded.
+`VN-BREADTH-1 — VN30 Market Breadth Core` is the immediate phase. It must use
+current authoritative SSI VN30 membership, preserve complete coverage counts,
+and avoid claiming historically constituent-correct breadth.
+
+`VN-FF-SIGNAL-1` is complete. The existing completed symbol analytics now own
+an additive value-based signal contract for 1/5/20-session direction,
+non-overlapping recent/previous five-session momentum, adjacent nonzero
+reversal, and existing percentile/z-score intensity. Symbol detail and VN30
+Overview render the same backend states without new requests or polling. The
+VN30 signal is explicitly current-membership decomposition; current
+`ForeignRoomMessage` values remain separate, provisional, and excluded from
+completed signals. Missing values and the quarantined 2026-06-29/30 sessions
+cannot complete a signal window; explicit accepted zero remains neutral.
 
 `VN-FF-LIVE-1` was accepted on 2026-08-10. A bounded active-session run received
 official `room.FPT` and `room.SSI` messages with raw `bq/sq/bv/sv` present,

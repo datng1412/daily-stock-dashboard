@@ -735,6 +735,12 @@ def test_provider_zero_session_is_excluded_from_windows_until_recovered():
     assert window["contains_provider_anomaly"] is True
     assert window["anomaly_sessions"] == ["2026-06-29", "2026-06-30"]
     assert window["anomaly_count"] == 2
+    signals = payload["decomposition"]["signals"]
+    assert signals["direction_1d"]["state"] == "accumulating"
+    assert signals["direction_5d"]["state"] == "unavailable"
+    assert signals["direction_5d"]["net_value"] is None
+    assert signals["direction_5d"]["covered_sessions"] == 3
+    assert signals["momentum"]["state"] == "unavailable"
 
 
 def test_incomplete_component_row_is_visible_but_excluded_from_windows_and_rankings():

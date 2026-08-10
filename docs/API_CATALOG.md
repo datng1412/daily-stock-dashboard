@@ -115,6 +115,15 @@ Top-level status is `ready`, `partial`, or `unavailable`; per-symbol availabilit
 ## Symbol foreign-flow history and analytics
 
 `GET /api/v1/stocks/vn/foreign-flow/symbol/{ticker}` accepts the existing recent-session or paired date-range request. The frontend inspection path uses `limit=60`. The response additively includes optional `analytics` with separate value/volume 5/20/60 statistics and date-aligned rolling 5/20 series. Existing clients may ignore the field. Cache, single-flight, force-refresh, stale-if-error, sanitization, and provider ownership remain unchanged; there is no new endpoint and no current-session or polling behavior.
+
+`analytics.signals` additively exposes completed net-value direction for 1/5/20
+accepted sessions, momentum from two non-overlapping five-session averages,
+the existing adjacent nonzero reversal, and existing 60-session unusual-flow
+intensity. Every window includes coverage and numeric formula inputs; missing
+is unavailable and accepted zero is neutral. The existing VN30 response also
+exposes the same object under `decomposition.signals`, labelled by its existing
+current-membership and historical-constituent-correctness fields. No endpoint,
+request fan-out, polling owner, current-to-completed merge, or provider changes.
 - Missing object data returns `null`.
 - Missing list data returns `[]`.
 - Live-provider statuses use `ok`, `unavailable`, or `disabled`.

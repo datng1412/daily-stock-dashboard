@@ -33,6 +33,7 @@ import {
   mapWatchlistFlowViewState,
 } from './foreignFlowViewState';
 import { selectForeignFlowDisplayStatus } from './latestForeignFlowSessionModel';
+import { ForeignFlowSignalsBlock } from './ForeignFlowSignals';
 
 type OverviewTarget = 'ticker' | 'industry' | 'watchlist' | 'details';
 
@@ -460,6 +461,14 @@ export const ForeignFlowOverview = ({
           {' · '}{currentAggregate.coverage.observedSymbolCount}/{currentAggregate.coverage.requestedSymbolCount} symbols
           {' · '}completed history remains authoritative below.
         </p>
+      ) : null}
+
+      {vn30.decomposition.signals ? (
+        <ForeignFlowSignalsBlock
+          signals={vn30.decomposition.signals}
+          title="Tín hiệu dòng tiền ngoại VN30"
+          limitation="Lịch sử được phân rã theo thành phần VN30 hiện tại; không phản ánh đúng thành phần lịch sử. Phiên hiện tại tạm tính không đi vào tín hiệu."
+        />
       ) : null}
 
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Foreign Flow primary KPIs">

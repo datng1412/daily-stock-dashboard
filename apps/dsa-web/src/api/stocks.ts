@@ -642,12 +642,100 @@ export type VietnamForeignFlowAnalyticsFamily = {
     unusualFlowBasis: string[];
   };
 };
+export type VietnamForeignFlowSignalDirectionState = 'accumulating' | 'distributing' | 'neutral' | 'unavailable';
+export type VietnamForeignFlowSignalMomentumState = 'accelerating' | 'decelerating' | 'stable' | 'reversal' | 'unavailable';
+export type VietnamForeignFlowSignalDirection = {
+  state: VietnamForeignFlowSignalDirectionState;
+  netValue?: number | null;
+  requestedSessions: 1 | 5 | 20;
+  observedSessions: number;
+  coveredSessions: number;
+  complete: boolean;
+  startDate?: string | null;
+  endDate?: string | null;
+};
+export type VietnamForeignFlowSignals = {
+  basis: 'foreign_net_value';
+  source: 'ssi_fastconnect';
+  sourceEndpoint: 'daily_stock_price';
+  finality: 'daily_available';
+  latestCompletedDate?: string | null;
+  direction1d: VietnamForeignFlowSignalDirection;
+  direction5d: VietnamForeignFlowSignalDirection;
+  direction20d: VietnamForeignFlowSignalDirection;
+  momentum: {
+    state: VietnamForeignFlowSignalMomentumState;
+    requestedSessions: 10;
+    observedSessions: number;
+    coveredSessions: number;
+    complete: boolean;
+    recent5Average?: number | null;
+    previous5Average?: number | null;
+    recentStartDate?: string | null;
+    recentEndDate?: string | null;
+    previousStartDate?: string | null;
+    previousEndDate?: string | null;
+  };
+  reversal: {
+    detected?: boolean | null;
+    fromDirection?: Extract<VietnamForeignFlowSignalDirectionState, 'accumulating' | 'distributing'> | null;
+    toDirection?: Extract<VietnamForeignFlowSignalDirectionState, 'accumulating' | 'distributing'> | null;
+    previousDate?: string | null;
+    currentDate?: string | null;
+    previousValue?: number | null;
+    currentValue?: number | null;
+  };
+  intensity: {
+    state: 'elevated' | 'normal' | 'unavailable';
+    absolutePercentile60d?: number | null;
+    zScore60d?: number | null;
+    sampleCount60d: number;
+    thresholdBasis: string[];
+  };
+};
+
+const asForeignFlowSignalRecord = (value: unknown): Record<string, unknown> | null => (
+  value != null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+);
+
+export const normalizeVietnamForeignFlowSignals = (raw: unknown): VietnamForeignFlowSignals | null => {
+  const signals = asForeignFlowSignalRecord(raw);
+  if (!signals) return null;
+
+  // camelcase-keys preserves a capital D after numeric suffixes (direction_1d -> direction1D).
+  const direction1d = asForeignFlowSignalRecord(signals.direction1D ?? signals.direction1d);
+  const direction5d = asForeignFlowSignalRecord(signals.direction5D ?? signals.direction5d);
+  const direction20d = asForeignFlowSignalRecord(signals.direction20D ?? signals.direction20d);
+  const momentum = asForeignFlowSignalRecord(signals.momentum);
+  const reversal = asForeignFlowSignalRecord(signals.reversal);
+  const intensity = asForeignFlowSignalRecord(signals.intensity);
+  if (!direction1d || !direction5d || !direction20d || !momentum || !reversal || !intensity) return null;
+
+  return {
+    ...signals,
+    direction1d,
+    direction5d,
+    direction20d,
+    momentum,
+    reversal,
+    intensity: {
+      ...intensity,
+      absolutePercentile60d: intensity.absolutePercentile60D ?? intensity.absolutePercentile60d ?? null,
+      zScore60d: intensity.zScore60D ?? intensity.zScore60d ?? null,
+      sampleCount60d: Number(intensity.sampleCount60D ?? intensity.sampleCount60d ?? 0),
+    },
+  } as VietnamForeignFlowSignals;
+};
+
 export type VietnamForeignFlowSymbolAnalytics = {
   basis: 'accepted_provider_rows';
   maxSessions: 60;
   observedSessions: number;
   value: VietnamForeignFlowAnalyticsFamily;
   volume: VietnamForeignFlowAnalyticsFamily;
+  signals?: VietnamForeignFlowSignals | null;
   rollingSeries: Array<{
     tradingDate: string;
     rollingNet5dValue?: number | null;
@@ -731,6 +819,7 @@ export const normalizeVietnamForeignFlowSymbolHistoryResponse = (
     ...analytics,
     value: normalizeForeignFlowAnalyticsFamily(analytics.value),
     volume: normalizeForeignFlowAnalyticsFamily(analytics.volume),
+    signals: normalizeVietnamForeignFlowSignals(analytics.signals),
     rollingSeries: rollingSeries.map((row) => ({
       tradingDate: String(row.tradingDate ?? ''),
       rollingNet5dValue: (row.rollingNet5DValue as number | null | undefined) ?? (row.rollingNet5dValue as number | null | undefined) ?? null,
@@ -1190,6 +1279,7 @@ export type VietnamVn30ForeignFlowResponse = {
     series: VietnamVn30ForeignFlowDaily[];
     latest?: VietnamVn30ForeignFlowDaily | null;
     windows: { '5': VietnamVn30ForeignFlowWindow; '20': VietnamVn30ForeignFlowWindow; '60'?: VietnamVn30ForeignFlowWindow };
+    signals?: VietnamForeignFlowSignals | null;
     reconciliation: Record<string, unknown>;
     anomalySessions: string[];
     anomalyCount: number;
@@ -1220,6 +1310,10 @@ const normalizeVietnamVn30ForeignFlowResponse = (
   data: VietnamVn30ForeignFlowCamelResponse,
 ): VietnamVn30ForeignFlowResponse => ({
   ...data,
+  decomposition: {
+    ...data.decomposition,
+    signals: normalizeVietnamForeignFlowSignals(data.decomposition.signals),
+  },
   components: (data.components ?? []).map((raw) => {
     const row = raw as VietnamVn30ForeignFlowCamelComponent & Record<string, number | boolean | string | null | undefined>;
     return {

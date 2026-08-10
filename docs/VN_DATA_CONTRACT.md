@@ -134,6 +134,35 @@ The versioned browser key `stockclock.vn.foreignFlowWatchlist.v1` stores only no
 
 Missing net values remain `null`: they do not become zero, complete a window, extend a streak, form a reversal, or fill a rolling window. Percentile is inclusive rank, `100 * count(sample <= latest) / N`, separately for signed and absolute values. Z-score is `(latest - mean) / population_standard_deviation`; both require at least five finite observations and zero deviation returns `null`. `unusual_flow_state=elevated` requires absolute 60-session percentile `>=90` or absolute 60-session z-score `>=2`. The contract is completed-session `daily_available` inspection only; it makes no current-session, price/flow, liquidity, alert, or predictive claim.
 
+### Explainable completed Foreign Flow signals (VN-FF-SIGNAL-1)
+
+`analytics.signals` is the single machine-readable signal owner and uses
+`basis=foreign_net_value`, VND, SSI DailyStockPrice, and
+`finality=daily_available`. `direction_1d`, `direction_5d`, and
+`direction_20d` classify only complete accepted net-value windows: positive is
+`accumulating`, negative is `distributing`, exact zero is `neutral`, and any
+missing/incomplete window is `unavailable`. Each direction returns requested,
+observed, and covered sessions plus dates, completeness, and the numeric net
+value only when complete.
+
+`momentum` requires ten complete accepted sessions. `recent_5_average` covers
+T-4 through T and `previous_5_average` covers T-9 through T-5. A direct
+nonzero sign change is `reversal`; otherwise a larger absolute recent average
+is `accelerating`, a smaller one is `decelerating`, equality is `stable`, and
+a transition through exact zero is conservatively `stable`. No epsilon or
+calendar-day filling is used. `reversal` reuses the existing adjacent nonzero
+completed-row event. `intensity` reuses the existing 60-session absolute
+percentile `>=90` or absolute z-score `>=2` rule and its existing five-finite-
+observation minimum; it adds no score.
+
+The same helper may describe VN30 current-membership decomposition history and
+is labelled `historical_constituent_correct=false`. Current-session
+`ForeignRoomMessage` data remains separately labelled provisional and is not
+inserted into direction, momentum, reversal, percentile, or z-score inputs.
+The unresolved 2026-06-29/30 anomaly rows remain excluded and cannot complete
+a window. The frontend maps server states only and introduces no signal
+request or polling lifecycle.
+
 Frontend foreign-flow formatting is a display-only contract: VND values with `abs(value) >= 1,000,000,000` render as the value divided by one billion with two decimal places and the suffix `Tỷ`; lower VND values and share volumes render as complete grouped integers. Decimal and thousands separators are always `.` and `,` respectively and do not depend on browser locale. API numbers remain unchanged.
 
 ## Completed-session 1-minute chart history (Phase 4.11C)

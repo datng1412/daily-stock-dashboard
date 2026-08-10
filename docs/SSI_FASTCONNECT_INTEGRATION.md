@@ -1378,6 +1378,14 @@ it did not make the stream canonical history. DailyStockPrice remains
 completed-session authority, and active publication/replay/reset acceptance
 remains pending.
 
+VN-FF-SIGNAL-1 keeps that provider boundary unchanged. Explainable direction,
+momentum, reversal, and unusual-intensity states are derived only from accepted
+completed DailyStockPrice `foreign_net_value` rows. They reuse the existing
+coverage and percentile/z-score analytics; `ForeignRoomMessage` snapshots stay
+separate and provisional and never enter completed signal windows. The
+2026-06-29/30 unresolved provider anomalies remain numeric null and excluded.
+No SSI request, subscription, fallback, or polling lifecycle was added.
+
 Active-session acceptance on 2026-07-24 connected and subscribed only
 FPT/SSI/VCB, but observed zero room rows in 25 seconds. This proves transport
 and subscription readiness, not buy/sell update semantics. Bounded REST

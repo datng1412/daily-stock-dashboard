@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [fix] Normalize digit-suffixed Foreign Flow signal fields before rendering so valid VN30 responses cannot crash the workspace.
+- [new feature] Add backend-owned explainable completed Foreign Flow direction, momentum, reversal, and unusual-intensity signals to symbol detail and VN30 Overview without new requests or polling.
+- [test] Cover numeric signal formulas, incomplete and explicit-zero semantics, anomaly exclusion, neutral frontend labels, and no-request VN30 rendering.
+- [documentation] Complete VN-FF-SIGNAL-1, document its source/finality/coverage formulas and limitations, and advance VN-BREADTH-1 as the next phase.
 - [documentation] Accept VN-FF-LIVE-1 with sanitized active-session SSI room, FastAPI, VN30/Industry reconciliation, and desktop/mobile browser evidence; advance the active roadmap to VN-FF-SIGNAL-1.
 - [fix] Accept the observed slash-form SSI room timestamp in the maintained current Foreign Flow diagnostic without changing production data semantics.
 - [test] Cover the bounded current Foreign Flow runtime acceptance output and slash-form provider timestamp attribution.

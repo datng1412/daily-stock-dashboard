@@ -1229,6 +1229,63 @@ class VietnamForeignFlowAnalyticsRollingRow(BaseModel):
     rolling_net_20d_volume: Optional[int] = None
 
 
+class VietnamForeignFlowSignalDirection(BaseModel):
+    state: Literal["accumulating", "distributing", "neutral", "unavailable"]
+    net_value: Optional[int] = None
+    requested_sessions: Literal[1, 5, 20]
+    observed_sessions: int = Field(ge=0, le=20)
+    covered_sessions: int = Field(ge=0, le=20)
+    complete: bool
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+
+
+class VietnamForeignFlowSignalMomentum(BaseModel):
+    state: Literal["accelerating", "decelerating", "stable", "reversal", "unavailable"]
+    requested_sessions: Literal[10] = 10
+    observed_sessions: int = Field(ge=0, le=10)
+    covered_sessions: int = Field(ge=0, le=10)
+    complete: bool
+    recent_5_average: Optional[float] = None
+    previous_5_average: Optional[float] = None
+    recent_start_date: Optional[str] = None
+    recent_end_date: Optional[str] = None
+    previous_start_date: Optional[str] = None
+    previous_end_date: Optional[str] = None
+
+
+class VietnamForeignFlowSignalReversal(BaseModel):
+    detected: Optional[bool] = None
+    from_direction: Optional[Literal["accumulating", "distributing"]] = None
+    to_direction: Optional[Literal["accumulating", "distributing"]] = None
+    previous_date: Optional[str] = None
+    current_date: Optional[str] = None
+    previous_value: Optional[int] = None
+    current_value: Optional[int] = None
+
+
+class VietnamForeignFlowSignalIntensity(BaseModel):
+    state: Literal["elevated", "normal", "unavailable"]
+    absolute_percentile_60d: Optional[float] = Field(default=None, ge=0, le=100)
+    z_score_60d: Optional[float] = None
+    sample_count_60d: int = Field(ge=0, le=60)
+    threshold_basis: List[str] = Field(default_factory=list, max_length=2)
+
+
+class VietnamForeignFlowSignals(BaseModel):
+    basis: Literal["foreign_net_value"] = "foreign_net_value"
+    source: Literal["ssi_fastconnect"] = "ssi_fastconnect"
+    source_endpoint: Literal["daily_stock_price"] = "daily_stock_price"
+    finality: Literal["daily_available"] = "daily_available"
+    latest_completed_date: Optional[str] = None
+    direction_1d: VietnamForeignFlowSignalDirection
+    direction_5d: VietnamForeignFlowSignalDirection
+    direction_20d: VietnamForeignFlowSignalDirection
+    momentum: VietnamForeignFlowSignalMomentum
+    reversal: VietnamForeignFlowSignalReversal
+    intensity: VietnamForeignFlowSignalIntensity
+
+
 class VietnamForeignFlowSymbolAnalytics(BaseModel):
     basis: Literal["accepted_provider_rows"] = "accepted_provider_rows"
     max_sessions: Literal[60] = 60
@@ -1236,6 +1293,7 @@ class VietnamForeignFlowSymbolAnalytics(BaseModel):
     value: VietnamForeignFlowAnalyticsFamily
     volume: VietnamForeignFlowAnalyticsFamily
     rolling_series: List[VietnamForeignFlowAnalyticsRollingRow] = Field(default_factory=list, max_length=60)
+    signals: VietnamForeignFlowSignals
 
 
 class VietnamForeignFlowSymbolHistoryResponse(BaseModel):

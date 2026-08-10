@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   stocksApi,
+  type VietnamForeignFlowSignals,
   type VietnamForeignFlowSymbolHistoryResponse,
   type VietnamVn30ForeignFlowResponse,
 } from '../../api/stocks';
@@ -53,6 +54,16 @@ const tickerPayload = (): VietnamForeignFlowSymbolHistoryResponse => ({
   requested: { mode: 'recent_sessions', requestedLimit: 20, returnedSessionCount: 2 },
   coverage: { requestedSessions: 20, coveredSessions: 2, complete: false },
   fetchedAt: '2026-07-21T09:00:00Z',
+});
+
+const signalPayload = (): VietnamForeignFlowSignals => ({
+  basis: 'foreign_net_value', source: 'ssi_fastconnect', sourceEndpoint: 'daily_stock_price', finality: 'daily_available', latestCompletedDate: '2026-07-21',
+  direction1d: { state: 'accumulating', netValue: 400, requestedSessions: 1, observedSessions: 1, coveredSessions: 1, complete: true },
+  direction5d: { state: 'accumulating', netValue: 220, requestedSessions: 5, observedSessions: 5, coveredSessions: 5, complete: true },
+  direction20d: { state: 'unavailable', netValue: null, requestedSessions: 20, observedSessions: 10, coveredSessions: 10, complete: false },
+  momentum: { state: 'decelerating', requestedSessions: 10, observedSessions: 10, coveredSessions: 10, complete: true, recent5Average: 44, previous5Average: 60 },
+  reversal: { detected: false },
+  intensity: { state: 'normal', absolutePercentile60d: 70, zScore60d: 0.5, sampleCount60d: 10, thresholdBasis: ['within_recent_distribution'] },
 });
 
 const vn30Payload = (): VietnamVn30ForeignFlowResponse => ({
@@ -580,6 +591,20 @@ describe('ForeignFlowPage', () => {
       await Promise.resolve();
     });
     expect(within(screen.getByTestId('latest-foreign-flow-card')).getByText('Mất kết nối')).toBeInTheDocument();
+  });
+
+  it('renders backend-owned completed VN30 signals without a symbol-history request', async () => {
+    const payload = vn30Payload();
+    payload.decomposition.signals = signalPayload();
+    vn30.mockResolvedValue(payload);
+
+    renderPage();
+
+    const signalBlock = await screen.findByLabelText('Tín hiệu dòng tiền ngoại VN30');
+    expect(within(signalBlock).getAllByText('Tích lũy')).toHaveLength(2);
+    expect(within(signalBlock).getByText('Chậm lại')).toBeInTheDocument();
+    expect(within(signalBlock).getByText(/thành phần VN30 hiện tại/)).toBeInTheDocument();
+    expect(symbolHistory).not.toHaveBeenCalled();
   });
 
   it('retains the current VN30 row as stale when visibility recovery is unavailable', async () => {

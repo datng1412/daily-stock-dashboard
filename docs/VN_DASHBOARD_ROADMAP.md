@@ -51,7 +51,7 @@ is next.
   refresh and a hidden-to-visible cycle. Cold readiness took 36.2 seconds; the
   bounded diagnostic readiness allowance is therefore 45 seconds.
 
-### 2. VN-FF-SIGNAL-1 — Explainable Foreign Flow Signals (active next phase)
+### 2. VN-FF-SIGNAL-1 — Explainable Foreign Flow Signals (completed 2026-08-10)
 
 - **Goal:** add formula-backed 1D/5D/20D accumulation/distribution,
   acceleration/deceleration, reversal, and unusual-flow summaries.
@@ -68,8 +68,17 @@ is next.
   price, or reconstruction of anomaly sessions.
 - **Exit criteria:** every signal exposes formula basis, coverage, source,
   session/finality, and neutral unavailable behavior.
+- **Acceptance evidence:** one backend-owned additive contract derives value
+  signals from the existing completed analytics. Direction requires complete
+  accepted 1/5/20-session windows; momentum compares two non-overlapping
+  five-session averages and requires ten complete sessions; intensity reuses
+  the existing absolute percentile/z-score rule. Symbol detail and VN30
+  Overview reuse their loaded responses with no request or polling fan-out.
+  Current provisional rows remain separate. Quarantined anomaly rows remain
+  numeric null and cannot complete windows. Focused backend/frontend tests,
+  Python compile, TypeScript, ESLint, and Vite build pass.
 
-### 3. VN-BREADTH-1 — VN30 Market Breadth Core
+### 3. VN-BREADTH-1 — VN30 Market Breadth Core (active next phase)
 
 - **Goal:** calculate advance, decline, unchanged, participation ratio, percent
   above MA20, and percent above MA50 for current authoritative SSI VN30
@@ -144,8 +153,8 @@ is next.
 
 | Class | Items |
 | --- | --- |
-| `NEXT` | `VN-FF-SIGNAL-1` |
-| `LATER` | `VN-BREADTH-1`, `VN-SECTOR-1`, `VN-RS-1`, `VN-ALERT-1`, eventual risk-mode synthesis |
+| `NEXT` | `VN-BREADTH-1` |
+| `LATER` | `VN-SECTOR-1`, `VN-RS-1`, `VN-ALERT-1`, eventual risk-mode synthesis |
 | `BLOCKED` | VN30 futures/F1M/basis/open interest/futures volume; automated proprietary source; HOSE-wide breadth until an authoritative scalable universe is proven; fundamentals/corporate actions without a provider/legal contract |
 | `DEFERRED` | Proprietary product expansion; broader stock-detail polish; macro/risk asset integration; optional news-provider expansion |
 | `DROP / DO NOT PLAN` | Hardcoded five-symbol defaults; guessed anomaly repair; raw-table-only feature phases; AI/ML investment scoring; automatic recommendations; dynamic request-handler subscriptions; unsupported SSI-field reinterpretation; new fallback providers for SSI-owned fields without explicit approval |

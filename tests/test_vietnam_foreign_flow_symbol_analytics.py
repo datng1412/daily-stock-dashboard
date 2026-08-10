@@ -128,3 +128,98 @@ def test_empty_provider_result_returns_bounded_empty_analytics():
     assert payload["analytics"]["rolling_series"] == []
     assert payload["analytics"]["value"]["latest"] is None
     assert payload["analytics"]["value"]["current_streak"]["direction"] == "unavailable"
+
+
+@pytest.mark.parametrize(
+    ("latest", "expected"),
+    [(10, "accumulating"), (-10, "distributing"), (0, "neutral"), (None, "unavailable")],
+)
+def test_completed_direction_signals_preserve_zero_and_missing(latest, expected):
+    values = [1] * 19 + [latest]
+    signals = VietnamForeignFlowService(
+        Fetcher([row(index, value) for index, value in enumerate(values)])
+    ).get_symbol_history("FPT", limit=20)["analytics"]["signals"]
+
+    assert signals["direction_1d"]["state"] == expected
+    assert signals["direction_1d"]["net_value"] == latest
+    expected_5d = None if latest is None else 4 + latest
+    expected_20d = None if latest is None else 19 + latest
+    classify = lambda value: (
+        "unavailable" if value is None else "accumulating" if value > 0
+        else "distributing" if value < 0 else "neutral"
+    )
+    assert signals["direction_5d"]["state"] == classify(expected_5d)
+    assert signals["direction_5d"]["net_value"] == expected_5d
+    assert signals["direction_20d"]["state"] == classify(expected_20d)
+    assert signals["direction_20d"]["net_value"] == (
+        expected_20d
+    )
+
+
+@pytest.mark.parametrize(
+    ("previous", "recent", "expected"),
+    [
+        (10, 20, "accelerating"),
+        (20, 10, "decelerating"),
+        (-10, -20, "accelerating"),
+        (-20, -10, "decelerating"),
+        (10, 10, "stable"),
+        (10, -10, "reversal"),
+        (-10, 10, "reversal"),
+        (0, 10, "stable"),
+    ],
+)
+def test_momentum_uses_two_non_overlapping_numeric_five_session_averages(
+    previous, recent, expected
+):
+    values = [previous] * 5 + [recent] * 5
+    momentum = VietnamForeignFlowService(
+        Fetcher([row(index, value) for index, value in enumerate(values)])
+    ).get_symbol_history("FPT", limit=10)["analytics"]["signals"]["momentum"]
+
+    assert momentum["state"] == expected
+    assert momentum["previous_5_average"] == previous
+    assert momentum["recent_5_average"] == recent
+    assert momentum["covered_sessions"] == 10
+    assert momentum["complete"] is True
+
+
+def test_signal_reversal_intensity_and_incomplete_coverage_reuse_analytics():
+    values = [10] * 55 + [-10, -10, -10, -10, -1_000]
+    payload = VietnamForeignFlowService(
+        Fetcher([row(index, value) for index, value in enumerate(values)])
+    ).get_symbol_history("FPT", limit=60)
+    signals = payload["analytics"]["signals"]
+
+    assert signals["momentum"]["state"] == "reversal"
+    assert signals["reversal"] == {
+        "detected": True,
+        "from_direction": "accumulating",
+        "to_direction": "distributing",
+        "previous_date": payload["rows"][54]["trading_date"],
+        "current_date": payload["rows"][55]["trading_date"],
+        "previous_value": 10,
+        "current_value": -10,
+    }
+    assert signals["intensity"]["state"] == "elevated"
+    assert signals["intensity"]["absolute_percentile_60d"] == 100
+    assert signals["intensity"]["z_score_60d"] is not None
+    assert signals["intensity"]["threshold_basis"]
+
+    incomplete = VietnamForeignFlowService(
+        Fetcher([row(index, 1 if index != 5 else None) for index in range(10)])
+    ).get_symbol_history("SSI", limit=10)["analytics"]["signals"]
+    assert incomplete["momentum"]["state"] == "unavailable"
+    assert incomplete["momentum"]["recent_5_average"] is None
+    assert incomplete["momentum"]["covered_sessions"] == 9
+
+
+def test_zero_standard_deviation_keeps_intensity_traceable_without_fake_z_score():
+    signals = VietnamForeignFlowService(
+        Fetcher([row(index, 0) for index in range(60)])
+    ).get_symbol_history("FPT", limit=60)["analytics"]["signals"]
+
+    assert signals["intensity"]["state"] == "elevated"
+    assert signals["intensity"]["absolute_percentile_60d"] == 100
+    assert signals["intensity"]["z_score_60d"] is None
+    assert signals["direction_20d"]["state"] == "neutral"

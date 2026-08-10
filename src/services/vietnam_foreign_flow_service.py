@@ -800,6 +800,132 @@ def _rolling_series(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return result
 
 
+def _signal_direction(
+    rows: List[Dict[str, Any]],
+    family: Dict[str, Any],
+    requested: int,
+) -> Dict[str, Any]:
+    if requested == 1:
+        selected = rows[-1:]
+        value = selected[0].get("foreign_net_value") if selected else None
+        observed = len(selected)
+        covered = int(value is not None)
+        complete = observed == covered == 1
+        start_date = selected[0]["trading_date"] if selected else None
+        end_date = start_date
+        net_value = value if complete else None
+    else:
+        window = family["windows"][str(requested)]
+        observed = window["observed_sessions"]
+        covered = window["covered_sessions"]
+        complete = bool(window["complete"])
+        start_date = window["start_date"]
+        end_date = window["end_date"]
+        net_value = window["net_sum"] if complete else None
+    state = (
+        "unavailable"
+        if not complete or net_value is None
+        else "accumulating"
+        if net_value > 0
+        else "distributing"
+        if net_value < 0
+        else "neutral"
+    )
+    return {
+        "state": state,
+        "net_value": net_value,
+        "requested_sessions": requested,
+        "observed_sessions": observed,
+        "covered_sessions": covered,
+        "complete": complete,
+        "start_date": start_date,
+        "end_date": end_date,
+    }
+
+
+def _signal_momentum(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    selected = rows[-10:]
+    values = [row.get("foreign_net_value") for row in selected]
+    observed = len(selected)
+    covered = sum(value is not None for value in values)
+    complete = observed == covered == 10
+    previous = selected[:5]
+    recent = selected[5:]
+    result = {
+        "state": "unavailable",
+        "requested_sessions": 10,
+        "observed_sessions": observed,
+        "covered_sessions": covered,
+        "complete": complete,
+        "recent_5_average": None,
+        "previous_5_average": None,
+        "recent_start_date": recent[0]["trading_date"] if len(recent) == 5 else None,
+        "recent_end_date": recent[-1]["trading_date"] if len(recent) == 5 else None,
+        "previous_start_date": previous[0]["trading_date"] if len(previous) == 5 else None,
+        "previous_end_date": previous[-1]["trading_date"] if len(previous) == 5 else None,
+    }
+    if not complete:
+        return result
+    previous_average = sum(row["foreign_net_value"] for row in previous) / 5
+    recent_average = sum(row["foreign_net_value"] for row in recent) / 5
+    if previous_average * recent_average < 0:
+        state = "reversal"
+    elif previous_average == 0 or recent_average == 0:
+        state = "stable"
+    elif abs(recent_average) > abs(previous_average):
+        state = "accelerating"
+    elif abs(recent_average) < abs(previous_average):
+        state = "decelerating"
+    else:
+        state = "stable"
+    result.update(
+        state=state,
+        recent_5_average=recent_average,
+        previous_5_average=previous_average,
+    )
+    return result
+
+
+def _foreign_flow_signals(
+    rows: List[Dict[str, Any]],
+    value_family: Dict[str, Any],
+) -> Dict[str, Any]:
+    reversal = value_family["latest_reversal"]
+    comparison = value_family["comparison"]
+    reversal_observable = len(rows) >= 2
+    signal_direction = {
+        "net_buy": "accumulating",
+        "net_sell": "distributing",
+    }
+    return {
+        "basis": "foreign_net_value",
+        "source": SOURCE,
+        "source_endpoint": SOURCE_ENDPOINT,
+        "finality": FINALITY,
+        "latest_completed_date": rows[-1]["trading_date"] if rows else None,
+        "direction_1d": _signal_direction(rows, value_family, 1),
+        "direction_5d": _signal_direction(rows, value_family, 5),
+        "direction_20d": _signal_direction(rows, value_family, 20),
+        "momentum": _signal_momentum(rows),
+        "reversal": {
+            "detected": bool(reversal) if reversal_observable else None,
+            "from_direction": signal_direction[reversal["from_direction"]] if reversal else None,
+            "to_direction": signal_direction[reversal["to_direction"]] if reversal else None,
+            "previous_date": reversal["previous_trading_date"] if reversal else None,
+            "current_date": reversal["trading_date"] if reversal else None,
+            "previous_value": reversal["previous_value"] if reversal else None,
+            "current_value": reversal["current_value"] if reversal else None,
+        },
+        "intensity": {
+            "state": comparison["unusual_flow_state"],
+            "absolute_percentile_60d": comparison["absolute_percentile_60d"],
+            "z_score_60d": comparison["z_score_60d"],
+            "sample_count_60d": comparison["sample_count_60d"],
+            "threshold_basis": comparison["unusual_flow_basis"],
+        },
+    }
+
+
 def _symbol_analytics(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     bounded = _complete_only_calculation_rows(rows[-60:])
 
@@ -813,13 +939,15 @@ def _symbol_analytics(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
             "comparison": _comparison(bounded, field),
         }
 
+    value_family = family("foreign_net_value")
     return {
         "basis": "accepted_provider_rows",
         "max_sessions": 60,
         "observed_sessions": len(bounded),
-        "value": family("foreign_net_value"),
+        "value": value_family,
         "volume": family("foreign_net_volume"),
         "rolling_series": _rolling_series(bounded),
+        "signals": _foreign_flow_signals(bounded, value_family),
     }
 
 
@@ -3367,6 +3495,18 @@ class VietnamForeignFlowVn30Service:
             "net_volume_60d": self._ranking_pair(components, "foreign_net_volume_60d", "window_end_date_60d", top_n),
         }
         decomposition_latest = series[-1] if series else None
+        signal_rows = [
+            {
+                **row,
+                "complete": bool(
+                    row.get("data_state") in {"ready", "stale"}
+                    and (row.get("value_coverage") or {}).get("complete")
+                    and row.get("usable_for_analytics") is not False
+                ),
+            }
+            for row in series
+        ]
+        decomposition_signals = _symbol_analytics(signal_rows)["signals"]
         reconciliation = self._reconcile(
             canonical.get("latest"), decomposition_latest
         )
@@ -3417,6 +3557,7 @@ class VietnamForeignFlowVn30Service:
                     "20": self._aggregate_window(series, 20, len(tickers)),
                     "60": self._aggregate_window(series, 60, len(tickers)),
                 },
+                "signals": decomposition_signals,
                 "components": components,
                 "component_counts": counts,
                 "rankings": rankings,

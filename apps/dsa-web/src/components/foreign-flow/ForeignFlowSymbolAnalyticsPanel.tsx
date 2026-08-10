@@ -7,6 +7,7 @@ import { foreignFlowSignTextClass } from '../../utils/foreignFlowSign';
 import { buildSymbolForeignFlowRows, type SymbolForeignFlowMetric, type SymbolForeignFlowRange } from './foreignFlowSymbolAnalyticsModel';
 import { ForeignFlowSymbolHistoryChart, type SymbolForeignFlowChartMode } from './ForeignFlowSymbolHistoryChart';
 import { ForeignFlowSymbolHistoryTable } from './ForeignFlowSymbolHistoryTable';
+import { ForeignFlowSignalsBlock } from './ForeignFlowSignals';
 
 export type SymbolForeignFlowWindow = 'latest' | '5' | '20' | '60';
 
@@ -57,6 +58,7 @@ export const ForeignFlowSymbolAnalyticsPanel = ({ ticker, data, loading, updatin
     {data?.dataState === 'empty' ? <p className="mt-5 rounded-lg border border-border/70 p-4 text-sm text-secondary-text">Không có dữ liệu dòng tiền ngoại trong phạm vi quan sát.</p> : null}
     {data?.dataState === 'unavailable' ? <div className="mt-5 rounded-lg border border-danger/30 bg-danger/10 p-4 text-sm text-danger" role="alert">Không thể tải lịch sử dòng tiền ngoại cho {ticker}.<div className="mt-3"><Button variant="outline" size="sm" onClick={onRetry}>Thử lại</Button></div></div> : null}
     {data && data.dataState !== 'empty' && data.dataState !== 'unavailable' && family ? <div className="mt-5 space-y-5">
+      {analytics?.signals ? <ForeignFlowSignalsBlock signals={analytics.signals} title={`Tín hiệu hoàn tất · ${ticker}`} /> : null}
       {window === 'latest' ? <dl className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {card('Giá trị mua', formatMetric(latest?.foreignBuyValue, 'value'), latest?.tradingDate)}
         {card('Giá trị bán', formatMetric(latest?.foreignSellValue, 'value'), latest?.tradingDate)}

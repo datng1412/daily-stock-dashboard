@@ -51,6 +51,12 @@ Explicit numeric zero remains `0`; missing optional volume remains `null`.
 - `latest_reversal`: most recent adjacent accepted rows whose finite nonzero signs differ; otherwise `null`.
 - `comparison`: 20/60 sample counts, averages, inclusive signed/absolute percentiles, population z-scores, and `unusual_flow_state` with machine-readable basis.
 - `rolling_series`: date-aligned 5/20-session net sums for value and volume. A window with any missing net remains `null`.
+- `analytics.signals.basis`: always `foreign_net_value`; signal math never silently combines value and volume.
+- `direction_{1d,5d,20d}`: `accumulating`, `distributing`, `neutral`, or `unavailable`, with numeric net value and requested/observed/covered/complete/date lineage. Incomplete windows expose no signal net value.
+- `momentum`: `accelerating`, `decelerating`, `stable`, `reversal`, or `unavailable`; compares the latest five-session average with the preceding non-overlapping five-session average and requires ten complete rows.
+- `signals.reversal`: nullable detection plus accumulating/distributing transition dates and values, mapped from the existing adjacent nonzero reversal primitive.
+- `signals.intensity`: `elevated`, `normal`, or `unavailable`, with absolute 60-session percentile, z-score, sample count, and threshold basis from existing comparison analytics.
+- Signal `source=ssi_fastconnect`, `source_endpoint=daily_stock_price`, and `finality=daily_available` identify completed ownership. Current provisional values remain outside this object.
 - Diagnostics fields are for debugging and should not become primary metric rows.
 - Frontend display formatting is UI-only. Raw API price fields remain VND/share numeric values; VN price-like fields are displayed in board-style thousand-VND units with two decimals and no suffix, for example `72,100` renders as `72.10`. Share-volume fields may render with `K`/`M` suffixes, and VND trading-value fields may render with `K`/`M`/`B`/`T` suffixes. Tooltips/titles may expose the raw VND or share count.
 - Frontend directional coloring is UI-only. Daily/latest price and `price_vs_reference_pct` are colored by comparing SSI DailyOhlc close/latest price with SSI DailyStockPrice `reference_price`, `ceiling_price`, and `floor_price`: ceiling is purple/magenta, floor is blue/cyan, reference/equal is dedicated yellow, above reference is green, below reference is red, and missing/non-positive inputs are neutral. Trade-tape zero change uses the same reference yellow. Raw API values and field ownership do not change.
