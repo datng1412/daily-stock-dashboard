@@ -9,7 +9,16 @@ Global rules:
 - SSI is the strict primary VN market-data provider.
 - Mozyfin is disabled for VN runtime.
 - KBS is legacy optional only and disabled by default.
-- News is disabled until a separate provider exists.
+- News is disabled by default. Optional local/personal
+  `vnstock_news_personal` and `vnstock_community` providers exist behind
+  separate enablement and terms boundaries; they are not universal hosted
+  production providers.
+
+Current Foreign Flow routes are implemented but still need retained
+active-session production acceptance. Completed DailyStockPrice history and
+analytics are mature; current symbol/VN30/Industry publication remains
+`IMPLEMENTED_NEEDS_LIVE_ACCEPTANCE`. No route starts or owns the provider
+connection.
 
 ## Verified manual HOSE proprietary-flow EOD
 
@@ -83,6 +92,13 @@ reconnection. Without a usable snapshot, the current capability is
 `unavailable`; completed DailyStockPrice capabilities remain independently
 usable. Successful connection clears the prior retryable stream failure, and
 only a newer provider message replaces the cached snapshot.
+
+Live acceptance status: the route, schema, shared cache, and frontend mapping
+are deterministic and implemented, but a fresh active-session
+`ForeignRoomMessage` has not yet been retained as end-to-end production/browser
+acceptance evidence. `VN-FF-LIVE-1` owns that acceptance gate; authorization,
+entitlement, or network failure remains typed provider unavailability rather
+than an application-synthesized value.
 
 ## `POST /api/v1/stocks/vn/industry-flow`
 
@@ -162,7 +178,14 @@ Current symbol foreign flow:
 
 Source ownership:
 
-- `latest_price`, daily close, chart-compatible OHLCV: SSI DailyOhlc.
+- `latest_price`: conditional SSI selection. A newer dated SSI DailyStockPrice
+  close is used when DailyOhlc is materially stale; otherwise a reliable
+  normalized SSI quote is used when present; otherwise SSI DailyOhlc close is
+  used. Source, date, and finality remain explicit, and the value is null when
+  no permitted SSI source is usable.
+- Daily close and chart-compatible OHLCV: SSI DailyOhlc. Promoting a newer
+  DailyStockPrice close for `latest_price` does not synthesize OHLCV or make
+  stale DailyOhlc indicators usable.
 - Reference, ceiling/floor, matched/put-through, latest foreign flow: SSI DailyStockPrice.
 - Intraday: SSI IntradayOhlc.
 - Realtime snapshot: SSI realtime contract when usable.
@@ -171,7 +194,8 @@ Source ownership:
 - Foreign room: SSI `R:{symbol}` stream context when usable.
 - Trading session/status: SSI `F:{symbol}` stream context when usable.
 - Market index pulse: SSI `MI:{index_code}` stream context when usable.
-- News: disabled now; future separate provider.
+- News: disabled by default; optional local/personal providers exist under
+  their own provider ownership and terms.
 
 Null/empty rules:
 
@@ -601,3 +625,16 @@ Response rules:
   response built from retained SSI membership, accepted completed history, and
   stale process-owned snapshots. Diagnostics disclose retention, age, refresh
   failure, cache bypass, and recovery state. A cold state remains unavailable.
+- Current VN30 and Industry aggregation share the same VN-FF-LIVE-1 acceptance
+  boundary as the symbol route. Existing implementation does not itself prove
+  fresh production publication.
+
+## Known completed-session Foreign Flow anomalies
+
+`2026-06-29` and `2026-06-30` remain `unresolved_provider_anomaly` after exact
+date verification observed explicit zero values for all four audited foreign
+fields across all 30 retained VN30 members. Public aggregate numbers remain
+null, and the dates are excluded from complete-only windows, rankings,
+analytics, chart numeric points, and numeric CSV cells. The API retains audit
+evidence and never reconstructs, infers, or accepts these as valid zero-flow
+sessions.

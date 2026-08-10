@@ -44,6 +44,10 @@ excluded from charts, complete windows, rankings, analytics, and numeric CSV
 cells. A successful repair restores the provider values and normal completed
 status; a failed repair remains inspectable and does not poll on every refresh.
 
+The currently quarantined sessions are `2026-06-29` and `2026-06-30`. They are
+`unresolved_provider_anomaly` and display `Bất thường dữ liệu`; they are not
+valid zero-flow sessions and must not be reconstructed or inferred.
+
 Industry current detail accepts usable `ready`, `partial`, `stale`, and
 `market_closed` aggregates. It uses the canonical current aggregate for the
 detail row and current groups for rankings. A complete accepted same-date row
@@ -278,6 +282,13 @@ Primary status priority is `Completed`, `Loading`, `Pre-open`, `Lunch break`, `C
 These states apply only to existing X/X-QUOTE/X-TRADE/F/R/MI consumers. They do not change D1/1m chart loading, polling, labels, or data ownership, and they do not add a frontend WebSocket or higher polling frequency.
 
 ## SSI-V3-M2.6B current symbol flow states
+
+These UI states are implemented deterministically but remain
+`IMPLEMENTED_NEEDS_LIVE_ACCEPTANCE` for fresh production publication.
+`VN-FF-LIVE-1` must prove a real active-session message through symbol, VN30,
+Industry, FastAPI, and browser while preserving one polling owner. A typed
+authorization, entitlement, or network failure remains an unavailable current
+section and does not hide completed Foreign Flow.
 
 - `waiting`: show that the bounded subscription is awaiting its first usable
   current-session room update; show no metric-shaped zeros.

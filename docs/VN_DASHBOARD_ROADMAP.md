@@ -1,5 +1,166 @@
 ﻿# VN Dashboard Roadmap
 
+## Active roadmap
+
+Last updated: 2026-08-10
+
+This capability-oriented roadmap is the current source of truth. Dated phase
+records later in this file are historical evidence and do not determine what
+is next.
+
+### 1. VN-FF-LIVE-1 — Current Foreign Flow Production Acceptance
+
+- **Goal:** retain end-to-end active-session evidence from
+  `ForeignRoomMessage` through the process-shared manager, symbol current,
+  current-VN30 aggregate, current-Industry aggregate, FastAPI, and browser.
+- **Why now:** completed Foreign Flow is mature, while current-session data is
+  the remaining production trust boundary.
+- **User value:** current foreign accumulation/distribution is either visibly
+  fresh and provisional or truthfully unavailable for a precise provider
+  reason.
+- **Data dependencies:** V3 streaming credentials/entitlement, active Vietnam
+  session, provider timestamp/session progression, and known deployment config.
+- **Reuse:** existing stream lifecycle, current routes, aggregations, finality
+  selector, 15-second HTTP polling, and browser visibility recovery.
+- **Main risks:** provider authorization/entitlement/network failure and
+  process/deployment configuration drift.
+- **Explicit exclusions:** no new feature, fallback, request-handler-owned
+  connection, dynamic full-market subscription, guessed value, or signal.
+- **Exit criteria:** one manager and one polling owner deliver fresh symbol,
+  VN30, and Industry values without duplicates; reconnect is bounded;
+  completed history stays independent. A proven external failure may exit as
+  `BLOCKED_PROVIDER` without forcing application changes. After this exit, the
+  R6A-R6E naming series stays closed unless a concrete regression requires a
+  historical reference.
+
+### 2. VN-FF-SIGNAL-1 — Explainable Foreign Flow Signals
+
+- **Goal:** add formula-backed 1D/5D/20D accumulation/distribution,
+  acceleration/deceleration, reversal, and unusual-flow summaries.
+- **Why now:** accepted completed history, windows, streaks, rankings, and
+  unusual-flow statistics already exist.
+- **User value:** explain whether foreign activity is strengthening, weakening,
+  or reversing without requiring manual table comparison.
+- **Data dependencies:** accepted complete DailyStockPrice rows; current data is
+  eligible only after VN-FF-LIVE-1 passes.
+- **Reuse:** existing coverage, percentile/z-score, rolling-window, anomaly,
+  finality, and frontend view-state models.
+- **Main risks:** partial windows and wording that overstates descriptive data.
+- **Explicit exclusions:** no AI/ML score, prediction, recommendation, target
+  price, or reconstruction of anomaly sessions.
+- **Exit criteria:** every signal exposes formula basis, coverage, source,
+  session/finality, and neutral unavailable behavior.
+
+### 3. VN-BREADTH-1 — VN30 Market Breadth Core
+
+- **Goal:** calculate advance, decline, unchanged, participation ratio, percent
+  above MA20, and percent above MA50 for current authoritative SSI VN30
+  membership. Add up/down volume or value only when field ownership and
+  completeness support them truthfully.
+- **Why now:** it directly answers whether VN30 movement has broad or narrow
+  participation using implemented membership and daily metrics.
+- **User value:** concise participation context rather than another isolated
+  stock table.
+- **Data dependencies:** exact current VN30 membership and bounded, performant
+  DailyOhlc histories.
+- **Reuse:** IndexComponents, DailyOhlc, MA20/MA50, caches, and coverage states.
+- **Main risks:** watchlist latency, missing members, and current-membership
+  historical bias.
+- **Explicit exclusions:** no HOSE-wide breadth, no missing-to-zero coercion,
+  and no official index-contribution claim.
+- **Exit criteria:** requested, observed, usable, missing, and classified counts
+  reconcile; latency is measured before any universe expansion.
+
+### 4. VN-SECTOR-1 — Sector Strength & Rotation
+
+- **Goal:** combine SSI ICB membership, price performance, breadth, and
+  completed Foreign Flow to explain current sector strengthening/weakening.
+- **Why now:** VN-BREADTH-1 supplies reusable participation primitives and
+  current-VN30 ICB/flow grouping already exists.
+- **User value:** identify which current VN30 industries are gaining or losing
+  participation and flow support.
+- **Data dependencies:** current ICB membership, accepted DailyOhlc, breadth,
+  and completed foreign-flow sessions.
+- **Reuse:** Industry Flow service, ICB metadata, VN30 cohort, and flow UI.
+- **Main risks:** small cohorts and historical composition bias.
+- **Explicit exclusions:** current-cohort returns are not official sector-index
+  returns; no predictive rotation score.
+- **Exit criteria:** ranks expose return, breadth, flow, coverage, session, and
+  current-cohort basis with full member reconciliation.
+
+### 5. VN-RS-1 — Relative Strength
+
+- **Goal:** compare a stock with VNINDEX, VN30, and its current industry cohort.
+- **Why now:** sector and breadth phases establish the context needed for
+  meaningful comparisons.
+- **User value:** show whether a stock is outperforming or underperforming its
+  market and peers over explicit windows.
+- **Data dependencies:** proven benchmark-history contract and exact session
+  alignment; partial DailyIndex is not sufficient by itself.
+- **Reuse:** DailyOhlc histories, index services, ICB membership, and chart
+  session utilities.
+- **Main risks:** benchmark gaps, date mismatch, and presenting a proxy as an
+  official index.
+- **Explicit exclusions:** no synthetic series labelled VNINDEX/VN30, beta, or
+  recommendation language.
+- **Exit criteria:** every comparison uses aligned provider dates and explicit
+  benchmark/cohort provenance with missing sessions left missing.
+
+### 6. VN-ALERT-1 — Watchlist Intelligence
+
+- **Goal:** reuse the generic alert platform for validated VN flow, breadth,
+  sector, and relative-strength conditions after their contracts exist.
+- **Why now:** alert transport and UI exist, but the VN signal inputs do not.
+- **User value:** surface meaningful watchlist changes without continuous
+  manual scanning.
+- **Data dependencies:** accepted outputs from the earlier roadmap phases.
+- **Reuse:** AlertService, worker, notification channels, Alerts page, and VN
+  deep links.
+- **Main risks:** noise, duplicate alerts, stale inputs, and advice-like copy.
+- **Explicit exclusions:** no automatic trading, opaque composite score, or
+  alert based on unavailable/provisional data outside its approved contract.
+- **Exit criteria:** each notification carries rule, observed value,
+  session/date, source, freshness/finality, cooldown identity, and deep link.
+
+## Backlog classification
+
+| Class | Items |
+| --- | --- |
+| `NEXT` | `VN-FF-LIVE-1` |
+| `LATER` | `VN-FF-SIGNAL-1`, `VN-BREADTH-1`, `VN-SECTOR-1`, `VN-RS-1`, `VN-ALERT-1`, eventual risk-mode synthesis |
+| `BLOCKED` | VN30 futures/F1M/basis/open interest/futures volume; automated proprietary source; HOSE-wide breadth until an authoritative scalable universe is proven; fundamentals/corporate actions without a provider/legal contract |
+| `DEFERRED` | Proprietary product expansion; broader stock-detail polish; macro/risk asset integration; optional news-provider expansion |
+| `DROP / DO NOT PLAN` | Hardcoded five-symbol defaults; guessed anomaly repair; raw-table-only feature phases; AI/ML investment scoring; automatic recommendations; dynamic request-handler subscriptions; unsupported SSI-field reinterpretation; new fallback providers for SSI-owned fields without explicit approval |
+
+## Known provider and data-quality limitations
+
+- `2026-06-29` and `2026-06-30` remain
+  `unresolved_provider_anomaly` (`Bất thường dữ liệu`). All 30 retained VN30
+  constituents returned explicit zero for the four audited foreign fields, but
+  those zero-shaped aggregates are not accepted as valid zero sessions.
+  Public numbers remain null and the dates stay excluded from complete-only
+  windows, rankings, analytics, chart numeric points, and numeric CSV cells.
+  Audit evidence is retained; no repair is guessed or inferred.
+- Completed VN30/Industry history uses current membership and must expose that
+  bias rather than claim historically effective constituents.
+- Futures/basis and automated proprietary data are provider-blocked.
+- HOSE breadth is outside VN-BREADTH-1 until universe authority and acquisition
+  performance are proven.
+
+## Fix-when-touched technical debt
+
+Large Vietnam dashboard page decomposition, VN30 hydration optimization,
+obsolete migration prose, current-price documentation maintenance, unrelated
+test-baseline failures, and broad historical-document compression are not
+active phases. Address them only within a scoped feature or correctness change.
+
+## Historical phase archive
+
+The dated records below preserve implementation history. Statements about V2
+production ownership, proprietary `indexSummary`, current Foreign Flow being
+unimplemented, future chart migration, or prior next phases are superseded by
+the active roadmap and current capability state above.
+
 ## Phase VN-PROPRIETARY-EOD-1 - Verified manual HOSE aggregate MVP (2026-08-06)
 
 - Added a network-free CLI for user-verified official HOSE completed-EOD gross buy/sell values, optional gross volume, exact net reconciliation, optional PDF signature/hash evidence, dry-run, atomic persistence, idempotency, and audited replacement. No PDF parsing, OCR, download, scraping, or full local path retention is used.
@@ -140,7 +301,10 @@
 
 - One bounded, zero-retry application child accepted health plus all six Foreign Flow routes, then terminated its exact process tree and released the dynamic loopback port in 23.62 seconds.
 - The lifecycle repair is live-proven: Industry returned 806 industry-session rows across 13 industries with all 30 current VN30 members classified, and no closed-adapter failure or false request-validation response remained.
-- The direct proprietary path is live-proven: one 2026-07-24 `indexSummary` row contained all six required normalized proprietary fields.
+- Historical/superseded finding: one 2026-07-24 `indexSummary` row appeared to
+  contain six candidate proprietary fields. R6D later invalidated this product
+  interpretation; the current SSI contract does not prove securities-company
+  proprietary flow and the capability route is unsupported.
 - FPT history, partial/usable current-membership VN30 decomposition, the secondary negatively cached direct-index unsupported result, and the three-ready-row watchlist remained coherent. The newest provider session was 2026-07-24, so the remaining date gap is provider publication lag, not an application-route failure.
 - No product code, provider contract, schema, frontend behavior, retry policy, or fallback changed during the post-fix smoke.
 
@@ -148,7 +312,9 @@
 
 - One zero-retry, secret-safe live diagnostic proved the configured official V3 REST host, DNS, TCP/443, verified TLS 1.3, authentication, exact FPT metadata, 20-session FPT DailyStockPrice history, 30-member VN30 membership, and a 20-row direct VN30 securities summary.
 - The earlier local `network_error` was not reproduced in the approved network context. No repository base-URL, credential-selection, proxy, CA, auth-client, shared-session, or REST/stream coupling defect was found, so product/provider code was not changed.
-- The sole proprietary `indexSummary` probe used a non-trading Sunday and returned no usable normalized row. The diagnostic now chooses the latest completed weekday, but the live call was not repeated and proprietary recovery is not claimed.
+- Historical/superseded diagnostic: the former proprietary `indexSummary`
+  probe used a non-trading Sunday. The current product no longer interprets
+  `indexSummary` as proprietary flow, so this is migration evidence only.
 - The direct-process application smoke completed backend startup and an internal health 200, while its parent readiness probe timed out and terminated the owned process before product routes ran. Application-route acceptance therefore remains pending a future bounded harness run; no provider retry or alternate launch path was used.
 - Current-session foreign flow, historically exact membership, new providers, fallback, fabricated data, alerts, and recommendations remain out of scope.
 
@@ -215,13 +381,17 @@ A guarded fresh-process acceptance for FPT/SSI/VCB/SHS/ACV returned 260 sessions
 - Finality now uses returned trading-session rank instead of weekday age: current and latest completed provider sessions are provisional; older sessions are completed-history candidates; provider-guaranteed finality remains false.
 - Retained per-symbol, watchlist, and VN30 foreign volume/value products with one board-specific VND normalization boundary. No fake value, null-to-zero conversion, cross-provider fallback, or frontend redesign was added.
 - Changed-area validation passed 342 tests. The full test tree completed with 3,464 passed, 4 skipped, and 67 pre-existing environment/legacy failures; all SSI V3 and Vietnam changed areas passed.
-- Atomic cutover remains blocked on the mandatory production-image/startup gate, which was not rerun after its unrelated legacy dependency was explicitly removed from this SSI task's scope. Production therefore remains entirely V2; V3 stays default-disabled with no automatic fallback or hybrid runtime.
+- At this historical phase, atomic cutover remained blocked on the production
+  image/startup gate and production remained V2. SSI-V3-M1-R2 later superseded
+  this state with the V3-only production cutover.
 
 ## Phase SSI-V3-M1 - V3 implementation ready, historical cutover block (2026-07-23)
 
 - Implemented the product-driven V3 REST contract for matched-trading daily candles, raw daily summary/foreign fields, exact metadata, current/completed one-minute history, index list, current membership, and latest index coverage.
 - Implemented one-connection V3 `trade.*`/`quote.*` streaming with non-blocking connect, heartbeat, existing bounded reconnect/resubscription/generation/cache lifecycle, scalar/array quote normalization, and content dedup when sequence is absent.
-- Live acceptance passed the requested symbol/index samples and active trade/quote topics. Production remains entirely V2 because the active foreign-flow UI/API assumes and compares VND values across HOSE, HNX, and UPCOM while the V3 exchange-specific value-unit/finality rule is not yet established.
+- At this historical phase, live samples passed but production remained V2
+  while foreign-value units/finality were unresolved. SSI-V3-M1-R2 and later
+  V3 foreign-flow work superseded that ownership statement.
 - Deterministic affected-surface validation passed 621 SSI, Vietnam service/API, analytics, intraday, and startup tests, and credential-free Python 3.11 container compilation passed for all changed Python files. The full backend run was inconclusive because the literal command could not read `.pytest_cache`; the cache-disabled run reached 61% before its time bound and exposed unrelated pre-existing config registry/message failures. The repository image gate was not completed because of an unrelated legacy dependency outside the SSI implementation. No frontend file changed.
 - Do not enable a partial V3 runtime. The next gate must resolve the foreign-value unit contract and repeat full backend, frontend (if changed), and Python 3.11 Docker acceptance before V2 removal.
 
@@ -293,17 +463,29 @@ These rules must not be broken.
 * No trading-instruction, price-target, or recommendation wording.
 * Use neutral labels such as status, trend, momentum, liquidity, source, unavailable, last updated.
 
-## Provider strategy
+## Historical provider strategy archive
+
+This section preserves the pre-cutover provider plan and endpoint vocabulary.
+It is superseded by the V3-only current state and active roadmap at the top of
+this file. References to V2 packages, V2 endpoints, or then-current source
+ownership are not active configuration.
 
 This roadmap is the source of truth for Vietnam dashboard provider ownership. SSI FastConnect Data is the strict official market-data source for supported Vietnam market data, including realtime snapshot and trade-tape contracts where SSI endpoints are available. Mozyfin is disabled for VN dashboard runtime because the free tier no longer supports the news/social API paths the dashboard previously used. KBS is disabled by default and is legacy-only behind explicit development flags.
 
-Phase SSI-V3-A1 records the live FastConnect migration gate: official V3 API/SDK contracts were mapped, then one authorized existing-key request received HTTP 401 when current V2 values were supplied as V3 raw `apiKey`/`apiSecret`. Outcome D keeps V2 production ownership unchanged while SSI resolves V3 activation and identifier/key mapping. The customer notice records V2 maintenance through 30/06/2027 and V3 replacement from 01/07/2027. See `docs/SSI_FASTCONNECT_V3_MIGRATION.md`.
+Historical Phase SSI-V3-A1 recorded the pre-cutover FastConnect gate and kept
+V2 ownership at that time. SSI-V3-M1-R2 later superseded that decision with
+the V3-only production cutover. See `docs/SSI_FASTCONNECT_V3_MIGRATION.md` for
+the preserved chronology.
 
-Phase SSI-V3-B2 implements the offline disabled V3 REST foundation: pinned official SDK, dedicated configuration, lazy shared Auth/Data lifecycle, and normalized securities, daily/completed-history OHLC, index-list, and index-summary capabilities. Phase SSI-V3-B3 adds direct-only, production-disabled `securitiesSummary` normalization for symbol history and same-shape index rows, retaining official gross foreign fields omitted by the high-level SDK model. Missing remains null, zero remains zero, no scaling is applied, and net volume/value require complete gross pairs. DailyStockPrice, public foreign-flow history/APIs, analytics, VN30 inputs, extended metadata, current-session intraday, production IndexComponents, and realtime remain explicitly V2-owned. No live credential/data check, fallback, shadow traffic, deployed enablement, API/frontend, cache, startup, or realtime change occurred. Units/finality/live parity remain gated; B4/B5 and realtime C remain separately authorized future phases.
+Historical Phases SSI-V3-B2/B3 implemented the disabled pre-cutover V3
+foundation while the listed product capabilities remained V2-owned at that
+time. SSI-V3-M1-R2 and the later V3 product phases superseded that provider
+ownership. The normalization history remains relevant for missing-versus-zero
+and gross-pair rules, not current routing.
 
 Phase SSI-V3-B3.1 repairs the V3 Market Data REST credential gate: dedicated API key/secret are required, while Client ID is optional and private key/OTP remain unused. The new terminal-only acceptance tool is double-guarded and bounded to one authentication lifecycle plus four FPT/HOSE operations. On 2026-07-22 the REST selector remained V2 and the environment guard was disabled, producing G/NOT_RUN with zero provider calls; configured Client ID presence also means empty-Client-ID live authentication is not yet proven. This phase changes no public dashboard/API behavior, provider ownership, fallback rule, startup, or realtime path. B4 remains blocked on an accepted bounded live result plus unit/finality evidence.
 
-### Current provider ownership
+### Historical provider ownership snapshot
 
 | Capability or data domain | Owner | Current implementation state | Dashboard rule |
 | --- | --- | --- | --- |
@@ -341,7 +523,7 @@ If data is news/fundamentals/corporate actions/macro, use an external provider.
 If SSI-owned data is unavailable, show unavailable. Do not silently fallback.
 ```
 
-### Current known implementation state
+### Historical implementation snapshot
 
 * SSI AccessToken works when local SSI credentials are configured.
 * DailyOhlc works for the direct 1Y query used by the chart path.
@@ -371,10 +553,13 @@ If SSI-owned data is unavailable, show unavailable. Do not silently fallback.
 * SSI realtime/trade-tape live endpoint names and entitlements may return unavailable. Unavailable states should include sanitized diagnostics without tokens, credentials, auth headers, or raw provider bodies.
 * Dashboard provider-status UI must keep core daily SSI availability separate from optional SSI realtime, SSI trade tape, SSI index components, and disabled news states. A `Partial` dashboard status can mean optional sections are unavailable; it must not imply daily SSI data failed when daily rows are OK.
 * KBS legacy realtime/trade-tape paths are disabled by default and require explicit legacy flags.
-* News/social are disabled/not implemented until a separate NewsProvider is added.
+* VN news is disabled by default. Optional local/personal
+  `vnstock_news_personal` and `vnstock_community` providers now exist behind
+  separate enablement and terms boundaries; neither is a universal hosted
+  production provider.
 * Local DB market-data storage is deferred; current mode is SSI live API plus backend cache/TTL.
 
-## Product phase plan
+## Historical product phase plan
 
 This is the end-to-end VN dashboard product plan. Phase 0 freezes the current SSI provider milestone. Later phases expand product quality, diagnostics, enrichment, and workflow without changing the core product boundary: data quality first, no hidden fallback providers, no fake realtime, and no recommendation wording.
 
@@ -2425,7 +2610,9 @@ Rules:
 
 * SSI-owned data must not fall back to Mozyfin or KBS.
 * `latest_price` uses SSI DailyOhlc close when SSI daily rows are available.
-* KBS realtime/trade-tape paths remain legacy-only behind explicit development flags; VN news remains disabled until a separate NewsProvider is implemented.
+* KBS realtime/trade-tape paths remain legacy-only behind explicit development
+  flags. VN news is disabled by default; optional local/personal providers use
+  separate enablement and terms boundaries.
 * If SSI is unavailable, show unavailable rather than silently replacing values.
 
 ### 7. Improve news structure
@@ -2642,11 +2829,12 @@ Local DB market-data storage is deferred because current dashboard call volume i
 * Do not add FC Trading or account/order/cash/stock-transfer actions.
 * Do not use Mozyfin or KBS fallback for SSI-owned data.
 * If SSI-owned data is unavailable, return unavailable.
-* Keep VN news disabled until a separate NewsProvider is implemented.
+* Keep VN news disabled by default. Optional local/personal providers remain
+  separately gated and are not universal hosted production providers.
 * Keep KBS legacy realtime disabled by default unless explicitly enabled for development diagnostics.
 * Keep source labels explicit: `SSI` for market data and realtime/trade tape; `disabled`/`not_implemented` for unsupported news/fundamentals/events.
 
-## Later backlog
+## Historical later backlog
 
 ### Market breadth
 
@@ -2689,18 +2877,12 @@ Rules:
 * Events must come from explicit sources.
 * No inferred corporate action markers.
 
-### Better chart engine
+### Completed chart-engine migration
 
-Possible future migration:
-
-* `lightweight-charts`
-* Better candlestick rendering
-* Native pan/zoom
-* Price scale
-* Crosshair synchronization
-* Mobile gesture support
-
-Use only if custom SVG becomes too costly to maintain.
+Lightweight Charts 5.2 is the sole current VN chart renderer. The former custom
+SVG engine and temporary engine switch were removed in Phase 4.10L. Future
+chart work is scoped maintenance or capability work, not a migration to
+Lightweight Charts.
 
 ## Engineering standards
 
@@ -2765,7 +2947,9 @@ Guardrail checks:
 * Confirm no trading-instruction, price-target, or recommendation wording appears.
 * Confirm no Mozyfin fallback exists for SSI-owned market data.
 * Confirm KBS is disabled by default and only available behind explicit legacy diagnostics flags.
-* Confirm VN news is disabled/not_implemented until a separate NewsProvider exists, and unsupported domains remain separate from SSI market data.
+* Confirm VN news defaults to disabled and any optional local/personal provider
+  remains explicitly gated, source-labelled, and separate from SSI market
+  data.
 
 ### Phase 4.11F - SSI Streaming Lifecycle and Subscription Recovery
 
@@ -2829,5 +3013,8 @@ The MVP is limited to summary, top buyers/sellers, watchlist table, and symbol d
 - Promote `CURRENT_MEMBERSHIP_DECOMPOSITION` to the primary usable product dataset without calling it a direct or historically exact VN30 aggregate. When it has valid data and direct canonical fields remain unsupported, the route returns `partial`, `usable=true`, and explicit decomposition provenance.
 - Compatibility latest/windows/series mirror the decomposition only with `primary_data_mode=current_membership_decomposition` and `aggregation_basis=current_vn30_membership`. Direct capability metadata remains available separately; direct constituent coverage stays not applicable.
 - Present “Dòng tiền ngoại rổ VN30 hiện tại” in the workspace, keep the current-membership limitation and coverage visible, and move the direct unsupported note to secondary copy instead of a whole-feature unavailable state.
-- Preserve 2026-06-29 and 2026-06-30 as provider-backed explicit-zero sessions. They remain valid zeros and expose series/window anomaly metadata; no value is mutated, removed, or classified as missing.
+- Preserve provider audit evidence for `2026-06-29` and `2026-06-30`, but do
+  not accept the aggregate zeros as valid zero-flow sessions. R6E classifies
+  both dates as `unresolved_provider_anomaly`; public aggregate values are null
+  and complete-only analytics exclude them without guessing a repair.
 - Current-session foreign flow, historically effective membership, and official direct VN30 foreign totals remain unavailable. A future SSI provider/schema version may recover direct capability through an explicit re-probe.

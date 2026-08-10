@@ -1,5 +1,40 @@
 # SSI FastConnect Integration
 
+## Current production contract
+
+SSI FastConnect V3 is the sole production SSI REST and streaming
+implementation. The active runtime uses `ssi-sdk==3.0.5`; V2 packages,
+consumer credentials, base URLs, selectors, and fallback paths are migration
+history only and are not active configuration.
+
+Completed Foreign Flow is mature: accepted DailyStockPrice history, durable
+restart restoration, current/completed merge rules, anomaly quarantine,
+rankings, coverage, analytics, and deterministic frontend states are
+implemented. Current Foreign Flow is
+`IMPLEMENTED_NEEDS_LIVE_ACCEPTANCE`: the `ForeignRoomMessage` symbol, VN30,
+and Industry paths exist, but a fresh end-to-end active-session production
+publication through the shared manager, FastAPI, and browser is not retained as
+accepted evidence.
+
+## VN-FF-LIVE-1 acceptance boundary
+
+`VN-FF-LIVE-1 — Current Foreign Flow Production Acceptance` is the immediate
+next phase and is primarily an acceptance phase. Its required proof chain is:
+
+`ForeignRoomMessage` -> process-shared stream manager -> symbol current -> VN30
+current aggregate -> Industry current aggregate -> FastAPI routes -> real
+browser/runtime.
+
+Acceptance must demonstrate a fresh provider message, provider session/time
+progression, one stream manager, one frontend polling owner, hidden/resume
+behavior, bounded reconnect/backoff, no request-handler-owned subscription,
+completed-history independence, correct current/completed finality, no
+duplicates, and known deployment configuration. A real authorization,
+entitlement, or network failure may close the phase as `BLOCKED_PROVIDER`;
+StockClock must not alter data semantics merely to force success. After this
+gate, do not extend the R6A-R6E naming sequence unless a concrete regression
+needs a historical reference.
+
 ## M2.6B-R6E historical anomaly repair and Industry current runtime
 
 An all-constituent explicit-zero VN30 session now triggers a bounded exact-date
@@ -204,7 +239,9 @@ Foreign Flow Explorer v1 reuses the existing V3 completed-session contracts:
 - ticker history from `daily_stock_price`;
 - current-membership VN30 decomposition from SSI IndexComponents plus symbol histories;
 - current-VN30 ICB aggregation and turnover from the bounded industry service;
-- proprietary VNINDEX/VN30 index and HOSE board summaries from `indexSummary`.
+- historical proprietary VNINDEX/VN30/HOSE exploration through `indexSummary`;
+  this interpretation was later superseded and removed because the current SSI
+  contract does not prove securities-company proprietary buy/sell fields.
 
 The UI selects the latest 1, 5, 20, or 60 distinct returned provider sessions, or an inclusive custom range bounded to 120 calendar days. It does not divide by calendar days or convert missing values to zero. Source session, fetched time, cache state/age, source freshness, coverage, and anomaly state are displayed separately. Force refresh is scoped to the active capability; value/volume changes reuse the loaded payload. CSV export uses only the selected loaded rows and raw numbers. Direct VN30 unsupported remains secondary, `historical_constituent_correct=false`, and current-session foreign/industry flow remains unavailable pending independent semantics proof.
 
@@ -252,7 +289,11 @@ fetch/receipt time remains separate from provider event time; missing values
 remain null/empty. See `docs/SSI_FASTCONNECT_V3_MIGRATION.md` for migration
 history and `docs/SSI_V3_DATA_AUTHENTICITY_AUDIT.md` for the authenticity trace.
 
-## Scope
+## Historical integration scope
+
+This scope records the earlier transition foundation. Current production is
+the V3-only contract at the top of this document; V2 endpoint names and package
+references below are retained only as migration history.
 
 This document covers the Vietnam dashboard SSI FastConnect transition foundation.
 
@@ -298,7 +339,10 @@ Out of scope:
 * Provider comparison endpoint.
 * Trading-instruction, price-target, or recommendation wording.
 
-## FastConnect V3 migration gate
+## Historical/superseded FastConnect V3 migration gates
+
+The migration-gate entries below record decisions before the V3-only cutover.
+They do not describe current provider selection or current configuration.
 
 Phase SSI-V3-A1 is audit-only. The SSI customer notice supplied to this project records V2 maintenance through 30/06/2027 and official V3 replacement from 01/07/2027. It does not change V2 runtime, configuration, traffic, or source ownership. The official V3 Python candidate (`ssi-sdk` / `ssi_sdk`) and V3 REST/WebSocket contracts are documented. One authorized auth sequence mapped the current V2 identifier/secret values to V3 raw `apiKey`/`apiSecret`; V3 returned HTTP 401, with no token, retry, data call, stream, or file request. The current decision is **D — existing credentials rejected by V3 for that exact mapping**. SSI must confirm V3 account activation and `client_id`/API-key mapping before another bounded attempt. See `docs/SSI_FASTCONNECT_V3_MIGRATION.md` for the complete change-impact matrix and exit criteria.
 
@@ -312,7 +356,7 @@ Phase SSI-V3-B3.1 aligns REST authentication with the official Market Data token
 
 ## Provider roles
 
-SSI FastConnect is the preferred future official market-data provider for:
+SSI FastConnect V3 is the current sole production SSI market-data provider for:
 
 * Daily OHLCV.
 * Daily stock price.
@@ -324,7 +368,7 @@ SSI FastConnect is the preferred future official market-data provider for:
 * Intraday OHLCV.
 * Realtime streaming later.
 
-Mozyfin is disabled for VN dashboard runtime. It must not be used for VN news/social, OHLCV, chart, reference, foreign-flow, index, metadata, intraday, or fallback behavior. Future news should be implemented through a separate NewsProvider contract.
+Mozyfin is disabled for VN dashboard runtime. It must not be used for VN news/social, OHLCV, chart, reference, foreign-flow, index, metadata, intraday, or fallback behavior. VN news is disabled by default; optional local/personal `vnstock_news_personal` and `vnstock_community` implementations exist under separate terms and enablement gates and are not universal hosted production providers.
 
 KBS is disabled by default and retained only as an explicit legacy development provider:
 
@@ -337,7 +381,7 @@ SSI is now the strict owner for supported VN REST market data. If SSI is disable
 
 External providers are still required for BCTC/KQKD, financial statements, financial ratios, corporate action event lists, dividends, rights, splits, and macro context such as Fed, oil, USD, and gold. These domains are outside current SSI REST market-data ownership.
 
-## Provider capability matrix
+## Historical provider capability matrix
 
 | Capability | Owner | Current implementation status | Dashboard rule |
 | --- | --- | --- | --- |
@@ -361,12 +405,17 @@ External providers are still required for BCTC/KQKD, financial statements, finan
 | Corporate actions, dividends, rights, splits | External provider through future `CorporateActionsProvider` | Disabled/not configured by default; contract proof only | Do not infer events from reference or adjusted-close gaps |
 | Macro/Fed/oil/USD/gold | External provider | Unsupported/future provider | Keep outside FC Data market-price ownership |
 
-## Current endpoint/source mapping
+## Historical endpoint/source mapping
+
+The table below preserves older endpoint-oriented discovery and product-source
+notes. Its V2 `/Market/...` paths are not active configuration. Current calls
+are routed only through `SsiRestProviderRouter` to the V3 adapter; current
+canonical-price selection follows `docs/VN_DATA_CONTRACT.md`.
 
 | Feature | SSI source/endpoint | Current status | Notes |
 | --- | --- | --- | --- |
-| DailyOhlc | `GET /Market/DailyOhlc` | OK | Canonical dashboard `latest_price` currently uses this close. Also owns chart candles and internal indicators. |
-| DailyStockPrice | `GET /Market/DailyStockPrice` | OK | Owns reference, ceiling/floor, matched/put-through, adjusted close if provided, latest foreign-flow fields, and bounded latest-available 5D/20D foreign net volume indicators from the existing per-symbol recent window. Phase 4.5C live API smoke populated 20 recent rows and non-null 5D/20D foreign-net summaries for FPT/HPG/SSI while `latest_price_source` stayed `SSI DailyOhlc`. Earlier smoke found same-day DailyOhlc versus DailyStockPrice close/volume mismatch for FPT on `2026-06-22`. |
+| DailyOhlc | V3 `securitiesSummary` daily-history normalization | OK | Owns chart candles, daily OHLCV, and technical inputs. Its close is the normal `latest_price` fallback, but the current service may select a newer dated DailyStockPrice close when this history is materially stale or a reliable normalized quote when available. |
+| DailyStockPrice | V3 `securitiesSummary` daily-summary normalization | OK | Owns reference, ceiling/floor, matched/put-through, adjusted close if provided, latest foreign-flow fields, and bounded latest-available 5D/20D foreign net volume indicators. Its dated usable close becomes `latest_price` only when DailyOhlc is materially stale; this does not synthesize OHLCV or technical inputs. |
 | IndexList | `GET /Market/IndexList` | OK | Use SSI-returned index codes instead of hardcoded assumptions. |
 | DailyIndex | `GET /Market/DailyIndex` | Partial: `indexID=VN30` returns rows, while exact `VNINDEX` remains unresolved and non-positive or missing index levels are null | Requires exact IndexList resolution and returns no placeholder row when SSI has no usable data. Phase 4.5C live API smoke returned a VN30 row dated 2026-06-29 but the public row still lacked a usable `index_value` and `exchange`. |
 | IndexComponents | `GET /Market/IndexComponents` | Usable for exact VN30 nested rows; unavailable cases remain `rows=[]` | Phase 4.4B proved `indexCode=VN30` returns an exact VN30 outer row with 30 nested members. Phase 4.5C live API smoke re-confirmed 30 VN30 component rows. Missing identifiers, mismatched outer rows, empty nested lists, or provider failures remain unavailable without hardcoded members. |
@@ -376,7 +425,7 @@ External providers are still required for BCTC/KQKD, financial statements, finan
 | Trade tape | SSI streaming `X-TRADE` event buffer; future verified REST/history contract if SSI documents one | Phase 4.7C adds a bounded process-local per-symbol X-TRADE buffer populated only by the background streaming manager. Phase 4.8E subscribes the startup-owned manager to `X-TRADE:{symbol}` alongside `X:{symbol}` when trade tape is enabled. Phase 4.8E-2 returns buffered rows even when stream freshness is stale. Phase 4.8E-3 normalizes explicit X-TRADE side/aggressor fields to `buy`/`sell`/null and adds reference-based `change`/`change_pct`. Phase 4.8E-4 maps observed raw SSI side codes `BU=buy` and `SD=sell` while preserving `side_if_available`. Watchlist/company unavailable rows remain `trade_tape=[]` plus separate `trade_tape_status` only when no usable rows exist. | Returns rows only for configured/bootstrap symbols with parsed X-TRADE events carrying price, volume, and timestamp. Request handlers only read the buffer and never start streams, subscribe dynamically, or probe previous REST candidates. B/S must not be inferred from price color or change. Historical time-and-sales history remains unverified. |
 | Securities/SecuritiesDetails | `GET /Market/Securities`, `GET /Market/SecuritiesDetails` | Partial metadata | Optional company name, issuer, security type, lot size, listed shares, and listed date may remain null. |
 | SSI remaining data audit | `docs/SSI_REMAINING_DATA_AUDIT.md` | Docs-only Phase 4.8F audit | Recommended runtime-proof order: `F` trading session/status, `X-QUOTE` order book, `R` foreign room, `MI` realtime market index, DailyStockPrice unused fields, SecuritiesDetails extended metadata, then `B` bars and instrument modules. |
-| News | Not SSI | Disabled until separate provider exists | Mozyfin is not used for VN runtime news. |
+| News | Not SSI | Disabled by default; optional local/personal providers exist | `vnstock_news_personal` and `vnstock_community` use separate enablement/terms boundaries. Mozyfin is not used for VN runtime news. |
 | FC Trading/order/account APIs | Not used | Not supported | No order placement, account actions, cash transfer, stock transfer, or portfolio trading actions are in scope. |
 
 Decision rule:
@@ -696,34 +745,12 @@ Direct callback proof is verification evidence only. It does not make realtime p
 
 ## Configuration
 
-SSI is disabled by default.
+SSI V3 is the only supported SSI production implementation. REST and streaming
+remain disabled until their explicit enable flags and credentials are supplied;
+disabled configuration produces typed unavailable states and does not select
+V2.
 
 ```env
-SSI_FASTCONNECT_ENABLED=false
-SSI_FASTCONNECT_REST_VERSION=v2
-SSI_FASTCONNECT_BASE_URL=https://fc-data.ssi.com.vn/api/v2/Market
-SSI_FASTCONNECT_CONSUMER_ID=
-SSI_FASTCONNECT_CONSUMER_SECRET=
-SSI_FASTCONNECT_TIMEOUT_SECONDS=10
-SSI_FASTCONNECT_CACHE_TTL_SECONDS=300
-SSI_FASTCONNECT_TOKEN_TTL_SECONDS=900
-SSI_FASTCONNECT_INTRADAY_ENABLED=true
-SSI_INTRADAY_RATE_LIMIT_COOLDOWN_SECONDS=60
-SSI_FASTCONNECT_REALTIME_ENABLED=true
-SSI_FASTCONNECT_TRADE_TAPE_ENABLED=true
-SSI_STREAMING_REALTIME_ENABLED=false
-SSI_STREAMING_REALTIME_CACHE_TTL_SECONDS=15
-SSI_STREAMING_REALTIME_CHANNEL_TEMPLATE=X:{symbol}
-SSI_STREAMING_REALTIME_STREAM_URL=https://fc-datahub.ssi.com.vn/
-SSI_STREAMING_REALTIME_BOOTSTRAP_SYMBOLS=
-SSI_STREAMING_REALTIME_IDLE_TIMEOUT_SECONDS=45
-SSI_STREAMING_REALTIME_RECONNECT_ENABLED=true
-SSI_STREAMING_REALTIME_RECONNECT_INITIAL_DELAY_SECONDS=2
-SSI_STREAMING_REALTIME_RECONNECT_MAX_DELAY_SECONDS=30
-SSI_STREAMING_REALTIME_RECONNECT_MAX_ATTEMPTS=0
-
-# Disabled V3 REST foundation. Dedicated V3 values are never aliased from V2.
-# API key/secret are required for V3; Client ID is optional for Market Data REST.
 SSI_V3_REST_ENABLED=false
 SSI_V3_CLIENT_ID=
 SSI_V3_API_KEY=
@@ -734,6 +761,27 @@ SSI_V3_MAX_RETRIES=2
 SSI_V3_RETRY_DELAY=1
 SSI_V3_RATE_LIMIT_PER_SECOND=5
 SSI_V3_LIVE_ACCEPTANCE_ENABLED=false
+
+SSI_FASTCONNECT_INTRADAY_ENABLED=true
+SSI_INTRADAY_RATE_LIMIT_COOLDOWN_SECONDS=60
+SSI_FASTCONNECT_REALTIME_ENABLED=true
+SSI_FASTCONNECT_TRADE_TAPE_ENABLED=true
+
+SSI_STREAMING_REALTIME_ENABLED=false
+SSI_STREAMING_REALTIME_CACHE_TTL_SECONDS=15
+SSI_STREAMING_REALTIME_CHANNEL_TEMPLATE=X:{symbol}
+SSI_STREAMING_REALTIME_BOOTSTRAP_SYMBOLS=
+SSI_STREAMING_REALTIME_IDLE_TIMEOUT_SECONDS=45
+SSI_STREAMING_REALTIME_RECONNECT_ENABLED=true
+SSI_STREAMING_REALTIME_RECONNECT_INITIAL_DELAY_SECONDS=2
+SSI_STREAMING_REALTIME_RECONNECT_MAX_DELAY_SECONDS=30
+SSI_STREAMING_REALTIME_RECONNECT_MAX_ATTEMPTS=0
+SSI_STREAMING_SNAPSHOT_ENABLED=false
+SSI_STREAMING_SNAPSHOT_PATH=runtime/ssi_streaming_last_known.v1.json
+SSI_STREAMING_SNAPSHOT_WRITE_INTERVAL_SECONDS=5
+SSI_STREAMING_SNAPSHOT_TRADE_LIMIT=50
+SSI_STREAMING_SNAPSHOT_MAX_SYMBOLS=128
+SSI_STREAMING_SNAPSHOT_MAX_AGE_DAYS=7
 
 VN_DAILY_DATA_PROVIDER=ssi
 VN_CHART_DATA_PROVIDER=ssi
@@ -751,9 +799,14 @@ KBS_ENABLED=false
 VN_ALLOW_LEGACY_KBS_PROVIDER=false
 ```
 
-Keep the base URL configurable because SSI documentation may reference another versioned path such as `/v2.0/Market`.
-
-Credentials must only come from local environment variables or a secret manager. Never commit real values. V3 configuration is env-only and hidden from the web configuration registry; selecting V3 while disabled or missing API key/secret fails with setting names only. `SSI_V3_LIVE_ACCEPTANCE_ENABLED` is a second manual-script guard, not a production route switch. V3 initialization never runs during import, FastAPI startup, or health checks.
+The V3 API URL remains configurable for documented SSI deployment changes; no
+V2 base URL, consumer credential, or version selector is active. Credentials
+must only come from local environment variables or a secret manager. Never
+commit real values. V3 configuration is env-only and hidden from the web
+configuration registry; disabled or missing API key/secret returns setting
+names only. `SSI_V3_LIVE_ACCEPTANCE_ENABLED` is a second manual-script guard,
+not a production route switch. V3 initialization remains lazy and health
+readiness does not require a provider call.
 
 The provider variables are intentionally strict for supported VN REST market data. Public env parsing accepts `ssi` for daily, chart, DailyStockPrice, and index provider values; invalid values fall back to `ssi`. `VN_PROVIDER_COMPARISON_ENABLED` remains `false`, and no provider comparison endpoint or card is exposed in this phase.
 
@@ -822,7 +875,10 @@ Strict DailyStockPrice behavior:
 * Legacy Mozyfin foreign-history caveats are not used for SSI ownership. SSI history is DailyStockPrice-only, row-count bounded, and non-fatal.
 * Normalized rows are publicly labeled `SSI DailyStockPrice`; the generic provider label `SSI` is not used for the enrichment block.
 * `quality_status`, `date_match`, `staleness_reason`, `missing_fields`, `field_coverage`, present-value-only `units`, and sanitized diagnostics make partial or mismatched enrichment explicit without changing DailyOhlc validity.
-* Date match is `matched`, `mismatched`, `unknown`, or `unavailable`. A mismatched or missing date never changes canonical `latest_price`, which remains SSI DailyOhlc close.
+* Date match is `matched`, `mismatched`, `unknown`, or `unavailable`. A
+  mismatch is an input to the documented canonical selection: only a materially
+  stale DailyOhlc history plus a dated usable DailyStockPrice close activates
+  the DailyStockPrice branch.
 * Volume fields use shares and value/price fields use VND. Missing fields stay null; SSI-provided zero remains zero.
 * Diagnostics are allowlisted to endpoint, symbol/date range, row count, selected date, DailyOhlc date, match state, foreign-history row counts/date span/status, coverage, and failure class. Raw payloads and authentication/account values are excluded.
 
@@ -1097,7 +1153,7 @@ The full VN product phase plan is in `docs/VN_DASHBOARD_ROADMAP.md`. SSI-depende
 | Phase 4.1 - Intraday Cadence Clarity | IntradayOhlc returned candle spacing and status metadata | Detect actual returned cadence and label stale/unavailable intraday clearly. |
 | Phase 4.5A - SSI Remaining Capability Completion | All current SSI FastConnect market-data endpoints and optional live contracts | Keep SSI-owned domains first, separate partial/unknown SSI gaps from external-provider-required domains, and do not implement VNStocks/FiinGroup runtime. |
 | Phase 5.0 - External Provider Architecture | None; external domains are not SSI-owned market data | Define separate NewsProvider, FundamentalsProvider, CorporateActionsProvider, and MacroProvider contracts before implementation. |
-| Phase 5.1 - NewsProvider | None; news is not SSI-owned | Keep news disabled until a separate provider exists. |
+| Historical Phase 5.1 - NewsProvider | None; news is not SSI-owned | News remains disabled by default; optional local/personal providers now exist behind separate gates. |
 | Phase 5.2 - Corporate Actions and Dividends | None unless SSI exposes explicit structured sources later | Use only explicit structured event sources; do not infer events from market-data gaps. |
 | Phase 6.0 - Backend Performance and Caching | DailyOhlc, DailyStockPrice, metadata, diagnostics if performance evidence justifies storage | Persist source/date/fetched_at only if durable storage is introduced; keep stale-data semantics explicit. |
 | Phase 7.0 - Product Packaging | SSI source/freshness status as validation inputs | Clean runbooks, startup scripts, smoke/test/release checklist, and deprecated docs without changing provider semantics. |
@@ -1114,9 +1170,14 @@ Exact SSI chart keys include provider/dataset, ticker, `1m`, date, page 1, and p
 
 ## Next phase
 
-Use the roadmap phase order. Phase 0 freezes the current SSI milestone; Phase 1 and Phase 2 make data quality and public contracts clearer; Phase 3.2-3.6 make `/vietnam` a progressive workspace before Phase 4.0 realtime/trade-tape investigation and later external provider work. Do not introduce FC Trading or Mozyfin/KBS fallback for SSI-owned market data in any phase.
+The immediate phase is `VN-FF-LIVE-1 — Current Foreign Flow Production
+Acceptance`. It must validate the existing V3 current-flow chain rather than
+add another feature. The ordered follow-up roadmap is `VN-FF-SIGNAL-1`,
+`VN-BREADTH-1`, `VN-SECTOR-1`, `VN-RS-1`, and `VN-ALERT-1`. Do not introduce
+FC Trading, request-handler subscriptions, or Mozyfin/KBS fallback for
+SSI-owned market data in any phase.
 
-## Phase 4.11F streaming topology and recovery
+## Historical: Phase 4.11F streaming topology and recovery
 
 The runtime has one FastAPI lifespan owner, one process-local `SsiStreamingRealtimeManager`, one reconnect monitor, and one official adapter instance per generation. The adapter creates one SSI `MarketDataStream`, SignalR `Connection`, `WebsocketTransport`, and daemon socket thread for each approved channel. X, X-QUOTE, X-TRADE, F, R, and MI therefore share manager/cache/persistence ownership but not one physical socket. Request handlers only read state and never start or subscribe.
 
@@ -1384,8 +1445,11 @@ completed in 23.62 seconds, and the port was confirmed released.
 The application results live-confirm both R3.1 repairs. Industry returned HTTP
 200 with ready/usable data: 806 industry-session rows, 13 industries, and all 30
 current VN30 members classified, with no closed-adapter or false 422 failure.
-Proprietary returned HTTP 200 from the direct `indexSummary` operation with one
-2026-07-24 row and all six required buy, sell, and net volume/value fields.
+Historical/superseded evidence: Proprietary returned HTTP 200 from the former
+direct `indexSummary` interpretation with one 2026-07-24 row. R6D later removed
+that interpretation because the current SSI contract does not prove
+securities-company proprietary buy/sell fields; the present capability route
+is unsupported.
 
 The surrounding contracts remained stable. FPT returned 20 ready sessions
 through 2026-07-24; current-membership VN30 decomposition returned 60

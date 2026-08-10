@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [documentation] Realign the VN roadmap from repository evidence, mark completed Foreign Flow mature with current-session production acceptance pending, introduce capability-oriented phases, defer proprietary expansion, and correct stale SSI V2, canonical-price, chart-engine, and proprietary-flow wording without changing runtime behavior.
 - [new feature] Add verified manual HOSE proprietary-flow EOD ingestion, atomic storage, read-only latest/history APIs, and an EOD-only Proprietary workspace.
 - [test] Cover proprietary EOD validation, PDF hashing, null-versus-zero, storage conflicts/replacement, GET-only APIs, request ownership, refresh retention, and completed-session rendering.
 - [documentation] Document manual official-publication evidence, no PDF parsing/OCR, completed-EOD ownership, API/store contracts, and pending live entry.

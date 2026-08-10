@@ -35,6 +35,12 @@ Explicit numeric zero remains `0`; missing optional volume remains `null`.
   all-constituent explicit-zero session. Its aggregate numeric values are null,
   `complete` and `valid_session` are false, and `usable_for_windows`,
   `usable_for_rankings`, and `usable_for_analytics` are false.
+- The currently quarantined dates are `2026-06-29` and `2026-06-30`. Exact-date
+  provider evidence showed explicit zeros in all four audited foreign fields
+  for all 30 retained VN30 members. They remain
+  `unresolved_provider_anomaly` (`Bất thường dữ liệu`), are not accepted as
+  valid zero sessions, and are omitted from chart numeric points and numeric
+  CSV cells without reconstructing or inferring values.
 - `recovery_attempted`, `recovery_succeeded`, `repair_status`, `repair_source`,
   `repair_failure_class`, and `repair_diagnostics` describe bounded exact-date
   verification without exposing credentials or raw provider payloads.
@@ -82,14 +88,14 @@ The stock-detail screenshot labels map to the current dictionary as follows. Thi
 
 | Field | Meaning | Source | Unit | Nullable | Canonical | UI placement | Known caveat |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `latest_price` | Canonical dashboard latest daily price | SSI DailyOhlc close | VND | yes | yes | Watchlist, selected ticker header, company hero | Can differ from DailyStockPrice close; Phase 1 should surface mismatch. |
-| `latest_price_source` | Source label for `latest_price` | Service metadata | text | yes | yes | Source badge near latest price | Should identify SSI DailyOhlc when daily data is canonical. |
-| `price.source` / `price.canonical_source` | Company price block canonical source | SSI DailyOhlc | text | yes | yes | Company price summary source note | Must not be a mixed DailyOhlc/DailyStockPrice label. |
+| `latest_price` | Canonical dashboard selected price | Conditional SSI selection | VND | yes | yes | Watchlist, selected ticker header, company hero | Newer dated DailyStockPrice close is selected when DailyOhlc is materially stale; otherwise a reliable normalized quote may be selected; otherwise DailyOhlc close. Null when none is usable. |
+| `latest_price_source` | Actual source label for `latest_price` | Service metadata | text | yes | yes | Source badge near latest price | Identifies `SSI DailyStockPrice`, a normalized quote source, `SSI DailyOhlc`, or unknown according to the selected branch. |
+| `price.source` / `price.canonical_source` | Company price block selected canonical source | Same conditional SSI selection as watchlist | text | yes | yes | Company price summary source note | Must identify the actual selected source; reference/limit ownership remains separate. |
 | `price.reference_source` | Company reference/limit field source | SSI DailyStockPrice | text | yes | no | Company price summary source note | Applies to reference, ceiling, and floor fields only. |
 | `latest_price_raw_field` | Raw provider field used for latest price when available | Provider normalization metadata | text | yes | no | Diagnostics only | Must not be used as proof of realtime support. |
 | `daily_close` | Daily close value exposed by watchlist/company contract | SSI DailyOhlc | VND | yes | yes | Daily core data | Same semantic owner as `latest_price` when DailyOhlc is valid. |
 | `ohlcv_close` | Close from normalized OHLCV row | SSI DailyOhlc | VND | yes | yes | Data Quality Summary/diagnostics | Used to compare with DailyStockPrice close. |
-| `daily_stock_price.close` | Close from DailyStockPrice endpoint | SSI DailyStockPrice | VND | yes | no, pending decision | Trading stats or source comparison | Handoff found FPT `2026-06-22` mismatch vs DailyOhlc; Phase 1 must decide company price source alignment. |
+| `daily_stock_price.close` | Close from DailyStockPrice endpoint | SSI DailyStockPrice | VND | yes | conditionally | Trading stats or source comparison | Becomes `latest_price` only when DailyOhlc history is materially stale and this row is dated and usable; it does not synthesize OHLCV or technical inputs. |
 | `adjusted_close` | Adjusted close when provider supplies it | SSI DailyStockPrice | VND | yes | no | Trading stats/detail | Do not infer corporate actions from adjusted-close gaps. |
 | `reference_price` | Session reference/basic price | SSI DailyStockPrice | VND | yes | no | Daily core data/limits | Separate from canonical latest price. |
 | `ceiling_price` | Daily price ceiling | SSI DailyStockPrice | VND | yes | no | Price limit block | Render only when value exists. |

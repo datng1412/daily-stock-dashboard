@@ -179,8 +179,8 @@ Daily data is the primary public contract for the VN dashboard.
 
 Required daily fields when the watchlist row is usable:
 
-* `latest_price`: sourced from SSI DailyOhlc close while the DailyOhlc versus DailyStockPrice mismatch is unresolved.
-* `latest_price_source`: identifies the source as SSI DailyOhlc or equivalent SSI daily source label.
+* `latest_price`: selected by the conditional SSI source algorithm below.
+* `latest_price_source`: identifies the actual selected source, including `SSI DailyOhlc`, `SSI DailyStockPrice`, a reliable normalized quote source, or `unknown`.
 * OHLCV fields: `open`, `high`, `low`, `close`, `daily_close`, `ohlcv_close`, `volume`, and value/amount fields when SSI provides them.
 * Price date fields: `latest_price_date`, `ohlcv_date`, or the current normalized daily trading date.
 * Source fields: `source`, `actual_source`, `fallback_used`, and block-specific source labels.
@@ -192,11 +192,34 @@ Daily finality must stay explicit:
 * `provisional` or `in_progress` means the daily candle may still change.
 * `unknown` means the dashboard has no reliable finality signal.
 
-If daily SSI data is unavailable, the row should expose an unavailable status and null daily metrics rather than borrowing live, intraday, or legacy-provider values.
+The current canonical selection algorithm is conditional, not a static source
+priority:
 
-If SSI DailyOhlc is unavailable but SSI DailyStockPrice returns usable enrichment, `latest_price`, `daily_close`, and OHLCV fields must remain null/unavailable. The row may still expose source-labeled DailyStockPrice fields such as reference, ceiling/floor, matched/put-through, and foreign-flow values. DailyStockPrice close must not become `latest_price`.
+1. When DailyOhlc history is materially stale and a dated usable
+   DailyStockPrice close exists, select that newer close and label
+   `latest_price_source=SSI DailyStockPrice`.
+2. Otherwise, when the normalized SSI quote context provides a positive latest
+   price plus its audited raw-field identity, select that quote and expose its
+   source/date as current optional market data.
+3. Otherwise, use the normalized DailyOhlc close and label it
+   `latest_price_source=SSI DailyOhlc` when present.
+4. If none of those branches supplies a usable value, `latest_price` remains
+   null and the source is `unknown`/unavailable. No external or legacy provider
+   fills it.
 
-Company detail aligns shared canonical daily fields with the watchlist row: `latest_price`, `daily_close`, daily OHLCV open/high/low/close/volume, and daily trading value use SSI DailyOhlc fields. In the company price block, `price.source` and `price.canonical_source` identify `SSI DailyOhlc`; `price.reference_source` identifies `SSI DailyStockPrice` for reference, ceiling, and floor fields. Company foreign-flow, matched, put-through, and adjusted-close fields remain SSI DailyStockPrice-specific and must be labeled as such when shown.
+Selecting a newer DailyStockPrice close does not synthesize OHLCV fields and
+does not make stale DailyOhlc technical indicators usable. A current quote is
+provisional/live context and does not become a completed daily close. The
+selected source, raw field, and provider date remain visible separately so
+finality follows the selected source/session rather than the display label.
+`daily_close`, chart candles, daily open/high/low/volume, and technical inputs
+remain DailyOhlc-owned and may be null/unavailable independently.
+
+Company detail aligns `latest_price` and its canonical source with the same
+watchlist selection algorithm. `price.reference_source` continues to identify
+SSI DailyStockPrice for reference, ceiling, and floor. Foreign-flow, matched,
+put-through, adjusted-close, and other source-specific fields remain explicitly
+DailyStockPrice-owned.
 
 ## Stock Detail Metrics Availability
 
@@ -243,7 +266,8 @@ Watchlist rows and company detail responses expose `data_quality_summary` as a P
 
 Required rules:
 
-* `canonical_price_source` remains `SSI DailyOhlc` while the DailyOhlc versus DailyStockPrice decision is unresolved.
+* `canonical_price_source` reports the source selected by the conditional
+  algorithm in the Daily Data Contract; it is not hardcoded to DailyOhlc.
 * `overall_status` uses `ok`, `partial`, or `unavailable` for summary quality only.
 * `issues` contains short user-safe messages and source-labeled fields.
 * `issues` must not contain endpoint names, HTTP status, attempted endpoints, raw provider errors, credentials, tokens, account IDs, or raw auth responses.
@@ -291,7 +315,9 @@ Reason codes used for row-level partial/missing explanations include:
 * `provider_empty`
 * `provider_error`
 
-These codes describe data availability only. They must not synthesize values, hide rows, or change `latest_price`, which remains SSI DailyOhlc when daily rows are usable.
+These codes describe data availability only. They must not synthesize values,
+hide rows, or independently change the conditional `latest_price` selection
+algorithm.
 
 ## Live Section Contract
 
@@ -548,7 +574,11 @@ Diagnostics must not include:
 
 ## News Contract
 
-News is disabled until a separate VN news provider is implemented. The production Vnstock News configuration remains a legal/terms gate, not a crawler. A separate `vnstock_news_personal` mode may be enabled only for local/personal research.
+VN news is disabled by default. The `vnstock_news` selection remains a
+legal/terms gate, not a crawler. Optional `vnstock_news_personal` and
+`vnstock_community` modes exist only for local/personal research under their
+separate enablement and source boundaries; neither is a universal hosted
+production provider.
 
 Current public shape:
 
@@ -660,7 +690,7 @@ The SSI-first rule is: if SSI can provide a market-data field, SSI owns it; if a
 | Data block | Owner | Public rule |
 | --- | --- | --- |
 | Daily OHLCV | SSI DailyOhlc | Canonical daily close and chart candles |
-| `latest_price` | SSI DailyOhlc | Uses DailyOhlc close until canonical-source mismatch is resolved |
+| `latest_price` | Conditional SSI canonical selection | Newer dated DailyStockPrice close when DailyOhlc is materially stale; otherwise a reliable normalized quote when present; otherwise DailyOhlc close. Null when none is usable. The source/date/finality remain explicit. |
 | Reference/ceiling/floor | SSI DailyStockPrice | Use when available |
 | Matched volume/value | SSI DailyStockPrice | Use when available |
 | Put-through volume/value | SSI DailyStockPrice | Use when available |
@@ -681,13 +711,17 @@ The SSI-first rule is: if SSI can provide a market-data field, SSI owns it; if a
 | SSI `MI` stream | SSI streaming runtime proof | Market-index pulse may appear in `market_index_pulse`; channel/field live proof and UI remain deferred and must not replace DailyIndex or affect price ownership |
 | Future SSI `B` stream | SSI streaming after runtime proof | Realtime bars must remain separate source-labeled blocks; no fake placeholders and no request-handler stream starts |
 | Future SSI extended instrument metadata | SSI SecuritiesDetails/Securities after runtime proof | Derivative, covered warrant, ETF/fund, and bond fields require exact row-key evidence and instrument-specific semantics before exposure |
-| News | Future NewsProvider | Disabled by default; `vnstock_news` is unavailable with `blocked_pending_terms`; `vnstock_news_personal` is local/personal research only |
+| News | Separate optional NewsProvider boundary | Disabled by default; `vnstock_news` is unavailable with `blocked_pending_terms`; `vnstock_news_personal` and `vnstock_community` are optional local/personal implementations with separate gates and are not universal hosted production providers |
 | Financials | Future external provider | Not implemented |
 | Corporate actions | `CorporateActionsProvider` future external boundary | Disabled/not configured by default; no inference |
 | Mozyfin | Disabled for VN runtime | No fallback |
 | KBS | Legacy optional only | Disabled by default |
 
-Compatibility aliases must stay within the same source owner. Do not use SSI DailyStockPrice close to overwrite `latest_price`, do not use DailyOhlc volume to fill matched volume, and do not use realtime, trade-tape, Mozyfin, or KBS values to fill daily fields.
+Compatibility aliases must stay within the same source owner. The only
+DailyStockPrice close promotion permitted for `latest_price` is the documented
+service branch where DailyOhlc is materially stale and the DailyStockPrice row
+is dated and usable. Do not use DailyOhlc volume to fill matched volume, and do
+not use trade-tape, Mozyfin, or KBS values to fill daily fields.
 
 Future SSI-backed fields from Phase 4.8F must be additive and explicit. Public rows need source labels, availability status, missing-field/null semantics, and sanitized diagnostics. Missing streaming data must stay `null` or `[]` rather than placeholder metrics, and external providers must not fill order book, trading status, foreign room, market-index pulse, realtime bars, or SSI-returned instrument metadata while SSI can provide those fields.
 
@@ -814,7 +848,12 @@ Units metadata does not prove data availability. UI availability must depend on 
 
 Cache errors and provider unavailable states are separate concepts. A provider 404 or unavailable live endpoint should not be shown as a daily SSI cache failure.
 
-`cache_status.daily_stock_price_cache` may report `hit`, `miss`, `refresh`, or `stale` for the bounded recent DailyStockPrice enrichment/history result. Its process-local TTL is 300 seconds. `force_refresh=true` bypasses this freshness check. This diagnostic cache field does not change source ownership: `latest_price` remains SSI DailyOhlc, while the cached enrichment remains SSI DailyStockPrice.
+`cache_status.daily_stock_price_cache` may report `hit`, `miss`, `refresh`, or
+`stale` for the bounded recent DailyStockPrice enrichment/history result. Its
+process-local TTL is 300 seconds. `force_refresh=true` bypasses this freshness
+check. Cache state alone never selects the canonical price; the documented
+DailyOhlc freshness comparison and dated usable DailyStockPrice row control the
+DailyStockPrice promotion branch.
 
 IndexComponents diagnostics may report `cache_status`, `cache_ttl_seconds`, `cache_negative`, and a sanitized key containing only provider, endpoint, normalized index code, and optional market. Usable rows use a 300-second TTL. Unavailable, rate-limited, and no-row responses use a 60-second negative TTL. `force_refresh=true` bypasses this cache.
 

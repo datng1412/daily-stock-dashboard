@@ -1,5 +1,70 @@
 # Project State
 
+## Current repository-grounded capability state
+
+Last updated: 2026-08-10
+
+Current production SSI market-data routing is V3-only through the sole provider
+router. The historical migration notes later in this file describe conditions
+at their original dates and do not override this section.
+
+| Capability group | Status | Current boundary |
+| --- | --- | --- |
+| Daily market data and technical analysis | `PRODUCTION_READY` | Canonical daily OHLCV, SSI-derived VN30 membership/components, MA20/MA50, Wilder RSI14, Bollinger Bands, volume averages/ratio, and other coverage-gated daily metrics are implemented. |
+| Completed Foreign Flow | `PRODUCTION_READY` | Symbol history, durable restart restoration, accepted/current merge semantics, anomaly quarantine, rankings, coverage, completed analytics, and deterministic frontend presentation are mature. |
+| Current Foreign Flow | `IMPLEMENTED_NEEDS_LIVE_ACCEPTANCE` | Symbol, current-VN30, and current-Industry paths are implemented from `ForeignRoomMessage`, but fresh end-to-end production publication through the shared manager, FastAPI, and browser has not been retained as accepted evidence. |
+| Optional SSI live surfaces | `IMPLEMENTED_NEEDS_LIVE_ACCEPTANCE` | Realtime X quote, X-QUOTE order book, and MI advance/decline semantics remain dependent on live runtime/provider proof. |
+| Partial market capabilities | `PARTIAL` | Current-session 1-minute chart, X-TRADE event buffer, VNINDEX/DailyIndex completeness, full-watchlist latency, current-membership VN30 historical decomposition, and current-membership Industry history retain documented limitations. |
+| Market participation analytics | `NOT_IMPLEMENTED` | VN30 price breadth, HOSE breadth, market percentages above MA20/MA50, new-high/new-low breadth, sector price rotation, relative strength, VN risk mode, and VN flow/breadth alert rules do not yet exist. |
+| Futures and automated proprietary sources | `BLOCKED_PROVIDER` | VN30 futures/F1M/basis/open-interest/volume contracts are unproven; automated proprietary data remains blocked by source and entitlement readiness. |
+| Proprietary product expansion | `DEFERRED` | Manual verified EOD infrastructure is experimental and has no accepted real financial row; it is not an active product priority. |
+
+## Active next phase
+
+`VN-FF-LIVE-1 — Current Foreign Flow Production Acceptance` is the sole
+immediate phase. It is an acceptance phase, not a new feature phase. It must
+prove a fresh active-session `ForeignRoomMessage` through the process-shared
+stream manager, symbol current response, VN30 current aggregate, Industry
+current aggregate, FastAPI routes, and real browser/runtime. It must also prove
+one manager, one frontend polling owner, visibility resume, bounded reconnect,
+correct finality, no duplicate rows, and completed-history independence.
+
+A real SSI authorization, entitlement, or network failure may close the phase
+as `BLOCKED_PROVIDER`; application code must not be changed merely to force a
+successful provider result. After this gate, the active roadmap continues with
+`VN-FF-SIGNAL-1`, `VN-BREADTH-1`, `VN-SECTOR-1`, `VN-RS-1`, and
+`VN-ALERT-1`. The former R6A-R6E sequence is closed unless a concrete
+regression requires historical reference.
+
+## Current data-quality limitations
+
+- On `2026-06-29` and `2026-06-30`, all retained VN30 constituents returned
+  explicit zero values for all four audited SSI foreign fields. Both sessions
+  remain `unresolved_provider_anomaly` (`Bất thường dữ liệu`): public aggregate
+  numbers are null and the sessions are excluded from complete-only windows,
+  rankings, analytics, chart numeric points, and numeric CSV cells. No value is
+  reconstructed, inferred, or accepted as a valid zero session.
+- Completed VN30 and Industry decomposition uses current authoritative VN30
+  membership and is not historically constituent-correct.
+- HOSE-wide breadth is blocked until an authoritative scalable universe and a
+  measured acquisition path are proven.
+- VN30 futures/basis remains blocked pending a provider contract for instrument
+  identity, price, expiry, multiplier, volume, and open interest.
+
+## Fix-when-touched technical debt
+
+Large Vietnam dashboard page decomposition, VN30 hydration performance,
+obsolete migration prose, current-price documentation maintenance, unrelated
+test-baseline failures, and broad historical-document compression are
+fix-when-touched work. None is an active standalone cleanup phase.
+
+## Historical implementation record
+
+The dated entries below preserve implementation and validation history. Any
+then-current V2 ownership, proprietary `indexSummary` interpretation, current
+Foreign Flow limitation, or next-phase statement is superseded by the current
+capability state above.
+
 - VN-PROPRIETARY-EOD-1 implements the verified manual HOSE aggregate MVP without weakening the EOD-0 source gate. `scripts/record_vn_proprietary_eod.py` requires official URL, explicit user verification, gross buy/sell integer VND values, exact net reconciliation, and optional paired gross share volume. An optional signature-valid PDF is SHA-256 hashed without parsing/OCR/copying; persistence without a file requires an explicit lower-strength acknowledgement. Accepted rows use a separate atomic schema-v1 store under `DATA_CACHE_DIR`, deterministic idempotency/conflict/replacement rules, and no public write route. Read-only latest/history APIs and the dedicated `Dữ liệu tự doanh HOSE cuối ngày` tab preserve null versus zero, source evidence, completed finality, manual-only refresh, stale-response rejection, and last-known-good display without proprietary polling. Validation passes 103 focused/shared backend tests, 36 focused frontend tests, compile, TypeScript, ESLint, Vite, and 28 system-Chrome desktop/mobile visual checks. The full backend baseline remains 69 failed and 4 skipped with 3,463 passes; the full frontend run has 1,076 passes, 2 skips, and eight unrelated existing failures while all affected tests pass. No real financial row was persisted, so live manual entry remains pending.
 
 - VN-PROPRIETARY-EOD-0 narrows the unresolved proprietary product to completed daily HOSE total gross buy/sell volume and value. A conservative read-only search of `D:\Downloads`, repository `.tmp`, `data`, and `sample_data` found no relevant XLSX/XLS/CSV sample. Public research found HOSE daily proprietary notices with PDF attachments, official HNX gross-field PDFs for the wrong exchange, paid/authenticated FiinTrade Excel export, entitlement-blocked FiinQuantX, and net-oriented news reports; none proves a free source-originated HOSE spreadsheet contract or automation/redistribution rights. The outcome is `VN_PROPRIETARY_EOD_SOURCE_SAMPLE_REQUIRED`. A new offline diagnostic inspects user-supplied CSV/XLS/XLSX schema, dates, units, exchange scope, totals/components, reconciliation, and missing-versus-zero lineage without network or production writes; 45 synthetic focused tests pass. No real provider file, importer, backend API, frontend UI, polling, or realtime behavior was added.
