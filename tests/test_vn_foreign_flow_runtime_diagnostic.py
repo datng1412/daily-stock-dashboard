@@ -74,6 +74,7 @@ def test_child_environment_removes_inherited_bind_variables(monkeypatch) -> None
 
 
 def test_readiness_requires_http_200_and_status_ok(capsys) -> None:
+    assert diagnostic.READINESS_SECONDS == 45.0
     server, thread = _serve_health("ok")
     try:
         assert diagnostic._wait_until_ready(
@@ -167,6 +168,19 @@ def test_completed_session_and_routes_use_explicit_provider_date() -> None:
     assert industry[3]["to_date"] == "2026-07-24"
 
 
+def test_current_acceptance_routes_cover_symbol_and_vn30_industry() -> None:
+    routes = diagnostic._current_acceptance_routes()
+    assert [route[0] for route in routes] == ["current_symbol", "current_industry"]
+    assert "/foreign-flow/current/FPT?" in routes[0][1]
+    assert "scope=vn30" in routes[1][1]
+    assert "include_industries=true" in routes[1][1]
+    assert "force_refresh=false" in routes[0][1]
+
+    refreshed = diagnostic._current_acceptance_routes(force_refresh=True)
+    assert "force_refresh=true" in refreshed[0][1]
+    assert "recovery_trigger=manual_refresh" in refreshed[1][1]
+
+
 def test_provider_observed_session_takes_precedence_over_explicit_fallback() -> None:
     selected, basis, latest = diagnostic._select_observed_session(
         date(2026, 7, 24),
@@ -252,6 +266,79 @@ def test_summary_emits_industry_proprietary_and_watchlist_acceptance_counts() ->
     assert watchlist["ready_count"] == 1
     assert watchlist["partial_count"] == 1
     assert watchlist["unavailable_count"] == 1
+
+
+def test_summary_sanitizes_current_symbol_and_aggregate_evidence() -> None:
+    symbol = diagnostic._summary(
+        mode="current_symbol",
+        method="GET",
+        path="/current/FPT",
+        http_status=200,
+        payload={
+            "status": "ok",
+            "data_state": "ready",
+            "usable": True,
+            "trading_date": "2026-08-10",
+            "current": {
+                "foreign_buy_volume": 100,
+                "foreign_sell_volume": 40,
+                "foreign_buy_value": 1_000,
+                "foreign_sell_value": 300,
+                "stream_timestamp": "2026/08/10 10:30:00",
+                "received_at": "2026-08-10T03:30:01+00:00",
+                "raw_payload": "must-not-be-emitted",
+            },
+            "diagnostics": {
+                "subscription_count": 2,
+                "foreign_room_subscription_count": 1,
+                "foreign_room_rows_observed": 3,
+            },
+        },
+        elapsed_ms=1,
+    )
+    aggregate = diagnostic._summary(
+        mode="current_industry",
+        method="GET",
+        path="/current-aggregate",
+        http_status=200,
+        payload={
+            "status": "partial",
+            "data_state": "partial",
+            "usable": True,
+            "provider_session_date": "2026-08-10",
+            "aggregate": {"foreign_buy_value": 30, "foreign_sell_value": 10},
+            "items": [
+                {"foreign_buy_value": 20, "foreign_sell_value": 5},
+                {"foreign_buy_value": 10, "foreign_sell_value": 5},
+            ],
+            "groups": [
+                {"provider_session_date": "2026-08-10", "foreign_buy_value": 30, "foreign_sell_value": 10}
+            ],
+            "coverage": {
+                "requested_symbol_count": 30,
+                "classified_symbol_count": 30,
+                "observed_symbol_count": 2,
+                "complete_value_count": 2,
+                "complete_volume_count": 0,
+                "missing_symbols": ["ACB"],
+                "stale_symbol_count": 0,
+            },
+        },
+        elapsed_ms=1,
+    )
+
+    assert symbol["row_count"] == 1
+    assert symbol["current"] == {
+        "foreign_buy_volume": 100,
+        "foreign_sell_volume": 40,
+        "foreign_buy_value": 1_000,
+        "foreign_sell_value": 300,
+    }
+    assert "raw_payload" not in symbol["current"]
+    assert symbol["foreign_room_rows_observed"] == 3
+    assert aggregate["items_reconcile"] is True
+    assert aggregate["groups_reconcile"] is True
+    assert aggregate["observed_symbol_count"] == 2
 
 
 def test_creation_flags_are_safe_for_current_platform() -> None:

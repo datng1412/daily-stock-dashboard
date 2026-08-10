@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [documentation] Accept VN-FF-LIVE-1 with sanitized active-session SSI room, FastAPI, VN30/Industry reconciliation, and desktop/mobile browser evidence; advance the active roadmap to VN-FF-SIGNAL-1.
+- [fix] Accept the observed slash-form SSI room timestamp in the maintained current Foreign Flow diagnostic without changing production data semantics.
+- [test] Cover the bounded current Foreign Flow runtime acceptance output and slash-form provider timestamp attribution.
+- [fix] Allow the bounded Foreign Flow runtime diagnostic 45 seconds for cold HTTP readiness after an observed 36-second startup without changing application startup behavior.
+- [test] Stabilize the asynchronous Industry current-group assertion by waiting for the final combined ranking state.
 - [documentation] Realign the VN roadmap from repository evidence, mark completed Foreign Flow mature with current-session production acceptance pending, introduce capability-oriented phases, defer proprietary expansion, and correct stale SSI V2, canonical-price, chart-engine, and proprietary-flow wording without changing runtime behavior.
 - [new feature] Add verified manual HOSE proprietary-flow EOD ingestion, atomic storage, read-only latest/history APIs, and an EOD-only Proprietary workspace.
 - [test] Cover proprietary EOD validation, PDF hashing, null-versus-zero, storage conflicts/replacement, GET-only APIs, request ownership, refresh retention, and completed-session rendering.

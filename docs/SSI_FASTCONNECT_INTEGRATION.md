@@ -10,30 +10,49 @@ history only and are not active configuration.
 Completed Foreign Flow is mature: accepted DailyStockPrice history, durable
 restart restoration, current/completed merge rules, anomaly quarantine,
 rankings, coverage, analytics, and deterministic frontend states are
-implemented. Current Foreign Flow is
-`IMPLEMENTED_NEEDS_LIVE_ACCEPTANCE`: the `ForeignRoomMessage` symbol, VN30,
-and Industry paths exist, but a fresh end-to-end active-session production
-publication through the shared manager, FastAPI, and browser is not retained as
-accepted evidence.
+implemented. Current Foreign Flow is `PRODUCTION_READY`: bounded active-session
+evidence now covers official `ForeignRoomMessage` publication through the
+process-shared manager, symbol current route, current-VN30/current-Industry
+aggregation, FastAPI, and a real desktop/mobile browser. Current values remain
+provisional and non-persistent; stale transport state retains last-known values
+with an explicit stale/disconnected status.
 
 ## VN-FF-LIVE-1 acceptance boundary
 
-`VN-FF-LIVE-1 — Current Foreign Flow Production Acceptance` is the immediate
-next phase and is primarily an acceptance phase. Its required proof chain is:
+`VN-FF-LIVE-1 — Current Foreign Flow Production Acceptance` was accepted on
+2026-08-10. Its proven chain is:
 
 `ForeignRoomMessage` -> process-shared stream manager -> symbol current -> VN30
 current aggregate -> Industry current aggregate -> FastAPI routes -> real
 browser/runtime.
 
-Acceptance must demonstrate a fresh provider message, provider session/time
-progression, one stream manager, one frontend polling owner, hidden/resume
-behavior, bounded reconnect/backoff, no request-handler-owned subscription,
-completed-history independence, correct current/completed finality, no
-duplicates, and known deployment configuration. A real authorization,
-entitlement, or network failure may close the phase as `BLOCKED_PROVIDER`;
-StockClock must not alter data semantics merely to force success. After this
-gate, do not extend the R6A-R6E naming sequence unless a concrete regression
-needs a historical reference.
+A bounded two-symbol diagnostic authenticated, subscribed one provider cohort,
+and received provider-dated FPT and SSI room messages with all raw
+`bq/sq/bv/sv` aliases present before typed normalization. Application runtime
+evidence retained provider/receipt times, returned usable symbol current data,
+classified all 30 current SSI IndexComponents members, reconciled the VN30
+aggregate and 13 Industry groups, and advanced aggregate values after a newer
+provider observation without summing cumulative snapshots. Repeated reads and
+manual refresh reused the lifecycle-owned manager/subscriptions. The browser
+retained provisional current data and completed history across refresh at
+desktop/mobile widths without overflow or console errors. Current snapshots
+were not written into accepted completed history.
+
+The 11:10-11:18 Vietnam-time repeat observed SSI progression from 11:10 to
+11:11, including equal cumulative SSI counters at the newer timestamp and a
+fresh FPT snapshot. The owned application classified 30/30 members, reconciled
+13 Industry groups, and progressed aggregate values between observations. Its
+cold health readiness took 36.2 seconds; the manual acceptance harness now
+allows 45 bounded seconds before classifying readiness failure. This changes
+diagnostic timing only, not FastAPI startup or provider semantics.
+
+The maintained raw diagnostic now accepts the observed SSI provider timestamp
+shape `YYYY/MM/DD HH:MM:SS`; this is diagnostic evidence handling only and does
+not change production parsing or data semantics. Docker pins `ssi-sdk==3.0.5`.
+The process-local stream/cache contract requires one backend worker for coherent
+current state. Render deployment was not directly observed in this acceptance.
+Do not extend the R6A-R6E naming sequence unless a concrete regression needs a
+historical reference.
 
 ## M2.6B-R6E historical anomaly repair and Industry current runtime
 
@@ -1170,9 +1189,8 @@ Exact SSI chart keys include provider/dataset, ticker, `1m`, date, page 1, and p
 
 ## Next phase
 
-The immediate phase is `VN-FF-LIVE-1 — Current Foreign Flow Production
-Acceptance`. It must validate the existing V3 current-flow chain rather than
-add another feature. The ordered follow-up roadmap is `VN-FF-SIGNAL-1`,
+With `VN-FF-LIVE-1` accepted, the immediate phase is `VN-FF-SIGNAL-1 —
+Explainable Foreign Flow Signals`. The ordered follow-up roadmap is
 `VN-BREADTH-1`, `VN-SECTOR-1`, `VN-RS-1`, and `VN-ALERT-1`. Do not introduce
 FC Trading, request-handler subscriptions, or Mozyfin/KBS fallback for
 SSI-owned market data in any phase.

@@ -969,11 +969,12 @@ describe('ForeignFlowPage', () => {
     renderPage('/foreign-flow?mode=industry');
 
     const rankings = await screen.findByRole('region', { name: 'industry rankings' });
+    await waitFor(() => expect(currentAggregate).toHaveBeenCalledTimes(1));
     expect(within(rankings).getByText('Technology (10)')).toBeInTheDocument();
     expect(within(rankings).getByText('Banks (20)')).toBeInTheDocument();
     expect(within(rankings).queryByText(/Missing Industry/)).not.toBeInTheDocument();
     expect(within(rankings).queryByText(/unclassified/i)).not.toBeInTheDocument();
-    expect(within(rankings).getByText('350')).toBeInTheDocument();
+    await waitFor(() => expect(within(rankings).getByText('350')).toBeInTheDocument());
     const currentDetailRow = await screen.findByTestId('current-session-flow-row');
     expect(within(currentDetailRow).getAllByText('300')).toHaveLength(2);
   });

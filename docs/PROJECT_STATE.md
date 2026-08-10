@@ -12,7 +12,7 @@ at their original dates and do not override this section.
 | --- | --- | --- |
 | Daily market data and technical analysis | `PRODUCTION_READY` | Canonical daily OHLCV, SSI-derived VN30 membership/components, MA20/MA50, Wilder RSI14, Bollinger Bands, volume averages/ratio, and other coverage-gated daily metrics are implemented. |
 | Completed Foreign Flow | `PRODUCTION_READY` | Symbol history, durable restart restoration, accepted/current merge semantics, anomaly quarantine, rankings, coverage, completed analytics, and deterministic frontend presentation are mature. |
-| Current Foreign Flow | `IMPLEMENTED_NEEDS_LIVE_ACCEPTANCE` | Symbol, current-VN30, and current-Industry paths are implemented from `ForeignRoomMessage`, but fresh end-to-end production publication through the shared manager, FastAPI, and browser has not been retained as accepted evidence. |
+| Current Foreign Flow | `PRODUCTION_READY` | Active-session `ForeignRoomMessage` publication is accepted through the process-shared manager, symbol current route, current-VN30/current-Industry aggregation, FastAPI, and browser. Values remain provisional, non-persistent, and truthfully stale when transport freshness expires. |
 | Optional SSI live surfaces | `IMPLEMENTED_NEEDS_LIVE_ACCEPTANCE` | Realtime X quote, X-QUOTE order book, and MI advance/decline semantics remain dependent on live runtime/provider proof. |
 | Partial market capabilities | `PARTIAL` | Current-session 1-minute chart, X-TRADE event buffer, VNINDEX/DailyIndex completeness, full-watchlist latency, current-membership VN30 historical decomposition, and current-membership Industry history retain documented limitations. |
 | Market participation analytics | `NOT_IMPLEMENTED` | VN30 price breadth, HOSE breadth, market percentages above MA20/MA50, new-high/new-low breadth, sector price rotation, relative strength, VN risk mode, and VN flow/breadth alert rules do not yet exist. |
@@ -21,20 +21,29 @@ at their original dates and do not override this section.
 
 ## Active next phase
 
-`VN-FF-LIVE-1 — Current Foreign Flow Production Acceptance` is the sole
-immediate phase. It is an acceptance phase, not a new feature phase. It must
-prove a fresh active-session `ForeignRoomMessage` through the process-shared
-stream manager, symbol current response, VN30 current aggregate, Industry
-current aggregate, FastAPI routes, and real browser/runtime. It must also prove
-one manager, one frontend polling owner, visibility resume, bounded reconnect,
-correct finality, no duplicate rows, and completed-history independence.
+`VN-FF-SIGNAL-1 — Explainable Foreign Flow Signals` is the immediate phase.
+It may use accepted completed-history inputs and may use current data only with
+its existing provisional/freshness/finality metadata. Neutral descriptive
+signals must expose formula basis and coverage; prediction, recommendation,
+target price, anomaly reconstruction, and inferred flow remain excluded.
 
-A real SSI authorization, entitlement, or network failure may close the phase
-as `BLOCKED_PROVIDER`; application code must not be changed merely to force a
-successful provider result. After this gate, the active roadmap continues with
-`VN-FF-SIGNAL-1`, `VN-BREADTH-1`, `VN-SECTOR-1`, `VN-RS-1`, and
-`VN-ALERT-1`. The former R6A-R6E sequence is closed unless a concrete
-regression requires historical reference.
+`VN-FF-LIVE-1` was accepted on 2026-08-10. A bounded active-session run received
+official `room.FPT` and `room.SSI` messages with raw `bq/sq/bv/sv` present,
+retained provider/receipt timestamps, and produced usable symbol, 30/30 VN30,
+and 13-group Industry application responses. A later observation advanced the
+process-owned aggregate without accumulating snapshots or creating duplicate
+logical rows. The real desktop/mobile browser retained provisional current data
+through manual refresh with no page-level overflow or console errors. Completed
+DailyStockPrice history stayed authoritative and independent. Render itself was
+not observed; deployment still requires one backend worker for coherent
+process-local current state.
+
+A launch-time repeat at 11:10-11:18 Vietnam time confirmed SSI provider
+progression from 11:10 to 11:11 for SSI, a fresh 11:11 FPT snapshot, 30/30
+current-VN30 coverage, 13 reconciled Industry groups, and one provisional FPT
+row above completed 2026-08-07 history in the real browser. Cold application
+startup took 36.2 seconds, so the manual runtime diagnostic now uses the
+established bounded 45-second readiness deadline rather than 20 seconds.
 
 ## Current data-quality limitations
 

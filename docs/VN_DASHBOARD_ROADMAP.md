@@ -8,7 +8,7 @@ This capability-oriented roadmap is the current source of truth. Dated phase
 records later in this file are historical evidence and do not determine what
 is next.
 
-### 1. VN-FF-LIVE-1 — Current Foreign Flow Production Acceptance
+### 1. VN-FF-LIVE-1 — Current Foreign Flow Production Acceptance (completed 2026-08-10)
 
 - **Goal:** retain end-to-end active-session evidence from
   `ForeignRoomMessage` through the process-shared manager, symbol current,
@@ -32,8 +32,26 @@ is next.
   `BLOCKED_PROVIDER` without forcing application changes. After this exit, the
   R6A-R6E naming series stays closed unless a concrete regression requires a
   historical reference.
+- **Acceptance evidence:** a bounded active-session run authenticated and
+  subscribed one official two-symbol room cohort, received provider-dated FPT
+  and SSI messages with raw `bq/sq/bv/sv` present, and retained normalized
+  replacement snapshots. The owned FastAPI runtime returned a usable symbol
+  snapshot plus a 30/30 current-VN30 aggregate and 13 current-Industry groups;
+  included item/group arithmetic reconciled and a later provider observation
+  advanced aggregate values without local accumulation. The real desktop and
+  mobile browser retained provisional current data through manual refresh with
+  no page-level overflow or console errors. Stale retained rows remained
+  labelled disconnected rather than being cleared. Completed DailyStockPrice
+  history and persistence remained independent. Render deployment was
+  `NOT_OBSERVED`; coherent current state assumes one backend worker.
+- **Launch-time repeat:** at 11:10-11:18 Vietnam time, SSI advanced the observed
+  provider timestamp from 11:10 to 11:11, the owned application returned 30/30
+  current-VN30 coverage and 13 reconciled Industry groups, and the real browser
+  retained one FPT provisional row above completed 2026-08-07 history through
+  refresh and a hidden-to-visible cycle. Cold readiness took 36.2 seconds; the
+  bounded diagnostic readiness allowance is therefore 45 seconds.
 
-### 2. VN-FF-SIGNAL-1 — Explainable Foreign Flow Signals
+### 2. VN-FF-SIGNAL-1 — Explainable Foreign Flow Signals (active next phase)
 
 - **Goal:** add formula-backed 1D/5D/20D accumulation/distribution,
   acceleration/deceleration, reversal, and unusual-flow summaries.
@@ -126,8 +144,8 @@ is next.
 
 | Class | Items |
 | --- | --- |
-| `NEXT` | `VN-FF-LIVE-1` |
-| `LATER` | `VN-FF-SIGNAL-1`, `VN-BREADTH-1`, `VN-SECTOR-1`, `VN-RS-1`, `VN-ALERT-1`, eventual risk-mode synthesis |
+| `NEXT` | `VN-FF-SIGNAL-1` |
+| `LATER` | `VN-BREADTH-1`, `VN-SECTOR-1`, `VN-RS-1`, `VN-ALERT-1`, eventual risk-mode synthesis |
 | `BLOCKED` | VN30 futures/F1M/basis/open interest/futures volume; automated proprietary source; HOSE-wide breadth until an authoritative scalable universe is proven; fundamentals/corporate actions without a provider/legal contract |
 | `DEFERRED` | Proprietary product expansion; broader stock-detail polish; macro/risk asset integration; optional news-provider expansion |
 | `DROP / DO NOT PLAN` | Hardcoded five-symbol defaults; guessed anomaly repair; raw-table-only feature phases; AI/ML investment scoring; automatic recommendations; dynamic request-handler subscriptions; unsupported SSI-field reinterpretation; new fallback providers for SSI-owned fields without explicit approval |

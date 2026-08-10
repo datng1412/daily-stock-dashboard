@@ -487,9 +487,14 @@ def _parse_provider_datetime(
     if not text:
         return None, False
     parsed: Optional[datetime] = None
+    provider_time_includes_date = bool(
+        re.match(r"^\d{4}[-/]\d{2}[-/]\d{2}[ T]", text)
+    )
     try:
         if "T" in text or " " in text:
-            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            parsed = datetime.fromisoformat(
+                text.replace("/", "-").replace("Z", "+00:00")
+            )
             if parsed.tzinfo is None:
                 parsed = parsed.replace(tzinfo=VN_TIMEZONE)
             else:
@@ -504,7 +509,7 @@ def _parse_provider_datetime(
             parsed = datetime.combine(base_date, parsed_time, tzinfo=VN_TIMEZONE)
     except (TypeError, ValueError):
         return None, False
-    if provider_date:
+    if provider_date or provider_time_includes_date:
         return parsed, False
     receipt_session = vietnam_market_session_from_epoch(received_at.timestamp())
     event_session = vietnam_market_session_from_epoch(parsed.timestamp())
@@ -586,8 +591,15 @@ def room_sample_from_message(
         present, value = _present_value(data, aliases)
         room_capacity[normalized] = classify_numeric(value, present=present)
 
+    provider_time_includes_date = bool(
+        re.match(r"^\d{4}[-/]\d{2}[-/]\d{2}[ T]", str(provider_time or ""))
+    )
     effective_date = provider_date or (
-        received_at.date().isoformat() if receipt_date_attributed else None
+        provider_dt.date().isoformat()
+        if provider_dt is not None and provider_time_includes_date
+        else received_at.date().isoformat()
+        if receipt_date_attributed
+        else None
     )
     return {
         "source": "SSI_V3_FOREIGN_ROOM_STREAM",
@@ -597,7 +609,7 @@ def room_sample_from_message(
         "symbol": symbol,
         "sample_number": sample_number,
         "provider_session_date": effective_date,
-        "provider_date_supplied": bool(provider_date),
+        "provider_date_supplied": bool(provider_date or provider_time_includes_date),
         "receipt_date_attributed": receipt_date_attributed,
         "provider_event_time": provider_time,
         "provider_event_at": (

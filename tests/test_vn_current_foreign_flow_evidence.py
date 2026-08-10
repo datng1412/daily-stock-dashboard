@@ -439,6 +439,14 @@ def test_time_only_active_message_is_safely_attributed_to_receipt_date():
     assert sample["provider_session_date"] == DATE
 
 
+def test_slash_form_provider_datetime_supplies_session_date():
+    sample = _room_sample(_room_message(t="2026/07/28 10:00:00"))
+    assert sample["provider_date_supplied"] is True
+    assert sample["receipt_date_attributed"] is False
+    assert sample["provider_session_date"] == DATE
+    assert sample["provider_event_at"] == "2026-07-28T10:00:00+07:00"
+
+
 def test_previous_session_message_does_not_become_current():
     sample = _room_sample(
         _room_message(td="2026-07-27", t="2026-07-27T10:00:00+07:00")

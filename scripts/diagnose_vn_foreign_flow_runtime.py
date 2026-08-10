@@ -27,7 +27,7 @@ from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parents[1]
 TMP = ROOT / ".tmp"
-READINESS_SECONDS = 20.0
+READINESS_SECONDS = 45.0
 READINESS_REQUEST_SECONDS = 2.0
 READINESS_POLL_SECONDS = 0.25
 REQUEST_SECONDS = 15.0
@@ -206,6 +206,11 @@ def _summary(
         if isinstance(payload.get("aggregate"), dict)
         else {}
     )
+    current = (
+        payload.get("current")
+        if isinstance(payload.get("current"), dict)
+        else {}
+    )
     series = (
         decomposition.get("series")
         if isinstance(decomposition.get("series"), list)
@@ -235,12 +240,15 @@ def _summary(
     first_item = items[0] if items and isinstance(items[0], dict) else {}
 
     row_count = (
+        1 if mode == "current_symbol" and current else
         1 if mode == "current_industry" and aggregate else
         len(series) if mode == "vn30" else len(rows)
     )
     item_count = len(items)
     latest_session = (
-        payload.get("provider_session_date")
+        payload.get("trading_date")
+        if mode == "current_symbol"
+        else payload.get("provider_session_date")
         if mode == "current_industry"
         else decomposition.get("latest_completed_session")
         if mode == "vn30"
@@ -314,6 +322,12 @@ def _summary(
         if isinstance(aggregate.get(field), (int, float))
         and not isinstance(aggregate.get(field), bool)
     }
+    safe_current = {
+        field: current.get(field)
+        for field in flow_fields
+        if isinstance(current.get(field), (int, float))
+        and not isinstance(current.get(field), bool)
+    }
     group_dates = {
         str(group.get("provider_session_date"))
         for group in groups
@@ -331,6 +345,23 @@ def _summary(
             ) == safe_aggregate.get(field)
             for field in safe_aggregate
         )
+    item_reconciles = None
+    if mode == "current_industry" and items and safe_aggregate:
+        item_reconciles = all(
+            sum(
+                item.get(field)
+                for item in items
+                if isinstance(item, dict)
+                and isinstance(item.get(field), (int, float))
+                and not isinstance(item.get(field), bool)
+            ) == safe_aggregate.get(field)
+            for field in safe_aggregate
+        )
+    diagnostics = (
+        payload.get("diagnostics")
+        if isinstance(payload.get("diagnostics"), dict)
+        else {}
+    )
 
     return {
         "mode": mode,
@@ -352,9 +383,49 @@ def _summary(
         "industry_count": len(industry_codes) if mode == "industry" else None,
         "group_count": len(groups) if mode == "current_industry" else None,
         "aggregate": safe_aggregate if mode == "current_industry" else None,
+        "current": safe_current if mode == "current_symbol" else None,
+        "provider_timestamp": (
+            current.get("stream_timestamp") if mode == "current_symbol" else None
+        ),
+        "received_at": current.get("received_at") if mode == "current_symbol" else None,
         "aggregate_present": bool(aggregate) if mode == "current_industry" else None,
         "group_dates": sorted(group_dates) if mode == "current_industry" else None,
         "groups_reconcile": group_reconciles,
+        "items_reconcile": item_reconciles,
+        "requested_symbol_count": (
+            coverage.get("requested_symbol_count") if mode == "current_industry" else None
+        ),
+        "classified_symbol_count": (
+            coverage.get("classified_symbol_count") if mode == "current_industry" else None
+        ),
+        "observed_symbol_count": (
+            coverage.get("observed_symbol_count") if mode == "current_industry" else None
+        ),
+        "complete_value_count": (
+            coverage.get("complete_value_count") if mode == "current_industry" else None
+        ),
+        "complete_volume_count": (
+            coverage.get("complete_volume_count") if mode == "current_industry" else None
+        ),
+        "missing_symbols": (
+            coverage.get("missing_symbols") if mode == "current_industry" else None
+        ),
+        "stale_symbol_count": (
+            coverage.get("stale_symbol_count") if mode == "current_industry" else None
+        ),
+        "subscription_count": (
+            diagnostics.get("subscription_count") if mode == "current_symbol" else None
+        ),
+        "foreign_room_subscription_count": (
+            diagnostics.get("foreign_room_subscription_count")
+            if mode == "current_symbol"
+            else None
+        ),
+        "foreign_room_rows_observed": (
+            diagnostics.get("foreign_room_rows_observed")
+            if mode == "current_symbol"
+            else None
+        ),
         "member_count": (
             payload.get("requested_symbol_count") if mode == "industry" else None
         ),
@@ -577,6 +648,40 @@ def _routes(completed_session: date) -> list[tuple[str, str, str, dict[str, Any]
     ]
 
 
+def _current_acceptance_routes(
+    *,
+    force_refresh: bool = False,
+) -> list[tuple[str, str, str, dict[str, Any] | None]]:
+    query = urlencode(
+        {
+            "force_refresh": str(force_refresh).lower(),
+            "recovery_trigger": "manual_refresh" if force_refresh else "route_touch",
+        }
+    )
+    aggregate_query = urlencode(
+        {
+            "scope": "vn30",
+            "include_industries": "true",
+            "force_refresh": str(force_refresh).lower(),
+            "recovery_trigger": "manual_refresh" if force_refresh else "route_touch",
+        }
+    )
+    return [
+        (
+            "current_symbol",
+            f"/api/v1/stocks/vn/foreign-flow/current/FPT?{query}",
+            "GET",
+            None,
+        ),
+        (
+            "current_industry",
+            f"/api/v1/stocks/vn/foreign-flow/current-aggregate?{aggregate_query}",
+            "GET",
+            None,
+        ),
+    ]
+
+
 def _select_observed_session(
     fallback: date,
     summaries: list[dict[str, Any]],
@@ -617,6 +722,11 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Enable SSI streaming and inspect only the current VN30 Industry aggregate.",
     )
+    parser.add_argument(
+        "--current-acceptance",
+        action="store_true",
+        help="Inspect symbol plus current VN30/Industry routes twice under one owned backend.",
+    )
     return parser.parse_args()
 
 
@@ -638,7 +748,9 @@ def main() -> int:
         process = subprocess.Popen(
             _child_command(port),
             cwd=ROOT,
-            env=_deduplicated_environment(enable_streaming=args.current_industry),
+            env=_deduplicated_environment(
+                enable_streaming=args.current_industry or args.current_acceptance
+            ),
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -705,6 +817,30 @@ def main() -> int:
                     break
                 if attempt == 0 and time.monotonic() < deadline - 20:
                     time.sleep(10)
+            return 0
+        if args.current_acceptance:
+            for mode, path, method, body in _current_acceptance_routes():
+                _request_once(
+                    port=port,
+                    mode=mode,
+                    path=path,
+                    deadline=deadline,
+                    method=method,
+                    body=body,
+                )
+            if time.monotonic() < deadline - 35:
+                time.sleep(20)
+            for mode, path, method, body in _current_acceptance_routes(
+                force_refresh=True
+            ):
+                _request_once(
+                    port=port,
+                    mode=mode,
+                    path=path,
+                    deadline=deadline,
+                    method=method,
+                    body=body,
+                )
             return 0
         initial_summaries: list[dict[str, Any]] = []
         for mode, path, method, body in _routes(completed_session)[:2]:
