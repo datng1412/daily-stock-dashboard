@@ -827,6 +827,31 @@ Direction compares the canonical-session finite positive close with the immediat
 
 Positive runtime acceptance on 2026-08-11 returned 30 exact current members and 30 aligned histories for completed provider session 2026-08-10. Direction reconciled as 24 advance + 4 decline + 2 unchanged = 30 usable; MA20 reconciled as 25 above + 5 not above = 30 usable; MA50 reconciled as 15 above + 15 not above = 30 usable; participation was `(24 + 4) / 30 = 93.33%`. Missing and session-mismatch counts were zero. The cold request used 30 DailyOhlc provider calls at maximum concurrency four; the immediate warm request used 30 cache hits and no provider calls. No fallback was used.
 
+### Current-VN30 sector strength
+
+`GET /api/v1/stocks/vn/sector-strength?index_code=VN30` composes existing
+normalized primitives. Exact current VN30 membership gates all work. Provider
+ICB code/name classifies each symbol into at most one group; missing metadata is
+reported as unclassified and never invented. Group member counts plus
+unclassified members must reconcile to 30.
+
+The only price return in VN-SECTOR-1 is
+`mean(current_close / previous_close - 1)` across usable, session-aligned
+breadth members. It is equal-weight, current-cohort, and not an official sector
+index. Direction and MA20/MA50 reuse breadth classifications with independent
+denominators. Completed foreign net value uses accepted DailyStockPrice rows
+over exactly 1, 5, or 20 returned sessions per member. A member contributes to
+a window only when it has the complete requested accepted rows; no partial
+member value is extrapolated. Valid explicit zero contributes zero, while
+missing/incomplete and unresolved anomaly rows remain excluded. Provisional
+current ForeignRoomMessage never enters these windows or historical rows.
+
+Price session/finality and latest completed foreign-flow date are independent
+provenance fields. The response remains usable when those publication dates
+differ. Shared breadth, IndexComponents, DailyOhlc, completed-flow cache, and
+single-flight paths are reused; there is no full watchlist hydration, fallback,
+or frontend member/sector fan-out.
+
 Foreign Flow Explorer v1 applies a shared completed-session selection contract to ticker, current VN30 basket, current-VN30 ICB industry, and supported proprietary VNINDEX/VN30/HOSE scopes. 1D/5D/20D/60D select distinct returned provider sessions; custom bounds are inclusive and limited to 120 calendar days. Metric selection is presentation-only and does not refetch when both value and volume already exist. Source session, fetched time, cache state/age, freshness, coverage, and anomaly are separate. CSV contains only selected loaded rows with raw numeric values. Current-session foreign/industry flow remains unavailable.
 
 Top-level `fresh_count`, `stale_count`, `empty_count`, and `unavailable_count` partition normalized symbols. `usable_count` is fresh plus stale; `coverage_ratio=usable_count/normalized_count`. State precedence is: all fresh usable is `ready`; all usable stale is `stale`; all empty is `empty`; mixed usable/non-usable is `partial`; otherwise provider failure is `unavailable`. Rankings are limited to the requested watchlist and contain latest/5-session/20-session top buys and sells. Null and zero values are excluded; signed net value determines direction; ticker breaks ties; stale or incomplete eligible rows remain marked rather than being dropped. No batch field changes SSI DailyOhlc ownership of `latest_price`.

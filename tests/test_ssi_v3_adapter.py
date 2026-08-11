@@ -251,6 +251,23 @@ def test_security_normalization_preserves_exact_ssi_icb_fields() -> None:
     assert result["rows"][0]["icb_name"] == "Software"
 
 
+def test_index_components_preserve_provider_icb_classification() -> None:
+    adapter, _auth, market, _data = make_adapter()
+    market.securities = [security(
+        symbol="FPT",
+        icb_code="9530",
+        icb_name="Software",
+    )]
+
+    result = adapter.get_index_components("VN30")
+
+    assert result["status"] == "ok"
+    assert result["rows"][0]["symbol"] == "FPT"
+    assert result["rows"][0]["industry"] == "Software"
+    assert result["rows"][0]["icb_code"] == "9530"
+    assert result["rows"][0]["icb_name"] == "Software"
+
+
 def test_market_summary_keeps_board_scope_and_nullable_gross_proprietary_fields() -> None:
     adapter, _auth, market, _data = make_adapter()
     market.market_summary = market_summary()

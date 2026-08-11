@@ -2,7 +2,7 @@
 
 ## Active roadmap
 
-Last updated: 2026-08-10
+Last updated: 2026-08-11
 
 This capability-oriented roadmap is the current source of truth. Dated phase
 records later in this file are historical evidence and do not determine what
@@ -113,7 +113,7 @@ is next.
   one page-owned aggregate request and one bounded manual refresh with retained
   values, no overflow or console errors, and no fallback.
 
-### 4. VN-SECTOR-1 — Sector Strength & Rotation
+### 4. VN-SECTOR-1 — Sector Strength & Rotation (production-ready)
 
 - **Goal:** combine SSI ICB membership, price performance, breadth, and
   completed Foreign Flow to explain current sector strengthening/weakening.
@@ -129,6 +129,20 @@ is next.
   returns; no predictive rotation score.
 - **Exit criteria:** ranks expose return, breadth, flow, coverage, session, and
   current-cohort basis with full member reconciliation.
+- **Implementation:** `GET /api/v1/stocks/vn/sector-strength` supports the
+  current VN30 cohort only. It reuses the shared breadth result and DailyOhlc
+  cache/single-flight path, keeps SSI ICB-null members unclassified, computes
+  equal-weight 1D member-close returns, and aggregates only accepted completed
+  DailyStockPrice foreign net value over 1/5/20 provider sessions. The compact
+  `/vietnam` table has one page request owner and request-free local sorting.
+- **Acceptance:** positive SSI acceptance on 2026-08-11 classified all 30
+  current members into 13 ICB groups for completed price session 2026-08-10;
+  completed foreign flow also ended 2026-08-10. Cold sector latency was 25.63
+  seconds with 30 DailyOhlc and 30 completed-flow provider calls. Warm latency
+  was 1.10 seconds with 30 DailyOhlc plus 30 flow cache hits and zero provider
+  calls. A breadth refresh followed by sector used zero additional DailyOhlc
+  provider calls. Desktop/mobile rendering, local sorting, retained refresh,
+  local table overflow, and group reconciliation passed without fallback.
 
 ### 5. VN-RS-1 — Relative Strength
 
@@ -168,8 +182,8 @@ is next.
 
 | Class | Items |
 | --- | --- |
-| `NEXT` | `VN-SECTOR-1` |
-| `LATER` | `VN-RS-1`, `VN-ALERT-1`, eventual risk-mode synthesis |
+| `NEXT` | `VN-RS-1` |
+| `LATER` | `VN-ALERT-1`, eventual risk-mode synthesis |
 | `BLOCKED` | VN30 futures/F1M/basis/open interest/futures volume; automated proprietary source; HOSE-wide breadth until an authoritative scalable universe is proven; fundamentals/corporate actions without a provider/legal contract |
 | `DEFERRED` | Proprietary product expansion; broader stock-detail polish; macro/risk asset integration; optional news-provider expansion |
 | `DROP / DO NOT PLAN` | Hardcoded five-symbol defaults; guessed anomaly repair; raw-table-only feature phases; AI/ML investment scoring; automatic recommendations; dynamic request-handler subscriptions; unsupported SSI-field reinterpretation; new fallback providers for SSI-owned fields without explicit approval |

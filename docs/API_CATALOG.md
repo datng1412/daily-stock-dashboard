@@ -289,6 +289,24 @@ Supports `index_code=VN30` only and optional `force_refresh`. Exact current SSI 
 
 Positive acceptance on 2026-08-11 returned HTTP 200 `ready` for 30/30 exact members aligned to completed provider session 2026-08-10. Counts reconciled as 24 advance, 4 decline, 2 unchanged; 25/30 above MA20; 15/30 above MA50; participation 93.33%; zero missing and zero mismatched. Cold/warm HTTP latency was 12.59/0.52 seconds, with 30 provider calls on cold and 30 cache hits on warm. No fallback or full-watchlist hydration occurred.
 
+### `GET /api/v1/stocks/vn/sector-strength`
+
+Supports `index_code=VN30` only and optional `force_refresh`; other scopes are
+HTTP 422. The response groups the exact current SSI VN30 cohort by provider ICB
+code/name and exposes membership/classification reconciliation, equal-weight
+member close return for 1D, direction, independent MA20/MA50 coverage, and
+accepted completed SSI DailyStockPrice foreign net value for 1/5/20 returned
+sessions. Price and foreign-flow dates/finality remain separate. Missing ICB or
+metrics remain missing; explicit accepted zero remains zero; unresolved
+all-zero anomaly sessions cannot complete a foreign-flow window.
+
+This is a current-cohort comparison, not an official sector index:
+`historical_constituent_correct=false` and
+`official_sector_index_return=false`. Diagnostics expose bounded timing,
+membership/DailyOhlc/flow call and cache counts, maximum concurrency four,
+`full_watchlist_hydration_used=false`, `current_foreign_flow_included=false`,
+and `fallback_used=false`.
+
 ## `GET /api/v1/stocks/vn/company/{ticker}`
 
 Purpose:

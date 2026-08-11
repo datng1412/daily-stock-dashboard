@@ -11,6 +11,7 @@ import {
   type VietnamIndexComponentsResponse,
   type VietnamIndexListResponse,
   type VietnamMarketBreadthResponse,
+  type VietnamSectorStrengthResponse,
   type VietnamObservabilityResponse,
   type VietnamRealtimeResponse,
   type VietnamRealtimeTradesResponse,
@@ -44,6 +45,7 @@ vi.mock('../../api/stocks', () => ({
     getVietnamDailyIndex: vi.fn(),
     getVietnamIndexComponents: vi.fn(),
     getVietnamMarketBreadth: vi.fn(),
+    getVietnamSectorStrength: vi.fn(),
   },
 }));
 
@@ -535,6 +537,7 @@ const mockedGetVietnamIndexList = vi.mocked(stocksApi.getVietnamIndexList);
 const mockedGetVietnamDailyIndex = vi.mocked(stocksApi.getVietnamDailyIndex);
 const mockedGetVietnamIndexComponents = vi.mocked(stocksApi.getVietnamIndexComponents);
 const mockedGetVietnamMarketBreadth = vi.mocked(stocksApi.getVietnamMarketBreadth);
+const mockedGetVietnamSectorStrength = vi.mocked(stocksApi.getVietnamSectorStrength);
 
 const makeIntradayChartResponse = (
   ticker = 'FPT',
@@ -686,6 +689,27 @@ const makeMarketBreadthResponse = (
   diagnostics: {},
   fetchedAt: '2026-06-10T09:00:00Z',
   ...overrides,
+});
+
+const makeSectorStrengthResponse = (): VietnamSectorStrengthResponse => ({
+  status: 'partial', dataState: 'partial', usable: true, indexCode: 'VN30', universe: 'current_vn30_membership', source: 'SSI',
+  membershipSource: 'SSI IndexComponents', classificationSource: 'SSI ICB', priceSource: 'SSI DailyOhlc', foreignFlowSource: 'SSI DailyStockPrice',
+  aggregationBasis: 'current_vn30_icb_equal_weight', historicalConstituentCorrect: false, officialSectorIndexReturn: false,
+  priceSessionDate: '2026-06-10', priceFinality: 'completed_daily', foreignFlowLatestCompletedDate: '2026-06-09',
+  membership: { requestedCount: 30, memberCount: 30, classifiedCount: 30, unclassifiedCount: 0, unclassifiedSymbols: [], groupCount: 1, duplicateSymbols: [], symbols: [...presetTickers.VN30] },
+  groups: [{
+    icbCode: '8300', icbName: 'Banks', memberSymbols: ['ACB', 'VCB'], memberCount: 2, dataState: 'partial',
+    return1D: { value: 0.01, usableCount: 2, missingCount: 0, method: 'equal_weight_mean_member_close_return' },
+    direction: { advances: 2, declines: 0, unchanged: 0, usableCount: 2 },
+    ma20: { aboveCount: 2, notAboveCount: 0, usableCount: 2, percentAbove: 100 },
+    ma50: { aboveCount: 1, notAboveCount: 1, usableCount: 2, percentAbove: 50 },
+    foreignFlow: { source: 'SSI DailyStockPrice', finality: 'completed_accepted', latestCompletedDate: '2026-06-09', windows: {
+      '1': { requestedSessions: 1, requestedMemberCount: 2, usableMemberCount: 2, missingMemberCount: 0, usableSymbols: ['ACB', 'VCB'], coverageRatio: 1, complete: true, netValue: 1_000_000_000, observedStartDates: ['2026-06-09'], observedEndDates: ['2026-06-09'] },
+      '5': { requestedSessions: 5, requestedMemberCount: 2, usableMemberCount: 2, missingMemberCount: 0, usableSymbols: ['ACB', 'VCB'], coverageRatio: 1, complete: true, netValue: 2_000_000_000, observedStartDates: ['2026-06-03'], observedEndDates: ['2026-06-09'] },
+      '20': { requestedSessions: 20, requestedMemberCount: 2, usableMemberCount: 1, missingMemberCount: 1, usableSymbols: ['ACB'], coverageRatio: 0.5, complete: false, netValue: 3_000_000_000, observedStartDates: ['2026-05-12'], observedEndDates: ['2026-06-09'] },
+    } },
+  }],
+  timing: {}, diagnostics: {}, fetchedAt: '2026-06-10T09:00:00Z',
 });
 
 const makeObservabilityResponse = (overrides: Partial<VietnamObservabilityResponse> = {}): VietnamObservabilityResponse => ({
@@ -1061,6 +1085,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     mockedGetVietnamDailyIndex.mockReset();
     mockedGetVietnamIndexComponents.mockReset();
     mockedGetVietnamMarketBreadth.mockReset();
+    mockedGetVietnamSectorStrength.mockReset();
     mockedGetVietnamMarketPhase.mockReset();
     mockedGetVietnamMarketPhase.mockReturnValue(makeMarketPhase());
     mockedGetVietnamWatchlist.mockImplementation(async (tickers) => makeResponse(tickers?.length ? tickers : defaultTickers));
@@ -1082,6 +1107,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     mockedGetVietnamDailyIndex.mockImplementation(async () => makeDailyIndexResponse());
     mockedGetVietnamIndexComponents.mockImplementation(async () => makeIndexComponentsResponse());
     mockedGetVietnamMarketBreadth.mockImplementation(async () => makeMarketBreadthResponse());
+    mockedGetVietnamSectorStrength.mockImplementation(async () => makeSectorStrengthResponse());
   });
 
   afterEach(() => {
@@ -1109,6 +1135,15 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(screen.getByText('17 / 27')).toBeInTheDocument();
     expect(mockedGetVietnamMarketBreadth).toHaveBeenCalledTimes(1);
     expect(mockedGetVietnamMarketBreadth.mock.calls[0]?.[0]?.forceRefresh).toBe(false);
+  });
+
+  it('owns one sector aggregate request at page level', async () => {
+    render(<VietnamDashboardPage />);
+
+    expect(await screen.findByRole('heading', { name: 'Sức mạnh ngành VN30' })).toBeInTheDocument();
+    expect(within(screen.getByTestId('vn30-sector-strength')).getByText('Banks')).toBeInTheDocument();
+    expect(mockedGetVietnamSectorStrength).toHaveBeenCalledTimes(1);
+    expect(mockedGetVietnamSectorStrength.mock.calls[0]?.[0]?.forceRefresh).toBe(false);
   });
 
   it('starts fresh empty localStorage without loading hardcoded default symbols', async () => {

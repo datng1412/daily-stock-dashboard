@@ -2153,6 +2153,9 @@ export type VietnamIndexComponent = {
   market?: string | null;
   weight?: number | null;
   name?: string | null;
+  industry?: string | null;
+  icbCode?: string | null;
+  icbName?: string | null;
   source?: string | null;
   missingFields?: string[];
   fieldCoverage?: Record<string, boolean>;
@@ -2232,6 +2235,83 @@ export type VietnamMarketBreadthResponse = {
     sessionMismatchCount: number;
     sessionMismatchSymbols: string[];
   };
+  timing: Record<string, number>;
+  diagnostics: Record<string, unknown>;
+  fetchedAt: string;
+};
+
+export type VietnamSectorForeignFlowWindow = {
+  requestedSessions: 1 | 5 | 20;
+  requestedMemberCount: number;
+  usableMemberCount: number;
+  missingMemberCount: number;
+  usableSymbols: string[];
+  coverageRatio?: number | null;
+  complete: boolean;
+  netValue?: number | null;
+  startDate?: string | null;
+  endDate?: string | null;
+  observedStartDates: string[];
+  observedEndDates: string[];
+};
+
+export type VietnamSectorStrengthGroup = {
+  icbCode: string;
+  icbName: string;
+  memberSymbols: string[];
+  memberCount: number;
+  dataState: 'ready' | 'partial' | 'unavailable';
+  return1D: {
+    value?: number | null;
+    usableCount: number;
+    missingCount: number;
+    method: 'equal_weight_mean_member_close_return';
+  };
+  direction: {
+    advances: number;
+    declines: number;
+    unchanged: number;
+    usableCount: number;
+  };
+  ma20: { aboveCount: number; notAboveCount: number; usableCount: number; percentAbove?: number | null };
+  ma50: { aboveCount: number; notAboveCount: number; usableCount: number; percentAbove?: number | null };
+  foreignFlow: {
+    source: 'SSI DailyStockPrice';
+    finality: 'completed_accepted';
+    latestCompletedDate?: string | null;
+    windows: Record<'1' | '5' | '20', VietnamSectorForeignFlowWindow>;
+  };
+};
+
+export type VietnamSectorStrengthResponse = {
+  status: 'ready' | 'partial' | 'unavailable';
+  dataState: 'ready' | 'partial' | 'unavailable';
+  usable: boolean;
+  indexCode: 'VN30';
+  universe: 'current_vn30_membership';
+  source: 'SSI';
+  membershipSource: 'SSI IndexComponents';
+  classificationSource: 'SSI ICB';
+  priceSource: 'SSI DailyOhlc';
+  foreignFlowSource: 'SSI DailyStockPrice';
+  aggregationBasis: 'current_vn30_icb_equal_weight';
+  historicalConstituentCorrect: false;
+  officialSectorIndexReturn: false;
+  priceSessionDate?: string | null;
+  priceFinality: 'completed_daily' | 'provisional_daily' | 'unknown';
+  foreignFlowLatestCompletedDate?: string | null;
+  membership: {
+    requestedCount: 30;
+    memberCount: number;
+    classifiedCount: number;
+    unclassifiedCount: number;
+    unclassifiedSymbols: string[];
+    groupCount: number;
+    duplicateSymbols: string[];
+    symbols: string[];
+    cacheStatus?: string | null;
+  };
+  groups: VietnamSectorStrengthGroup[];
   timing: Record<string, number>;
   diagnostics: Record<string, unknown>;
   fetchedAt: string;
@@ -2809,6 +2889,21 @@ export const stocksApi = {
     });
     const { toCamelCase } = await import('./utils');
     return toCamelCase<VietnamMarketBreadthResponse>(response.data);
+  },
+
+  async getVietnamSectorStrength(
+    options?: { forceRefresh?: boolean; signal?: AbortSignal },
+  ): Promise<VietnamSectorStrengthResponse> {
+    const response = await apiClient.get('/api/v1/stocks/vn/sector-strength', {
+      params: {
+        index_code: 'VN30',
+        ...(options?.forceRefresh ? { force_refresh: true } : {}),
+      },
+      timeout: 120000,
+      signal: options?.signal,
+    });
+    const { toCamelCase } = await import('./utils');
+    return toCamelCase<VietnamSectorStrengthResponse>(response.data);
   },
 
   async getVietnamRealtimeQuotes(tickers: string[], options?: { signal?: AbortSignal }): Promise<VietnamRealtimeResponse> {

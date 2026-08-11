@@ -134,6 +134,22 @@ These fields are additive Phase 4.8A metrics. They live under watchlist `indicat
 | `short_term_zones.support[]` / `short_term_zones.resistance[]` | Nearest compact price zones below/above latest daily close | Derived from SSI DailyOhlc | VND | no, empty list when none/unavailable | no | Support / Resistance table columns and optional selected-ticker daily-chart bands | At most two zones per side, nearest first; each item exposes only `lower` and `upper`; zones crossing the latest close are excluded. The chart visualizes existing values only as clipped S1/S2/R1/R2 bands and does not calculate ranges, add requests, or alter the chart scale. |
 | `ssi_derived_metrics_status` / `ssi_derived_metrics_source` | Aggregate status/source label for Phase 4.8A metrics | Service-derived from SSI inputs | text | no | no | Source/status copy | Source is `SSI DailyOhlc + SSI DailyStockPrice`. |
 
+## VN30 Sector Strength Fields
+
+| Field | Meaning |
+| --- | --- |
+| `membership.classified_count` / `unclassified_count` | Current authoritative VN30 members with/without provider SSI ICB code and name. |
+| `groups[].return_1d.value` | Equal-weight arithmetic mean of usable member `current_close / previous_close - 1`; not an official sector-index return. |
+| `groups[].direction` | Advance/decline/unchanged counts copied from session-aligned VN30 breadth classifications. |
+| `groups[].ma20` / `ma50` | Above/not-above counts, independent usable denominator, and percent above for the current group. |
+| `groups[].foreign_flow.windows[1|5|20]` | Accepted completed DailyStockPrice foreign net value plus requested/usable/missing member coverage for exact returned-session windows. |
+| `price_session_date` / `price_finality` | Canonical DailyOhlc breadth session and finality. |
+| `foreign_flow_latest_completed_date` | Latest accepted completed DailyStockPrice session represented by the groups; it need not equal the price date. |
+
+Sector null means unavailable, insufficient, incomplete, anomalous, or
+unclassified. Zero is emitted only from real price arithmetic or accepted
+provider flow values. Current provisional ForeignRoomMessage is excluded.
+
 ## Foreign Flow Fields
 
 | Field | Meaning | Source | Unit | Nullable | Canonical | UI placement | Known caveat |

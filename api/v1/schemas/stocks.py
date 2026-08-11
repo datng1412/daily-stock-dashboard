@@ -654,6 +654,9 @@ class VietnamIndexComponent(BaseModel):
     market: Optional[str] = None
     weight: Optional[float] = None
     name: Optional[str] = None
+    industry: Optional[str] = None
+    icb_code: Optional[str] = None
+    icb_name: Optional[str] = None
     source: Optional[str] = None
     missing_fields: List[str] = Field(default_factory=list)
     field_coverage: Dict[str, bool] = Field(default_factory=dict)
@@ -2167,6 +2170,106 @@ class VietnamMarketBreadthResponse(BaseModel):
     coverage: VietnamMarketBreadthCoverage
     items: List[VietnamMarketBreadthItem] = Field(default_factory=list, max_length=30)
     timing: VietnamMarketBreadthTiming
+    diagnostics: Dict[str, Any] = Field(default_factory=dict)
+    fetched_at: str
+
+
+class VietnamSectorStrengthMembership(BaseModel):
+    requested_count: Literal[30] = 30
+    member_count: int = Field(ge=0, le=30)
+    classified_count: int = Field(ge=0, le=30)
+    unclassified_count: int = Field(ge=0, le=30)
+    unclassified_symbols: List[str] = Field(default_factory=list, max_length=30)
+    group_count: int = Field(ge=0, le=30)
+    duplicate_symbols: List[str] = Field(default_factory=list, max_length=30)
+    symbols: List[str] = Field(default_factory=list, max_length=30)
+    cache_status: Optional[str] = None
+
+
+class VietnamSectorReturn(BaseModel):
+    value: Optional[float] = None
+    usable_count: int = Field(ge=0, le=30)
+    missing_count: int = Field(ge=0, le=30)
+    method: Literal["equal_weight_mean_member_close_return"]
+
+
+class VietnamSectorDirection(BaseModel):
+    advances: int = Field(ge=0, le=30)
+    declines: int = Field(ge=0, le=30)
+    unchanged: int = Field(ge=0, le=30)
+    usable_count: int = Field(ge=0, le=30)
+
+
+class VietnamSectorMovingAverage(BaseModel):
+    above_count: int = Field(ge=0, le=30)
+    not_above_count: int = Field(ge=0, le=30)
+    usable_count: int = Field(ge=0, le=30)
+    percent_above: Optional[float] = Field(default=None, ge=0, le=100)
+
+
+class VietnamSectorForeignFlowWindow(BaseModel):
+    requested_sessions: Literal[1, 5, 20]
+    requested_member_count: int = Field(ge=0, le=30)
+    usable_member_count: int = Field(ge=0, le=30)
+    missing_member_count: int = Field(ge=0, le=30)
+    usable_symbols: List[str] = Field(default_factory=list, max_length=30)
+    coverage_ratio: Optional[float] = Field(default=None, ge=0, le=1)
+    complete: bool
+    net_value: Optional[int] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    observed_start_dates: List[str] = Field(default_factory=list)
+    observed_end_dates: List[str] = Field(default_factory=list)
+
+
+class VietnamSectorForeignFlow(BaseModel):
+    source: Literal["SSI DailyStockPrice"] = "SSI DailyStockPrice"
+    finality: Literal["completed_accepted"] = "completed_accepted"
+    latest_completed_date: Optional[str] = None
+    windows: Dict[str, VietnamSectorForeignFlowWindow] = Field(default_factory=dict)
+
+
+class VietnamSectorStrengthGroup(BaseModel):
+    icb_code: str
+    icb_name: str
+    member_symbols: List[str] = Field(default_factory=list, max_length=30)
+    member_count: int = Field(ge=1, le=30)
+    data_state: Literal["ready", "partial", "unavailable"]
+    return_1d: VietnamSectorReturn
+    direction: VietnamSectorDirection
+    ma20: VietnamSectorMovingAverage
+    ma50: VietnamSectorMovingAverage
+    foreign_flow: VietnamSectorForeignFlow
+
+
+class VietnamSectorStrengthTiming(BaseModel):
+    breadth_ms: float = Field(ge=0)
+    classification_ms: float = Field(ge=0)
+    foreign_flow_ms: float = Field(ge=0)
+    calculation_ms: float = Field(ge=0)
+    total_ms: float = Field(ge=0)
+
+
+class VietnamSectorStrengthResponse(BaseModel):
+    status: Literal["ready", "partial", "unavailable"]
+    data_state: Literal["ready", "partial", "unavailable"]
+    usable: bool
+    index_code: Literal["VN30"] = "VN30"
+    universe: Literal["current_vn30_membership"] = "current_vn30_membership"
+    source: Literal["SSI"] = "SSI"
+    membership_source: Literal["SSI IndexComponents"] = "SSI IndexComponents"
+    classification_source: Literal["SSI ICB"] = "SSI ICB"
+    price_source: Literal["SSI DailyOhlc"] = "SSI DailyOhlc"
+    foreign_flow_source: Literal["SSI DailyStockPrice"] = "SSI DailyStockPrice"
+    aggregation_basis: Literal["current_vn30_icb_equal_weight"] = "current_vn30_icb_equal_weight"
+    historical_constituent_correct: Literal[False] = False
+    official_sector_index_return: Literal[False] = False
+    price_session_date: Optional[str] = None
+    price_finality: Literal["completed_daily", "provisional_daily", "unknown"]
+    foreign_flow_latest_completed_date: Optional[str] = None
+    membership: VietnamSectorStrengthMembership
+    groups: List[VietnamSectorStrengthGroup] = Field(default_factory=list, max_length=30)
+    timing: VietnamSectorStrengthTiming
     diagnostics: Dict[str, Any] = Field(default_factory=dict)
     fetched_at: str
 

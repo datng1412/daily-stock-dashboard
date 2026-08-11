@@ -2,7 +2,7 @@
 
 ## Current repository-grounded capability state
 
-Last updated: 2026-08-10
+Last updated: 2026-08-11
 
 Current production SSI market-data routing is V3-only through the sole provider
 router. The historical migration notes later in this file describe conditions
@@ -15,20 +15,19 @@ at their original dates and do not override this section.
 | Current Foreign Flow | `PRODUCTION_READY` | Active-session `ForeignRoomMessage` publication is accepted through the process-shared manager, symbol current route, current-VN30/current-Industry aggregation, FastAPI, and browser. Values remain provisional, non-persistent, and truthfully stale when transport freshness expires. |
 | Optional SSI live surfaces | `IMPLEMENTED_NEEDS_LIVE_ACCEPTANCE` | Realtime X quote, X-QUOTE order book, and MI advance/decline semantics remain dependent on live runtime/provider proof. |
 | Partial market capabilities | `PARTIAL` | Current-session 1-minute chart, X-TRADE event buffer, VNINDEX/DailyIndex completeness, full-watchlist latency, current-membership VN30 historical decomposition, and current-membership Industry history retain documented limitations. |
-| Market participation analytics | `PARTIAL` | VN30 current-membership price breadth, participation, and percentages above MA20/MA50 are production-ready from session-aligned SSI DailyOhlc. The broader group remains partial because HOSE breadth, new-high/new-low breadth, sector rotation, relative strength, VN risk mode, and alert rules do not yet exist. |
+| Market participation analytics | `PARTIAL` | VN30 current-membership breadth and current-ICB sector strength/rotation context are production-ready. The broader group remains partial because HOSE breadth, new-high/new-low breadth, relative strength, VN risk mode, and alert rules do not yet exist. |
 | Futures and automated proprietary sources | `BLOCKED_PROVIDER` | VN30 futures/F1M/basis/open-interest/volume contracts are unproven; automated proprietary data remains blocked by source and entitlement readiness. |
 | Proprietary product expansion | `DEFERRED` | Manual verified EOD infrastructure is experimental and has no accepted real financial row; it is not an active product priority. |
 
 ## Active next phase
 
-`VN-SECTOR-1 — Sector Strength & Rotation` is the next implementation phase.
-VN-BREADTH-1 is implemented with current authoritative SSI VN30 membership,
-session-aligned DailyOhlc, canonical MA20/MA50 semantics, independent usable
-denominators, and no historically constituent-correct claim. Positive runtime
-acceptance completed on 2026-08-11 with 30 exact SSI members, 30 aligned
-completed-session histories for 2026-08-10, reconciled direction and MA
-denominators, a four-worker maximum, real desktop/mobile rendering, and no
-fallback.
+`VN-RS-1 — Relative Strength` is the next implementation phase. VN-SECTOR-1 is
+production-ready from exact current VN30 membership, provider SSI ICB metadata,
+session-aligned breadth/DailyOhlc, and accepted completed DailyStockPrice
+foreign flow. Positive runtime acceptance on 2026-08-11 classified 30/30
+members into 13 groups, kept price and flow provenance on 2026-08-10, reused
+the breadth cache with zero additional DailyOhlc provider calls, and passed
+real desktop/mobile rendering without fallback.
 
 `VN-FF-SIGNAL-1` is complete. The existing completed symbol analytics now own
 an additive value-based signal contract for 1/5/20-session direction,
@@ -72,6 +71,10 @@ established bounded 45-second readiness deadline rather than 20 seconds.
   measured acquisition path are proven.
 - VN30 futures/basis remains blocked pending a provider contract for instrument
   identity, price, expiry, multiplier, volume, and open interest.
+- VN-SECTOR-1 uses the current VN30 cohort and current SSI ICB classification;
+  it is not historically constituent-correct and does not claim official
+  sector-index returns. Small one-member groups remain visible rather than
+  being assigned an inferred confidence or composite score.
 
 ## Fix-when-touched technical debt
 
@@ -86,6 +89,16 @@ The dated entries below preserve implementation and validation history. Any
 then-current V2 ownership, proprietary `indexSummary` interpretation, current
 Foreign Flow limitation, or next-phase statement is superseded by the current
 capability state above.
+
+- VN-SECTOR-1 adds a current-VN30 ICB sector comparison API and compact
+  `/vietnam` table. It reuses the accepted breadth/DailyOhlc cache and completed
+  DailyStockPrice history, preserves independent price/flow dates and missing
+  coverage, and introduces no official index, composite score, recommendation,
+  or fallback. Positive 2026-08-11 acceptance classified 30/30 members into 13
+  groups. Cold/warm sector latency was 25.63/1.10 seconds; warm and
+  breadth-to-sector paths made zero additional DailyOhlc provider calls. Real
+  desktop/mobile rendering passed after correcting the digit-adjacent API key
+  normalization from `return_1d` to frontend `return1D`.
 
 - VN-BREADTH-1 adds `GET /api/v1/stocks/vn/market-breadth?index_code=VN30` and a compact `/vietnam` card. Exact 30-member SSI IndexComponents membership gates a four-worker minimal DailyOhlc fan-out; the full watchlist path is not used. The modal latest provider date (latest date on ties) is the single session basis, mismatched members are excluded without forward-fill, and existing `calculate_vietnam_indicators` supplies SMA20/SMA50. Direction, MA20, and MA50 denominators remain independent; participation is `(advances + declines) / direction_usable_count`. Positive acceptance on 2026-08-11 resolved 30 exact members and 30 aligned completed-session histories for 2026-08-10: 24 advances, 4 declines, 2 unchanged; 25/30 above MA20; 15/30 above MA50; participation 93.33%; no missing or mismatched symbols. Cold HTTP/service timing was 12.59/12.58 seconds with 30 provider calls and maximum concurrency four; immediate warm timing was 0.52/0.51 seconds with 30 cache hits and zero provider calls. The real desktop/mobile page used one page-owned aggregate request, retained values through one manual refresh, and had no breadth console error, malformed numeric text, horizontal overflow, or fallback. Focused validation passed 10 backend and 224 frontend tests plus TypeScript, ESLint, and Vite.
 

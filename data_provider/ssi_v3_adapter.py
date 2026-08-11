@@ -1930,6 +1930,9 @@ class SsiFastConnectV3Adapter:
                 "market": exchange,
                 "weight": None,
                 "name": row.get("name") or row.get("name_en"),
+                "industry": row.get("industry") or row.get("icb_name"),
+                "icb_code": row.get("icb_code"),
+                "icb_name": row.get("icb_name") or row.get("industry"),
                 "source": SSI_V3_SOURCE,
             }
         rows = [deduped[symbol] for symbol in sorted(deduped)]

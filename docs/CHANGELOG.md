@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [new feature] Add current-VN30 SSI ICB sector strength with equal-weight 1D return, breadth participation, and accepted completed foreign-flow windows.
+- [improvement] Reuse shared VN30 breadth, DailyOhlc, IndexComponents, and completed-flow caches so breadth-to-sector adds no duplicate DailyOhlc fan-out.
+- [test] Cover sector reconciliation, missing-versus-zero flow, cache reuse, API normalization, local sorting, retained refresh, and real desktop/mobile rendering.
+- [documentation] Document VN-SECTOR-1 sources, current-cohort limitations, API fields, UI states, performance, and positive runtime acceptance.
+
 - [new feature] Add session-aligned current-membership VN30 price breadth from SSI IndexComponents and minimal DailyOhlc histories with direction, participation, and MA20/MA50 coverage.
 - [new feature] Add a compact one-request VN30 breadth card to the Vietnam dashboard with ready, partial, retained-refresh, and unavailable states.
 - [test] Cover VN30 breadth formulas, session mismatch, missing-versus-zero, exact membership gating, bounded concurrency/cache reuse, API serialization, and desktop/mobile rendering.

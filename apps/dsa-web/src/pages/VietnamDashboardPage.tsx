@@ -23,7 +23,7 @@ import {
 import { AppPage, Badge, Button, Loading, Tooltip } from '../components/common';
 import { VietnamLightweightChart } from '../components/charts/VietnamLightweightChart';
 import { normalizeShortTermChartZones } from '../components/charts/lightweightChartData';
-import { DataQualitySummary, ForeignFlowWatchlistRankings, OrderBookLadder, VietnamMarketBreadth } from '../components/dashboard';
+import { DataQualitySummary, ForeignFlowWatchlistRankings, OrderBookLadder, VietnamMarketBreadth, VietnamSectorStrength } from '../components/dashboard';
 import {
   tradeTapeLifecycleDetail,
   useTradeTapeLifecycle,
@@ -34,6 +34,7 @@ import {
 } from '../components/vietnam-dashboard';
 import { useForeignFlowWatchlistBatch } from '../hooks/useForeignFlowWatchlistBatch';
 import { useVietnamMarketBreadth } from '../hooks/useVietnamMarketBreadth';
+import { useVietnamSectorStrength } from '../hooks/useVietnamSectorStrength';
 import { cn } from '../utils/cn';
 import { buildVietnamConditionSummary, VIETNAM_CONDITION_SUMMARY_SUBTITLE } from '../utils/vietnamConditionSummary';
 import { getRealtimeSnapshotDisplayState, type RealtimeSnapshotDisplayResult } from '../utils/realtimeSnapshotState';
@@ -5308,6 +5309,13 @@ const VietnamDashboardPage: React.FC = () => {
     error: marketBreadthError,
     refresh: refreshMarketBreadth,
   } = useVietnamMarketBreadth();
+  const {
+    data: sectorStrength,
+    loading: sectorStrengthLoading,
+    updating: sectorStrengthUpdating,
+    error: sectorStrengthError,
+    refresh: refreshSectorStrength,
+  } = useVietnamSectorStrength();
 
   const loadRealtimeQuotes = useCallback(async (tickers: string[]) => {
     const seen = new Set<string>();
@@ -6597,6 +6605,7 @@ const VietnamDashboardPage: React.FC = () => {
         onRefresh={() => {
           refreshWatchlistData(false);
           void refreshMarketBreadth();
+          void refreshSectorStrength();
         }}
       />
 
@@ -6606,6 +6615,14 @@ const VietnamDashboardPage: React.FC = () => {
         updating={marketBreadthUpdating}
         error={marketBreadthError}
         onRefresh={() => { void refreshMarketBreadth(); }}
+      />
+
+      <VietnamSectorStrength
+        data={sectorStrength}
+        loading={sectorStrengthLoading}
+        updating={sectorStrengthUpdating}
+        error={sectorStrengthError}
+        onRefresh={() => { void refreshSectorStrength(); }}
       />
 
       {isUpdatingWatchlist || (hasCommittedData && error) ? (

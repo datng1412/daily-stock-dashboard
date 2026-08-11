@@ -34,6 +34,15 @@ acceptance used one page-owned request and one manual refresh, retained values
 during refresh, and showed no breadth console error, horizontal overflow, or
 fallback.
 
+VN-SECTOR-1 reuses that breadth result and cache rather than issuing a second
+DailyOhlc fan-out. SSI V3 IndexComponents now preserves optional `icb_code`,
+`icb_name`, and `industry` from normalized securities metadata. The aggregate
+groups the exact current VN30 cohort, computes equal-weight 1D member returns,
+reuses direction/MA classifications, and reads accepted completed
+DailyStockPrice flow for 1/5/20 sessions. Current provisional room flow is not
+included. Live acceptance on 2026-08-11 classified 30/30 into 13 groups; the
+breadth-to-sector sequence made zero additional DailyOhlc provider calls.
+
 ## VN-FF-LIVE-1 acceptance boundary
 
 `VN-FF-LIVE-1 — Current Foreign Flow Production Acceptance` was accepted on

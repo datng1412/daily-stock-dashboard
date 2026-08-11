@@ -50,6 +50,7 @@ from api.v1.schemas.stocks import (
     VietnamIndexListResponse,
     VietnamMarketIndexPulseResponse,
     VietnamMarketBreadthResponse,
+    VietnamSectorStrengthResponse,
     VietnamObservabilityResponse,
     VietnamRealtimeResponse,
     VietnamRealtimeTradesResponse,
@@ -87,6 +88,7 @@ from src.services.vietnam_flow_data_service import (
 )
 from src.services.vietnam_market_service import VietnamMarketService, vietnam_intraday_chart_health_snapshot
 from src.services.vietnam_market_breadth_service import VietnamMarketBreadthService
+from src.services.vietnam_sector_strength_service import VietnamSectorStrengthService
 from src.services.vietnam_observability import vietnam_observability_snapshot
 from data_provider.base import normalize_stock_code
 from data_provider.vnstock_realtime_fetcher import VnstockRealtimeFetcher
@@ -1075,6 +1077,40 @@ def get_vietnam_market_breadth(
             status_code=500,
             detail={"error": "vn_market_breadth_failed", "message": "Vietnam market breadth request failed"},
         ) from exc
+
+
+@router.get(
+    "/vn/sector-strength",
+    response_model=VietnamSectorStrengthResponse,
+    summary="Current-membership VN30 sector strength context",
+    description=(
+        "Return current-cohort SSI ICB group participation, equal-weight 1D member return, "
+        "and accepted completed SSI DailyStockPrice foreign flow. This is not an official sector index."
+    ),
+)
+def get_vietnam_sector_strength(
+    index_code: str = Query("VN30", description="VN-SECTOR-1 supports VN30 only."),
+    force_refresh: bool = Query(False, description="Refresh the shared VN30 breadth and completed-flow inputs."),
+) -> VietnamSectorStrengthResponse:
+    try:
+        payload = VietnamSectorStrengthService().build(
+            index_code=index_code,
+            force_refresh=force_refresh,
+        )
+        return VietnamSectorStrengthResponse(**payload)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"error": "vn_sector_strength_invalid_request", "message": str(exc)},
+        ) from exc
+    except Exception as exc:
+        logger.error("Vietnam sector strength failed", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={"error": "vn_sector_strength_failed", "message": "Vietnam sector strength request failed"},
+        ) from exc
+
+
 @router.get(
     "/vn/proprietary-flow/eod/history",
     response_model=VietnamProprietaryFlowEodHistoryResponse,
