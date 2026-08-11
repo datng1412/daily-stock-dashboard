@@ -10,6 +10,7 @@ import {
   type VietnamForeignFlowBatchResponse,
   type VietnamIndexComponentsResponse,
   type VietnamIndexListResponse,
+  type VietnamMarketBreadthResponse,
   type VietnamObservabilityResponse,
   type VietnamRealtimeResponse,
   type VietnamRealtimeTradesResponse,
@@ -42,6 +43,7 @@ vi.mock('../../api/stocks', () => ({
     getVietnamIndexList: vi.fn(),
     getVietnamDailyIndex: vi.fn(),
     getVietnamIndexComponents: vi.fn(),
+    getVietnamMarketBreadth: vi.fn(),
   },
 }));
 
@@ -532,6 +534,7 @@ const mockedGetVietnamCompanyNews = vi.mocked(stocksApi.getVietnamCompanyNews);
 const mockedGetVietnamIndexList = vi.mocked(stocksApi.getVietnamIndexList);
 const mockedGetVietnamDailyIndex = vi.mocked(stocksApi.getVietnamDailyIndex);
 const mockedGetVietnamIndexComponents = vi.mocked(stocksApi.getVietnamIndexComponents);
+const mockedGetVietnamMarketBreadth = vi.mocked(stocksApi.getVietnamMarketBreadth);
 
 const makeIntradayChartResponse = (
   ticker = 'FPT',
@@ -635,6 +638,53 @@ const makeDailyIndexResponse = (
   ],
   count: 2,
   fallbackUsed: false,
+  ...overrides,
+});
+
+const makeMarketBreadthResponse = (
+  overrides: Partial<VietnamMarketBreadthResponse> = {},
+): VietnamMarketBreadthResponse => ({
+  status: 'ready',
+  dataState: 'ready',
+  usable: true,
+  indexCode: 'VN30',
+  source: 'SSI',
+  sourceEndpoint: 'securitiesSummary',
+  aggregationBasis: 'current_vn30_membership_daily_ohlc',
+  historicalConstituentCorrect: false,
+  providerSessionDate: '2026-06-10',
+  finality: 'completed_daily',
+  freshness: 'fresh',
+  membership: {
+    status: 'ready',
+    source: 'SSI IndexComponents',
+    basis: 'current_vn30_membership',
+    memberCount: 30,
+    symbols: [...presetTickers.VN30],
+    duplicateCount: 0,
+    duplicateSymbols: [],
+    invalidCount: 0,
+  },
+  direction: { advances: 18, declines: 10, unchanged: 2, usableCount: 30 },
+  participation: { ratio: 28 / 30, formula: '(advances + declines) / direction_usable_count' },
+  ma20: { aboveCount: 20, notAboveCount: 9, usableCount: 29, percentAbove: 68.9655, formula: 'close > SMA(close, 20)' },
+  ma50: { aboveCount: 17, notAboveCount: 10, usableCount: 27, percentAbove: 62.963, formula: 'close > SMA(close, 50)' },
+  coverage: {
+    requestedCount: 30,
+    membershipCount: 30,
+    observedCount: 30,
+    alignedCount: 30,
+    directionUsableCount: 30,
+    ma20UsableCount: 29,
+    ma50UsableCount: 27,
+    missingCount: 0,
+    missingSymbols: [],
+    sessionMismatchCount: 0,
+    sessionMismatchSymbols: [],
+  },
+  timing: {},
+  diagnostics: {},
+  fetchedAt: '2026-06-10T09:00:00Z',
   ...overrides,
 });
 
@@ -1010,6 +1060,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     mockedGetVietnamIndexList.mockReset();
     mockedGetVietnamDailyIndex.mockReset();
     mockedGetVietnamIndexComponents.mockReset();
+    mockedGetVietnamMarketBreadth.mockReset();
     mockedGetVietnamMarketPhase.mockReset();
     mockedGetVietnamMarketPhase.mockReturnValue(makeMarketPhase());
     mockedGetVietnamWatchlist.mockImplementation(async (tickers) => makeResponse(tickers?.length ? tickers : defaultTickers));
@@ -1030,6 +1081,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     mockedGetVietnamIndexList.mockImplementation(async () => makeIndexListResponse());
     mockedGetVietnamDailyIndex.mockImplementation(async () => makeDailyIndexResponse());
     mockedGetVietnamIndexComponents.mockImplementation(async () => makeIndexComponentsResponse());
+    mockedGetVietnamMarketBreadth.mockImplementation(async () => makeMarketBreadthResponse());
   });
 
   afterEach(() => {
@@ -1046,6 +1098,17 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(chunkVietnamWatchlistTickers(tickers, 4).map((batch) => batch.length)).toEqual([4, 4, 4]);
     expect(chunkVietnamWatchlistTickers(tickers, 8).map((batch) => batch.length)).toEqual([8, 4]);
     expect(chunkVietnamWatchlistTickers(defaultTickers, vn30BatchSize).flat()).toEqual(defaultTickers);
+  });
+
+  it('owns one VN30 breadth request at page level and displays independent coverage', async () => {
+    render(<VietnamDashboardPage />);
+
+    expect(await screen.findByRole('heading', { name: 'Độ rộng VN30' })).toBeInTheDocument();
+    expect(screen.getByText('18 tăng')).toBeInTheDocument();
+    expect(screen.getByText('20 / 29')).toBeInTheDocument();
+    expect(screen.getByText('17 / 27')).toBeInTheDocument();
+    expect(mockedGetVietnamMarketBreadth).toHaveBeenCalledTimes(1);
+    expect(mockedGetVietnamMarketBreadth.mock.calls[0]?.[0]?.forceRefresh).toBe(false);
   });
 
   it('starts fresh empty localStorage without loading hardcoded default symbols', async () => {

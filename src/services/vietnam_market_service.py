@@ -4014,8 +4014,18 @@ class VietnamMarketService:
             raise RuntimeError("Mozyfin is disabled for VN dashboard runtime.")
         return self.manager.get_daily_data(normalize_vn_symbol(symbol), days=days)
 
-    def _daily_ohlcv_cache_key(self, symbol: str, provider: str, *, limit: int, days: int) -> Tuple[Any, ...]:
+    def _daily_ohlcv_cache_key(
+        self,
+        symbol: str,
+        provider: str,
+        *,
+        limit: int,
+        days: int,
+        purpose: Optional[str] = None,
+    ) -> Tuple[Any, ...]:
         params: Dict[str, Any] = {"timeframe": "1d", "limit": limit, "days": days}
+        if purpose:
+            params["purpose"] = purpose
         if provider == VN_PROVIDER_SSI:
             params["provider"] = VN_PROVIDER_SSI
             params["provider_version"] = "v3"
@@ -4084,6 +4094,82 @@ class VietnamMarketService:
                 }
 
         return load
+
+    def read_daily_ohlcv_history(
+        self,
+        symbol: str,
+        *,
+        limit: int = 55,
+        lookback_days: int = 120,
+        force_refresh: bool = False,
+    ) -> Dict[str, Any]:
+        """Read a minimal, cached SSI DailyOhlc history without watchlist enrichment."""
+        normalized_symbol = vn_ticker(symbol)
+        if not re.fullmatch(r"[A-Z0-9]{1,10}", normalized_symbol):
+            raise ValueError("Invalid Vietnam ticker")
+        safe_limit = max(51, min(int(limit), 80))
+        safe_lookback_days = max(90, min(int(lookback_days), 180))
+        to_date = datetime.now(VN_TIMEZONE).date()
+        from_date = to_date - timedelta(days=safe_lookback_days)
+        cache_key = self._daily_ohlcv_cache_key(
+            normalized_symbol,
+            VN_PROVIDER_SSI,
+            limit=safe_limit,
+            days=safe_lookback_days,
+            purpose="market_breadth",
+        )
+
+        def load() -> Tuple[pd.DataFrame, str, Dict[str, Any]]:
+            payload = self._get_ssi_rest_provider().get_daily_ohlcv(
+                normalized_symbol,
+                from_date=from_date.isoformat(),
+                to_date=to_date.isoformat(),
+                limit=safe_limit,
+            )
+            diagnostics = dict(payload.get("diagnostics") or {})
+            rows = payload.get("rows") or []
+            dataframe = self._ssi_ohlcv_dataframe(normalized_symbol, rows)
+            status = str(payload.get("status") or "unavailable")
+            return dataframe, VN_SOURCE_SSI, {
+                "status": "ok" if status in {"ok", "partial"} and not dataframe.empty else "unavailable",
+                "primary_source": VN_SOURCE_SSI,
+                "actual_source": VN_SOURCE_SSI,
+                "fallback_used": False,
+                "fallback_reason": None,
+                "unavailable_reason": (
+                    None
+                    if status in {"ok", "partial"} and not dataframe.empty
+                    else self._safe_provider_reason(payload, "SSI DailyOhlc unavailable")
+                ),
+                "provider_version": "v3",
+                "endpoint": "securitiesSummary",
+                "adapter": "SsiFastConnectV3Adapter",
+                "provider_status": status,
+                "diagnostics": diagnostics,
+            }
+
+        cache_result = _read_cache(
+            cache_key,
+            "ohlcv",
+            load,
+            force_refresh=force_refresh,
+        )
+        dataframe, source, provider_meta = self._unpack_daily_ohlcv_value(
+            cache_result["value"],
+            VN_PROVIDER_SSI,
+        )
+        entry = cache_result["entry"]
+        return {
+            "symbol": normalized_symbol,
+            "status": provider_meta.get("status") or ("ok" if not dataframe.empty else "unavailable"),
+            "source": source,
+            "dataframe": dataframe,
+            "cache_status": cache_result["status"],
+            "cache_error": cache_result.get("error"),
+            "fetched_at": _iso(entry.fetched_at),
+            "expires_at": _iso(entry.expires_at),
+            "provider_meta": provider_meta,
+        }
 
     def _intraday_payload_from_rows(
         self,
@@ -7386,6 +7472,7 @@ class VietnamMarketService:
         diagnostics.update(
             {
                 "cache_status": cache_result["status"],
+                "cache_fetched_at": _iso(cache_entry.fetched_at) if cache_entry else None,
                 "cache_ttl_seconds": (
                     VN_INDEX_COMPONENTS_CACHE_TTL_SECONDS
                     if result.get("status") == "ok" and bool(result.get("rows"))

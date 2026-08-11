@@ -78,7 +78,7 @@ is next.
   numeric null and cannot complete windows. Focused backend/frontend tests,
   Python compile, TypeScript, ESLint, and Vite build pass.
 
-### 3. VN-BREADTH-1 — VN30 Market Breadth Core (active next phase)
+### 3. VN-BREADTH-1 — VN30 Market Breadth Core (implemented; positive runtime proof pending)
 
 - **Goal:** calculate advance, decline, unchanged, participation ratio, percent
   above MA20, and percent above MA50 for current authoritative SSI VN30
@@ -97,6 +97,16 @@ is next.
   and no official index-contribution claim.
 - **Exit criteria:** requested, observed, usable, missing, and classified counts
   reconcile; latency is measured before any universe expansion.
+- **Implementation:** `GET /api/v1/stocks/vn/market-breadth` resolves exact
+  current SSI VN30 membership, reads only 55 DailyOhlc rows per member with a
+  four-worker cap and the existing cache/single-flight path, aligns on one
+  provider session, and reuses canonical SMA20/SMA50 calculations. The
+  `/vietnam` page owns one aggregate request and shows counts plus independent
+  coverage denominators.
+- **Acceptance:** deterministic backend/frontend validation is complete. A
+  bounded API run returned typed membership-unavailable (cold 348 ms, warm
+  35 ms) with zero DailyOhlc fan-out and no fallback, so positive 30-member
+  provider reconciliation remains pending rather than fabricated.
 
 ### 4. VN-SECTOR-1 — Sector Strength & Rotation
 
@@ -153,8 +163,8 @@ is next.
 
 | Class | Items |
 | --- | --- |
-| `NEXT` | `VN-BREADTH-1` |
-| `LATER` | `VN-SECTOR-1`, `VN-RS-1`, `VN-ALERT-1`, eventual risk-mode synthesis |
+| `NEXT` | `VN-SECTOR-1` |
+| `LATER` | `VN-RS-1`, `VN-ALERT-1`, eventual risk-mode synthesis; positive-provider VN-BREADTH-1 runtime confirmation |
 | `BLOCKED` | VN30 futures/F1M/basis/open interest/futures volume; automated proprietary source; HOSE-wide breadth until an authoritative scalable universe is proven; fundamentals/corporate actions without a provider/legal contract |
 | `DEFERRED` | Proprietary product expansion; broader stock-detail polish; macro/risk asset integration; optional news-provider expansion |
 | `DROP / DO NOT PLAN` | Hardcoded five-symbol defaults; guessed anomaly repair; raw-table-only feature phases; AI/ML investment scoring; automatic recommendations; dynamic request-handler subscriptions; unsupported SSI-field reinterpretation; new fallback providers for SSI-owned fields without explicit approval |

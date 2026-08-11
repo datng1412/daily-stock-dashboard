@@ -49,6 +49,7 @@ from api.v1.schemas.stocks import (
     VietnamIndexComponentsResponse,
     VietnamIndexListResponse,
     VietnamMarketIndexPulseResponse,
+    VietnamMarketBreadthResponse,
     VietnamObservabilityResponse,
     VietnamRealtimeResponse,
     VietnamRealtimeTradesResponse,
@@ -85,6 +86,7 @@ from src.services.vietnam_flow_data_service import (
     VietnamFlowDataService,
 )
 from src.services.vietnam_market_service import VietnamMarketService, vietnam_intraday_chart_health_snapshot
+from src.services.vietnam_market_breadth_service import VietnamMarketBreadthService
 from src.services.vietnam_observability import vietnam_observability_snapshot
 from data_provider.base import normalize_stock_code
 from data_provider.vnstock_realtime_fetcher import VnstockRealtimeFetcher
@@ -1046,6 +1048,33 @@ def get_vietnam_proprietary_flow_eod_latest(
         ) from exc
 
 
+@router.get(
+    "/vn/market-breadth",
+    response_model=VietnamMarketBreadthResponse,
+    summary="Current-membership VN30 daily market breadth",
+    description="Return session-aligned VN30 direction and MA20/MA50 breadth derived only from SSI IndexComponents and DailyOhlc.",
+)
+def get_vietnam_market_breadth(
+    index_code: str = Query("VN30", description="VN-BREADTH-1 supports VN30 only."),
+    force_refresh: bool = Query(False, description="Bypass fresh SSI membership and DailyOhlc cache entries."),
+) -> VietnamMarketBreadthResponse:
+    try:
+        payload = VietnamMarketBreadthService().build(
+            index_code=index_code,
+            force_refresh=force_refresh,
+        )
+        return VietnamMarketBreadthResponse(**payload)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"error": "vn_market_breadth_invalid_request", "message": str(exc)},
+        ) from exc
+    except Exception as exc:
+        logger.error("Vietnam market breadth failed", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={"error": "vn_market_breadth_failed", "message": "Vietnam market breadth request failed"},
+        ) from exc
 @router.get(
     "/vn/proprietary-flow/eod/history",
     response_model=VietnamProprietaryFlowEodHistoryResponse,

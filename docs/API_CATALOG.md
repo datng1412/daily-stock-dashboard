@@ -283,6 +283,10 @@ Usable rows may include `index_code`, `exchange`, `index_value`, `estimated_inde
 
 Uses the explicit normalized `index_code` to call SSI IndexComponents directly. SSI IndexList remains separate discovery/diagnostic context and does not block an explicit component request. Returns real SSI component rows and count when available; otherwise `status=unavailable` and `rows=[]`. Successful results are process-cached for 300 seconds; unavailable/rate-limited/no-row results are negatively cached for 60 seconds. Missing optional name/weight/exchange fields remain null. The endpoint never supplies hardcoded VN30 membership or another-provider fallback.
 
+### `GET /api/v1/stocks/vn/market-breadth`
+
+Supports `index_code=VN30` only and optional `force_refresh`. Exact current SSI IndexComponents membership gates a minimal SSI DailyOhlc fan-out; any other scope is HTTP 422, and unavailable/non-30 membership performs no symbol-history calls. The response exposes typed `ready|partial|unavailable`, provider session/finality/freshness, current-membership metadata, advance/decline/unchanged counts, participation, MA20/MA50 above/not-above counts and independent denominators, missing/mismatched symbols, member provenance, cache/call counters, bounded timing, `historical_constituent_correct=false`, and `fallback_used=false`. Missing metrics are null, not zero.
+
 ## `GET /api/v1/stocks/vn/company/{ticker}`
 
 Purpose:

@@ -17,6 +17,16 @@ aggregation, FastAPI, and a real desktop/mobile browser. Current values remain
 provisional and non-persistent; stale transport state retains last-known values
 with an explicit stale/disconnected status.
 
+VN-BREADTH-1 reuses the sole V3 provider through exact current
+IndexComponents membership and a minimal 55-row DailyOhlc history reader. The
+reader keeps the existing process cache/single-flight behavior, adds a
+purpose-specific cache key, requests a bounded 120-calendar-day window, and
+fans out with at most four workers. No V2, fallback provider, full watchlist
+hydration, MI breadth, or foreign-flow substitution is involved. The bounded
+2026-08-10 local acceptance returned typed IndexComponents unavailable before
+symbol fan-out (cold 348 ms, warm 35 ms); positive 30-member DailyOhlc breadth
+proof therefore remains pending provider availability.
+
 ## VN-FF-LIVE-1 acceptance boundary
 
 `VN-FF-LIVE-1 — Current Foreign Flow Production Acceptance` was accepted on

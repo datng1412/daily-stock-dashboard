@@ -2170,6 +2170,73 @@ export type VietnamIndexComponentsResponse = {
   diagnostics?: Record<string, unknown>;
 };
 
+export type VietnamMarketBreadthResponse = {
+  status: 'ready' | 'partial' | 'unavailable';
+  dataState: 'ready' | 'partial' | 'unavailable';
+  usable: boolean;
+  indexCode: 'VN30';
+  source: 'SSI';
+  sourceEndpoint: 'securitiesSummary';
+  aggregationBasis: 'current_vn30_membership_daily_ohlc';
+  historicalConstituentCorrect: false;
+  providerSessionDate?: string | null;
+  finality: 'completed_daily' | 'provisional_daily' | 'unknown';
+  freshness: 'fresh' | 'partial' | 'stale' | 'unavailable';
+  membership: {
+    status: 'ready' | 'unavailable';
+    source: 'SSI IndexComponents';
+    basis: 'current_vn30_membership';
+    memberCount: number;
+    symbols: string[];
+    duplicateCount: number;
+    duplicateSymbols: string[];
+    invalidCount: number;
+    fetchedAt?: string | null;
+    cacheStatus?: string | null;
+    reason?: string | null;
+  };
+  direction?: {
+    advances: number;
+    declines: number;
+    unchanged: number;
+    usableCount: number;
+  } | null;
+  participation?: {
+    ratio?: number | null;
+    formula: '(advances + declines) / direction_usable_count';
+  } | null;
+  ma20?: {
+    aboveCount: number;
+    notAboveCount: number;
+    usableCount: number;
+    percentAbove?: number | null;
+    formula: 'close > SMA(close, 20)';
+  } | null;
+  ma50?: {
+    aboveCount: number;
+    notAboveCount: number;
+    usableCount: number;
+    percentAbove?: number | null;
+    formula: 'close > SMA(close, 50)';
+  } | null;
+  coverage: {
+    requestedCount: 30;
+    membershipCount: number;
+    observedCount: number;
+    alignedCount: number;
+    directionUsableCount: number;
+    ma20UsableCount: number;
+    ma50UsableCount: number;
+    missingCount: number;
+    missingSymbols: string[];
+    sessionMismatchCount: number;
+    sessionMismatchSymbols: string[];
+  };
+  timing: Record<string, number>;
+  diagnostics: Record<string, unknown>;
+  fetchedAt: string;
+};
+
 export type VietnamCorporateActionEvent = {
   ticker: string;
   eventId?: string | null;
@@ -2727,6 +2794,21 @@ export const stocksApi = {
     });
     const { toCamelCase } = await import('./utils');
     return toCamelCase<VietnamIndexComponentsResponse>(response.data);
+  },
+
+  async getVietnamMarketBreadth(
+    options?: { forceRefresh?: boolean; signal?: AbortSignal },
+  ): Promise<VietnamMarketBreadthResponse> {
+    const response = await apiClient.get('/api/v1/stocks/vn/market-breadth', {
+      params: {
+        index_code: 'VN30',
+        ...(options?.forceRefresh ? { force_refresh: true } : {}),
+      },
+      timeout: 120000,
+      signal: options?.signal,
+    });
+    const { toCamelCase } = await import('./utils');
+    return toCamelCase<VietnamMarketBreadthResponse>(response.data);
   },
 
   async getVietnamRealtimeQuotes(tickers: string[], options?: { signal?: AbortSignal }): Promise<VietnamRealtimeResponse> {

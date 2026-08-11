@@ -23,7 +23,7 @@ import {
 import { AppPage, Badge, Button, Loading, Tooltip } from '../components/common';
 import { VietnamLightweightChart } from '../components/charts/VietnamLightweightChart';
 import { normalizeShortTermChartZones } from '../components/charts/lightweightChartData';
-import { DataQualitySummary, ForeignFlowWatchlistRankings, OrderBookLadder } from '../components/dashboard';
+import { DataQualitySummary, ForeignFlowWatchlistRankings, OrderBookLadder, VietnamMarketBreadth } from '../components/dashboard';
 import {
   tradeTapeLifecycleDetail,
   useTradeTapeLifecycle,
@@ -33,6 +33,7 @@ import {
   type VietnamLiveChannelSummary,
 } from '../components/vietnam-dashboard';
 import { useForeignFlowWatchlistBatch } from '../hooks/useForeignFlowWatchlistBatch';
+import { useVietnamMarketBreadth } from '../hooks/useVietnamMarketBreadth';
 import { cn } from '../utils/cn';
 import { buildVietnamConditionSummary, VIETNAM_CONDITION_SUMMARY_SUBTITLE } from '../utils/vietnamConditionSummary';
 import { getRealtimeSnapshotDisplayState, type RealtimeSnapshotDisplayResult } from '../utils/realtimeSnapshotState';
@@ -5300,6 +5301,13 @@ const VietnamDashboardPage: React.FC = () => {
     refresh: refreshForeignFlow,
     forceRefresh: forceRefreshForeignFlow,
   } = useForeignFlowWatchlistBatch(logicalWatchlist);
+  const {
+    data: marketBreadth,
+    loading: marketBreadthLoading,
+    updating: marketBreadthUpdating,
+    error: marketBreadthError,
+    refresh: refreshMarketBreadth,
+  } = useVietnamMarketBreadth();
 
   const loadRealtimeQuotes = useCallback(async (tickers: string[]) => {
     const seen = new Set<string>();
@@ -6586,7 +6594,18 @@ const VietnamDashboardPage: React.FC = () => {
         freshnessLabel={formatRelativeAge(data?.dataQuality.lastRefreshTime ?? lastRefreshAt)}
         refreshing={loading && !forceLoading}
         refreshDisabled={!hasActiveWatchlist || isWatchlistFilterBusy}
-        onRefresh={() => refreshWatchlistData(false)}
+        onRefresh={() => {
+          refreshWatchlistData(false);
+          void refreshMarketBreadth();
+        }}
+      />
+
+      <VietnamMarketBreadth
+        data={marketBreadth}
+        loading={marketBreadthLoading}
+        updating={marketBreadthUpdating}
+        error={marketBreadthError}
+        onRefresh={() => { void refreshMarketBreadth(); }}
       />
 
       {isUpdatingWatchlist || (hasCommittedData && error) ? (

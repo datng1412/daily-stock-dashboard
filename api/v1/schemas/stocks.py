@@ -2077,6 +2077,100 @@ class VietnamProprietaryFlowResponse(BaseModel):
     diagnostics: Dict[str, Any] = Field(default_factory=dict)
 
 
+class VietnamMarketBreadthMembership(BaseModel):
+    status: Literal["ready", "unavailable"]
+    source: Literal["SSI IndexComponents"] = "SSI IndexComponents"
+    basis: Literal["current_vn30_membership"] = "current_vn30_membership"
+    member_count: int = Field(ge=0, le=30)
+    symbols: List[str] = Field(default_factory=list, max_length=30)
+    duplicate_count: int = Field(ge=0)
+    duplicate_symbols: List[str] = Field(default_factory=list)
+    invalid_count: int = Field(ge=0)
+    fetched_at: Optional[str] = None
+    cache_status: Optional[str] = None
+    reason: Optional[str] = None
+
+
+class VietnamMarketBreadthDirection(BaseModel):
+    advances: int = Field(ge=0, le=30)
+    declines: int = Field(ge=0, le=30)
+    unchanged: int = Field(ge=0, le=30)
+    usable_count: int = Field(ge=0, le=30)
+
+
+class VietnamMarketBreadthParticipation(BaseModel):
+    ratio: Optional[float] = Field(default=None, ge=0, le=1)
+    formula: Literal["(advances + declines) / direction_usable_count"]
+
+
+class VietnamMarketBreadthMovingAverage(BaseModel):
+    above_count: int = Field(ge=0, le=30)
+    not_above_count: int = Field(ge=0, le=30)
+    usable_count: int = Field(ge=0, le=30)
+    percent_above: Optional[float] = Field(default=None, ge=0, le=100)
+    formula: Literal["close > SMA(close, 20)", "close > SMA(close, 50)"]
+
+
+class VietnamMarketBreadthCoverage(BaseModel):
+    requested_count: Literal[30] = 30
+    membership_count: int = Field(ge=0, le=30)
+    observed_count: int = Field(ge=0, le=30)
+    aligned_count: int = Field(ge=0, le=30)
+    direction_usable_count: int = Field(ge=0, le=30)
+    ma20_usable_count: int = Field(ge=0, le=30)
+    ma50_usable_count: int = Field(ge=0, le=30)
+    missing_count: int = Field(ge=0, le=30)
+    missing_symbols: List[str] = Field(default_factory=list, max_length=30)
+    session_mismatch_count: int = Field(ge=0, le=30)
+    session_mismatch_symbols: List[str] = Field(default_factory=list, max_length=30)
+
+
+class VietnamMarketBreadthItem(BaseModel):
+    symbol: str
+    latest_date: Optional[str] = None
+    session_aligned: bool
+    current_close: Optional[float] = None
+    previous_close: Optional[float] = None
+    direction: Optional[Literal["advance", "decline", "unchanged"]] = None
+    ma20: Optional[float] = None
+    above_ma20: Optional[bool] = None
+    ma50: Optional[float] = None
+    above_ma50: Optional[bool] = None
+    reasons: List[str] = Field(default_factory=list)
+
+
+class VietnamMarketBreadthTiming(BaseModel):
+    membership_ms: float = Field(ge=0)
+    daily_ohlc_ms: float = Field(ge=0)
+    calculation_ms: float = Field(ge=0)
+    serialization_ms: float = Field(ge=0)
+    total_ms: float = Field(ge=0)
+
+
+class VietnamMarketBreadthResponse(BaseModel):
+    status: Literal["ready", "partial", "unavailable"]
+    data_state: Literal["ready", "partial", "unavailable"]
+    usable: bool
+    index_code: Literal["VN30"] = "VN30"
+    source: Literal["SSI"] = "SSI"
+    source_endpoint: Literal["securitiesSummary"] = "securitiesSummary"
+    aggregation_basis: Literal["current_vn30_membership_daily_ohlc"] = "current_vn30_membership_daily_ohlc"
+    historical_constituent_correct: Literal[False] = False
+    provider_session_date: Optional[str] = None
+    finality: Literal["completed_daily", "provisional_daily", "unknown"]
+    freshness: Literal["fresh", "partial", "stale", "unavailable"]
+    membership: VietnamMarketBreadthMembership
+    direction: Optional[VietnamMarketBreadthDirection] = None
+    participation: Optional[VietnamMarketBreadthParticipation] = None
+    ma20: Optional[VietnamMarketBreadthMovingAverage] = None
+    ma50: Optional[VietnamMarketBreadthMovingAverage] = None
+    coverage: VietnamMarketBreadthCoverage
+    items: List[VietnamMarketBreadthItem] = Field(default_factory=list, max_length=30)
+    timing: VietnamMarketBreadthTiming
+    diagnostics: Dict[str, Any] = Field(default_factory=dict)
+    fetched_at: str
+
+
 class VietnamProprietaryFlowEodRow(BaseModel):
     """One verified manual HOSE completed-session aggregate."""
 
