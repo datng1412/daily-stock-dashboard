@@ -287,6 +287,8 @@ Uses the explicit normalized `index_code` to call SSI IndexComponents directly. 
 
 Supports `index_code=VN30` only and optional `force_refresh`. Exact current SSI IndexComponents membership gates a minimal SSI DailyOhlc fan-out; any other scope is HTTP 422, and unavailable/non-30 membership performs no symbol-history calls. The response exposes typed `ready|partial|unavailable`, provider session/finality/freshness, current-membership metadata, advance/decline/unchanged counts, participation, MA20/MA50 above/not-above counts and independent denominators, missing/mismatched symbols, member provenance, cache/call counters, bounded timing, `historical_constituent_correct=false`, and `fallback_used=false`. Missing metrics are null, not zero.
 
+Positive acceptance on 2026-08-11 returned HTTP 200 `ready` for 30/30 exact members aligned to completed provider session 2026-08-10. Counts reconciled as 24 advance, 4 decline, 2 unchanged; 25/30 above MA20; 15/30 above MA50; participation 93.33%; zero missing and zero mismatched. Cold/warm HTTP latency was 12.59/0.52 seconds, with 30 provider calls on cold and 30 cache hits on warm. No fallback or full-watchlist hydration occurred.
+
 ## `GET /api/v1/stocks/vn/company/{ticker}`
 
 Purpose:

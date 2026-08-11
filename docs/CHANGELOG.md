@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [new feature] Add a compact one-request VN30 breadth card to the Vietnam dashboard with ready, partial, retained-refresh, and unavailable states.
 - [test] Cover VN30 breadth formulas, session mismatch, missing-versus-zero, exact membership gating, bounded concurrency/cache reuse, API serialization, and desktop/mobile rendering.
 - [documentation] Document the VN30 breadth API, formulas, coverage, current-membership bias, provider-blocked positive runtime proof, and advance the roadmap to VN-SECTOR-1.
+- [documentation] Accept VN-BREADTH-1 with exact 30-member SSI membership, 30 aligned DailyOhlc histories, reconciled direction/MA breadth, measured cold/warm cache behavior, and real desktop/mobile rendering without fallback.
 - [documentation] Align the API catalog and UI state contract with the retained VN-FF-LIVE-1 production acceptance evidence.
 - [fix] Normalize digit-suffixed Foreign Flow signal fields before rendering so valid VN30 responses cannot crash the workspace.
 - [new feature] Add backend-owned explainable completed Foreign Flow direction, momentum, reversal, and unusual-intensity signals to symbol detail and VN30 Overview without new requests or polling.

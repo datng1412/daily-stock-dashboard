@@ -23,9 +23,16 @@ reader keeps the existing process cache/single-flight behavior, adds a
 purpose-specific cache key, requests a bounded 120-calendar-day window, and
 fans out with at most four workers. No V2, fallback provider, full watchlist
 hydration, MI breadth, or foreign-flow substitution is involved. The bounded
-2026-08-10 local acceptance returned typed IndexComponents unavailable before
-symbol fan-out (cold 348 ms, warm 35 ms); positive 30-member DailyOhlc breadth
-proof therefore remains pending provider availability.
+2026-08-11 positive acceptance resolved exactly 30 normalized unique members
+and 30 aligned DailyOhlc histories for completed provider session 2026-08-10.
+The API reconciled 24 advances, 4 declines, 2 unchanged, 25/30 above MA20,
+15/30 above MA50, and 93.33% participation with no missing or mismatched
+symbols. Cold HTTP/service latency was 12.59/12.58 seconds with 30 provider
+calls and maximum concurrency four; the immediate warm request was 0.52/0.51
+seconds with 30 cache hits and zero provider calls. Real desktop/mobile browser
+acceptance used one page-owned request and one manual refresh, retained values
+during refresh, and showed no breadth console error, horizontal overflow, or
+fallback.
 
 ## VN-FF-LIVE-1 acceptance boundary
 

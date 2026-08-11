@@ -220,6 +220,8 @@ Provider endpoint details, HTTP status, retryability, and raw provider summaries
 | Fixture mode | Fixture/test mode is explicitly enabled by runtime config or test fixture | `Fixture data mode.` | Fixture-backed fields only with source/fixture labels | Treating fixture output as live SSI data | Diagnostics identify fixture source without secrets | Smoke/test asserts fixture labels are explicit |
 | Cache stale | Cached block is older than expected for its source, or stale flag is set | `Cached data may be stale.` | Existing values if source/date/fetched_at remain visible | Claiming stale data is current, or mixing cache error with provider unavailable | Cache age, source block, and fetched time in diagnostics | Cache-state UI test and observability contract test |
 
+VN-BREADTH-1 positive browser acceptance on 2026-08-11 rendered the real 30/30 completed-session result at 1366x768 and 390x844. The page made one aggregate breadth request, no per-symbol frontend requests, and one manual refresh request; the prior usable values remained visible during refresh. Both viewports showed session, direction, MA20/MA50 numerator/denominator/percentage, participation, and coverage without `NaN`, `Infinity`, page-level horizontal overflow, or breadth console errors.
+
 ## Copy Rules
 
 - Use source-aware labels: `SSI DailyOhlc`, `SSI DailyStockPrice`, `SSI IntradayOhlc`, `SSI realtime`, `SSI trade tape`, `SSI X-QUOTE order book`, `SSI R foreign room`, `SSI F trading session/status stream`, and `SSI MI market-index stream`.

@@ -78,7 +78,7 @@ is next.
   numeric null and cannot complete windows. Focused backend/frontend tests,
   Python compile, TypeScript, ESLint, and Vite build pass.
 
-### 3. VN-BREADTH-1 — VN30 Market Breadth Core (implemented; positive runtime proof pending)
+### 3. VN-BREADTH-1 — VN30 Market Breadth Core (production-ready)
 
 - **Goal:** calculate advance, decline, unchanged, participation ratio, percent
   above MA20, and percent above MA50 for current authoritative SSI VN30
@@ -103,10 +103,15 @@ is next.
   provider session, and reuses canonical SMA20/SMA50 calculations. The
   `/vietnam` page owns one aggregate request and shows counts plus independent
   coverage denominators.
-- **Acceptance:** deterministic backend/frontend validation is complete. A
-  bounded API run returned typed membership-unavailable (cold 348 ms, warm
-  35 ms) with zero DailyOhlc fan-out and no fallback, so positive 30-member
-  provider reconciliation remains pending rather than fabricated.
+- **Acceptance:** positive runtime acceptance completed on 2026-08-11. SSI
+  returned exactly 30 normalized unique members; all 30 histories aligned to
+  completed provider session 2026-08-10 with 24 advances, 4 declines, 2
+  unchanged, 25/30 above MA20, 15/30 above MA50, and 93.33% participation.
+  Cold HTTP/service latency was 12.59/12.58 seconds with 30 provider calls and
+  concurrency four; the immediate warm request was 0.52/0.51 seconds with 30
+  cache hits and no provider calls. Desktop/mobile browser acceptance proved
+  one page-owned aggregate request and one bounded manual refresh with retained
+  values, no overflow or console errors, and no fallback.
 
 ### 4. VN-SECTOR-1 — Sector Strength & Rotation
 
@@ -164,7 +169,7 @@ is next.
 | Class | Items |
 | --- | --- |
 | `NEXT` | `VN-SECTOR-1` |
-| `LATER` | `VN-RS-1`, `VN-ALERT-1`, eventual risk-mode synthesis; positive-provider VN-BREADTH-1 runtime confirmation |
+| `LATER` | `VN-RS-1`, `VN-ALERT-1`, eventual risk-mode synthesis |
 | `BLOCKED` | VN30 futures/F1M/basis/open interest/futures volume; automated proprietary source; HOSE-wide breadth until an authoritative scalable universe is proven; fundamentals/corporate actions without a provider/legal contract |
 | `DEFERRED` | Proprietary product expansion; broader stock-detail polish; macro/risk asset integration; optional news-provider expansion |
 | `DROP / DO NOT PLAN` | Hardcoded five-symbol defaults; guessed anomaly repair; raw-table-only feature phases; AI/ML investment scoring; automatic recommendations; dynamic request-handler subscriptions; unsupported SSI-field reinterpretation; new fallback providers for SSI-owned fields without explicit approval |
