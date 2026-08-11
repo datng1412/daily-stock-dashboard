@@ -307,6 +307,25 @@ membership/DailyOhlc/flow call and cache counts, maximum concurrency four,
 `full_watchlist_hydration_used=false`, `current_foreign_flow_included=false`,
 and `fallback_used=false`.
 
+### `GET /api/v1/stocks/vn/relative-strength/{ticker}`
+
+Accepts one normalized Vietnam ticker and optional `force_refresh`. It returns
+independent exact-session 1D/5D/20D selected-stock comparisons versus provider
+VNINDEX, provider VN30, and current SSI VN30 same-ICB peers. Stock/peer closes
+are SSI DailyOhlc; index values are exact-date SSI V3
+`indexSummary.indexValue`. Each ready window exposes start/end sessions, stock
+return percent, benchmark return percent, relative performance in percentage
+points, aligned-session count, and null reason. Missing inputs remain null and
+produce partial/unavailable state; no forward-fill or fallback is used.
+
+Industry peers exclude the selected ticker and are equal-weight. The response
+labels the cohort `historical_constituent_correct=false` and
+`official_sector_index_return=false`, exposes requested/usable/missing peers,
+and does not claim an official sector index. Diagnostics include bounded
+timing, cache/provider-call counters, maximum concurrency four,
+`full_watchlist_hydration_used=false`, `synthetic_index_used=false`, and
+`fallback_used=false`. Invalid tickers return HTTP 422.
+
 ## `GET /api/v1/stocks/vn/company/{ticker}`
 
 Purpose:

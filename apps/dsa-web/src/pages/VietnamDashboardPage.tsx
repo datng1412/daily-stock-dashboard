@@ -23,7 +23,7 @@ import {
 import { AppPage, Badge, Button, Loading, Tooltip } from '../components/common';
 import { VietnamLightweightChart } from '../components/charts/VietnamLightweightChart';
 import { normalizeShortTermChartZones } from '../components/charts/lightweightChartData';
-import { DataQualitySummary, ForeignFlowWatchlistRankings, OrderBookLadder, VietnamMarketBreadth, VietnamSectorStrength } from '../components/dashboard';
+import { DataQualitySummary, ForeignFlowWatchlistRankings, OrderBookLadder, VietnamMarketBreadth, VietnamRelativeStrength, VietnamSectorStrength } from '../components/dashboard';
 import {
   tradeTapeLifecycleDetail,
   useTradeTapeLifecycle,
@@ -35,6 +35,7 @@ import {
 import { useForeignFlowWatchlistBatch } from '../hooks/useForeignFlowWatchlistBatch';
 import { useVietnamMarketBreadth } from '../hooks/useVietnamMarketBreadth';
 import { useVietnamSectorStrength } from '../hooks/useVietnamSectorStrength';
+import { useVietnamRelativeStrength } from '../hooks/useVietnamRelativeStrength';
 import { cn } from '../utils/cn';
 import { buildVietnamConditionSummary, VIETNAM_CONDITION_SUMMARY_SUBTITLE } from '../utils/vietnamConditionSummary';
 import { getRealtimeSnapshotDisplayState, type RealtimeSnapshotDisplayResult } from '../utils/realtimeSnapshotState';
@@ -5316,6 +5317,13 @@ const VietnamDashboardPage: React.FC = () => {
     error: sectorStrengthError,
     refresh: refreshSectorStrength,
   } = useVietnamSectorStrength();
+  const {
+    data: relativeStrength,
+    loading: relativeStrengthLoading,
+    updating: relativeStrengthUpdating,
+    error: relativeStrengthError,
+    refresh: refreshRelativeStrength,
+  } = useVietnamRelativeStrength(selectedTicker);
 
   const loadRealtimeQuotes = useCallback(async (tickers: string[]) => {
     const seen = new Set<string>();
@@ -6623,6 +6631,15 @@ const VietnamDashboardPage: React.FC = () => {
         updating={sectorStrengthUpdating}
         error={sectorStrengthError}
         onRefresh={() => { void refreshSectorStrength(); }}
+      />
+
+      <VietnamRelativeStrength
+        ticker={selectedTicker}
+        data={relativeStrength}
+        loading={relativeStrengthLoading}
+        updating={relativeStrengthUpdating}
+        error={relativeStrengthError}
+        onRefresh={() => { void refreshRelativeStrength(); }}
       />
 
       {isUpdatingWatchlist || (hasCommittedData && error) ? (

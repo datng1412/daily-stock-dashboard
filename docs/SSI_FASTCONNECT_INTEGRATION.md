@@ -43,6 +43,29 @@ DailyStockPrice flow for 1/5/20 sessions. Current provisional room flow is not
 included. Live acceptance on 2026-08-11 classified 30/30 into 13 groups; the
 breadth-to-sector sequence made zero additional DailyOhlc provider calls.
 
+VN-RS-1 uses exact-date SSI V3 `indexSummary` as the provider-backed historical
+VNINDEX/VN30 benchmark contract. The endpoint accepts one `tradingDate`, so the
+service requests the selected stock's latest 21 provider sessions with maximum
+concurrency four, validates returned date and positive `indexValue`, and caches
+each `(index_code, session)` point for 300 seconds (negative result 60 seconds).
+The stock and current same-ICB VN30 peer histories reuse the existing bounded
+DailyOhlc reader/cache. Exact stock/index session intersections determine
+market windows; peers require the selected stock's exact start/end sessions.
+There is no synthetic index, forward-fill, V2/external fallback, or official
+industry-index reinterpretation.
+
+Bounded positive acceptance on 2026-08-11 returned 21/21 exact VNINDEX and
+VN30 points through 2026-08-10. FPT cold HTTP latency was 8.99 seconds with 42
+benchmark calls; the immediate warm request was 0.05 seconds with 42 benchmark
+hits and no provider call. After breadth and sector hydration, the next FPT
+relative-strength read remained 0.03 seconds and added no stock, membership,
+peer, or benchmark provider call. FPT's current software group had no other
+VN30 peer, so Industry stayed unavailable; VCB proved ready bank-peer values.
+In a separate cold breadth-to-sector-to-VCB sequence, RS completed in 8.06
+seconds, used 12 peer DailyOhlc cache hits plus one selected-stock hit, made
+zero peer or stock DailyOhlc calls, and made only its 42 cold exact-date index
+calls.
+
 ## VN-FF-LIVE-1 acceptance boundary
 
 `VN-FF-LIVE-1 — Current Foreign Flow Production Acceptance` was accepted on

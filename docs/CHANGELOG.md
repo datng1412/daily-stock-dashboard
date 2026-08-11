@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [new feature] Add exact-session selected-stock relative performance versus SSI VNINDEX, VN30, and equal-weight current same-ICB VN30 peers for 1D, 5D, and 20D.
+- [improvement] Reuse bounded DailyOhlc, IndexComponents, and per-session index caches with one selected-ticker frontend request and stale-response protection.
+- [test] Cover return formulas, exact alignment, missing/zero/partial peer semantics, cache reuse, API normalization, request ownership, and desktop/mobile rendering.
+- [documentation] Accept VN-RS-1 with provider benchmark proof, methodology, performance, current-cohort limitations, and advance the roadmap to VN-ALERT-1.
 - [new feature] Add current-VN30 SSI ICB sector strength with equal-weight 1D return, breadth participation, and accepted completed foreign-flow windows.
 - [improvement] Reuse shared VN30 breadth, DailyOhlc, IndexComponents, and completed-flow caches so breadth-to-sector adds no duplicate DailyOhlc fan-out.
 - [test] Cover sector reconciliation, missing-versus-zero flow, cache reuse, API normalization, local sorting, retained refresh, and real desktop/mobile rendering.

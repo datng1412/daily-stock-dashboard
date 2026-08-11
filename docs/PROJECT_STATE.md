@@ -15,19 +15,19 @@ at their original dates and do not override this section.
 | Current Foreign Flow | `PRODUCTION_READY` | Active-session `ForeignRoomMessage` publication is accepted through the process-shared manager, symbol current route, current-VN30/current-Industry aggregation, FastAPI, and browser. Values remain provisional, non-persistent, and truthfully stale when transport freshness expires. |
 | Optional SSI live surfaces | `IMPLEMENTED_NEEDS_LIVE_ACCEPTANCE` | Realtime X quote, X-QUOTE order book, and MI advance/decline semantics remain dependent on live runtime/provider proof. |
 | Partial market capabilities | `PARTIAL` | Current-session 1-minute chart, X-TRADE event buffer, VNINDEX/DailyIndex completeness, full-watchlist latency, current-membership VN30 historical decomposition, and current-membership Industry history retain documented limitations. |
-| Market participation analytics | `PARTIAL` | VN30 current-membership breadth and current-ICB sector strength/rotation context are production-ready. The broader group remains partial because HOSE breadth, new-high/new-low breadth, relative strength, VN risk mode, and alert rules do not yet exist. |
+| Market participation analytics | `PARTIAL` | VN30 current-membership breadth, current-ICB sector context, and selected-stock relative performance versus provider VNINDEX/VN30/current peers are production-ready. The broader group remains partial because HOSE breadth, new-high/new-low breadth, VN risk mode, and alert rules do not yet exist. |
 | Futures and automated proprietary sources | `BLOCKED_PROVIDER` | VN30 futures/F1M/basis/open-interest/volume contracts are unproven; automated proprietary data remains blocked by source and entitlement readiness. |
 | Proprietary product expansion | `DEFERRED` | Manual verified EOD infrastructure is experimental and has no accepted real financial row; it is not an active product priority. |
 
 ## Active next phase
 
-`VN-RS-1 — Relative Strength` is the next implementation phase. VN-SECTOR-1 is
-production-ready from exact current VN30 membership, provider SSI ICB metadata,
-session-aligned breadth/DailyOhlc, and accepted completed DailyStockPrice
-foreign flow. Positive runtime acceptance on 2026-08-11 classified 30/30
-members into 13 groups, kept price and flow provenance on 2026-08-10, reused
-the breadth cache with zero additional DailyOhlc provider calls, and passed
-real desktop/mobile rendering without fallback.
+`VN-ALERT-1 — Watchlist Intelligence` is the next implementation phase.
+VN-RS-1 is production-ready for selected-stock 1/5/20-session relative
+performance versus provider VNINDEX, provider VN30, and equal-weight current
+VN30 same-ICB peers. Positive runtime acceptance on 2026-08-11 proved exact
+SSI sessions through 2026-08-10, a usable FPT partial response, a complete VCB
+bank-peer response, bounded cold/warm cache behavior, and real desktop/mobile
+rendering without fallback or frontend fan-out.
 
 `VN-FF-SIGNAL-1` is complete. The existing completed symbol analytics now own
 an additive value-based signal contract for 1/5/20-session direction,
@@ -75,6 +75,10 @@ established bounded 45-second readiness deadline rather than 20 seconds.
   it is not historically constituent-correct and does not claim official
   sector-index returns. Small one-member groups remain visible rather than
   being assigned an inferred confidence or composite score.
+- VN-RS-1 Industry is an equal-weight proxy made from current same-ICB VN30
+  peers, excludes the selected ticker, is not historically constituent-correct,
+  and is not an official industry index. A current group with no other member,
+  such as FPT's observed software group, remains unavailable.
 
 ## Fix-when-touched technical debt
 
@@ -89,6 +93,21 @@ The dated entries below preserve implementation and validation history. Any
 then-current V2 ownership, proprietary `indexSummary` interpretation, current
 Foreign Flow limitation, or next-phase statement is superseded by the current
 capability state above.
+
+- VN-RS-1 adds `GET /api/v1/stocks/vn/relative-strength/{ticker}` and one
+  selected-ticker dashboard card. SSI DailyOhlc owns stock and peer closes;
+  exact-date SSI `indexSummary.indexValue` owns VNINDEX/VN30. Each independent
+  1/5/20-session window uses exact provider-session intersections and no
+  forward-fill. Industry is the equal-weight current-VN30 same-ICB peer cohort
+  excluding the selected ticker. FPT runtime was partial because its current
+  software group had no other VN30 peer; VCB was ready across all three
+  comparisons. FPT cold/warm HTTP latency was 8.99/0.05 seconds with 42/0
+  benchmark calls; breadth-to-sector-to-RS reused all stock, membership, and
+  benchmark inputs. A separate cold breadth-to-sector-to-VCB sequence reused
+  the selected history plus all 12 peer histories from cache with zero peer
+  DailyOhlc calls; only the 42 independent index points were cold.
+  Desktop/mobile browser acceptance made exactly one request per selected
+  ticker and had no console errors or page overflow.
 
 - VN-SECTOR-1 adds a current-VN30 ICB sector comparison API and compact
   `/vietnam` table. It reuses the accepted breadth/DailyOhlc cache and completed

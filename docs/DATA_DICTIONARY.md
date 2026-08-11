@@ -150,6 +150,26 @@ Sector null means unavailable, insufficient, incomplete, anomalous, or
 unclassified. Zero is emitted only from real price arithmetic or accepted
 provider flow values. Current provisional ForeignRoomMessage is excluded.
 
+## VN Relative Strength Fields
+
+| Field | Meaning |
+| --- | --- |
+| `comparisons.vnindex` / `comparisons.vn30` | Selected-stock return versus exact-date SSI `indexSummary.indexValue`; no synthetic benchmark. |
+| `comparisons.industry` | Equal-weight current-VN30 same-ICB peers excluding the selected ticker; not an official industry index. |
+| `windows.1d` / `5d` / `20d` | Independent provider-session windows requiring `N + 1` exact usable points. |
+| `stock_return_pct` | `(stock_end / stock_start - 1) * 100` on the disclosed exact sessions. |
+| `benchmark_return_pct` | Equivalent provider-index return or arithmetic mean of usable exact-session peer returns. |
+| `relative_performance_pp` | `stock_return_pct - benchmark_return_pct`; percentage points, not percent change of a ratio. |
+| `start_session` / `end_session` | Exact aligned provider dates used by the window; null when a complete aligned window is unavailable. |
+| `requested_peer_count` / `usable_peer_count` / `missing_peers` | Current-cohort Industry coverage for the window. Missing is not zero. |
+| `historical_constituent_correct` | Always false for the current-membership peer proxy. |
+| `official_sector_index_return` | Always false for the peer proxy. |
+
+Top-level and per-comparison `ready`, `partial`, and `unavailable` describe
+coverage, not a trading signal. A valid numeric zero remains zero; unavailable
+numbers remain null. `latest_price` and all canonical daily fields are
+unchanged.
+
 ## Foreign Flow Fields
 
 | Field | Meaning | Source | Unit | Nullable | Canonical | UI placement | Known caveat |

@@ -11,6 +11,7 @@ import {
   type VietnamIndexComponentsResponse,
   type VietnamIndexListResponse,
   type VietnamMarketBreadthResponse,
+  type VietnamRelativeStrengthResponse,
   type VietnamSectorStrengthResponse,
   type VietnamObservabilityResponse,
   type VietnamRealtimeResponse,
@@ -46,6 +47,7 @@ vi.mock('../../api/stocks', () => ({
     getVietnamIndexComponents: vi.fn(),
     getVietnamMarketBreadth: vi.fn(),
     getVietnamSectorStrength: vi.fn(),
+    getVietnamRelativeStrength: vi.fn(),
   },
 }));
 
@@ -538,6 +540,7 @@ const mockedGetVietnamDailyIndex = vi.mocked(stocksApi.getVietnamDailyIndex);
 const mockedGetVietnamIndexComponents = vi.mocked(stocksApi.getVietnamIndexComponents);
 const mockedGetVietnamMarketBreadth = vi.mocked(stocksApi.getVietnamMarketBreadth);
 const mockedGetVietnamSectorStrength = vi.mocked(stocksApi.getVietnamSectorStrength);
+const mockedGetVietnamRelativeStrength = vi.mocked(stocksApi.getVietnamRelativeStrength);
 
 const makeIntradayChartResponse = (
   ticker = 'FPT',
@@ -710,6 +713,27 @@ const makeSectorStrengthResponse = (): VietnamSectorStrengthResponse => ({
     } },
   }],
   timing: {}, diagnostics: {}, fetchedAt: '2026-06-10T09:00:00Z',
+});
+
+const makeRelativeStrengthWindows = (): VietnamRelativeStrengthResponse['comparisons']['vnindex']['windows'] => ({
+  '1d': { requestedSessions: 1, status: 'ready', complete: true, startSession: '2026-06-09', endSession: '2026-06-10', stockReturnPct: 3, benchmarkReturnPct: 2, relativePerformancePp: 1, alignedSessionCount: 2, missingPeers: [] },
+  '5d': { requestedSessions: 5, status: 'ready', complete: true, startSession: '2026-06-03', endSession: '2026-06-10', stockReturnPct: 3, benchmarkReturnPct: 2, relativePerformancePp: 1, alignedSessionCount: 6, missingPeers: [] },
+  '20d': { requestedSessions: 20, status: 'ready', complete: true, startSession: '2026-05-12', endSession: '2026-06-10', stockReturnPct: 3, benchmarkReturnPct: 2, relativePerformancePp: 1, alignedSessionCount: 21, missingPeers: [] },
+});
+
+const makeRelativeStrengthResponse = (ticker = 'FPT'): VietnamRelativeStrengthResponse => ({
+  status: 'ready', dataState: 'ready', usable: true, ticker, stockSource: 'SSI DailyOhlc',
+  stockLatestSession: '2026-06-10', stockSessionCount: 55, historicalConstituentCorrect: false,
+  comparisons: Object.fromEntries(['vnindex', 'vn30', 'industry'].map((key) => [key, {
+    status: 'ready', usable: true, benchmarkCode: key === 'industry' ? '9537' : key.toUpperCase(),
+    benchmarkName: key === 'industry' ? 'Technology' : key.toUpperCase(), source: key === 'industry' ? 'SSI DailyOhlc + SSI ICB' : 'SSI indexSummary',
+    sourceEndpoint: key === 'industry' ? 'securitiesSummary + securitiesByBoard?index=VN30' : '/api/v3/data/indexSummary',
+    actualField: key === 'industry' ? 'close' : 'indexValue',
+    methodology: key === 'industry' ? 'current_vn30_icb_equal_weight_peers_excluding_selected' : 'provider_index_value_exact_aligned_sessions',
+    peerSymbols: key === 'industry' ? ['HPG'] : [],
+    windows: makeRelativeStrengthWindows(),
+  }])) as VietnamRelativeStrengthResponse['comparisons'],
+  timing: { totalMs: 10 }, diagnostics: {}, fetchedAt: '2026-06-10T09:00:00Z',
 });
 
 const makeObservabilityResponse = (overrides: Partial<VietnamObservabilityResponse> = {}): VietnamObservabilityResponse => ({
@@ -1086,6 +1110,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     mockedGetVietnamIndexComponents.mockReset();
     mockedGetVietnamMarketBreadth.mockReset();
     mockedGetVietnamSectorStrength.mockReset();
+    mockedGetVietnamRelativeStrength.mockReset();
     mockedGetVietnamMarketPhase.mockReset();
     mockedGetVietnamMarketPhase.mockReturnValue(makeMarketPhase());
     mockedGetVietnamWatchlist.mockImplementation(async (tickers) => makeResponse(tickers?.length ? tickers : defaultTickers));
@@ -1108,6 +1133,7 @@ describe('VietnamDashboardPage watchlist loading', () => {
     mockedGetVietnamIndexComponents.mockImplementation(async () => makeIndexComponentsResponse());
     mockedGetVietnamMarketBreadth.mockImplementation(async () => makeMarketBreadthResponse());
     mockedGetVietnamSectorStrength.mockImplementation(async () => makeSectorStrengthResponse());
+    mockedGetVietnamRelativeStrength.mockImplementation(async (ticker) => makeRelativeStrengthResponse(ticker));
   });
 
   afterEach(() => {
@@ -1144,6 +1170,17 @@ describe('VietnamDashboardPage watchlist loading', () => {
     expect(within(screen.getByTestId('vn30-sector-strength')).getByText('Banks')).toBeInTheDocument();
     expect(mockedGetVietnamSectorStrength).toHaveBeenCalledTimes(1);
     expect(mockedGetVietnamSectorStrength.mock.calls[0]?.[0]?.forceRefresh).toBe(false);
+  });
+
+  it('owns one relative-strength request for the selected ticker without peer fan-out', async () => {
+    window.history.replaceState({}, '', '/vietnam?watchlist=FPT,HPG&ticker=FPT');
+    render(<VietnamDashboardPage />);
+
+    expect(await screen.findByRole('heading', { name: 'Relative Strength · FPT' })).toBeInTheDocument();
+    expect(screen.getByTestId('relative-strength-row-vnindex')).toHaveTextContent('+1.00pp');
+    expect(mockedGetVietnamRelativeStrength).toHaveBeenCalledTimes(1);
+    expect(mockedGetVietnamRelativeStrength.mock.calls[0]?.[0]).toBe('FPT');
+    expect(mockedGetVietnamRelativeStrength.mock.calls[0]?.[1]?.forceRefresh).toBe(false);
   });
 
   it('starts fresh empty localStorage without loading hardcoded default symbols', async () => {

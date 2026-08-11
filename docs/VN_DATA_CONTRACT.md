@@ -852,6 +852,39 @@ differ. Shared breadth, IndexComponents, DailyOhlc, completed-flow cache, and
 single-flight paths are reused; there is no full watchlist hydration, fallback,
 or frontend member/sector fan-out.
 
+### Selected-stock relative performance
+
+`GET /api/v1/stocks/vn/relative-strength/{ticker}` compares one normalized
+selected ticker over independent 1, 5, and 20 provider-session windows. Stock
+and peer closes come only from SSI DailyOhlc. VNINDEX and VN30 values come only
+from exact-date SSI V3 `indexSummary.indexValue`; a missing provider point
+remains missing and is not replaced by a synthetic, reconstructed, or external
+series.
+
+For each market benchmark, the service intersects the stock and benchmark
+provider dates, selects the latest `N + 1` exact common sessions, and calculates
+`return_pct = (end / start - 1) * 100`. Relative performance is the transparent
+percentage-point difference `stock_return_pct - benchmark_return_pct`. There
+is no forward-fill, interpolation, calendar-day substitution, beta, alpha,
+composite score, or recommendation.
+
+Industry uses current SSI VN30 IndexComponents classification. Peers are the
+other current VN30 members with the same non-empty provider ICB code, excluding
+the selected ticker. Each usable peer must have both of the selected stock's
+exact start/end provider sessions; the benchmark return is their equal-weight
+arithmetic mean. Missing peers reduce coverage and produce partial state. No
+usable peer produces unavailable state, not zero. This proxy is
+`historical_constituent_correct=false`, `official_sector_index_return=false`,
+and must never be labelled an official industry index.
+
+The response exposes comparison/window states, exact start/end sessions,
+underlying stock and benchmark returns, relative percentage points, peer
+membership/coverage, provenance, bounded timing, and sanitized provider/cache
+counters. Index points use a 300-second positive and 60-second negative
+process cache with same-key single-flight; symbol histories and membership
+reuse their existing caches. `force_refresh=true` intentionally bypasses fresh
+entries. Missing metrics are null. `latest_price` ownership is unchanged.
+
 Foreign Flow Explorer v1 applies a shared completed-session selection contract to ticker, current VN30 basket, current-VN30 ICB industry, and supported proprietary VNINDEX/VN30/HOSE scopes. 1D/5D/20D/60D select distinct returned provider sessions; custom bounds are inclusive and limited to 120 calendar days. Metric selection is presentation-only and does not refetch when both value and volume already exist. Source session, fetched time, cache state/age, freshness, coverage, and anomaly are separate. CSV contains only selected loaded rows with raw numeric values. Current-session foreign/industry flow remains unavailable.
 
 Top-level `fresh_count`, `stale_count`, `empty_count`, and `unavailable_count` partition normalized symbols. `usable_count` is fresh plus stale; `coverage_ratio=usable_count/normalized_count`. State precedence is: all fresh usable is `ready`; all usable stale is `stale`; all empty is `empty`; mixed usable/non-usable is `partial`; otherwise provider failure is `unavailable`. Rankings are limited to the requested watchlist and contain latest/5-session/20-session top buys and sells. Null and zero values are excluded; signed net value determines direction; ticker breaks ties; stale or incomplete eligible rows remain marked rather than being dropped. No batch field changes SSI DailyOhlc ownership of `latest_price`.

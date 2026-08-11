@@ -50,6 +50,7 @@ from api.v1.schemas.stocks import (
     VietnamIndexListResponse,
     VietnamMarketIndexPulseResponse,
     VietnamMarketBreadthResponse,
+    VietnamRelativeStrengthResponse,
     VietnamSectorStrengthResponse,
     VietnamObservabilityResponse,
     VietnamRealtimeResponse,
@@ -89,6 +90,7 @@ from src.services.vietnam_flow_data_service import (
 from src.services.vietnam_market_service import VietnamMarketService, vietnam_intraday_chart_health_snapshot
 from src.services.vietnam_market_breadth_service import VietnamMarketBreadthService
 from src.services.vietnam_sector_strength_service import VietnamSectorStrengthService
+from src.services.vietnam_relative_strength_service import VietnamRelativeStrengthService
 from src.services.vietnam_observability import vietnam_observability_snapshot
 from data_provider.base import normalize_stock_code
 from data_provider.vnstock_realtime_fetcher import VnstockRealtimeFetcher
@@ -1108,6 +1110,38 @@ def get_vietnam_sector_strength(
         raise HTTPException(
             status_code=500,
             detail={"error": "vn_sector_strength_failed", "message": "Vietnam sector strength request failed"},
+        ) from exc
+
+
+@router.get(
+    "/vn/relative-strength/{ticker}",
+    response_model=VietnamRelativeStrengthResponse,
+    summary="Selected Vietnam stock relative performance",
+    description=(
+        "Return exact-session 1D/5D/20D percentage-point performance versus "
+        "provider VNINDEX, provider VN30, and current-VN30 same-ICB equal-weight peers."
+    ),
+)
+def get_vietnam_relative_strength(
+    ticker: str,
+    force_refresh: bool = Query(False, description="Refresh bounded stock, peer, membership, and benchmark inputs."),
+) -> VietnamRelativeStrengthResponse:
+    try:
+        payload = VietnamRelativeStrengthService().build(
+            ticker=ticker,
+            force_refresh=force_refresh,
+        )
+        return VietnamRelativeStrengthResponse(**payload)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"error": "vn_relative_strength_invalid_request", "message": str(exc)},
+        ) from exc
+    except Exception as exc:
+        logger.error("Vietnam relative strength failed", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={"error": "vn_relative_strength_failed", "message": "Vietnam relative strength request failed"},
         ) from exc
 
 

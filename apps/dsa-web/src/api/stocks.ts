@@ -2317,6 +2317,80 @@ export type VietnamSectorStrengthResponse = {
   fetchedAt: string;
 };
 
+export type VietnamRelativeStrengthWindow = {
+  requestedSessions: 1 | 5 | 20;
+  status: 'ready' | 'partial' | 'unavailable';
+  complete: boolean;
+  startSession?: string | null;
+  endSession?: string | null;
+  stockReturnPct?: number | null;
+  benchmarkReturnPct?: number | null;
+  relativePerformancePp?: number | null;
+  alignedSessionCount: number;
+  requestedPeerCount?: number | null;
+  usablePeerCount?: number | null;
+  missingPeers: string[];
+  reason?: string | null;
+};
+
+export type VietnamRelativeStrengthComparison = {
+  status: 'ready' | 'partial' | 'unavailable';
+  usable: boolean;
+  benchmarkCode?: string | null;
+  benchmarkName?: string | null;
+  source: string;
+  sourceEndpoint: string;
+  actualField: 'indexValue' | 'close';
+  methodology: 'provider_index_value_exact_aligned_sessions' | 'current_vn30_icb_equal_weight_peers_excluding_selected';
+  peerMemberCount?: number | null;
+  peerSymbols: string[];
+  historicalConstituentCorrect?: false | null;
+  officialSectorIndexReturn?: false | null;
+  windows: Record<'1d' | '5d' | '20d', VietnamRelativeStrengthWindow>;
+};
+
+export type VietnamRelativeStrengthResponse = {
+  status: 'ready' | 'partial' | 'unavailable';
+  dataState: 'ready' | 'partial' | 'unavailable';
+  usable: boolean;
+  ticker: string;
+  stockSource: 'SSI DailyOhlc';
+  stockLatestSession?: string | null;
+  stockSessionCount: number;
+  historicalConstituentCorrect: false;
+  comparisons: Record<'vnindex' | 'vn30' | 'industry', VietnamRelativeStrengthComparison>;
+  timing: { totalMs: number };
+  diagnostics: Record<string, unknown>;
+  fetchedAt: string;
+};
+
+type VietnamRelativeStrengthCamelCaseComparison = Omit<VietnamRelativeStrengthComparison, 'windows'> & {
+  windows?: Partial<Record<'1D' | '5D' | '20D', VietnamRelativeStrengthWindow>>;
+};
+
+type VietnamRelativeStrengthCamelCaseResponse = Omit<VietnamRelativeStrengthResponse, 'comparisons'> & {
+  comparisons?: Partial<Record<'vnindex' | 'vn30' | 'industry', VietnamRelativeStrengthCamelCaseComparison>>;
+};
+
+export const normalizeVietnamRelativeStrengthResponse = (
+  data: VietnamRelativeStrengthCamelCaseResponse,
+): VietnamRelativeStrengthResponse => ({
+  ...data,
+  comparisons: Object.fromEntries(
+    (['vnindex', 'vn30', 'industry'] as const).map((key) => {
+      const comparison = data.comparisons?.[key];
+      return [key, comparison ? {
+        ...comparison,
+        windows: {
+          '1d': comparison.windows?.['1D'],
+          '5d': comparison.windows?.['5D'],
+          '20d': comparison.windows?.['20D'],
+        },
+      } : undefined];
+    }),
+  ) as VietnamRelativeStrengthResponse['comparisons'],
+});
+
 export type VietnamCorporateActionEvent = {
   ticker: string;
   eventId?: string | null;
@@ -2904,6 +2978,21 @@ export const stocksApi = {
     });
     const { toCamelCase } = await import('./utils');
     return toCamelCase<VietnamSectorStrengthResponse>(response.data);
+  },
+
+  async getVietnamRelativeStrength(
+    ticker: string,
+    options?: { forceRefresh?: boolean; signal?: AbortSignal },
+  ): Promise<VietnamRelativeStrengthResponse> {
+    const response = await apiClient.get(`/api/v1/stocks/vn/relative-strength/${encodeURIComponent(ticker)}`, {
+      params: options?.forceRefresh ? { force_refresh: true } : undefined,
+      timeout: 120000,
+      signal: options?.signal,
+    });
+    const { toCamelCase } = await import('./utils');
+    return normalizeVietnamRelativeStrengthResponse(
+      toCamelCase<VietnamRelativeStrengthCamelCaseResponse>(response.data),
+    );
   },
 
   async getVietnamRealtimeQuotes(tickers: string[], options?: { signal?: AbortSignal }): Promise<VietnamRealtimeResponse> {

@@ -5,3 +5,4 @@ export * from './ForeignFlowWatchlistRankings';
 export * from './OrderBookLadder';
 export * from './VietnamMarketBreadth';
 export * from './VietnamSectorStrength';
+export * from './VietnamRelativeStrength';

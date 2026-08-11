@@ -2274,6 +2274,60 @@ class VietnamSectorStrengthResponse(BaseModel):
     fetched_at: str
 
 
+class VietnamRelativeStrengthWindow(BaseModel):
+    requested_sessions: Literal[1, 5, 20]
+    status: Literal["ready", "partial", "unavailable"]
+    complete: bool
+    start_session: Optional[str] = None
+    end_session: Optional[str] = None
+    stock_return_pct: Optional[float] = None
+    benchmark_return_pct: Optional[float] = None
+    relative_performance_pp: Optional[float] = None
+    aligned_session_count: int = Field(ge=0)
+    requested_peer_count: Optional[int] = Field(default=None, ge=0, le=30)
+    usable_peer_count: Optional[int] = Field(default=None, ge=0, le=30)
+    missing_peers: List[str] = Field(default_factory=list, max_length=30)
+    reason: Optional[str] = None
+
+
+class VietnamRelativeStrengthComparison(BaseModel):
+    status: Literal["ready", "partial", "unavailable"]
+    usable: bool
+    benchmark_code: Optional[str] = None
+    benchmark_name: Optional[str] = None
+    source: str
+    source_endpoint: str
+    actual_field: Literal["indexValue", "close"]
+    methodology: Literal[
+        "provider_index_value_exact_aligned_sessions",
+        "current_vn30_icb_equal_weight_peers_excluding_selected",
+    ]
+    peer_member_count: Optional[int] = Field(default=None, ge=0, le=30)
+    peer_symbols: List[str] = Field(default_factory=list, max_length=30)
+    historical_constituent_correct: Optional[Literal[False]] = None
+    official_sector_index_return: Optional[Literal[False]] = None
+    windows: Dict[str, VietnamRelativeStrengthWindow] = Field(default_factory=dict)
+
+
+class VietnamRelativeStrengthTiming(BaseModel):
+    total_ms: float = Field(ge=0)
+
+
+class VietnamRelativeStrengthResponse(BaseModel):
+    status: Literal["ready", "partial", "unavailable"]
+    data_state: Literal["ready", "partial", "unavailable"]
+    usable: bool
+    ticker: str
+    stock_source: Literal["SSI DailyOhlc"] = "SSI DailyOhlc"
+    stock_latest_session: Optional[str] = None
+    stock_session_count: int = Field(ge=0, le=80)
+    historical_constituent_correct: Literal[False] = False
+    comparisons: Dict[str, VietnamRelativeStrengthComparison] = Field(default_factory=dict)
+    timing: VietnamRelativeStrengthTiming
+    diagnostics: Dict[str, Any] = Field(default_factory=dict)
+    fetched_at: str
+
+
 class VietnamProprietaryFlowEodRow(BaseModel):
     """One verified manual HOSE completed-session aggregate."""
 

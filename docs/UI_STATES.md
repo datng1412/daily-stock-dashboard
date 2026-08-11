@@ -220,6 +220,10 @@ Provider endpoint details, HTTP status, retryability, and raw provider summaries
 | VN30 sector strength ready/partial | Exact membership and at least one real group metric are usable | Show current ICB group, signed equal-weight 1D return, MA20/MA50 numerator/denominator, completed foreign net 1D/5D/20D, source dates, and coverage | Source-labelled current-cohort facts; explicit zero remains `0` | Official sector-index, composite score, recommendation, missing as zero, current flow as completed | Detailed member/window coverage remains in the aggregate response/disclosure | Component and live browser tests cover signs, missing, sorting, and overflow |
 | VN30 sector strength unavailable | Exact membership or all group inputs are unavailable | `Dữ liệu ngành VN30 không khả dụng.` | No numeric sector facts | Hardcoded classification, fallback, fabricated group or zero | Sanitized aggregate diagnostics | Page remains usable; manual retry stays local |
 | VN30 sector refresh failed with prior data | A later sector refresh fails after usable same-scope groups were shown | Keep the prior table and disclose the failed update | Prior source/session-labelled groups | Blanking rows or relabelling them fresh | Request error stays local to sector owner | Hook/component test covers retained last-good data |
+| Relative strength loading | A selected ticker has one in-flight relative-strength request and no prior same-ticker result | `Loading relative performance for {ticker}…` | Loading state only | Peer fan-out, mixed-ticker rows, fake values | Request ID and selected ticker remain frontend-owned | Hook/page tests assert one request per selection and stale-response rejection |
+| Relative strength ready/partial | At least one exact provider-session comparison window is usable | Show signed percentage-point difference plus stock/benchmark returns for 1D/5D/20D, source, and method disclosure | SSI DailyOhlc stock/peers and SSI indexSummary VNINDEX/VN30 only | Alpha/beta/score/recommendation, official Industry index claim, missing as zero | Peer list, dates, coverage, and cache counters remain in the response/disclosure | Component/runtime/browser tests cover ready, partial, zero, positive, and negative values |
+| Relative strength unavailable | Selected stock or all exact benchmark/peer windows are insufficient | `Relative performance is unavailable for {ticker}.` with concise coverage reason | No numeric comparison | Synthetic index, forward-fill, hidden partial values, fallback | Sanitized comparison/window reasons | Other dashboard sections remain usable; refresh stays local |
+| Relative strength refresh failed with prior data | A later same-ticker refresh fails after usable data was shown | Retain the last usable table and disclose the failed update | Prior source/session-labelled result | Blanking the table or mixing another ticker's response | Error remains local to the selected-ticker hook | Hook test covers last-good retention |
 | Daily OK + index data unavailable | Watchlist DailyOhlc rows are usable; DailyIndex and/or IndexComponents return unavailable with empty rows | `SSI daily index unavailable.` / `SSI index components unavailable.` | Watchlist, selected ticker, chart, and any real independent index rows | Fake index values, zero converted from null, inferred breadth, or daily-data failure | Index endpoint/code/date/coverage/failure details remain in diagnostics | UI tests preserve watchlist/selection/chart while index context degrades independently |
 | Fixture mode | Fixture/test mode is explicitly enabled by runtime config or test fixture | `Fixture data mode.` | Fixture-backed fields only with source/fixture labels | Treating fixture output as live SSI data | Diagnostics identify fixture source without secrets | Smoke/test asserts fixture labels are explicit |
 | Cache stale | Cached block is older than expected for its source, or stale flag is set | `Cached data may be stale.` | Existing values if source/date/fetched_at remain visible | Claiming stale data is current, or mixing cache error with provider unavailable | Cache age, source block, and fetched time in diagnostics | Cache-state UI test and observability contract test |
@@ -233,6 +237,14 @@ rows. At mobile width the 760px table scrolls inside its 294px container while
 the page/body remain within the 384px viewport. Price and completed-flow dates
 are disclosed independently, and no recommendation or official-sector-index
 wording is used.
+
+VN-RS-1 positive browser acceptance on 2026-08-11 rendered FPT as truthful
+partial (ready VNINDEX/VN30 and unavailable no-peer Industry) and VCB as ready
+across VNINDEX, VN30, and current bank peers. The page made exactly one
+relative-strength request per selected ticker. At 1366x768 and 390x844 there
+was no document-level horizontal overflow; the 640px comparison table scrolled
+inside its 294px mobile container. No browser console warning/error, fallback,
+recommendation copy, or official-sector-index claim appeared.
 
 ## Copy Rules
 

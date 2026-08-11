@@ -144,7 +144,7 @@ is next.
   provider calls. Desktop/mobile rendering, local sorting, retained refresh,
   local table overflow, and group reconciliation passed without fallback.
 
-### 5. VN-RS-1 — Relative Strength
+### 5. VN-RS-1 — Relative Strength (production-ready)
 
 - **Goal:** compare a stock with VNINDEX, VN30, and its current industry cohort.
 - **Why now:** sector and breadth phases establish the context needed for
@@ -161,6 +161,23 @@ is next.
   recommendation language.
 - **Exit criteria:** every comparison uses aligned provider dates and explicit
   benchmark/cohort provenance with missing sessions left missing.
+- **Implementation:** `GET /api/v1/stocks/vn/relative-strength/{ticker}` uses
+  SSI DailyOhlc for the selected stock and current same-ICB VN30 peers, and
+  exact-date SSI `indexSummary.indexValue` for VNINDEX/VN30. Independent
+  1/5/20-session windows use exact mutual provider sessions. The Industry
+  comparison is equal-weight, excludes the selected ticker, and is explicitly
+  current-membership, historically incorrect, and not an official index.
+- **Acceptance:** bounded 2026-08-11 runtime proof returned usable FPT
+  VNINDEX/VN30 windows through 2026-08-10 and truthfully unavailable Industry
+  windows because the current software cohort had no other VN30 peer. VCB
+  returned ready VNINDEX, VN30, and bank-peer windows. FPT cold/warm HTTP
+  latency was 8.99/0.05 seconds with 42/0 benchmark provider calls; the
+  breadth-to-sector-to-RS path added no RS provider calls after cache warm-up.
+  A cold breadth-to-sector-to-VCB sequence reused 12/12 peer histories and the
+  selected history from cache, with zero redundant DailyOhlc provider calls;
+  its only cold RS reads were 42 exact-date index points.
+  Real desktop/mobile rendering issued exactly one request for each selected
+  ticker, used local table overflow, and produced no console errors.
 
 ### 6. VN-ALERT-1 — Watchlist Intelligence
 
@@ -182,8 +199,8 @@ is next.
 
 | Class | Items |
 | --- | --- |
-| `NEXT` | `VN-RS-1` |
-| `LATER` | `VN-ALERT-1`, eventual risk-mode synthesis |
+| `NEXT` | `VN-ALERT-1` |
+| `LATER` | eventual risk-mode synthesis |
 | `BLOCKED` | VN30 futures/F1M/basis/open interest/futures volume; automated proprietary source; HOSE-wide breadth until an authoritative scalable universe is proven; fundamentals/corporate actions without a provider/legal contract |
 | `DEFERRED` | Proprietary product expansion; broader stock-detail polish; macro/risk asset integration; optional news-provider expansion |
 | `DROP / DO NOT PLAN` | Hardcoded five-symbol defaults; guessed anomaly repair; raw-table-only feature phases; AI/ML investment scoring; automatic recommendations; dynamic request-handler subscriptions; unsupported SSI-field reinterpretation; new fallback providers for SSI-owned fields without explicit approval |
