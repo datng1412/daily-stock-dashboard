@@ -56,6 +56,14 @@ from src.services.market_light_alerts import (
     normalize_market_alert_parameters,
 )
 from src.services.market_light_service import normalize_market_region
+from src.services.vietnam_watchlist_alerts import (
+    VN_ALERT_TYPES,
+    VietnamWatchlistAlert,
+    evaluate_vietnam_alert,
+    make_vietnam_alert_payload,
+    normalize_vietnam_alert_parameters,
+    normalize_vietnam_alert_target,
+)
 from src.storage import (
     AlertCooldownRecord,
     AlertNotificationRecord,
@@ -68,8 +76,8 @@ from src.utils.sanitize import sanitize_diagnostic_text
 
 LEGACY_RUNTIME_ALERT_TYPES = frozenset({"price_cross", "price_change_percent", "volume_spike"})
 SYMBOL_ALERT_TYPES = LEGACY_RUNTIME_ALERT_TYPES | TECHNICAL_ALERT_TYPES
-SUPPORTED_ALERT_TYPES = SYMBOL_ALERT_TYPES | PORTFOLIO_ALERT_TYPES | MARKET_ALERT_TYPES
-SUPPORTED_TARGET_SCOPES = frozenset({"single_symbol", "watchlist", "portfolio_holdings", "portfolio_account", "market"})
+SUPPORTED_ALERT_TYPES = SYMBOL_ALERT_TYPES | PORTFOLIO_ALERT_TYPES | MARKET_ALERT_TYPES | VN_ALERT_TYPES
+SUPPORTED_TARGET_SCOPES = frozenset({"single_symbol", "watchlist", "portfolio_holdings", "portfolio_account", "market", "vn_market"})
 SUPPORTED_SEVERITIES = frozenset({"info", "warning", "critical"})
 NULLABLE_RULE_UPDATE_FIELDS = frozenset({"cooldown_policy", "notification_policy"})
 
@@ -215,6 +223,8 @@ class AlertService:
             return await asyncio.to_thread(evaluate_portfolio_risk_alert, rule)
         if isinstance(rule, MarketLightAlert):
             return await asyncio.to_thread(evaluate_market_light_alert, rule, cache=daily_cache)
+        if isinstance(rule, VietnamWatchlistAlert):
+            return await asyncio.to_thread(evaluate_vietnam_alert, rule, cache=daily_cache)
         if isinstance(rule, StaticAlertEvaluation):
             return evaluate_static_alert(rule)
         return self._evaluation_error(rule, f"unsupported runtime alert type: {rule.alert_type}")
@@ -691,6 +701,9 @@ class AlertService:
             return threshold_for_indicator(rule.alert_type, rule.indicator_params)
         if isinstance(rule, PortfolioRiskAlert):
             return None
+        if isinstance(rule, VietnamWatchlistAlert):
+            value = rule.parameters.get("threshold")
+            return float(value) if value is not None else None
         if isinstance(rule, MarketLightAlert):
             if rule.alert_type == "market_light_score_drop":
                 return float(rule.parameters.get("min_drop", 0) or 0)
@@ -709,6 +722,8 @@ class AlertService:
             return "portfolio_risk"
         if isinstance(rule, MarketLightAlert):
             return MARKET_LIGHT_DATA_SOURCE
+        if isinstance(rule, VietnamWatchlistAlert):
+            return "SSI completed-session analytics"
         return None
 
     @classmethod
@@ -881,6 +896,11 @@ class AlertService:
 
         parameters = self._normalize_parameters(alert_type, payload.get("parameters") or {})
         target = self._normalize_target(target_scope, target)
+        if alert_type in VN_ALERT_TYPES:
+            try:
+                target = normalize_vietnam_alert_target(alert_type, target)
+            except ValueError as exc:
+                raise AlertServiceError(str(exc)) from exc
         if target_scope == "single_symbol" and alert_type in LEGACY_RUNTIME_ALERT_TYPES:
             serialized_rule = {"stock_code": target, "alert_type": alert_type, **parameters}
             try:
@@ -912,6 +932,12 @@ class AlertService:
 
     @staticmethod
     def _validate_scope_alert_type(target_scope: str, alert_type: str) -> None:
+        if target_scope == "vn_market":
+            if alert_type not in VN_ALERT_TYPES:
+                raise AlertServiceError("vn_market target_scope only supports Vietnam intelligence alert types")
+            return
+        if alert_type in VN_ALERT_TYPES:
+            raise AlertServiceError("Vietnam intelligence alert types require target_scope=vn_market")
         if target_scope == "market":
             if alert_type not in MARKET_ALERT_TYPES:
                 raise AlertServiceError("market target_scope only supports market alert types")
@@ -935,6 +961,10 @@ class AlertService:
                 return normalize_market_region(target)
             except ValueError as exc:
                 raise AlertServiceError(str(exc)) from exc
+        if target_scope == "vn_market":
+            # The family-specific target is normalized after parameters/type are
+            # known in _normalize_rule_payload.
+            return target.strip().upper()
         try:
             normalized = normalize_batch_target_scope_target(target_scope, target)
             if target_scope in {"portfolio_holdings", "portfolio_account"}:
@@ -983,6 +1013,12 @@ class AlertService:
             except ValueError as exc:
                 raise AlertServiceError(str(exc)) from exc
 
+        if alert_type in VN_ALERT_TYPES:
+            try:
+                return normalize_vietnam_alert_parameters(alert_type, parameters)
+            except ValueError as exc:
+                raise AlertServiceError(str(exc)) from exc
+
         raise UnsupportedAlertTypeError(f"unsupported alert_type for Alert API: {alert_type}")
 
     @staticmethod
@@ -1015,6 +1051,9 @@ class AlertService:
 
         if data["alert_type"] in MARKET_ALERT_TYPES:
             return [make_market_light_payload(parent_key=parent_key, data=data, config=config)]
+
+        if data["alert_type"] in VN_ALERT_TYPES:
+            return [make_vietnam_alert_payload(parent_key=parent_key, data=data)]
 
         if data["target_scope"] in SYMBOL_BATCH_TARGET_SCOPES:
             if config is None:
@@ -1235,6 +1274,10 @@ class AlertService:
 
     @staticmethod
     def _default_rule_name(*, target: str, alert_type: str, parameters: Dict[str, Any]) -> str:
+        if alert_type in VN_ALERT_TYPES:
+            condition = parameters.get("expected_state") or f"{parameters.get('operator')} {parameters.get('threshold')}"
+            window = f" {parameters.get('window')}d" if parameters.get("window") else ""
+            return f"{target} {parameters.get('metric')}{window} {condition}"
         if alert_type == "price_cross":
             return f"{target} price {parameters['direction']} {parameters['price']}"
         if alert_type == "price_change_percent":

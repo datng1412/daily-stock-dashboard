@@ -151,6 +151,13 @@ class AlertWorker:
             if record_status == "triggered":
                 stats["triggered"] += 1
                 if runtime_rule.source == "db":
+                    if (
+                        trigger_id is not None
+                        and not trigger_write.created
+                        and str(getattr(runtime_rule.rule, "alert_type", "")).startswith("vn_")
+                    ):
+                        stats["cooldown_suppressed"] += 1
+                        continue
                     cooldown_decision = self._check_db_cooldown(runtime_rule, trigger_id)
                     if cooldown_decision.suppressed:
                         stats["cooldown_suppressed"] += 1

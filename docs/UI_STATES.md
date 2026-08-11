@@ -120,6 +120,22 @@ history retained, regressive refresh, same-date precedence, 20-plus-current
 history, chart/ranking/watchlist reach, and CSV finality/coverage. It found no
 page-level horizontal overflow; intentional table scrollers remained local.
 
+## VN intelligence alert states
+
+| State | Alerts UI behavior | Worker behavior |
+| --- | --- | --- |
+| Configuring | Show only valid selectors for the chosen family and explicit unit/window labels | No analytics call; CRUD only |
+| Completed and condition matched | History shows observed value, provider session, source/finality, family, and `Open context` link | Persist once and notify through existing channels |
+| Completed and condition false | No trigger-history noise | Normal non-trigger |
+| Incomplete, null, anomalous, or provisional | Never render a fake numeric value or market interpretation | Skipped/degraded; cannot notify |
+| Same rule/session repeated | Existing history remains singular | VN notification dedup suppresses repeat even with zero-second generic cooldown |
+| Disabled | Rule remains manageable in the existing list | Not loaded; no analytics/provider work |
+
+At 1366x768 and 390x844, the existing Alerts form remains one responsive
+surface with no page-level horizontal overflow. Copy is descriptive and never
+adds a recommendation. Current-session ForeignRoom flow is not offered as an
+MVP alert selector.
+
 ## Symbol foreign-flow inspection
 
 - **Closed:** ticker selection only highlights the workspace; zero history requests and no hidden loading state.

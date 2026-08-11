@@ -246,6 +246,38 @@ describe('AlertRuleForm', () => {
     });
   });
 
+  it('submits a completed-session Vietnam relative-strength rule', async () => {
+    render(<AlertRuleForm onSubmit={onSubmit} />);
+
+    fireEvent.change(screen.getByLabelText('Target scope'), { target: { value: 'vn_market' } });
+    fireEvent.change(screen.getByLabelText('Rule type'), { target: { value: 'vn_relative_strength' } });
+    fireEvent.change(screen.getByLabelText('Vietnam ticker'), { target: { value: 'fpt' } });
+    fireEvent.change(screen.getByLabelText('Benchmark'), { target: { value: 'vn30' } });
+    fireEvent.change(screen.getByLabelText('Completed-session window'), { target: { value: '20' } });
+    fireEvent.change(screen.getByLabelText('Operator'), { target: { value: 'gte' } });
+    fireEvent.change(screen.getByLabelText('Threshold'), { target: { value: '2.5' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create rule' }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      targetScope: 'vn_market', target: 'FPT', alertType: 'vn_relative_strength',
+      parameters: { metric: 'relative_performance_pp', operator: 'gte', threshold: 2.5, window: 20, benchmark: 'vn30' },
+    })));
+    expect(screen.getByText(/completed SSI sessions only/i)).toBeInTheDocument();
+  });
+
+  it('submits a completed foreign-flow state rule without a numeric threshold', async () => {
+    render(<AlertRuleForm onSubmit={onSubmit} />);
+    fireEvent.change(screen.getByLabelText('Target scope'), { target: { value: 'vn_market' } });
+    fireEvent.change(screen.getByLabelText('Vietnam ticker'), { target: { value: 'ssi' } });
+    fireEvent.change(screen.getByLabelText('Metric'), { target: { value: 'direction_state' } });
+    fireEvent.change(screen.getByLabelText('Expected state'), { target: { value: 'distributing' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create rule' }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      targetScope: 'vn_market', target: 'SSI', alertType: 'vn_foreign_flow',
+      parameters: { metric: 'direction_state', window: 5, operator: 'eq', expectedState: 'distributing' },
+    })));
+  });
+
   it('keeps all account option when account loading fails', async () => {
     getAccounts.mockRejectedValueOnce(new Error('boom'));
     render(<AlertRuleForm onSubmit={onSubmit} />);

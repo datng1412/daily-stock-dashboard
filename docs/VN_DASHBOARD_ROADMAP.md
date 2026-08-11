@@ -181,6 +181,8 @@ is next.
 
 ### 6. VN-ALERT-1 — Watchlist Intelligence
 
+- **Status:** implemented deterministically and browser-accepted; real completed
+  provider firing remains runtime-blocked by the local SSI network state.
 - **Goal:** reuse the generic alert platform for validated VN flow, breadth,
   sector, and relative-strength conditions after their contracts exist.
 - **Why now:** alert transport and UI exist, but the VN signal inputs do not.
@@ -194,12 +196,37 @@ is next.
   alert based on unavailable/provisional data outside its approved contract.
 - **Exit criteria:** each notification carries rule, observed value,
   session/date, source, freshness/finality, cooldown identity, and deep link.
+- **Implemented contract:** `vn_market` rules support completed symbol foreign
+  flow (`net_value` or direction state), VN30 breadth, current-VN30 SSI ICB
+  sector metrics, and selected-stock relative strength. Numeric rules use an
+  explicit operator and threshold. Relative strength also requires a 1/5/20
+  session window and `vnindex`, `vn30`, or `industry` benchmark.
+- **Evaluation boundary:** only enabled stored rules create work. Expensive
+  identical family/scope reads share the existing worker-cycle cache. No
+  watchlist expansion, implicit RS fan-out, scheduler, polling loop, or
+  provisional ForeignRoom read was added.
+- **Truthfulness:** incomplete coverage, unavailable/null values, quarantined
+  foreign-flow anomalies, provisional finality, and missing ICB groups are
+  non-evaluable and cannot fire. Trigger diagnostics carry source, endpoint,
+  session, finality, coverage, cache state, dedup identity, and deep link.
+- **Dedup:** persisted trigger identity remains
+  `rule_id + target + data_source + data_timestamp`; VN rules also suppress a
+  duplicate notification for that same completed provider session even when a
+  zero-second generic cooldown is configured. A later completed session is
+  independently eligible.
+- **2026-08-11 acceptance:** a bounded four-service probe completed in 0.79s.
+  FPT completed foreign-flow history was retained through 2026-08-10 but the
+  refresh reported `network_error`/stale; breadth, sector, and relative strength
+  were unavailable without completed provider sessions. No live rule was fired
+  from stale/unavailable input. Deterministic four-family evaluators, worker
+  persistence/dedup, Alert API, and desktop/mobile UI passed. Outcome:
+  `IMPLEMENTED_RUNTIME_BLOCKED` until a network-available completed-data run.
 
 ## Backlog classification
 
 | Class | Items |
 | --- | --- |
-| `NEXT` | `VN-ALERT-1` |
+| `NEXT` | Unassigned after VN-ALERT-1 acceptance |
 | `LATER` | eventual risk-mode synthesis |
 | `BLOCKED` | VN30 futures/F1M/basis/open interest/futures volume; automated proprietary source; HOSE-wide breadth until an authoritative scalable universe is proven; fundamentals/corporate actions without a provider/legal contract |
 | `DEFERRED` | Proprietary product expansion; broader stock-detail polish; macro/risk asset integration; optional news-provider expansion |
@@ -3056,7 +3083,7 @@ Delivery order and gates:
 7. **Phase 4.12F - HOSE scale hardening (gate blocked):** Phase 4.12F-A returned outcome E because 736 exact SSI Securities rows lacked normalized type. Phase 4.12F-A1 then returned outcome F after the first deterministic SecuritiesDetails request produced no exact HOSE row. Phase 4.12F-A2 proved the installed SDK's four query keys and empty page defaults, added bounded provider-derived candidate and response-shape diagnostics, and issued one bounded live command; however, its sanitized terminal result was not retained, so A2 also remains outcome F and no direct provider/fetcher conclusion is claimed. No type-bearing Details row, broader classification, DailyStockPrice call, aggregate, or frontend scope exists. HOSE remains unavailable; a future follow-up may repeat only one narrowly captured exact-symbol probe.
 8. **Phase 4.12E-3 - Symbol analytics (implemented deterministically):** the existing symbol endpoint adds null-aware value/volume analytics over at most 60 accepted provider rows. `/foreign-flow` requests that history only after the explicit detail action, then renders local 5/20/60 summaries, streak/reversal/comparison/extrema cards, net/buy-sell/cumulative/rolling charts, and a sortable history table without refetching for presentation changes. Optional runtime smoke was skipped; E-2 runtime acceptance remains deferred.
 9. **Phase 4.13A - Price, liquidity, and foreign-flow context (future):** requires explicit ownership, denominator, and interpretation gates; no price/flow join exists yet.
-10. **Phase 4.13B - Foreign-flow alerts (future):** requires finality, correction, cooldown, and dedup gates; no alert runtime exists yet.
+10. **Phase 4.13B - Foreign-flow alerts (implemented by VN-ALERT-1):** completed accepted symbol flow supports explicit 1/5/20-session numeric or state rules through the generic alert runtime. Current provisional flow remains excluded.
 
 The MVP is limited to summary, top buyers/sellers, watchlist table, and symbol detail. Sector aggregation is P1 and requires authoritative classification coverage. Historical constituent-correct VN30, negotiated-order splits, advanced anomaly analysis, export/reports, ownership analysis, and alerts are later work.
 ### SSI-V3-M2.5 — Foreign, proprietary, and industry flow data

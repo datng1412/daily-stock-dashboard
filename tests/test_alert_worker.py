@@ -836,6 +836,32 @@ class AlertWorkerTestCase(unittest.TestCase):
         self.assertEqual(len(notifications), 2)
         self.assertEqual(notifier.send_with_results.call_count, 2)
 
+    def test_vietnam_rule_same_completed_session_suppresses_duplicate_notification(self) -> None:
+        rule = self._create_rule(
+            name="VN30 breadth",
+            target_scope="vn_market",
+            target="VN30",
+            alert_type="vn_breadth",
+            parameters={"metric": "advances", "operator": "gt", "threshold": 10},
+            cooldown_policy={"cooldown_seconds": 0},
+        )
+        payload = {
+            "source": "SSI", "usable": True, "finality": "completed_daily", "provider_session_date": "2026-08-10",
+            "direction": {"advances": 20, "declines": 10}, "ma20": {}, "ma50": {},
+            "coverage": {"direction_usable_count": 30},
+        }
+        notifier = self._notifier(self._dispatch_result(True), self._dispatch_result(True))
+        worker = AlertWorker(config_provider=lambda: self._config(), service=self.service, notifier=notifier)
+        with patch("src.services.vietnam_market_breadth_service.VietnamMarketBreadthService.build", return_value=payload):
+            first = worker.run_once()
+            second = worker.run_once()
+
+        self.assertEqual(first["notified"], 1)
+        self.assertEqual(second["notified"], 0)
+        self.assertEqual(second["recorded"], 0)
+        self.assertEqual(len(self._triggers(rule_id=rule["id"], status="triggered")), 1)
+        notifier.send_with_results.assert_called_once()
+
     def test_db_triggered_history_deduplicates_per_rule_id(self) -> None:
         first_rule = self._create_rule(
             name="MA one",

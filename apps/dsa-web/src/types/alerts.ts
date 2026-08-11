@@ -12,9 +12,14 @@ export type AlertType =
   | 'portfolio_drawdown'
   | 'portfolio_price_stale'
   | 'market_light_status'
-  | 'market_light_score_drop';
+  | 'market_light_score_drop'
+  | 'vn_foreign_flow'
+  | 'vn_breadth'
+  | 'vn_sector'
+  | 'vn_relative_strength';
 export type AlertSeverity = 'info' | 'warning' | 'critical';
-export type AlertTargetScope = 'single_symbol' | 'watchlist' | 'portfolio_holdings' | 'portfolio_account' | 'market';
+export type AlertTargetScope = 'single_symbol' | 'watchlist' | 'portfolio_holdings' | 'portfolio_account' | 'market' | 'vn_market';
+export type VietnamAlertOperator = 'gt' | 'gte' | 'lt' | 'lte' | 'eq';
 export type AlertDirection = 'above' | 'below' | 'up' | 'down' | 'bullish_cross' | 'bearish_cross';
 export type PortfolioStopLossMode = 'near' | 'breach';
 export type MarketRegion = 'cn' | 'hk' | 'us';
@@ -38,6 +43,10 @@ export interface AlertRuleParameters {
   mode?: PortfolioStopLossMode;
   statuses?: MarketLightStatus[];
   minDrop?: number;
+  metric?: string;
+  operator?: VietnamAlertOperator;
+  expectedState?: 'accumulating' | 'distributing' | 'neutral';
+  benchmark?: 'vnindex' | 'vn30' | 'industry';
 }
 
 export interface AlertRuleItem {

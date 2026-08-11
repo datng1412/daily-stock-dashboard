@@ -55,6 +55,21 @@ operation because the current SSI contract does not prove securities-company
 proprietary buy/sell fields. `indexSummary` is not called or mapped by this
 route.
 
+## VN-ALERT-1 through the generic Alert API
+
+Existing `/api/v1/alerts/rules` CRUD, enable/disable/test, trigger-history, and
+notification-history routes accept the additive `vn_market` scope and four
+types: `vn_foreign_flow`, `vn_breadth`, `vn_sector`, and
+`vn_relative_strength`. Invalid target/metric/window/operator/benchmark/state
+combinations return the existing structured validation error before analytics
+or provider work. No VN alert route was added.
+
+The worker remains the sole evaluation owner. Only enabled persisted rules
+load their exact requested scope; the form itself talks only to Alert CRUD.
+Trigger diagnostics expose sanitized source/finality/coverage and existing
+deep links, while unavailable/incomplete/provisional evaluations are recorded
+as skipped/degraded rather than triggered.
+
 ## Completed foreign-flow restart behavior
 
 The existing symbol-history and aggregate routes keep their public schemas.

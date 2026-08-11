@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [new feature] Add completed-session Vietnam foreign-flow, VN30 breadth, VN30 sector, and selected-stock relative-strength rules to the existing Alerts platform.
+- [improvement] Gate VN intelligence notifications on complete accepted inputs, reuse worker-cycle analytics, preserve disabled-rule demand control, and deduplicate same-rule same-session notifications.
+- [test] Cover VN rule validation, completed-session firing and unavailable suppression, provider-cache reuse, Alert API compatibility, worker deduplication, and Alerts form behavior.
+- [documentation] Document VN-ALERT-1 rule contracts, provenance history, deep links, current-session exclusion, and operational boundaries.
 - [new feature] Add exact-session selected-stock relative performance versus SSI VNINDEX, VN30, and equal-weight current same-ICB VN30 peers for 1D, 5D, and 20D.
 - [improvement] Reuse bounded DailyOhlc, IndexComponents, and per-session index caches with one selected-ticker frontend request and stale-response protection.
 - [test] Cover return formulas, exact alignment, missing/zero/partial peer semantics, cache reuse, API normalization, request ownership, and desktop/mobile rendering.

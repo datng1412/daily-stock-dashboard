@@ -29,6 +29,23 @@ Conventions:
 
 Explicit numeric zero remains `0`; missing optional volume remains `null`.
 
+## VN alert intelligence fields
+
+| Field | Meaning | Units / values | Missing-data rule |
+| --- | --- | --- | --- |
+| `target_scope` | Existing alert scope used by VN intelligence | `vn_market` | Required for VN rule families |
+| `metric` | Accepted service field selected by the user | family-specific enum | Unknown combinations fail validation before provider work |
+| `window` | Completed provider sessions | 1, 5, or 20 | Required only by windowed families/metrics |
+| `operator` / `threshold` | User-owned numeric condition | `gt`, `gte`, `lt`, `lte`, `eq`; finite number | Missing or non-finite threshold is invalid |
+| `expected_state` | Existing accepted foreign-flow state | accumulating, distributing, neutral | Never derived from provisional current flow |
+| `benchmark` | Relative-strength comparison | vnindex, vn30, industry | Industry means equal-weight current same-ICB VN30 peers |
+| `data_timestamp` | Observed completed provider session | date at midnight | Never replaced with evaluation time |
+| `diagnostics` | Sanitized event provenance | JSON string | No raw provider payload or credential data |
+
+Numeric values retain their service units: foreign net value is VND, breadth
+and MA participation are percentage points/counts, sector return is percent,
+and relative performance is percentage points. Null/unavailable is not zero.
+
 ## Symbol foreign-flow analytics
 
 - `data_quality=anomalous` on a VN30 daily aggregate identifies an unresolved

@@ -139,6 +139,24 @@ class AlertApiTestCase(unittest.TestCase):
         missing_resp = self.client.get(f"/api/v1/alerts/rules/{rule_id}")
         self.assertEqual(missing_resp.status_code, 404)
 
+    def test_vietnam_intelligence_rule_contract_and_validation(self) -> None:
+        created = self._create_rule({
+            "name": "FPT relative strength",
+            "target_scope": "vn_market",
+            "target": "fpt",
+            "alert_type": "vn_relative_strength",
+            "parameters": {"metric": "relative_performance_pp", "window": 5, "benchmark": "vnindex", "operator": "gt", "threshold": 2},
+        })
+        self.assertEqual(created["target"], "FPT")
+        self.assertEqual(created["target_scope"], "vn_market")
+        self.assertEqual(created["parameters"]["benchmark"], "vnindex")
+
+        invalid = self.client.post("/api/v1/alerts/rules", json={
+            "target_scope": "vn_market", "target": "FPT", "alert_type": "vn_relative_strength",
+            "parameters": {"metric": "relative_performance_pp", "window": 7, "benchmark": "invented", "operator": "gt", "threshold": 2},
+        })
+        self.assertEqual(invalid.status_code, 400, invalid.text)
+
     def test_rule_response_includes_server_cooldown_active_flag(self) -> None:
         created = self._create_rule()
         repo = AlertRepository(self.db)

@@ -37,12 +37,20 @@ const MARKET_ALERT_TYPE_OPTIONS = [
   { value: 'market_light_score_drop', label: 'Market light score drop' },
 ];
 
+const VN_ALERT_TYPE_OPTIONS = [
+  { value: 'vn_foreign_flow', label: 'Completed foreign flow' },
+  { value: 'vn_breadth', label: 'VN30 breadth' },
+  { value: 'vn_sector', label: 'VN30 sector' },
+  { value: 'vn_relative_strength', label: 'Relative strength' },
+];
+
 const TARGET_SCOPE_OPTIONS = [
   { value: 'single_symbol', label: 'Single symbol' },
   { value: 'watchlist', label: 'Watchlist' },
   { value: 'portfolio_holdings', label: 'Portfolio holdings' },
   { value: 'portfolio_account', label: 'Portfolio account' },
   { value: 'market', label: 'Market' },
+  { value: 'vn_market', label: 'Vietnam intelligence' },
 ];
 
 const SEVERITY_OPTIONS = [
@@ -99,11 +107,13 @@ function isPortfolioScope(scope: AlertTargetScope): boolean {
 }
 
 function defaultAlertTypeForScope(scope: AlertTargetScope): AlertType {
+  if (scope === 'vn_market') return 'vn_foreign_flow';
   if (scope === 'market') return 'market_light_status';
   return scope === 'portfolio_account' ? 'portfolio_stop_loss' : 'price_cross';
 }
 
 function optionsForScope(scope: AlertTargetScope) {
+  if (scope === 'vn_market') return VN_ALERT_TYPE_OPTIONS;
   if (scope === 'market') return MARKET_ALERT_TYPE_OPTIONS;
   return scope === 'portfolio_account' ? PORTFOLIO_ALERT_TYPE_OPTIONS : SYMBOL_ALERT_TYPE_OPTIONS;
 }
@@ -137,6 +147,11 @@ export const AlertRuleForm: React.FC<AlertRuleFormProps> = ({ onSubmit, isSubmit
   const [dPeriod, setDPeriod] = useState('3');
   const [marketLightStatuses, setMarketLightStatuses] = useState<MarketLightStatus[]>(['red', 'yellow']);
   const [minDrop, setMinDrop] = useState('10');
+  const [vnMetric, setVnMetric] = useState('net_value');
+  const [vnOperator, setVnOperator] = useState<'gt' | 'gte' | 'lt' | 'lte' | 'eq'>('gt');
+  const [vnWindow, setVnWindow] = useState('5');
+  const [vnBenchmark, setVnBenchmark] = useState<'vnindex' | 'vn30' | 'industry'>('vnindex');
+  const [vnExpectedState, setVnExpectedState] = useState<'accumulating' | 'distributing' | 'neutral'>('accumulating');
   const [formError, setFormError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -203,6 +218,14 @@ export const AlertRuleForm: React.FC<AlertRuleFormProps> = ({ onSubmit, isSubmit
       setMarketLightStatuses(['red', 'yellow']);
     } else if (nextType === 'market_light_score_drop') {
       setMinDrop('10');
+    } else if (nextType === 'vn_foreign_flow') {
+      setVnMetric('net_value'); setVnWindow('5'); setTarget('');
+    } else if (nextType === 'vn_breadth') {
+      setVnMetric('advance_decline_spread'); setTarget('VN30');
+    } else if (nextType === 'vn_sector') {
+      setVnMetric('return_1d_pct'); setTarget('');
+    } else if (nextType === 'vn_relative_strength') {
+      setVnMetric('relative_performance_pp'); setVnWindow('5'); setVnBenchmark('vnindex'); setTarget('');
     }
   };
 
@@ -336,6 +359,21 @@ export const AlertRuleForm: React.FC<AlertRuleFormProps> = ({ onSubmit, isSubmit
       if (parsedMinDrop == null) return null;
       return { minDrop: parsedMinDrop };
     }
+    if (alertType.startsWith('vn_')) {
+      if (alertType === 'vn_foreign_flow' && vnMetric === 'direction_state') {
+        return { metric: vnMetric, window: Number(vnWindow), operator: 'eq', expectedState: vnExpectedState };
+      }
+      const parsedThreshold = parseFiniteNumber(threshold, 'Threshold');
+      if (parsedThreshold == null) return null;
+      return {
+        metric: vnMetric,
+        operator: vnOperator,
+        threshold: parsedThreshold,
+        ...(alertType === 'vn_foreign_flow' || (alertType === 'vn_sector' && vnMetric === 'foreign_net_value') || alertType === 'vn_relative_strength'
+          ? { window: Number(vnWindow) } : {}),
+        ...(alertType === 'vn_relative_strength' ? { benchmark: vnBenchmark } : {}),
+      };
+    }
     return {};
   };
 
@@ -364,6 +402,12 @@ export const AlertRuleForm: React.FC<AlertRuleFormProps> = ({ onSubmit, isSubmit
       resolvedTarget = 'default';
     } else if (targetScope === 'market') {
       resolvedTarget = marketRegion;
+    } else if (targetScope === 'vn_market') {
+      resolvedTarget = alertType === 'vn_breadth' ? 'VN30' : target.trim().toUpperCase();
+      if (!resolvedTarget) {
+        setFormError(alertType === 'vn_sector' ? 'SSI ICB sector code is required' : 'Vietnam ticker is required');
+        return;
+      }
     } else {
       resolvedTarget = portfolioTarget;
     }
@@ -436,6 +480,17 @@ export const AlertRuleForm: React.FC<AlertRuleFormProps> = ({ onSubmit, isSubmit
         />
       );
     }
+    if (targetScope === 'vn_market') {
+      return (
+        <Input
+          label={alertType === 'vn_sector' ? 'SSI ICB sector code' : alertType === 'vn_breadth' ? 'Universe' : 'Vietnam ticker'}
+          value={alertType === 'vn_breadth' ? 'VN30' : target}
+          onChange={(event) => setTarget(event.target.value.toUpperCase())}
+          placeholder={alertType === 'vn_sector' ? 'For example 8300' : 'For example FPT'}
+          disabled={isSubmitting || alertType === 'vn_breadth'}
+        />
+      );
+    }
     return (
       <div className="space-y-2">
         <Select
@@ -449,6 +504,25 @@ export const AlertRuleForm: React.FC<AlertRuleFormProps> = ({ onSubmit, isSubmit
       </div>
     );
   };
+
+  const vnMetricOptions = alertType === 'vn_foreign_flow'
+    ? [{ value: 'net_value', label: 'Net foreign value' }, { value: 'direction_state', label: 'Flow state' }]
+    : alertType === 'vn_breadth'
+      ? [
+          { value: 'advance_decline_spread', label: 'Advance - decline spread' },
+          { value: 'advances', label: 'Advances' }, { value: 'declines', label: 'Declines' },
+          { value: 'percent_above_ma20', label: '% above MA20' }, { value: 'percent_above_ma50', label: '% above MA50' },
+        ]
+      : alertType === 'vn_sector'
+        ? [
+            { value: 'return_1d_pct', label: '1-session return (%)' },
+            { value: 'percent_above_ma20', label: '% above MA20' }, { value: 'percent_above_ma50', label: '% above MA50' },
+            { value: 'foreign_net_value', label: 'Completed foreign net value' },
+          ]
+        : [
+            { value: 'relative_performance_pp', label: 'Relative performance (pp)' },
+            { value: 'stock_return_pct', label: 'Stock return (%)' }, { value: 'benchmark_return_pct', label: 'Benchmark return (%)' },
+          ];
 
   return (
     <Card title="Create alert rule" subtitle="Web alerts center" variant="bordered" padding="md">
@@ -749,6 +823,31 @@ export const AlertRuleForm: React.FC<AlertRuleFormProps> = ({ onSubmit, isSubmit
             onChange={(event) => setMinDrop(event.target.value)}
             disabled={isSubmitting}
           />
+        ) : null}
+
+        {alertType.startsWith('vn_') ? (
+          <div className="space-y-3 rounded-lg border border-border/60 bg-surface-subtle p-4">
+            <p className="text-xs text-muted-text">
+              Evaluates completed SSI sessions only. Missing, partial, anomalous, or provisional current-session data cannot trigger.
+            </p>
+            <div className="grid gap-4 md:grid-cols-2">
+              <Select label="Metric" value={vnMetric} options={vnMetricOptions} disabled={isSubmitting} onChange={setVnMetric} />
+              {(alertType === 'vn_foreign_flow' || alertType === 'vn_relative_strength' || (alertType === 'vn_sector' && vnMetric === 'foreign_net_value')) ? (
+                <Select label="Completed-session window" value={vnWindow} options={[{ value: '1', label: '1 session' }, { value: '5', label: '5 sessions' }, { value: '20', label: '20 sessions' }]} disabled={isSubmitting} onChange={setVnWindow} />
+              ) : null}
+              {alertType === 'vn_relative_strength' ? (
+                <Select label="Benchmark" value={vnBenchmark} options={[{ value: 'vnindex', label: 'VN-Index' }, { value: 'vn30', label: 'VN30' }, { value: 'industry', label: 'Current VN30 ICB peers' }]} disabled={isSubmitting} onChange={(value) => setVnBenchmark(value as typeof vnBenchmark)} />
+              ) : null}
+              {alertType === 'vn_foreign_flow' && vnMetric === 'direction_state' ? (
+                <Select label="Expected state" value={vnExpectedState} options={[{ value: 'accumulating', label: 'Accumulating' }, { value: 'distributing', label: 'Distributing' }, { value: 'neutral', label: 'Neutral' }]} disabled={isSubmitting} onChange={(value) => setVnExpectedState(value as typeof vnExpectedState)} />
+              ) : (
+                <>
+                  <Select label="Operator" value={vnOperator} options={[{ value: 'gt', label: '>' }, { value: 'gte', label: '>=' }, { value: 'lt', label: '<' }, { value: 'lte', label: '<=' }, { value: 'eq', label: '=' }]} disabled={isSubmitting} onChange={(value) => setVnOperator(value as typeof vnOperator)} />
+                  <Input label="Threshold" type="number" step="any" value={threshold} onChange={(event) => setThreshold(event.target.value)} disabled={isSubmitting} />
+                </>
+              )}
+            </div>
+          </div>
         ) : null}
 
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

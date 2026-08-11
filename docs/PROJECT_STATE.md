@@ -15,13 +15,27 @@ at their original dates and do not override this section.
 | Current Foreign Flow | `PRODUCTION_READY` | Active-session `ForeignRoomMessage` publication is accepted through the process-shared manager, symbol current route, current-VN30/current-Industry aggregation, FastAPI, and browser. Values remain provisional, non-persistent, and truthfully stale when transport freshness expires. |
 | Optional SSI live surfaces | `IMPLEMENTED_NEEDS_LIVE_ACCEPTANCE` | Realtime X quote, X-QUOTE order book, and MI advance/decline semantics remain dependent on live runtime/provider proof. |
 | Partial market capabilities | `PARTIAL` | Current-session 1-minute chart, X-TRADE event buffer, VNINDEX/DailyIndex completeness, full-watchlist latency, current-membership VN30 historical decomposition, and current-membership Industry history retain documented limitations. |
-| Market participation analytics | `PARTIAL` | VN30 current-membership breadth, current-ICB sector context, and selected-stock relative performance versus provider VNINDEX/VN30/current peers are production-ready. The broader group remains partial because HOSE breadth, new-high/new-low breadth, VN risk mode, and alert rules do not yet exist. |
+| Market participation analytics | `PARTIAL` | VN30 current-membership breadth, current-ICB sector context, selected-stock relative performance, and completed-session VN intelligence alerts are production-ready. The broader group remains partial because HOSE breadth, new-high/new-low breadth, and VN risk mode do not yet exist. |
 | Futures and automated proprietary sources | `BLOCKED_PROVIDER` | VN30 futures/F1M/basis/open-interest/volume contracts are unproven; automated proprietary data remains blocked by source and entitlement readiness. |
 | Proprietary product expansion | `DEFERRED` | Manual verified EOD infrastructure is experimental and has no accepted real financial row; it is not an active product priority. |
 
 ## Active next phase
 
-`VN-ALERT-1 — Watchlist Intelligence` is the next implementation phase.
+`VN-ALERT-1 — Watchlist Intelligence` is implemented. It reuses the generic
+AlertService, worker, storage, notification routes, Alerts page, and trigger
+history for four explicitly configured rule families: accepted completed
+foreign flow, VN30 breadth, current-VN30 ICB sector context, and selected-stock
+relative strength. Rules are demand-driven; incomplete or provisional inputs
+cannot fire; same-rule/scope/session notifications are deduplicated. Current
+ForeignRoomMessage snapshots remain excluded.
+
+Deterministic backend and browser acceptance passed on 2026-08-11. The bounded
+real provider probe was externally blocked: FPT completed history was retained
+through 2026-08-10 with a stale `network_error`, while breadth, sector, and RS
+had no completed usable session. Runtime outcome is `IMPLEMENTED_RUNTIME_BLOCKED`;
+no stale/unavailable condition was allowed to fire.
+
+The next phase is not assigned by this implementation.
 VN-RS-1 is production-ready for selected-stock 1/5/20-session relative
 performance versus provider VNINDEX, provider VN30, and equal-weight current
 VN30 same-ICB peers. Positive runtime acceptance on 2026-08-11 proved exact

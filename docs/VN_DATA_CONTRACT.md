@@ -72,6 +72,29 @@ current-VN30 universe plus requested, classified, observed, complete-value,
 complete-volume, stale, missing, and group counts. This is not full-market
 industry coverage.
 
+## VN-ALERT-1 completed-session rule contract
+
+The generic Alert API additively accepts `target_scope=vn_market` with
+`vn_foreign_flow`, `vn_breadth`, `vn_sector`, or `vn_relative_strength`.
+Parameters are strictly normalized combinations of `metric`, optional 1/5/20
+`window`, numeric `operator` plus finite `threshold`, or a supported completed
+foreign-flow `expected_state`; relative strength also requires `benchmark`.
+No VN-specific CRUD route or storage table is added.
+
+Evaluation uses only accepted completed source contracts. DailyStockPrice
+foreign flow must have a complete accepted window; breadth requires completed
+DailyOhlc and the full metric denominator; sector price/MA/flow uses its own
+completed source and complete group coverage; relative strength requires a
+complete exact-aligned window. Missing, null, anomalous, partial-required, or
+provisional data is non-evaluable and never coerced to zero. Current
+`ForeignRoomMessage` flow is excluded.
+
+The existing trigger record stores the provider session in `data_timestamp`.
+Sanitized diagnostics carry family, scope, metric, window, condition, observed
+value/state, source/endpoint, finality, coverage, cache use, dedup identity, and
+an existing `/foreign-flow` or `/vietnam` deep link. Same rule, target, source,
+and completed session is persisted/notified once; a later session is eligible.
+
 ## Durable accepted foreign-flow history (Phase SSI-V3-M2.6B-R6A)
 
 Accepted completed SSI DailyStockPrice foreign-flow rows are keyed by normalized

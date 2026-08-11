@@ -36,6 +36,10 @@ const ALERT_TYPE_FILTER_OPTIONS = [
   { value: 'portfolio_price_stale', label: 'Portfolio price status' },
   { value: 'market_light_status', label: 'Market light status' },
   { value: 'market_light_score_drop', label: 'Market light score drop' },
+  { value: 'vn_foreign_flow', label: 'Completed foreign flow' },
+  { value: 'vn_breadth', label: 'VN30 breadth' },
+  { value: 'vn_sector', label: 'VN30 sector' },
+  { value: 'vn_relative_strength', label: 'Relative strength' },
 ];
 
 const typeLabel: Record<AlertType, string> = {
@@ -53,6 +57,10 @@ const typeLabel: Record<AlertType, string> = {
   portfolio_price_stale: 'Portfolio price status',
   market_light_status: 'Market light status',
   market_light_score_drop: 'Market light score drop',
+  vn_foreign_flow: 'Completed foreign flow',
+  vn_breadth: 'VN30 breadth',
+  vn_sector: 'VN30 sector',
+  vn_relative_strength: 'Relative strength',
 };
 
 const severityLabel: Record<string, string> = {
@@ -67,6 +75,7 @@ const scopeLabel: Record<string, string> = {
   portfolio_holdings: 'Portfolio holdings',
   portfolio_account: 'Portfolio account',
   market: 'Market',
+  vn_market: 'Vietnam intelligence',
 };
 
 const marketRegionLabel: Record<string, string> = {
@@ -81,6 +90,13 @@ const marketLightStatusLabel: Record<string, string> = {
 };
 
 function formatParameters(rule: AlertRuleItem): string {
+  if (rule.alertType.startsWith('vn_')) {
+    const condition = rule.parameters.expectedState
+      ?? `${rule.parameters.operator ?? '--'} ${rule.parameters.threshold ?? '--'}`;
+    const window = rule.parameters.window ? ` / ${rule.parameters.window} sessions` : '';
+    const benchmark = rule.parameters.benchmark ? ` / ${rule.parameters.benchmark}` : '';
+    return `${rule.parameters.metric ?? '--'}${window}${benchmark} / ${condition}`;
+  }
   if (rule.alertType === 'market_light_status') {
     const statuses = rule.parameters.statuses ?? [];
     return statuses.length > 0

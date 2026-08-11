@@ -121,6 +121,35 @@ P1/P2 实现告警持久化时，推荐优先复用以上模式：在 storage �
 - 回滚说明：最小回滚方式至少包括 revert PR；若创建了新表或索引，需要说明是否保留数据、如何手动清理。
 - 数据迁移边界：不得自动迁移、删除或覆盖 `AGENT_EVENT_ALERT_RULES_JSON`，除非用户显式执行导入动作。
 
+## VN-ALERT-1 completed-session intelligence
+
+The existing Alert API, `AlertService`, background worker, persistence,
+notification routes, Alerts page, and trigger history also own four explicit
+Vietnam rule families. There is no separate VN scheduler or alert store.
+
+| `alert_type` | target | accepted metrics | required selectors |
+| --- | --- | --- | --- |
+| `vn_foreign_flow` | normalized VN ticker | `net_value`, `direction_state` | 1/5/20 completed sessions; numeric operator/threshold or accepted state |
+| `vn_breadth` | `VN30` | advances, declines, advance-decline spread, percent above MA20/MA50 | numeric operator/threshold |
+| `vn_sector` | exact SSI ICB code in the current VN30 cohort | equal-weight 1D return, percent above MA20/MA50, completed foreign net value | numeric operator/threshold; 1/5/20 window for flow |
+| `vn_relative_strength` | normalized VN ticker | relative performance, stock return, benchmark return | 1/5/20 sessions; VNINDEX, VN30, or current same-ICB VN30 peers; numeric operator/threshold |
+
+Only enabled persisted rules are evaluated. Identical family/scope reads reuse
+the worker-cycle cache; there is no watchlist-wide relative-strength fan-out.
+Missing, null, incomplete, partial-required coverage, anomalous, or provisional
+inputs do not fire. `ForeignRoomMessage` current-session snapshots are never an
+alert input; SSI DailyStockPrice accepted completed history remains the foreign
+flow authority.
+
+Triggered VN records preserve the completed provider session in
+`data_timestamp`. Sanitized JSON diagnostics retain family, scope, metric,
+window, operator, threshold/state, observed value, source/endpoint, finality,
+coverage, cache use, dedup identity, and a VN deep link. The Alerts history
+renders this provenance without changing the storage schema. A rule/target on
+the same completed session produces at most one trigger and notification; a
+new completed session remains eligible. Normal generic cooldown and notification
+channel behavior otherwise remains unchanged.
+
 ## P1 Alert API MVP
 
 P1 新增后端 Alert API 与 schema，锁定告警中心最小 API 契约，不接入 Web 页面或后台 worker。

@@ -23,6 +23,16 @@ function formatNullable(value?: string | number | null): string {
   return String(value);
 }
 
+function parseDetails(diagnostics?: string | null): Record<string, unknown> | null {
+  if (!diagnostics?.trim().startsWith('{')) return null;
+  try {
+    const parsed = JSON.parse(diagnostics) as unknown;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+}
+
 interface AlertTriggerHistoryProps {
   triggers: AlertTriggerItem[];
   isLoading?: boolean;
@@ -54,7 +64,10 @@ export const AlertTriggerHistory: React.FC<AlertTriggerHistoryProps> = ({ trigge
               </tr>
             </thead>
             <tbody className="divide-y divide-border/40">
-              {triggers.map((trigger) => (
+              {triggers.map((trigger) => {
+                const details = parseDetails(trigger.diagnostics);
+                const deepLink = typeof details?.deep_link === 'string' ? details.deep_link : null;
+                return (
                 <tr key={trigger.id} className="align-top">
                   <td className="px-3 py-3">
                     <Badge variant={statusVariant(trigger.status)}>
@@ -69,10 +82,17 @@ export const AlertTriggerHistory: React.FC<AlertTriggerHistoryProps> = ({ trigge
                     {formatDateTime(trigger.dataTimestamp ?? trigger.triggeredAt)}
                   </td>
                   <td className="px-3 py-3 text-secondary-text">
-                    {trigger.reason || trigger.diagnostics || '--'}
+                    <div>{trigger.reason || trigger.diagnostics || '--'}</div>
+                    {details ? (
+                      <div className="mt-1 text-xs text-muted-text">
+                        Session {String(details.session ?? '--')} · {String(details.finality ?? '--')} · {String(details.family ?? '--')}
+                        {deepLink ? <a className="ml-2 text-primary hover:underline" href={deepLink}>Open context</a> : null}
+                      </div>
+                    ) : null}
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
