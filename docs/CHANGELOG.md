@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [documentation] Record that restricted-runner TCP denial can mimic SSI V3 `network_error`, while a valid-network shared-versus-fresh lifecycle check succeeds and VN30 membership remains process-local.
 - [new feature] Add completed-session Vietnam foreign-flow, VN30 breadth, VN30 sector, and selected-stock relative-strength rules to the existing Alerts platform.
 - [improvement] Gate VN intelligence notifications on complete accepted inputs, reuse worker-cycle analytics, preserve disabled-rule demand control, and deduplicate same-rule same-session notifications.
 - [test] Cover VN rule validation, completed-session firing and unavailable suppression, provider-cache reuse, Alert API compatibility, worker deduplication, and Alerts form behavior.

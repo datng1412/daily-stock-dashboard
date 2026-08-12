@@ -279,6 +279,26 @@ Use `python scripts/diagnose_vn_foreign_flow_connectivity.py --live` only as a
 single bounded operational check. It uses zero SDK retries, one authentication
 lifecycle, and at most one request per documented capability.
 
+The 2026-08-12 REST lifecycle differential reached the same conclusion. In a
+restricted execution context, DNS resolved but TCP/443 was denied locally with
+`PermissionError`; the adapter consequently normalized authentication as
+`network_error`. In the approved network context, DNS, TCP/443, verified TLS
+1.3, authentication, and all five bounded provider capabilities succeeded. A
+process-shared adapter and a separate child-created adapter both returned 30
+VN30 members plus one exact-date FPT DailyOhlc, FPT DailyStockPrice, and VNINDEX
+indexSummary row. There was no shared-client lifecycle differential and no
+R6C recovery was needed. Therefore a generic `network_error` from a restricted
+diagnostic runner must not be classified as an SSI outage or poisoned-client
+defect until the same bounded check is repeated in a network-capable context.
+
+The audit also confirmed that accepted completed Foreign Flow history is
+durable across process restart, while VN30 IndexComponents membership remains
+a process-local TTL cache. A restart followed by a failed first membership
+request can therefore return zero members until SSI access recovers; a Vietnam
+date rollover alone does not invalidate that cache. This limitation did not
+cause the 2026-08-12 incident because the valid-network first request returned
+all 30 members.
+
 A separate direct-process application smoke reached lifespan completion,
 Uvicorn socket readiness, and an internal `/api/health` HTTP 200 in about four
 seconds. The parent smoke harness nevertheless failed to observe readiness
