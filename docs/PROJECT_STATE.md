@@ -21,7 +21,7 @@ at their original dates and do not override this section.
 
 ## Active next phase
 
-`VN-ALERT-1 — Watchlist Intelligence` is implemented. It reuses the generic
+`VN-ALERT-1 — Watchlist Intelligence` is `PRODUCTION_READY`. It reuses the generic
 AlertService, worker, storage, notification routes, Alerts page, and trigger
 history for four explicitly configured rule families: accepted completed
 foreign flow, VN30 breadth, current-VN30 ICB sector context, and selected-stock
@@ -29,11 +29,17 @@ relative strength. Rules are demand-driven; incomplete or provisional inputs
 cannot fire; same-rule/scope/session notifications are deduplicated. Current
 ForeignRoomMessage snapshots remain excluded.
 
-Deterministic backend and browser acceptance passed on 2026-08-11. The bounded
-real provider probe was externally blocked: FPT completed history was retained
-through 2026-08-10 with a stale `network_error`, while breadth, sector, and RS
-had no completed usable session. Runtime outcome is `IMPLEMENTED_RUNTIME_BLOCKED`;
-no stale/unavailable condition was allowed to fire.
+Final network-capable production acceptance passed on 2026-08-12. SSI V3 auth,
+30-member VN30 membership, and completed analytics were available through
+2026-08-11. An acceptance-only FPT `vn_foreign_flow` rule matched the real
+one-session `distributing` state (`foreign_net_value=-104,650,853,200` VND),
+persisted one trigger through `AlertWorker`, and remained one trigger on the
+same-session repeat. A naturally unavailable FPT industry-relative-strength
+rule wrote only `skipped`; disabling both rules resulted in zero evaluations.
+The real Alert API CRUD/history flow and desktop/mobile Alerts UI passed,
+including the FPT Foreign Flow deep link. The acceptance also repaired invalid
+truncated trigger-diagnostics JSON and mobile grid intrinsic-width overflow.
+All temporary rules, state, processes, and ports were removed after validation.
 
 The next phase is not assigned by this implementation.
 VN-RS-1 is production-ready for selected-stock 1/5/20-session relative

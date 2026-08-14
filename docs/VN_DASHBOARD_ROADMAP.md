@@ -181,8 +181,8 @@ is next.
 
 ### 6. VN-ALERT-1 — Watchlist Intelligence
 
-- **Status:** implemented deterministically and browser-accepted; real completed
-  provider firing remains runtime-blocked by the local SSI network state.
+- **Status:** `PRODUCTION_READY`; final network-capable completed-data, worker,
+  API, and browser acceptance passed on 2026-08-12.
 - **Goal:** reuse the generic alert platform for validated VN flow, breadth,
   sector, and relative-strength conditions after their contracts exist.
 - **Why now:** alert transport and UI exist, but the VN signal inputs do not.
@@ -221,6 +221,16 @@ is next.
   from stale/unavailable input. Deterministic four-family evaluators, worker
   persistence/dedup, Alert API, and desktop/mobile UI passed. Outcome:
   `IMPLEMENTED_RUNTIME_BLOCKED` until a network-available completed-data run.
+- **2026-08-12 final acceptance:** a network-capable run superseded the prior
+  environment block. SSI auth and 30-member VN30 membership succeeded; FPT
+  completed one-session flow for provider session `2026-08-11` was
+  `distributing` with `foreign_net_value=-104,650,853,200` VND. The real worker
+  persisted one trigger, suppressed its same-session repeat, skipped naturally
+  unavailable industry relative strength, and loaded zero rules after disable.
+  Generic API CRUD/history plus real 1366x768 and 390x844 browser create,
+  toggle, trigger-history, selected-FPT deep-link, and delete flows passed.
+  Trigger JSON/deep-link serialization and mobile intrinsic-width overflow were
+  repaired and regression-checked during acceptance.
 
 ## Backlog classification
 
@@ -3084,6 +3094,7 @@ Delivery order and gates:
 8. **Phase 4.12E-3 - Symbol analytics (implemented deterministically):** the existing symbol endpoint adds null-aware value/volume analytics over at most 60 accepted provider rows. `/foreign-flow` requests that history only after the explicit detail action, then renders local 5/20/60 summaries, streak/reversal/comparison/extrema cards, net/buy-sell/cumulative/rolling charts, and a sortable history table without refetching for presentation changes. Optional runtime smoke was skipped; E-2 runtime acceptance remains deferred.
 9. **Phase 4.13A - Price, liquidity, and foreign-flow context (future):** requires explicit ownership, denominator, and interpretation gates; no price/flow join exists yet.
 10. **Phase 4.13B - Foreign-flow alerts (implemented by VN-ALERT-1):** completed accepted symbol flow supports explicit 1/5/20-session numeric or state rules through the generic alert runtime. Current provisional flow remains excluded.
+    * Final production acceptance passed on 2026-08-12 with completed SSI session `2026-08-11`. A temporary FPT one-session `direction_state=distributing` rule matched real `foreign_net_value=-104,650,853,200` VND, persisted exactly once through `AlertWorker`, stayed deduplicated on repeat, and stopped all evaluation when disabled. A naturally unavailable industry-relative-strength input remained skipped. API CRUD/history and 1366x768/390x844 browser create, toggle, history, deep-link, and delete flows passed. VN-ALERT-1 is `PRODUCTION_READY`; no subsequent implementation phase is selected automatically.
 
 The MVP is limited to summary, top buyers/sellers, watchlist table, and symbol detail. Sector aggregation is P1 and requires authoritative classification coverage. Historical constituent-correct VN30, negotiated-order splits, advanced anomaly analysis, export/reports, ownership analysis, and alerts are later work.
 ### SSI-V3-M2.5 — Foreign, proprietary, and industry flow data

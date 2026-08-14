@@ -70,6 +70,13 @@ Trigger diagnostics expose sanitized source/finality/coverage and existing
 deep links, while unavailable/incomplete/provisional evaluations are recorded
 as skipped/degraded rather than triggered.
 
+Structured trigger diagnostics remain a string for compatibility, but the API
+returns valid compact JSON from an allowlist of VN provenance fields. Relative
+`/foreign-flow` or `/vietnam` deep links survive sanitization; oversized
+coverage is omitted instead of returning truncated invalid JSON. Final
+production acceptance on 2026-08-12 exercised create/read/update,
+disable/enable, trigger history, and delete against the normal backend.
+
 ## Completed foreign-flow restart behavior
 
 The existing symbol-history and aggregate routes keep their public schemas.

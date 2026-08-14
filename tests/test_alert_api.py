@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import sys
 import tempfile
@@ -837,6 +838,42 @@ class AlertApiTestCase(unittest.TestCase):
         self.assertTrue(notification_payload["items"][0]["retryable"])
         self.assertNotIn("secret-token", str(notification_payload))
         self.assertNotIn("example.com/webhook", str(notification_payload))
+
+    def test_vietnam_trigger_diagnostics_preserve_safe_deep_link_as_valid_json(self) -> None:
+        rule = self._create_rule()
+        diagnostics = {
+            "family": "vn_foreign_flow",
+            "metric": "direction_state",
+            "window": 1,
+            "session": "2026-08-11",
+            "finality": "daily_available",
+            "deep_link": "/foreign-flow?mode=ticker&ticker=FPT",
+            "coverage": {"rows": [str(index) for index in range(1000)]},
+            "source_endpoint": "https://provider.example/private",
+        }
+        with self.db.get_session() as session:
+            session.add(
+                AlertTriggerRecord(
+                    rule_id=rule["id"],
+                    target="FPT",
+                    reason="completed flow matched",
+                    data_source="SSI completed-session analytics",
+                    triggered_at=datetime(2026, 8, 12, 9, 30),
+                    status="triggered",
+                    diagnostics=json.dumps(diagnostics),
+                )
+            )
+            session.commit()
+
+        response = self.client.get("/api/v1/alerts/triggers", params={"rule_id": rule["id"]})
+
+        self.assertEqual(response.status_code, 200, response.text)
+        serialized = response.json()["items"][0]["diagnostics"]
+        parsed = json.loads(serialized)
+        self.assertEqual(parsed["deep_link"], "/foreign-flow?mode=ticker&ticker=FPT")
+        self.assertEqual(parsed["session"], "2026-08-11")
+        self.assertNotIn("coverage", parsed)
+        self.assertNotIn("provider.example", serialized)
 
     def test_alert_cooldowns_table_create_all_is_idempotent(self) -> None:
         constraint_names = {constraint.name for constraint in AlertCooldownRecord.__table__.constraints}

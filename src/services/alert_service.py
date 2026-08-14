@@ -71,7 +71,7 @@ from src.storage import (
     AlertTriggerRecord,
     DatabaseManager,
 )
-from src.utils.sanitize import sanitize_diagnostic_text
+from src.utils.sanitize import redact_sensitive_mapping, sanitize_diagnostic_text
 
 
 LEGACY_RUNTIME_ALERT_TYPES = frozenset({"price_cross", "price_change_percent", "volume_spike"})
@@ -1255,8 +1255,74 @@ class AlertService:
             "data_timestamp": row.data_timestamp.isoformat() if row.data_timestamp else None,
             "triggered_at": row.triggered_at.isoformat() if row.triggered_at else None,
             "status": row.status,
-            "diagnostics": self._sanitize_text(row.diagnostics) if row.diagnostics else None,
+            "diagnostics": self._serialize_trigger_diagnostics(row.diagnostics),
         }
+
+    @classmethod
+    def _serialize_trigger_diagnostics(cls, raw: Optional[str]) -> Optional[str]:
+        if not raw:
+            return None
+        try:
+            parsed = json.loads(raw)
+        except (TypeError, json.JSONDecodeError):
+            return cls._sanitize_text(raw)
+        if not isinstance(parsed, dict):
+            return cls._sanitize_text(raw)
+
+        compact: Dict[str, Any] = {}
+        for key in (
+            "family",
+            "scope",
+            "metric",
+            "window",
+            "operator",
+            "threshold",
+            "observed",
+            "session",
+            "source",
+            "source_endpoint",
+            "finality",
+            "cache_hit",
+            "dedup_key",
+            "provider_calls",
+        ):
+            value = parsed.get(key)
+            if value is None or isinstance(value, (dict, list)):
+                continue
+            compact[key] = value if isinstance(value, (bool, int, float)) else cls._sanitize_text(value)[:80]
+
+        coverage = parsed.get("coverage")
+        if isinstance(coverage, dict):
+            compact["coverage"] = cls._sanitize_structured_diagnostic_value(
+                redact_sensitive_mapping(coverage)
+            )
+
+        deep_link = parsed.get("deep_link")
+        if isinstance(deep_link, str) and deep_link.startswith("/") and not deep_link.startswith("//"):
+            compact["deep_link"] = deep_link[:200]
+
+        if not compact:
+            return cls._sanitize_text(raw)
+        serialized = json.dumps(compact, ensure_ascii=False, separators=(",", ":"), sort_keys=True, default=str)
+        if len(serialized) > 4000 and "coverage" in compact:
+            compact.pop("coverage")
+            serialized = json.dumps(compact, ensure_ascii=False, separators=(",", ":"), sort_keys=True, default=str)
+        return serialized
+
+    @classmethod
+    def _sanitize_structured_diagnostic_value(cls, value: Any, *, depth: int = 0) -> Any:
+        if depth >= 5:
+            return None
+        if isinstance(value, dict):
+            return {
+                cls._sanitize_text(key)[:80]: cls._sanitize_structured_diagnostic_value(item, depth=depth + 1)
+                for key, item in value.items()
+            }
+        if isinstance(value, list):
+            return [cls._sanitize_structured_diagnostic_value(item, depth=depth + 1) for item in value]
+        if value is None or isinstance(value, (bool, int, float)):
+            return value
+        return cls._sanitize_text(value)
 
     def _serialize_notification(self, row: AlertNotificationRecord) -> Dict[str, Any]:
         return {

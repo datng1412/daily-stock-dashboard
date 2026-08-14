@@ -136,6 +136,13 @@ surface with no page-level horizontal overflow. Copy is descriptive and never
 adds a recommendation. Current-session ForeignRoom flow is not offered as an
 MVP alert selector.
 
+Final browser acceptance on 2026-08-12 created the completed FPT flow rule,
+showed its persisted `2026-08-11` trigger, toggled enable/disable, opened the
+real FPT Foreign Flow context, and deleted the temporary rule. The Alerts grid
+uses `min-w-0` at its intrinsic-width boundaries so table minimum widths remain
+inside local scrollers at 390x844; desktop and mobile reported no page-level
+overflow or console error.
+
 ## Symbol foreign-flow inspection
 
 - **Closed:** ticker selection only highlights the workspace; zero history requests and no hidden loading state.

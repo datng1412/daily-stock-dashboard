@@ -150,6 +150,14 @@ the same completed session produces at most one trigger and notification; a
 new completed session remains eligible. Normal generic cooldown and notification
 channel behavior otherwise remains unchanged.
 
+The public API returns structured diagnostics as valid compact JSON from a
+sanitized allowlist. It may omit oversized coverage, but it does not truncate
+JSON mid-object or discard a validated relative deep link. Final production
+acceptance on 2026-08-12 persisted and deduplicated a real completed FPT
+foreign-flow trigger for session `2026-08-11`, exercised API CRUD/history and
+desktop/mobile Alerts interactions, and opened the selected FPT Foreign Flow
+context. VN-ALERT-1 is `PRODUCTION_READY`.
+
 ## P1 Alert API MVP
 
 P1 新增后端 Alert API 与 schema，锁定告警中心最小 API 契约，不接入 Web 页面或后台 worker。

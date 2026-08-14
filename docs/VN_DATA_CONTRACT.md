@@ -94,6 +94,15 @@ Sanitized diagnostics carry family, scope, metric, window, condition, observed
 value/state, source/endpoint, finality, coverage, cache use, dedup identity, and
 an existing `/foreign-flow` or `/vietnam` deep link. Same rule, target, source,
 and completed session is persisted/notified once; a later session is eligible.
+The API serializes structured trigger diagnostics as valid compact JSON rather
+than truncating an object mid-token; only an allowlisted, sanitized field set is
+returned, and oversized coverage is omitted before the deep link is lost.
+
+Final production acceptance on 2026-08-12 used completed SSI session
+`2026-08-11`: FPT one-session flow was `distributing` with
+`foreign_net_value=-104,650,853,200` VND. The real worker persisted one trigger,
+suppressed the same-session repeat, evaluated no disabled rule, and retained a
+naturally unavailable industry-relative-strength input as non-triggering.
 
 ## Durable accepted foreign-flow history (Phase SSI-V3-M2.6B-R6A)
 
