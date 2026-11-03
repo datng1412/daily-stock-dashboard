@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [documentation] Audit repository documentation, add a current authority/navigation map and coverage matrix, align SSI V3 onboarding and agent guidance, and distinguish retained acceptance from historical phase plans.
 - [fix] Preserve valid compact VN trigger diagnostics and working Alerts deep links instead of truncating JSON mid-object.
 - [fix] Keep Alerts tables inside local scrollers so the 390px mobile page has no horizontal overflow.
 - [documentation] Mark VN-ALERT-1 production-ready after real completed SSI firing, worker persistence/dedup, API CRUD, and desktop/mobile browser acceptance.

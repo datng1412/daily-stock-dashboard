@@ -1,5 +1,7 @@
 # English Documentation Index
 
+For StockClock's current implementation, subject authority, and AI onboarding, start with [DOCS_INDEX](DOCS_INDEX.md). This page remains the general feature and language directory.
+
 This is the entry point for project documentation. The README covers the project overview and quick start; detailed setup, configuration, deployment, feature usage, and troubleshooting docs are linked below.
 
 > For Chinese documentation, see [docs/INDEX.md](INDEX.md).

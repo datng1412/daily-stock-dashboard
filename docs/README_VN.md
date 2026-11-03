@@ -2,26 +2,27 @@
 
 This page is the current entry point for VN dashboard setup. The active runtime is strict SSI FastConnect mode.
 
-## FastConnect V3 planning status
+## Current FastConnect V3 status
 
-FastConnect V2 remains the active VN dashboard provider. The SSI customer notice recorded for this project says V2 is maintained through 30/06/2027 and V3 officially replaces it from 01/07/2027. Phase SSI-V3-A identified official V3 SDK/API documentation but has no local V3 package or account-access proof, so the current result is **deferred**. Nothing in the dashboard switches to V3, falls back between versions, or changes data ownership. Technical migration details and the access-enablement gate are in `docs/SSI_FASTCONNECT_V3_MIGRATION.md`.
+SSI FastConnect V3 (`ssi-sdk==3.0.5`) is the sole production SSI REST and streaming implementation. V2 routing and credentials are historical. Start with [documentation ownership](DOCS_INDEX.md), [current capability state](PROJECT_STATE.md), and the active [roadmap](VN_DASHBOARD_ROADMAP.md); the V3 migration document preserves dated cutover evidence rather than a pending migration instruction.
 
 ## Current Runtime
 
-- Daily OHLCV, daily chart candles, and canonical `latest_price` come from SSI `DailyOhlc` close when DailyOhlc rows exist.
-- SSI `DailyStockPrice` is enrichment only: reference prices, ceiling/floor, adjusted close when present, matched/put-through fields, and foreign-flow fields. It must not overwrite `latest_price`.
-- The foreign-flow workspace supports explicit single-symbol inspection over at most 60 accepted DailyStockPrice sessions. It keeps value and volume separate and shows 5/20/60 coverage, streak/reversal/comparison/extrema summaries, net/buy-sell/cumulative/rolling charts, and a sortable history table. No symbol history is requested before the panel is opened; panel controls do not refetch. This is completed-session inspection, not current-session flow, a price relationship, an alert, or advice.
+- Validated SSI daily OHLC history normally owns chart candles, technical indicators, and `latest_price`. If history fails freshness/completeness and a newer usable DailyStockPrice row exists, the existing service exposes that price with an explicit partial/source label and withholds history-derived indicators.
+- SSI `DailyStockPrice` also owns reference/limits, matched/put-through and completed foreign-flow fields. This is one SSI provider with distinct contracts, not a provider fallback.
+- The foreign-flow workspace separates accepted DailyStockPrice history from provisional current flow, with value/volume, 5/20/60-session coverage, signals, rankings, and explicit current-membership VN30/Industry limits. Completed-session inspection and current publication have separate request/finality contracts. Completed flow is also an input to explicitly configured intelligence alerts.
 - The optional compact intraday pulse is sourced only from SSI `IntradayOhlc` when usable. Separately, the selected-ticker chart offers `1m` for Today or an available completed date through `/api/v1/stocks/vn/intraday-chart`; it uses sparse SSI resolution-1 bars, strict Vietnam timestamps, a dedicated bounded cache, and no realtime substitution. Today is delayed polling, never a live/tick chart. 5m/15m/30m/1h, aggregation, page 2, and fallback remain unavailable.
-- Realtime snapshots come from the optional SSI `X:{symbol}` live contract and stay separate from daily prices.
+- Realtime quote, order-book, and trade caches come from the optional process-shared V3 streaming lifecycle. X/X-QUOTE/X-TRADE are retained product/context labels; they are not literal V3 subscription syntax. See the current integration contract.
 - Optional local streaming snapshots can retain already-normalized last-known X/X-QUOTE/X-TRADE/R/MI/F rows across a backend restart. They are bounded, stale, explicitly labeled, and never replace SSI DailyOhlc daily price data.
-- Trade tape comes from the optional SSI `X-TRADE:{symbol}` latest-event stream context and stays separate from daily prices.
-- Foreign room comes from the optional SSI `R:{symbol}` live context when a usable streaming cache row exists and stays separate from DailyStockPrice daily foreign flow.
-- Market-index pulse comes from the optional SSI `MI:{index_code}` live context when usable streaming cache rows exist and stays separate from REST DailyIndex and stock rows.
+- Trade tape is a bounded event buffer, independent of official daily close. Current foreign flow uses official `room.{symbol}` / `ForeignRoomMessage` replacement snapshots; values stay provisional and non-persistent. Completed DailyStockPrice history remains separate and authoritative.
+- Optional market-index pulse stays separate from REST daily indexes. Retained live acceptance and remaining channel caveats are listed in PROJECT_STATE.
 - VN30/index components are SSI-backed where available.
-- News, fundamentals, financial statements, ratios, macro data, research reports, and corporate actions/dividends/rights/splits are disabled / `not_implemented` until a separate qualified provider is added for those gaps. `VN_NEWS_PROVIDER=vnstock_news` reports an explicit unavailable terms gate only. `VN_NEWS_PROVIDER=vnstock_news_personal` is local/personal research only, requires an explicit enable flag, and must not be used for hosted/public/commercial deployment. `VN_NEWS_PROVIDER=vnstock_community` is a separate local/personal selected-company headline mode, capped at three cached rows and never used for SSI market data. Its original article path remains provenance-only unless a validated absolute HTTP(S) URL is available; the UI never guesses a hostname.
+- News defaults to disabled. `VN_NEWS_PROVIDER=vnstock_news` reports an explicit unavailable terms gate only. `VN_NEWS_PROVIDER=vnstock_news_personal` is implemented for local/personal research, requires an explicit enable flag, and must not be used for hosted/public/commercial deployment. `VN_NEWS_PROVIDER=vnstock_community` is a separate implemented local/personal selected-company headline mode, capped at three cached rows and never used for SSI market data. Its original article path remains provenance-only unless a validated absolute HTTP(S) URL is available; the UI never guesses a hostname. Financial statements, ratios, macro, research reports, and corporate actions remain separately unavailable, disabled, or unimplemented as identified in PROJECT_STATE and the data contract.
 - Missing object data is represented as `null`; missing list data is represented as `[]`.
 
 Mozyfin owns no normal VN dashboard runtime path. KBS is legacy-only, disabled by default, and should appear only in explicitly labeled legacy diagnostics or historical notes.
+
+VN30 breadth, current-ICB sector context, selected-stock relative strength, and completed-session intelligence alerts are implemented and have dated acceptance evidence. Current flow, completed history, and alert inputs have different finality rules; consult the data contract rather than older phase snapshots later in this file.
 
 ## Setup
 

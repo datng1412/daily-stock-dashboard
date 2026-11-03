@@ -4,6 +4,12 @@
 
 This strategy defines the expected validation for VN dashboard documentation, API contracts, and UI states. It is scoped to SSI-first VN dashboard work and should be referenced before data-quality, contract, progressive workspace, live-section, provider, and packaging tasks.
 
+## Current validation authority
+
+Current runtime is SSI V3 only. Use existing `tests/test_ssi_v3_*.py`, provider routing, service/API, streaming, and affected frontend tests selected for the changed surface. V2-default/delegation paragraphs below are historical migration evidence; removed test names do not become runnable requirements. Inspect paths before running a copied command. Dated results in PROJECT_STATE are retained evidence, not the result of the current task.
+
+Documentation-only work checks links/paths, configuration and command names, current-state consistency, secret exposure, and `git diff --check`. AI asset edits additionally run `python scripts/check_ai_assets.py`. No install, build, server, broad suite, or provider call is required solely for prose changes. For implementation, follow the AGENTS validation matrix and record any pending live/browser evidence explicitly.
+
 ## SSI-V3-M2 market-data authenticity
 
 ## SSI-V3-M2.1 daily-OHLC lineage

@@ -2,6 +2,8 @@
 
 ## Purpose
 
+Current field definitions are checked against executable schemas/normalizers. Named early-phase and planned sections are historical design context unless reaffirmed by [VN_DATA_CONTRACT](VN_DATA_CONTRACT.md) and current [PROJECT_STATE](PROJECT_STATE.md); they do not downgrade accepted current-flow or alert capabilities.
+
 This dictionary defines the public and UI-relevant fields used by the VN dashboard and company detail page. It should be read with `docs/VN_DATA_CONTRACT.md`, `docs/API_CATALOG.md`, and `docs/UI_STATES.md`.
 
 Conventions:

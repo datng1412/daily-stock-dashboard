@@ -2,7 +2,7 @@
 
 ## Active roadmap
 
-Last updated: 2026-08-11
+Documentation reviewed: 2026-11-02 against baseline `0bf5f90f`. Retained runtime evidence remains dated; no live acceptance was repeated by this review. No next product implementation phase is assigned.
 
 This capability-oriented roadmap is the current source of truth. Dated phase
 records later in this file are historical evidence and do not determine what

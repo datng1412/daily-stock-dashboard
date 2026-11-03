@@ -1,6 +1,8 @@
 # Decisions
 
-Last updated: 2026-06-29
+Last reviewed against repository: 2026-11-02. Runtime acceptance dates remain those recorded in PROJECT_STATE.
+
+Current authority: [documentation map](DOCS_INDEX.md), [capability state](PROJECT_STATE.md), and the active [roadmap](VN_DASHBOARD_ROADMAP.md). The historical phase plan and external-provider sequencing below record prior decisions, not the next authorized task.
 
 This file records current product and engineering decisions that should not be re-litigated without explicit user direction.
 
@@ -19,7 +21,7 @@ Operational rule:
 - Separate facts, source status, diagnostics, and neutral interpretation.
 - Prefer neutral labels such as `Strong`, `Improving`, `Neutral`, `Weakening`, `Risk elevated`, and `Data unavailable`.
 
-## VN Product Phase Plan
+## Historical VN Product Phase Plan (superseded sequencing)
 
 Decision: after Phase 3.5A, the VN dashboard pivots from additional UI refinement to data-first implementation. Phase 4.0A is the next recommended task.
 
@@ -60,7 +62,7 @@ Operational rule:
 - If daily history is materially stale or incomplete while a newer SSI DailyStockPrice row exists, expose a partial row with DailyStockPrice as the explicitly labeled canonical provider value; do not compute technical indicators from stale history.
 - Mozyfin is disabled for VN runtime and must not be used as fallback for SSI-owned fields.
 - KBS is legacy optional only, disabled by default, and must require explicit legacy flags before diagnostic use.
-- News is disabled until a separate NewsProvider is implemented.
+- News defaults to disabled. Optional personal/local `vnstock_news_personal` and `vnstock_community` adapters are implemented under separate enablement/terms gates; they do not own SSI market data or prove hosted redistribution rights.
 
 ## External Realtime And News Resources
 
@@ -72,7 +74,7 @@ Operational rule:
 - Any future provider implementation must first summarize auth, rate limits, timestamp semantics, and data/price semantics.
 - Future news should use a separate NewsProvider contract, not Mozyfin free-tier news/social paths or scraping.
 
-## VN External Provider Priority
+## Historical VN External Provider Priority (qualification rationale)
 
 Decision: corporate actions/dividends are the first external VN data domain to qualify after SSI-owned market data.
 
@@ -90,7 +92,7 @@ Operational rule:
 - Financial statements, ratios, metadata fallback, news, macro, and external VNINDEX remain deferred in the order recorded in `docs/VN_EXTERNAL_PROVIDER_STRATEGY.md`.
 - The existing portfolio subsystem remains user-owned and separate from external VN market-data provider selection.
 
-## VN SSI-First Completion Before External Runtime
+## VN SSI-First Ownership and External Runtime Gates
 
 Decision: complete and document remaining SSI FastConnect capability before implementing VNStocks, FiinGroup, or another external provider runtime.
 
@@ -104,7 +106,7 @@ Operational rule:
 
 - Treat `docs/SSI_DATA_CAPABILITY_MATRIX.md` as the current SSI capability classification before adding VN data fields.
 - Keep DailyOhlc and DailyStockPrice behavior unchanged unless a separate source-ownership decision is made.
-- VNStocks and FiinGroup are candidate external providers only until a later qualification phase verifies access, rate limits, timestamp/data semantics, storage/display rights, and redistribution rights.
+- FiinGroup and other unqualified market-data candidates remain gated by access, rate-limit, timestamp/data, storage/display, and redistribution proof. The separately implemented optional local Vnstock news adapters are the scoped exception, not SSI fallback.
 - Do not add external fallback providers, scrape public pages, infer events from price gaps, or fake index/news/financial/macro data.
 
 ## SSI Realtime And Trade Tape Semantics
@@ -147,6 +149,8 @@ Implication:
 ## Intraday Semantics
 
 Decision: SSI IntradayOhlc is a compact intraday candle source, not a realtime matched quote.
+
+The selected chart also supports sparse `1m` completed-date and delayed Today candles. This is distinct from the compact pulse and is not a guaranteed 1H or live-tick series.
 
 Rationale:
 

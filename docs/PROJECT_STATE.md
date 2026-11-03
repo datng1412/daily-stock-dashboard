@@ -2,7 +2,7 @@
 
 ## Current repository-grounded capability state
 
-Last updated: 2026-08-11
+Documentation reviewed: 2026-11-02 against baseline commit `0bf5f90f` (main). Last retained runtime acceptance: 2026-08-12; this documentation audit did not retest live SSI or a deployed service.
 
 Current production SSI market-data routing is V3-only through the sole provider
 router. The historical migration notes later in this file describe conditions
@@ -19,7 +19,7 @@ at their original dates and do not override this section.
 | Futures and automated proprietary sources | `BLOCKED_PROVIDER` | VN30 futures/F1M/basis/open-interest/volume contracts are unproven; automated proprietary data remains blocked by source and entitlement readiness. |
 | Proprietary product expansion | `DEFERRED` | Manual verified EOD infrastructure is experimental and has no accepted real financial row; it is not an active product priority. |
 
-## Active next phase
+## Current milestone and next-phase boundary
 
 `VN-ALERT-1 — Watchlist Intelligence` is `PRODUCTION_READY`. It reuses the generic
 AlertService, worker, storage, notification routes, Alerts page, and trigger

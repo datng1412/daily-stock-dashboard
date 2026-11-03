@@ -21,6 +21,8 @@ Analyze your watchlist daily -> generate a decision dashboard -> push to Telegra
 
 English | [简体中文](../README.md) | [繁體中文](README_CHT.md)
 
+StockClock Vietnam workspace: [current state and documentation map](DOCS_INDEX.md) · [VN setup](README_VN.md). This branch retains the inherited multi-market AI analysis features; the VN workspace follows separate SSI V3 contracts and neutral market-inspection labels.
+
 </div>
 
 ## 💖 Sponsors

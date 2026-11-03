@@ -21,6 +21,8 @@
 
 繁體中文 | [English](README_EN.md) | [简体中文](../README.md)
 
+StockClock 越南市場工作區：[目前狀態與文件導覽](DOCS_INDEX.md) · [越南儀表板設定](README_VN.md)。此分支保留既有多市場 AI 分析功能；VN 工作區遵循獨立的 SSI V3 資料契約和中性市場標籤。
+
 </div>
 
 ## 💖 贊助商 (Sponsors)

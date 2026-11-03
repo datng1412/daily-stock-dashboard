@@ -2,6 +2,8 @@
 
 ## Codex continuity docs
 
+Start with `docs/DOCS_INDEX.md` for subject ownership and the current-versus-historical documentation boundary.
+
 When resuming work with Codex or another coding agent, read these project-management docs before changing implementation:
 
 * `docs/PROJECT_STATE.md` for current repository and Vietnam dashboard state.
@@ -10,7 +12,17 @@ When resuming work with Codex or another coding agent, read these project-manage
 * `docs/CODEX_TASK_TEMPLATE.md` for starting a scoped Codex task.
 * `docs/REVIEW_CHECKLIST.md` for review and handoff checks.
 
-For Vietnam dashboard work, keep live/fixture mode explicit, do not print Mozyfin secrets, do not present quote output as a reliable realtime matched price unless source semantics change, treat the intraday pulse as 1H OHLCV rather than realtime quote, keep RSI14 as Wilder/RMA, and preserve neutral labels with no buy/sell recommendations.
+For Vietnam dashboard work, SSI FastConnect V3 is the sole production market-data provider. Keep live and injected-test evidence explicit; never activate legacy fixtures as runtime fallback. Preserve Wilder/RMA RSI14, neutral labels, and missing-versus-zero integrity. Daily history, delayed sparse 1m candles, streaming quotes/trades, and provisional current foreign flow are separate contracts; read `docs/VN_DATA_CONTRACT.md` before changing their semantics.
+
+### Evidence and completion rules
+
+* Current code, schemas, configuration, and executable tests define implementation. Dated retained acceptance defines what was actually verified; code existence alone does not prove live provider acceptance.
+* `PROJECT_STATE.md` owns capability status; the active section of `VN_DASHBOARD_ROADMAP.md` owns priorities. Historical phase sections do not authorize new work or override current contracts.
+* `latest_price` normally uses validated SSI daily OHLC. The existing newer-DailyStockPrice degradation is explicitly labelled partial when history fails freshness; do not remove or broaden it based on old enrichment-only prose.
+* Completed DailyStockPrice history owns accepted foreign flow. Current `ForeignRoomMessage` is provisional and never enters completed history or completed-session alerts. Use current SSI-derived membership; never fabricate constituents, fields, timestamps, zeros, or provider fallback.
+* Keep provider connection ownership in the process-shared lifecycle. Routes may use existing bounded recovery/lease mechanisms; do not create clients or independent streams per request.
+* Definition of Done: scoped implementation and contracts agree; relevant deterministic checks pass; required runtime/visual acceptance is evidenced or explicitly pending; docs record limitations; unrelated work and secrets are preserved. Docs-only work requires path/link, consistency, and diff checks, not provider calls or product builds.
+* Inspect working/staged state first. Preserve unrelated changes. Do not stage without user authorization, and do not reset, restore, clean, or stash user work to simplify a task.
 
 After each VN dashboard implementation or validation phase, Codex must update the relevant roadmap/docs with any newly discovered limitations, known issues, data-source caveats, validation findings, or deferred tasks. Do this before reporting the phase as complete. Prefer `docs/VN_DASHBOARD_ROADMAP.md` for roadmap/backlog issues, `docs/SSI_FASTCONNECT_INTEGRATION.md` for SSI-specific caveats, and `docs/CHANGELOG.md` for user-visible documentation changes. Do not silently leave important findings only in chat output.
 
@@ -85,7 +97,7 @@ python scripts/check_ai_assets.py
 
 ## 3. Repository overview
 
-* Project positioning: an intelligent stock analysis system covering A-shares, Hong Kong stocks, and US stocks.
+* StockClock's VN product is a personal, data-quality-first SSI market inspection dashboard with Foreign Flow, breadth, sectors, relative strength, and completed-session alerts. The inherited A-share/HK/US AI-report, portfolio, bot, and desktop subsystems remain in the repository; their features and provider fallbacks are not automatically VN product capabilities.
 * Main flow: fetch data -> technical analysis / news retrieval -> LLM analysis -> generate report -> send notifications.
 * Key entry points:
 

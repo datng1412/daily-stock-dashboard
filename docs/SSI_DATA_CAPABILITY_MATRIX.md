@@ -2,6 +2,8 @@
 
 ## Purpose
 
+For current status, use [PROJECT_STATE](PROJECT_STATE.md) and the current production section of [SSI integration](SSI_FASTCONNECT_INTEGRATION.md). Local audit baselines and phase tables below are dated evidence; statements that a 2026-06/07 probe is the latest do not supersede the retained August acceptance.
+
 This matrix is an audit and planning aid for the VN dashboard. It is not a new API contract and does not replace `docs/VN_DATA_CONTRACT.md`.
 
 Statuses are conservative and should be refreshed when provider behavior, endpoint permissions, or response shapes change. A `strong` or `usable` status is repository and current-evidence scoped; it is not a permanent provider guarantee.

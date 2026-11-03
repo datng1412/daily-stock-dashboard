@@ -1,10 +1,18 @@
 # Vietnam Dashboard Runbook
 
-Last updated: 2026-07-23
+Documentation reviewed: 2026-11-02. Commands below were inspected, not executed by this documentation audit.
 
 ## Goal
 
-Run and debug the Vietnam dashboard in strict SSI FastConnect mode. Mozyfin is disabled for VN runtime, KBS is legacy optional only, and news is disabled until a separate NewsProvider is implemented.
+Run and debug the Vietnam dashboard in strict SSI FastConnect V3 mode. News defaults to disabled; optional local/personal news adapters have separate enablement and terms gates. Use [DOCS_INDEX](DOCS_INDEX.md) for current authority and [PROJECT_STATE](PROJECT_STATE.md) for dated acceptance and limitations.
+
+## Operational boundaries
+
+- The production Docker/Render path is documented in [RUNBOOK_DOCKER_RENDER](RUNBOOK_DOCKER_RENDER.md). The existing Compose file still forwards a legacy Mozyfin variable and does not forward SSI V3 credentials; it is not a complete current SSI deployment template. This documentation task does not change that file.
+- REST enablement/credentials, optional streaming, local news, and scheduled alert evaluation are separate. `--serve-only` serves API/UI; it does not start scheduled AlertWorker evaluation. The existing `--schedule` path owns periodic evaluation when enabled.
+- For automated server acceptance, choose a free port, own the exact child process, enforce readiness (45s), per-request (15s), and total-lifetime (120s) deadlines, then terminate the owned tree in `finally` and verify port release. Never wait for a web server to exit naturally.
+- A local outbound TCP permission failure is an execution-environment block, not provider evidence. Live calls require an authorized network-capable context. `/api/health` proves application readiness only.
+- Use one backend worker for coherent process-local current-flow state. Accepted completed foreign-flow history has durable cache restoration; provisional room values and current aggregates do not become completed history.
 
 ## Live SSI Mode
 
@@ -26,11 +34,6 @@ $env:VN_INTRADAY_DATA_PROVIDER = "ssi"
 $env:VN_REALTIME_DATA_PROVIDER = "ssi"
 $env:VN_TRADE_TAPE_PROVIDER = "ssi"
 $env:VN_NEWS_PROVIDER = "disabled"
-$env:MOZYFIN_ENABLED = "false"
-$env:MOZYFIN_NEWS_ENABLED = "false"
-$env:VN_ALLOW_LEGACY_MOZYFIN_PROVIDER = "false"
-$env:KBS_ENABLED = "false"
-$env:VN_ALLOW_LEGACY_KBS_PROVIDER = "false"
 
 # Set SSI_V3_API_KEY and SSI_V3_API_SECRET from a local secret source only.
 # SSI_V3_CLIENT_ID is optional. Do not echo any credential.
@@ -164,9 +167,9 @@ For each ticker, inspect:
 
 Use `ConvertTo-Json -Depth 12`; shallow JSON depth can stringify nested objects as `@{...}` and mislead debugging.
 
-## Current Milestone Smoke (Phase 0)
+## Bounded dashboard smoke
 
-Use these endpoints for the current SSI provider milestone smoke. They should not print credentials or raw auth responses. Future phase implementation steps live in `docs/VN_DASHBOARD_ROADMAP.md`, not this runbook.
+Use these endpoints only within an authorized bounded smoke. They should not print credentials or raw auth responses. Current priorities live in the active section of `VN_DASHBOARD_ROADMAP.md`.
 
 ```text
 GET http://127.0.0.1:8000/api/v1/stocks/vn/watchlist?tickers=FPT&force_refresh=true
@@ -226,7 +229,7 @@ If SSI DailyOhlc and SSI DailyStockPrice disagree for the same ticker/date, do n
 4. Chart/watchlist TTL mismatch.
 5. Whether the provider has provisional versus final values.
 
-Current dashboard rule: `latest_price` uses SSI DailyOhlc close as canonical dashboard price. DailyStockPrice provides reference/limits/foreign/matched/put-through fields unless a future design explicitly changes canonical source semantics.
+Current dashboard rule: validated daily OHLC normally owns `latest_price`. The existing service may expose a newer DailyStockPrice price as explicitly partial when daily history fails freshness/completeness; history-derived indicators remain unavailable. Check source/date/quality together. This is existing same-provider degradation, not an invitation to blend same-date mismatches.
 
 ### Intraday Freshness
 
@@ -309,13 +312,11 @@ SSI_V3_API_SECRET=<set in secret env>
 SSI_V3_CLIENT_ID=<optional secret env>
 ```
 
-Required non-secret provider defaults:
+REST example defaults (streaming remains separately optional):
 
 ```text
 SSI_V3_REST_ENABLED=true
-SSI_STREAMING_REALTIME_ENABLED=true
-SSI_STREAMING_REALTIME_BOOTSTRAP_SYMBOLS=FPT
-SSI_STREAMING_REALTIME_CHANNEL_TEMPLATE=X:{symbol}
+SSI_STREAMING_REALTIME_ENABLED=false
 VN_DAILY_DATA_PROVIDER=ssi
 VN_CHART_DATA_PROVIDER=ssi
 VN_DAILY_STOCK_PRICE_PROVIDER=ssi
@@ -324,14 +325,11 @@ VN_INTRADAY_DATA_PROVIDER=ssi
 VN_REALTIME_DATA_PROVIDER=ssi
 VN_TRADE_TAPE_PROVIDER=ssi
 VN_NEWS_PROVIDER=disabled
-MOZYFIN_ENABLED=false
-MOZYFIN_NEWS_ENABLED=false
-KBS_ENABLED=false
 ```
 
 Use `/tmp/dsa-cache` when the deployment service does not have a persistent disk. Cache behavior must not change SSI/Mozyfin/KBS source ownership.
 
-The Docker image must install official SSI `python-fcdata` tag `v2.2.2` through `requirements.txt`. If Render logs or `/api/v1/stocks/vn/realtime` diagnostics show `package_unavailable`, rebuild from a commit that includes that dependency before investigating SSI entitlement or channel behavior.
+The Docker image installs the pinned official `ssi-sdk==3.0.5` from `requirements.txt`. A missing SDK is a dependency/image issue; diagnose it separately from transport or entitlement. Removed V2 packages and channel templates must not be restored from historical notes.
 
 ## Data Semantics Reminder
 
@@ -339,7 +337,7 @@ The Docker image must install official SSI `python-fcdata` tag `v2.2.2` through 
 - SSI DailyStockPrice supplies reference/limits, matched/put-through, and latest foreign-flow fields.
 - SSI IntradayOhlc is not a realtime matched quote.
 - SSI realtime snapshot and trade tape are separate optional live contracts.
-- News is disabled until a separate provider is implemented.
+- News defaults to disabled; implemented personal/local adapters require their explicit configuration and terms gates.
 - RSI14 uses Wilder/RMA.
 - Labels are neutral condition tags only.
 - VN dashboard visible times should use Vietnam time.

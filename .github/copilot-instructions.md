@@ -2,6 +2,8 @@
 
 Canonical source: [`AGENTS.md`](../AGENTS.md).
 
+Documentation ownership and reading order: [`docs/DOCS_INDEX.md`](../docs/DOCS_INDEX.md). Use current implementation and dated acceptance evidence; historical phase prose does not override current VN contracts.
+
 If any instruction in this file conflicts with `AGENTS.md`, follow `AGENTS.md`.
 
 ## Core Rules
@@ -16,7 +18,7 @@ If any instruction in this file conflicts with `AGENTS.md`, follow `AGENTS.md`.
 - Do not hardcode secrets, accounts, ports, model names, absolute environment-specific paths, or environment-specific branches.
 - Reuse existing modules, configuration entrypoints, scripts, and tests instead of adding parallel implementations.
 - For user-visible behavior changes, CLI/API changes, deployment changes, notification changes, or report-structure changes, update the relevant docs and `docs/CHANGELOG.md`.
-- In `docs/CHANGELOG.md`, the `[Unreleased]` section uses a **flat format**: one line per entry formatted as `- [type] description`, where type is one of `新功能`/`改进`/`修复`/`文档`/`测试`/`chore`. **Do not add `### category headers` inside `[Unreleased]`** to minimize merge conflicts in concurrent PRs. A maintainer will reorganize into the full categorized format at release time.
+- In `docs/CHANGELOG.md`, `[Unreleased]` uses one standalone `- [type] description` line per entry. Allowed types are `new feature` / `improvement` / `fix` / `documentation` / `test` / `chore`; do not add category headings.
 - Use `README.md` only for project positioning, high-level capabilities, quick start, main entrypoints, and sponsorship/cooperation information; avoid updating README unless the change is homepage-level.
 - Put detailed module behavior, page interaction, topic configuration, troubleshooting, field contracts, implementation semantics, and edge cases in the appropriate `docs/*.md` file instead of README.
 - When config semantics change, sync `.env.example` and assess impact on local runs, Docker, GitHub Actions, API, Web, and Desktop.

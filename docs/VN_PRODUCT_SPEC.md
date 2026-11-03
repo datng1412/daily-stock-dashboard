@@ -2,6 +2,8 @@
 
 For a non-technical, product-facing overview in Vietnamese, see `docs/VN_PRODUCT_OFFERING.md`.
 
+Current scope/status is maintained in [PROJECT_STATE](PROJECT_STATE.md) and the active [roadmap](VN_DASHBOARD_ROADMAP.md). Named phase sections here preserve feature design history, not an executable backlog. Completed/current Foreign Flow, breadth, sectors, relative strength, and completed-session alerts now exist; an older section saying a feature does not exist describes that phase only.
+
 ## Product Goal
 
 The Vietnam dashboard is a data-quality-first market inspection workspace for VN tickers. It helps users inspect official daily market data, source coverage, freshness, and unavailable provider states without turning the product into a trading-decision tool.
