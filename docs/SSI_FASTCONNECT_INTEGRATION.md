@@ -359,7 +359,26 @@ can retain `status=ok` and old completeness diagnostics alongside
 `cache_source=provider_backed_stale`. Consumers that require aligned marks need
 to check the exact candle date, price and cache provenance separately. The
 [holdings feasibility record](PROJECT_STATE.md#vn-holdings-concentration-snapshot-feasibility-2026-11-03)
-documents the offline checks and pending live evidence.
+records the offline checks and subsequent dated live evidence.
+
+The final holdings live gate on 2026-11-03 subsequently accepted 8/8 positive,
+fresh exact-date marks for 2026-11-02 through the existing chart route. A single
+authorized cold/warm run used 25 actual HTTP requests including one auth and
+24 cold summary reads; warm requests used the process cache with zero SSI
+traffic. All responses were HTTP 200. Cold charts took 4.228 seconds, warm
+charts 1.294 seconds, and the full authenticated run 6.112 seconds, with at most
+two concurrent chart requests and no retries. The 25-request authorization was
+fully consumed. Retained `page_count` diagnostics describe the original fetch,
+not additional warm transport requests.
+
+Same-date external closes matched for all eight equities. This is nominal
+per-share price-scale acceptance for a dated concentration snapshot, not proof
+of historical adjustment semantics, a holiday calendar, today's finality, or
+an investor's quantity. SHS and ACV reference volumes differed from SSI, with
+cause unverified; both remained positive. See the
+[final gate and exact frontend scope](PROJECT_STATE.md#final-bounded-live-acceptance-2026-11-03)
+for prices, sources, request costs, limitations, and share-date requirements.
+No application/provider behavior or active roadmap was changed by this gate.
 
 The retained V3 intraday service request uses the supported `interval=1m`; requested dashboard cadence remains separate and is compared with observed provider cadence.
 
