@@ -117,6 +117,120 @@ valuation coverage, same-date price and share-basis reconciliation, latency at
 the proposed eight-position cap, and the investor's five-review workflow are
 pending. `NEXT` remains unassigned.
 
+Phase 8.2 at `f48817a2` remains `NEEDS_VALIDATION`. The guarded daily-history
+audit returned `NOT_RUN` with zero operations. Live exact-date mark coverage,
+price and share-basis reconciliation, and cold and warm chart costs remain
+pending. The existing audit reads the adapter directly, so the holdings gate
+requires a bounded chart-route run that also measures cache reuse. Two
+existing Foreign Flow client tests reproduced on the baseline. The symbol
+test expects a 60-session cap instead of the current 120-session cap, and the
+VN30 fixture omits the required `decomposition` object. Both are outside the
+daily chart path. Personal workflow measurement moves to an in-product pilot
+after a technical `GO`.
+
+### Final bounded live acceptance (2026-11-03)
+
+Decision: `GO` for the frontend-only, same-date concentration snapshot scoped
+below. This dated acceptance supersedes the pending live gate above; it does
+not mark the feature implemented or assign `NEXT`.
+
+The user explicitly authorized one read-only preflight for FPT, SSI, VCB,
+HPG, VNM, MWG, SHS, and ACV, capped at 25 SSI HTTP requests including auth,
+two concurrent chart requests, zero retries, and a 30-second hard deadline.
+The diagnostic process already had `SSI_V3_LIVE_ACCEPTANCE_ENABLED=true` and
+valid required local V3 settings. No enablement or credential setting was
+changed. One fresh process reused the existing `get_vietnam_chart` route and
+process-shared V3 lifecycle, then closed it. No server startup, streaming,
+brokerage account, or personal portfolio was accessed. Baseline: `f48817a2`.
+
+The run completed at `2026-11-03T23:13:28+07:00` in 6.112 seconds, including
+authentication (0.584 seconds). Eight cold charts took 4.228 seconds and
+eight immediate warm charts took 1.294 seconds. Actual HTTP transport counts
+were one authentication plus 24 cold summary reads (three per equity), then
+zero warm reads: 25/25 authorized requests, all HTTP 200, zero HTTP 429, and
+zero transport/provider failures. Warm cache hits were 8/8 with identical
+chart points; stale-cache recoveries were zero. Warm diagnostics retain the
+original cold `page_count=3`; that field is not a new-request counter.
+
+Each 6M chart returned 129 observed dates from `2026-05-04` through
+`2026-11-03`, from 260 normalized history rows. Each included one observation
+dated today. The snapshot deliberately excluded today's candle because the
+chart has no per-candle finality, and selected the newest observed prior date,
+`2026-11-02`, rather than treating the adapter's weekday reference as exchange
+calendar evidence. Coverage on that exact date was 8/8 (100%): all OHLC shapes
+were valid, closes and matched volumes were finite and positive, history was
+complete/fresh, and no stale-cache or fallback mark was used.
+
+| Equity | SSI close, VND/share | SSI matched volume, shares | Same-date BSC close | External record |
+| --- | ---: | ---: | ---: | --- |
+| FPT | 50,200 | 12,293,400 | 50,200 | [BSC FPT](https://www.bsc.com.vn/du-lieu-lich-su/?mck=FPT) |
+| SSI | 18,850 | 27,277,400 | 18,850 | [BSC SSI](https://www.bsc.com.vn/du-lieu-lich-su/?mck=SSI) |
+| VCB | 53,600 | 14,009,100 | 53,600 | [BSC VCB](https://www.bsc.com.vn/du-lieu-lich-su/?mck=VCB) |
+| HPG | 20,400 | 25,465,100 | 20,400 | [BSC HPG](https://www.bsc.com.vn/du-lieu-lich-su/?mck=HPG) |
+| VNM | 56,000 | 4,335,400 | 56,000 | [BSC VNM](https://www.bsc.com.vn/du-lieu-lich-su/?mck=VNM) |
+| MWG | 72,400 | 4,855,000 | 72,400 | [BSC MWG](https://www.bsc.com.vn/du-lieu-lich-su/?mck=MWG) |
+| SHS | 12,200 | 13,095,000 | 12,200 | [BSC SHS](https://www.bsc.com.vn/du-lieu-lich-su/?mck=SHS) |
+| ACV | 38,700 | 1,071,000 | 38,700 | [BSC ACV](https://www.bsc.com.vn/du-lieu-lich-su/?mck=ACV) |
+
+Public historical pages were inspected without login or external API/provider
+integration. All eight closing-price deltas are zero. BSC's price heading says
+thousand VND while its rendered cells use values such as `50,200`; that heading
+alone is ambiguous. The same-date actual/adjusted close table for
+[FPT](https://openbds.com.vn/co-phieu/FPT), explicit VND/share description for
+[SHS](https://taichinh.com/chung-khoan/shs), and independent
+[ACV history](https://vn.investing.com/equities/airports-corporation-of-viet-nam-historical-data),
+corroborated the nominal per-share scale. These observations support raw
+VND/share arithmetic for this date; board-style thousand-VND formatting must
+remain presentation-only. They do not certify the adjustment basis of the
+full history or any investor's actual quantity. BSC reports 13,103,224 SHS and
+1,075,393 ACV shares, differing from SSI by 8,224 and 4,393 respectively; the
+cause was not established. Exact volume equality is not accepted. Both sources
+remain positive, so this does not change the price-based concentration gate.
+
+The local `.venv` could not import the diagnostic because dependencies including
+`ssi_sdk`, `httpx`, `fastapi`, and `tenacity` were absent. The already installed
+Python 3.13 runtime imported and executed the existing route; nothing was
+installed. The bounded diagnostic and sanitized transport/mark evidence remain
+ignored local artifacts at `.claude/reviews/holdings_live_gate.py` and
+`.claude/reviews/holdings_live_gate.json`. The retained facts above are the
+reviewable record; do not rerun the live command under the exhausted budget.
+
+#### Bounded implementation scope after GO
+
+- Change only the VN frontend under `apps/dsa-web/`, plus its maintained docs.
+  Provide an explicitly named holdings concentration snapshot with at most
+  eight unique VN equities and manually entered positive whole-share quantities
+  confirmed by the user for the displayed reference date. Quantities are shares,
+  with no lot multiplier. Keep inputs local to the browser and provide clear/reset.
+- Reuse the existing daily chart client and payload without backend/API/provider
+  changes. Fetch only on explicit snapshot load or refresh, at concurrency at
+  most two, reuse existing in-flight/cached data where available, and avoid
+  polling or requests caused by presentation controls.
+- Select the newest actually observed date strictly before today in Vietnam
+  time across the requested charts. Require every holding to have a valid,
+  finite positive exact-date mark with positive matched volume and fresh,
+  complete, non-stale SSI provenance. Never move to an older common date
+  silently. Missing/wrong-date/stale/ineligible holdings prevent the complete
+  total and weights; retain an explicitly dated previous result separately
+  during refresh/failure and report coverage and reasons.
+- Compute value as same-date shares times raw VND/share close, total as the
+  sum of all eligible holding values, and each weight as value/total. Show a
+  responsive value/weight table, total, largest holding and top-three weights,
+  observed date, SSI source, coverage, and cache/freshness state. Use neutral
+  descriptions; scope concentration to the entered holdings.
+- Exclude brokerage access, trades, cash, leverage, sector attribution, alerts,
+  cost basis, P&L, return history, and automatic dividend/split/rights or quantity
+  adjustments. Historical adjustment semantics remain unknown. User quantities
+  must describe the same share basis/date as the snapshot, including any manual
+  corporate-action correction; today's quantities must not be assumed to apply
+  to a prior session.
+- Before feature completion, verify the new frontend's date/eligibility/math,
+  request ownership and concurrency, cancellation/stale-response handling, and
+  desktop/mobile states, then run the affected frontend checks. This live gate
+  exercised the route function and response model, not ASGI HTTP/auth/middleware,
+  browser rendering, restart/TTL expiry, production load, or the personal pilot.
+  The sample supports eight-holding on-demand feasibility; it is not a load SLA.
+
 ## Fix-when-touched technical debt
 
 Large Vietnam dashboard page decomposition, VN30 hydration performance,
