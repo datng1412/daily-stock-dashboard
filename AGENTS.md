@@ -86,9 +86,11 @@ For stock-related UI or API behavior:
 * `AGENTS.md` is the single source of truth for AI collaboration rules in this repository.
 * `CLAUDE.md` must be a symlink pointing to `AGENTS.md`, for compatibility with the Claude ecosystem.
 * `.github/copilot-instructions.md` and `.github/instructions/*.instructions.md` are mirrors or layered supplements for GitHub Copilot / Coding Agent. If they conflict with this file, `AGENTS.md` takes precedence.
-* Repository collaboration skills are stored in `.claude/skills/`. Analysis outputs are stored in `.claude/reviews/`. The former may be committed to the repository; the latter should be treated as local artifacts by default.
+* The project-specific Codex workflows live in `.agents/skills/`. Use [market-data-integrity](.agents/skills/market-data-integrity/SKILL.md) when reviewing changes or regressions in VN market-data semantics. Use [stockclock-doc-sync](.agents/skills/stockclock-doc-sync/SKILL.md) when a completed phase changes documented behavior, acceptance, or limitations, or when auditing those claims. Follow each skill's evidence checks and use [DOCS_INDEX](docs/DOCS_INDEX.md) to find the maintained authority.
+* Existing issue and PR workflows live in `.claude/skills/`. Treat their `.claude/reviews/` outputs as local artifacts by default.
 * The root-level `SKILL.md` and `docs/openclaw-skill-integration.md` are product or external integration documentation. They are not the source of truth for repository collaboration rules.
-* If `.agents/skills/` or another agent-specific directory is added in the future, first define the single source of truth, then synchronize through scripts or mirrors. Do not manually maintain multiple long-term copies with the same meaning.
+* When the user requests delegation or a high-risk cross-layer change warrants a separate review, use a built-in subagent for a bounded, independent check when the session permits it. Give it the scope, relevant contract, and expected evidence. Request file/line findings and checks run or pending, avoid concurrent edits to the same files, and verify its findings before incorporating them.
+* When a recurring workflow, repeated failure, or specialized review need emerges, evaluate reuse first. Add or update a repository skill or agent only when repository evidence demonstrates a reusable need that current capabilities cannot meet, the scope is clear and distinct, the result can be validated, and the benefit justifies maintenance. Keep policy here and the detailed workflow in one skill. Keep user-level configuration untouched and obtain explicit approval before installing external capabilities or dependencies.
 * When modifying AI collaboration governance assets, run:
 
 ```bash

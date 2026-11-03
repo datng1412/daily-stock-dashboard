@@ -7,4 +7,4 @@
 - 本目录中的 skill 需要与 `AGENTS.md` 保持一致
 - `.claude/reviews/` 属于本地分析产物，不作为规则真源
 
-如果未来需要兼容其他 agent 目录（如 `.agents/skills/` 或 `.github/skills/`），应先明确单一真源，再通过脚本或镜像同步，而不是手工长期维护多份同义内容。
+StockClock 的 Codex 专用流程位于 `.agents/skills/`。本目录继续维护 issue 分析、PR 审查和 issue 修复流程，适用范围见 [AGENTS.md](../../AGENTS.md#2-ai-collaboration-asset-governance)。

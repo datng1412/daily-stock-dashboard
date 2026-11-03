@@ -75,3 +75,37 @@ Validation on 2026-11-02:
 - `python scripts/check_ai_assets.py`: failed at `CLAUDE.md must be a symlink to AGENTS.md`. Git records mode `120000` with target `AGENTS.md`, while this Windows worktree materializes a regular link-text file. The full checker is not reported as passing.
 - All five remaining governance checks were invoked independently and passed: Copilot entry, layered instruction inventory, repository skill assets, ignore rules, and tracked artifact exclusions. The checker itself was not modified.
 - No product tests/builds, provider calls, credential checks, servers, installs, or deployment probes were run. Starting branch main tracked origin/main with 0/0 divergence; no staging, commit, or push occurred.
+
+## Phase 7 — AI capability audit
+
+Reviewed 2026-11-03 from clean `main` at `4dc1b175`. This section covers repository development capabilities. The earlier documentation coverage score and dated product acceptance use their original baselines.
+
+### Existing capabilities and evidence
+
+- [AGENTS.md](../AGENTS.md) is the only repository instruction file of that name. The tracked `CLAUDE.md` points to it, and [Copilot](../.github/copilot-instructions.md) adds backend, client, and governance instructions. The Windows checkout limitation is recorded below.
+- The three [Claude workflows](../.claude/skills/README.md), `analyze-issue`, `analyze-pr`, and `fix-issue`, are readable instruction documents without Codex skill metadata. The existing checker verifies their presence and rule-source references. Slash-command registration and GitHub execution were outside this audit. The root [stock_analyzer](../SKILL.md) describes inherited product behavior.
+- The repository started with empty `.agents/` and `.codex/` directories. No repository skill, agent TOML, or project Codex configuration was present in those directories. Installed system skills include Skill Creator. Codex's documented built-ins are `default`, `worker`, and `explorer`. [OpenAI skill conventions](https://learn.chatgpt.com/docs/build-skills), [OpenAI subagent conventions](https://learn.chatgpt.com/docs/agent-configuration/subagents).
+- The [task template](CODEX_TASK_TEMPLATE.md), [review checklist](REVIEW_CHECKLIST.md), and [test strategy](TEST_STRATEGY.md) already cover delivery and acceptance. [CI](../.github/workflows/ci.yml) runs the governance and backend gates, Docker build, and frontend lint/build when triggered. [Network smoke](../.github/workflows/network-smoke.yml) and [PR review](../.github/workflows/pr-review.yml) supply supplementary checks. Workflow definitions establish what is configured. This phase did not execute GitHub jobs.
+
+### Skill decisions
+
+| Candidate | Decision and evidence | Trigger and reusable workflow |
+| --- | --- | --- |
+| [stockclock-doc-sync](../.agents/skills/stockclock-doc-sync/SKILL.md) | Created. The prior audit repaired stale provider, pricing, and acceptance claims across multiple owners. The index identifies those owners and the checklist covers the handoff. The skill adds an evidence-to-owner pass over the phase delta. | Use for an explicit docs audit or when a completed phase changes maintained behavior, acceptance evidence, or limitations. Map changed claims to their owners, reconcile related summaries, and verify links, scope, and evidence dates. |
+| [market-data-integrity](../.agents/skills/market-data-integrity/SKILL.md) | Created. Daily price degradation, provisional flow, and completed-session alerts repeatedly depend on lineage across provider, cache, and consumers. Existing contracts and tests define the rules. The skill adds a trace and case-selection procedure. | Use when a VN change or regression affects source, normalization, freshness, finality, coverage, anomalies, or ownership. Trace the affected data and failure path, select deterministic cases, and report the evidence tier. |
+| `feature-delivery` | Skipped. AGENTS, the task template, the checklist, and the issue-fix workflow cover this sequence. | Use the existing process for implementation, acceptance, and handoff. Reassess a narrower skill when a repeated delivery gap has concrete evidence. |
+
+### Agent decisions
+
+No custom agent or agent TOML was added. For market-data reviews, `default` can apply the integrity skill to a bounded contract. For architecture reviews, `explorer` can trace ownership and dependencies. For independent acceptance, `worker` can run assigned deterministic checks within the parent session's permissions. For documentation consistency, `default` can use the documentation map and sync skill. The parent sets scope and evidence expectations and reconciles the findings. [AGENTS.md](../AGENTS.md#2-ai-collaboration-asset-governance) owns delegation and future capability criteria.
+
+### Phase 7 validation
+
+- The installed Skill Creator validator accepted both manifests. The local Codex app server (`0.166.0-alpha.5.1`) returned both as enabled repository skills via `skills/list` from the root and `apps/dsa-web`. This was a local discovery probe. Model selection and subagent execution remain unverified.
+- Read-only workflow samples separated the triggers. The integrity sample traced fresh DailyOhlc versus explicitly partial newer DailyStockPrice through the watchlist service and API fields, using the existing freshness test assertions as case references. The sync sample mapped the retained VN-ALERT-1 acceptance to PROJECT_STATE, the roadmap, the data contract, and the changelog while preserving its original date. A generic feature or issue handoff uses the existing template and checklist.
+- The full AI asset checker reproduced the Windows `CLAUDE.md` symlink failure with `core.symlinks=false`. Git still records mode `120000` with target `AGENTS.md`. The other five checks passed independently.
+- All 29 added relative links and their anchors resolved. `git diff --check`, manifest metadata, and the added-line credential-pattern scan passed. The nine-file diff covers AI instructions, the two manifests, and audit/navigation/changelog documentation. Product builds, tests, and live provider acceptance were outside scope.
+
+### Follow-up
+
+Repeat the full governance checker in a symlink-capable checkout. During the next qualifying documentation or market-data task, record whether Codex selects the right skill and produces the expected evidence. Use a concrete review or routing gap to justify any further capability change.

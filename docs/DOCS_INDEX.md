@@ -29,8 +29,9 @@ Reviewed 2026-11-02 against clean `main` baseline `0bf5f90f`. This is the naviga
 | Logs and health | [Docker/Render runbook](RUNBOOK_DOCKER_RENDER.md), [SSI integration](SSI_FASTCONNECT_INTEGRATION.md) | `/api/health` proves HTTP readiness, not market-data availability; route-specific health/observability and source freshness are separate. |
 | API budgets | [SSI integration](SSI_FASTCONNECT_INTEGRATION.md), [alerts](alerts.md) | Service bounds are not entitlement or contractual rate limits. Cold RS can use 42 exact-date index reads; configure exact scopes and reuse caches. No verified monthly cost model exists. |
 | Git and AI governance | [AGENTS.md](../AGENTS.md) | `CLAUDE.md` is the tracked symlink; Copilot instructions are layered supplements. Preserve work, use scoped English commit descriptions, and obtain explicit commit/push authorization. |
+| StockClock Codex skills | [market-data-integrity](../.agents/skills/market-data-integrity/SKILL.md), [stockclock-doc-sync](../.agents/skills/stockclock-doc-sync/SKILL.md) | Use the first to trace VN data contracts and the second to reconcile maintained claims. [Issue and PR workflows](../.claude/skills/README.md) remain separate. |
 | General inherited app | [README](../README.md), [English index](INDEX_EN.md), [Chinese index](INDEX.md) | Multi-market analysis, bots, portfolio, desktop, and AI-report capabilities are not implied VN provider capabilities. |
-| Audit findings and remaining gaps | [DOCUMENTATION_AUDIT](DOCUMENTATION_AUDIT.md) | Sixteen-area assessment, evidence scope, limitations, and P0/P1/P2 follow-ups. |
+| Audit findings and remaining gaps | [DOCUMENTATION_AUDIT](DOCUMENTATION_AUDIT.md) | Sixteen-area assessment, Phase 7 AI capability audit, evidence boundaries, and prioritized follow-ups. |
 
 ## Current architecture
 
