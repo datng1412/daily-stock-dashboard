@@ -194,6 +194,12 @@ LITELLM_MODEL=ollama/qwen3:8b
 
 For the single-agent ask-stock path, the backend also keeps a provider-aware trace track for DeepSeek V4 thinking + tool-call roundtrip. A trace is persisted only when the same run has both `tool_calls` and `reasoning_content`; the last 3 minimal protocol slices per `session_id + provider + model` are spliced back into the next request before the anchored visible assistant reply. Provider trace is either preserved exactly or dropped as a whole; it is never summarized, never returned by Web session-history APIs, and adds no `.env` setting. Model/provider mismatch, summarized anchors, or insufficient budget drop the whole trace. Claude extended thinking is limited in this PR to adapter/storage-level opaque `thinking` / `redacted_thinking` / `signature` block plumbing with offline fixtures; production end-to-end Claude and multi-agent trace injection remain follow-ups. Protocol references: DeepSeek thinking mode (<https://api-docs.deepseek.com/guides/thinking_mode>) and Anthropic Claude extended thinking (<https://platform.claude.com/docs/en/docs/build-with-claude/extended-thinking>). The LiteLLM compatibility window remains `litellm>=1.80.10,!=1.82.7,!=1.82.8,<2.0.0` from `requirements.txt`.
 
+### Ask-Stock conversation context compression
+
+The default passes the latest 20 visible messages. Set `AGENT_CONTEXT_COMPRESSION_ENABLED=true` to summarize older visible user/assistant text within a session. `AGENT_CONTEXT_COMPRESSION_PROFILE` sets the defaults: `cost` (6,000 tokens and two protected turns), `balanced` (12,000 and four), or `long_context_raw_first` (24,000 and six). Explicit `AGENT_CONTEXT_COMPRESSION_TRIGGER_TOKENS` and `AGENT_CONTEXT_PROTECTED_TURNS` override the profile.
+
+Provider traces, thinking blocks, tool calls, and tool results are outside visible-text compression. The single-agent DeepSeek thinking/tool-call path can retain up to three minimal traces keyed by session, provider, and model for exact replay. It skips a trace when its matching assistant turn has been summarized or the replay would exceed the budget. Claude thinking support in this scope is adapter/storage plumbing and offline fixtures. Multi-agent trace replay remains deferred.
+
 ### Strict Temperature Model Compatibility Notes
 
 - Moonshot officially documents Kimi as an OpenAI-compatible API, with `https://api.moonshot.ai/v1` as the base URL: <https://platform.kimi.ai/docs/guide/kimi-k2-6-quickstart>
@@ -251,6 +257,9 @@ model_list:
 > **Priority Rule**: YAML is king! If YAML is configured, both **Channels Mode** and **Simple Mode** are entirely ignored. Hierarchy: `YAML > Channels > Simple`.
 
 ### GitHub Actions Notes
+
+The [daily analysis workflow](../.github/workflows/00-daily-analysis.yml) can write `LITELLM_CONFIG_YAML` into the path selected by `LITELLM_CONFIG`. Keep secret values out of the YAML. Use environment references to explicitly forwarded repository secrets such as `LITELLM_API_KEY`, `OPENAI_API_KEY`, or `ANTHROPIC_API_KEY`.
+
 
 The bundled `00-daily-analysis.yml` explicitly passes the common LLM runtime fields to the job environment:
 

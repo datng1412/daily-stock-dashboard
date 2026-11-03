@@ -80,6 +80,7 @@ After opening a PR, CI will automatically run the following PR checks:
 
 | Check | Description | Required |
 |-------|-------------|:--------:|
+| `ai-governance` | `python scripts/check_ai_assets.py` | Required |
 | `backend-gate` | `scripts/ci_gate.sh` — py_compile + flake8 critical errors + `./scripts/test.sh code` + `./scripts/test.sh yfinance` + offline pytest | ✅ |
 | `docker-build` | Docker image build and key module import smoke test | ✅ |
 | `web-gate` | `npm run lint` + `npm run build` (triggered when `apps/dsa-web/` changes) | ✅ (when triggered) |
@@ -101,9 +102,9 @@ npm run lint
 npm run build
 ```
 
-### Documentation Sync Rule
+### Documentation policy
 
-When modifying a Chinese-language core document (e.g., `docs/full-guide.md`), your PR description **must state** whether the corresponding English document has been updated. If not updated, explain why.
+Write maintained documentation in English and update the existing subject owner. See the [documentation map](DOCS_INDEX.md) and the [repository policy](../AGENTS.md#documentation-policy).
 
 ## 📋 Priority Areas for Contribution
 
@@ -111,7 +112,7 @@ When modifying a Chinese-language core document (e.g., `docs/full-guide.md`), yo
 - 🤖 New AI model integrations
 - 📊 New data source adapters
 - 🐛 Bug fixes and performance improvements
-- 📖 Documentation improvements and translations
+- 📖 Documentation improvements
 
 ## ❓ Questions
 

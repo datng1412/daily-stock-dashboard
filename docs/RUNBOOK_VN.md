@@ -14,6 +14,10 @@ Run and debug the Vietnam dashboard in strict SSI FastConnect V3 mode. News defa
 - A local outbound TCP permission failure is an execution-environment block, not provider evidence. Live calls require an authorized network-capable context. `/api/health` proves application readiness only.
 - Use one backend worker for coherent process-local current-flow state. Accepted completed foreign-flow history has durable cache restoration; provisional room values and current aggregates do not become completed history.
 
+## Local Docker
+
+Follow the [Docker and Render runbook](RUNBOOK_DOCKER_RENDER.md#local-docker-run) for SSI V3 environment forwarding, volume permissions, and application readiness.
+
 ## Live SSI Mode
 
 Use live SSI mode when validating current market data. Do not print SSI credentials, tokens, account IDs, or auth headers.
@@ -188,67 +192,9 @@ Expected smoke behavior:
 * Optional live sections do not render fake metric rows.
 * Mozyfin and KBS are not normal-mode fallbacks.
 
-## Live Section Contract Checks
+## Data-quality triage
 
-The live-section contract is strict:
-
-- No object data: `null`
-- No list data: `[]`
-- Public status: `ok`, `unavailable`, or `disabled`
-- Technical details: diagnostics/logs, not primary metric fields
-
-Expected unavailable examples:
-
-```text
-realtime_snapshot: null
-intraday_pulse: null
-intraday_candles: []
-trade_tape: []
-```
-
-The UI should show concise states such as:
-
-```text
-SSI intraday unavailable.
-SSI realtime unavailable. Daily SSI data is still available.
-SSI trade tape unavailable.
-News disabled.
-```
-
-Do not treat unavailable intraday, realtime, trade tape, index components, or news as daily SSI row failure when SSI DailyOhlc is valid.
-
-## Current Data-Quality Checks
-
-### DailyOhlc vs DailyStockPrice
-
-If SSI DailyOhlc and SSI DailyStockPrice disagree for the same ticker/date, do not silently overwrite one source with the other. First check:
-
-1. Same trading date.
-2. Cache freshness.
-3. Old backend process.
-4. Chart/watchlist TTL mismatch.
-5. Whether the provider has provisional versus final values.
-
-Current dashboard rule: validated daily OHLC normally owns `latest_price`. The existing service may expose a newer DailyStockPrice price as explicitly partial when daily history fails freshness/completeness; history-derived indicators remain unavailable. Check source/date/quality together. This is existing same-provider degradation, not an invitation to blend same-date mismatches.
-
-### Intraday Freshness
-
-If latest SSI intraday candle date does not match latest SSI daily trading date:
-
-- Keep daily SSI row `ok` when DailyOhlc is valid.
-- Mark intraday unavailable.
-- Keep `intraday_pulse = null`.
-- Keep `intraday_candles = []` for the usable public section.
-- Put stale-date diagnostics in status/diagnostics.
-
-### Realtime And Trade Tape
-
-SSI realtime snapshot and SSI trade tape are separate optional live contracts. If live endpoints return unavailable or no usable rows:
-
-- Keep daily SSI row `ok` when DailyOhlc is valid.
-- Keep public status concise.
-- Put attempted endpoint, HTTP status, retryability, and provider-error details in diagnostics.
-- Do not use KBS unless explicit legacy diagnostics flags are enabled.
+Use [the VN data contract](VN_DATA_CONTRACT.md) for source selection, freshness, and public unavailable values. If daily endpoints disagree, compare trading dates, process identity, cache ages, and provisional versus completed state. Use [observability](OBSERVABILITY.md) to distinguish provider, transport, and cache failures. Daily validity and the availability of optional live sections are independent.
 
 ## Stale Data Diagnosis
 
@@ -300,44 +246,6 @@ $env:npm_config_cache = "D:\stock-dashboard\.npm-cache"
 
 These settings only affect the current shell session. They do not change SSI provider ownership or dashboard data semantics.
 
-## Docker / Render Notes
+## Deployment and semantics
 
-Docker and Render should use SSI environment variables and must not require Mozyfin API keys for VN dashboard runtime.
-
-Required secret values:
-
-```text
-SSI_V3_API_KEY=<set in secret env>
-SSI_V3_API_SECRET=<set in secret env>
-SSI_V3_CLIENT_ID=<optional secret env>
-```
-
-REST example defaults (streaming remains separately optional):
-
-```text
-SSI_V3_REST_ENABLED=true
-SSI_STREAMING_REALTIME_ENABLED=false
-VN_DAILY_DATA_PROVIDER=ssi
-VN_CHART_DATA_PROVIDER=ssi
-VN_DAILY_STOCK_PRICE_PROVIDER=ssi
-VN_INDEX_DATA_PROVIDER=ssi
-VN_INTRADAY_DATA_PROVIDER=ssi
-VN_REALTIME_DATA_PROVIDER=ssi
-VN_TRADE_TAPE_PROVIDER=ssi
-VN_NEWS_PROVIDER=disabled
-```
-
-Use `/tmp/dsa-cache` when the deployment service does not have a persistent disk. Cache behavior must not change SSI/Mozyfin/KBS source ownership.
-
-The Docker image installs the pinned official `ssi-sdk==3.0.5` from `requirements.txt`. A missing SDK is a dependency/image issue; diagnose it separately from transport or entitlement. Removed V2 packages and channel templates must not be restored from historical notes.
-
-## Data Semantics Reminder
-
-- `latest_price` uses SSI DailyOhlc close when SSI daily data is available.
-- SSI DailyStockPrice supplies reference/limits, matched/put-through, and latest foreign-flow fields.
-- SSI IntradayOhlc is not a realtime matched quote.
-- SSI realtime snapshot and trade tape are separate optional live contracts.
-- News defaults to disabled; implemented personal/local adapters require their explicit configuration and terms gates.
-- RSI14 uses Wilder/RMA.
-- Labels are neutral condition tags only.
-- VN dashboard visible times should use Vietnam time.
+See the [Docker and Render runbook](RUNBOOK_DOCKER_RENDER.md) for deployment configuration and the [SSI integration guide](SSI_FASTCONNECT_INTEGRATION.md#current-production-contract) for provider settings. [UI states](UI_STATES.md) owns visible labels and presentation.

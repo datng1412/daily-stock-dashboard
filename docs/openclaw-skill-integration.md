@@ -1,5 +1,7 @@
 # openclaw Skill 集成指南
 
+> Frozen external integration reference. The embedded skill is preserved as written. See the [inherited configuration guide](full-guide_EN.md) for current repository API entry points.
+
 本文档说明如何通过 [openclaw](https://github.com/openclaw/openclaw) Skill 调用 daily_stock_analysis 的 REST API，实现在 openclaw 对话中触发股票分析的能力。
 
 ## 概述

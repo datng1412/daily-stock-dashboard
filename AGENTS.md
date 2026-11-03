@@ -2,15 +2,9 @@
 
 ## Codex continuity docs
 
-Start with `docs/DOCS_INDEX.md` for subject ownership and the current-versus-historical documentation boundary.
+Start with [the documentation index](docs/DOCS_INDEX.md) for reading order, subject ownership, and the evidence boundary.
 
-When resuming work with Codex or another coding agent, read these project-management docs before changing implementation:
-
-* `docs/PROJECT_STATE.md` for current repository and Vietnam dashboard state.
-* `docs/DECISIONS.md` for active product and engineering decisions.
-* `docs/RUNBOOK_VN.md` for live/fixture Vietnam dashboard operations.
-* `docs/CODEX_TASK_TEMPLATE.md` for starting a scoped Codex task.
-* `docs/REVIEW_CHECKLIST.md` for review and handoff checks.
+Before changing implementation, read Project State, Decisions, and the applicable runbook and contracts from the index. Use the task template and review checklist for scoped work and handoff.
 
 For Vietnam dashboard work, SSI FastConnect V3 is the sole production market-data provider. Keep live and injected-test evidence explicit; never activate legacy fixtures as runtime fallback. Preserve Wilder/RMA RSI14, neutral labels, and missing-versus-zero integrity. Daily history, delayed sparse 1m candles, streaming quotes/trades, and provisional current foreign flow are separate contracts; read `docs/VN_DATA_CONTRACT.md` before changing their semantics.
 
@@ -72,8 +66,15 @@ For stock-related UI or API behavior:
 * The `[Unreleased]` section in `docs/CHANGELOG.md` must use a flat format. Each item must be one standalone line using this format: `- [type] description`. Allowed types are: `new feature` / `improvement` / `fix` / `documentation` / `test` / `chore`. Do not add `### category headings` inside `[Unreleased]`, to reduce merge conflicts across concurrent PRs.
 * `README.md` is only for project positioning, core capability overview, quick start, main entry points, sponsorship/cooperation, and other homepage-level information. Avoid updating README unless necessary, to prevent continuous bloat.
 * More detailed module behavior, page interactions, topic-specific configuration, troubleshooting instructions, field contracts, implementation semantics, and boundary conditions should be documented in the corresponding `docs/*.md` or topic-specific documentation instead of README.
-* When changing either English or Chinese bilingual documentation, evaluate whether the other version also needs to be synchronized. If it is not synchronized, explain why in the delivery notes.
 * Comments, docstrings, and log messages should prioritize clarity and accuracy. English is not strictly required, but the language should stay consistent with the surrounding file context.
+
+## Documentation policy
+
+* English is the sole maintained language for technical, product, and AI collaboration documentation. Write all new or updated maintained prose in English. Do not create parallel translations.
+* Update existing subject owners when the actual behavior, contract, operational guidance, or verified evidence changes. Link to the owner from summaries. Create a document only when no existing owner fits.
+* Keep scope, current status, roadmap priorities, and dated observations distinct. Keep historical records in Git when practical. Label retained legacy evidence or compatibility files and keep them out of active navigation.
+* Before merging or deleting a document, preserve unique current guidance and check links, anchors, scripts, tests, workflows, and runtime references. Keep exact paths and compatibility text where those dependencies require them.
+* Preserve application localization, legitimate market terminology, quoted UI labels, runtime prompts, fixtures, provider payloads, and contract identifiers.
 
 ## 1.1 PR title convention, non-blocking recommendation
 
@@ -97,97 +98,16 @@ For stock-related UI or API behavior:
 python scripts/check_ai_assets.py
 ```
 
-## 3. Repository overview
+## 3. Repository entry points
 
-* StockClock's VN product is a personal, data-quality-first SSI market inspection dashboard with Foreign Flow, breadth, sectors, relative strength, and completed-session alerts. The inherited A-share/HK/US AI-report, portfolio, bot, and desktop subsystems remain in the repository; their features and provider fallbacks are not automatically VN product capabilities.
-* Main flow: fetch data -> technical analysis / news retrieval -> LLM analysis -> generate report -> send notifications.
-* Key entry points:
+See [Architecture](docs/ARCHITECTURE.md) for layers and runtime ownership. Use `main.py` for CLI analysis, scheduling, and Web startup, and `server.py` for direct ASGI startup. The inherited analysis and portfolio workflows have separate contracts from the Vietnam workspace.
 
-  * `main.py`: main entry point for analysis tasks
-  * `server.py`: FastAPI service entry point
-  * `apps/dsa-web/`: web frontend
-  * `apps/dsa-desktop/`: Electron desktop app
-  * `.github/workflows/`: CI, release, and daily task workflows
-* Core responsibilities:
+## 4. Task workflow
 
-  * `src/core/`: main process orchestration
-  * `src/services/`: business service layer
-  * `src/repositories/`: data access layer
-  * `src/reports/`: report generation
-  * `src/schemas/`: schemas and data structures
-  * `data_provider/`: multi-source data adapters and fallbacks
-  * `api/`: FastAPI API
-  * `bot/`: bot integrations
-  * `scripts/`: local scripts
-  * `.github/scripts/`: GitHub automation scripts
-  * `tests/`: pytest tests
-  * `docs/`: documentation and notes
-
-## 4. Common commands
-
-### Run the application
-
-```bash
-python main.py
-python main.py --debug
-python main.py --dry-run
-python main.py --stocks 600519,hk00700,AAPL
-python main.py --market-review
-python main.py --schedule
-python main.py --serve
-python main.py --serve-only
-uvicorn server:app --reload --host 0.0.0.0 --port 8000
-```
-
-### Backend validation
-
-```bash
-pip install -r requirements.txt
-pip install flake8 pytest
-./scripts/ci_gate.sh
-python -m pytest -m "not network"
-python -m py_compile <changed_python_files>
-```
-
-### Web / Desktop
-
-```bash
-cd apps/dsa-web
-npm ci
-npm run lint
-npm run build
-
-cd ../dsa-desktop
-npm install
-npm run build
-```
-
-### PR / CI evidence
-
-```bash
-gh pr view <pr_number>
-gh pr checks <pr_number>
-gh run view <run_id> --log-failed
-```
-
-## 5. Default workflow
-
-1. First determine the task type: `fix / feat / refactor / docs / chore / test / review`.
-2. Read the existing implementation, configuration, tests, scripts, workflows, and documentation before making changes.
-3. Identify the change boundary: backend / API / Web / Desktop / Workflow / Docs / AI collaboration assets.
-4. Check whether the task touches high-risk areas: configuration semantics, API / Schema, data-source fallback, report structure, authentication, scheduling, release process, or desktop startup flow.
-5. Make the smallest change directly related to the current task. Do not bundle unrelated refactors.
-6. If documentation, scripts, or workflows are inconsistent with the code, trust the actual code and workflows first, then decide whether to update documentation as part of the task.
-7. After making changes, run the checks defined in the validation matrix below.
-8. For Vietnam dashboard changes, additionally review the result from three angles: engineering quality, web/product design quality, and stock-market usefulness.
-9. The final delivery should usually explain:
-
-   * What changed
-   * Why it changed
-   * Validation status
-   * Unverified items
-   * Risks
-   * Rollback method
+1. Inspect the worktree, classify the task, and identify the affected entry points, risk, and owners.
+2. Read the relevant implementation, tests, configuration, and workflows. Use [the documentation index](docs/DOCS_INDEX.md) for maintained guidance.
+3. Make the smallest scoped change and run the checks for the affected surface. Review VN work for engineering quality, scanability, and neutral, source-aware interpretation.
+4. Record the result, verification, remaining gaps, risks, and rollback in the handoff.
 
 ## 6. Validation matrix
 

@@ -1,5 +1,7 @@
 # Deployment Guide
 
+This guide covers inherited analysis deployments. Use the [Vietnam Docker and Render runbook](RUNBOOK_DOCKER_RENDER.md) for the SSI V3 workspace.
+
 This document explains how to deploy the AI Stock Analysis System to a server.
 
 ## Deployment Options Comparison
@@ -454,3 +456,9 @@ A: Each run takes about 2-5 minutes, 22 workdays per month = 44-110 minutes, wel
 ---
 
 **Wishing you a smooth deployment!**
+
+## Web binding and search configuration
+
+For intentional remote access, set `WEBUI_HOST` explicitly and follow the authentication and proxy guidance in [Security and secrets](SECURITY_AND_SECRETS.md). Keep loopback binding for local use.
+
+For inherited news search, `SEARXNG_BASE_URLS` points to instances with JSON format enabled. `SEARXNG_PUBLIC_INSTANCES_ENABLED` controls public-instance discovery when that list is empty. See [.env.example](../.env.example) for the current settings.

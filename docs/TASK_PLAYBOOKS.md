@@ -183,7 +183,7 @@ Forbidden changes:
 Required docs:
 
 - `SSI_FASTCONNECT_INTEGRATION.md`
-- `VN_DATA_QUALITY_TODOS.md`
+- `PROJECT_STATE.md`
 - `OBSERVABILITY.md`
 - `SECURITY_AND_SECRETS.md`
 
@@ -289,7 +289,7 @@ Forbidden changes:
 
 Required docs:
 
-- Update `API_CATALOG.md`, `DATA_DICTIONARY.md`, `VN_DATA_CONTRACT.md`, or `VN_DATA_QUALITY_TODOS.md` if snapshot findings reveal drift.
+- Update `API_CATALOG.md`, `DATA_DICTIONARY.md`, `VN_DATA_CONTRACT.md`, or `PROJECT_STATE.md` if snapshot findings reveal drift.
 
 Validation:
 

@@ -1,5 +1,7 @@
 # Repository documentation audit
 
+> Dated baseline. The findings below describe the original audit. Use [DOCS_INDEX](DOCS_INDEX.md) for current ownership and scope.
+
 Review date: 2026-11-02. Baseline: clean `main`, `0bf5f90f` (`fix(vn-alerts): finalize live runtime acceptance`, committed 2026-08-14). Review used local tracked code, tests, deployment/workflows, and retained documentation evidence. No builds, live provider calls, credential tests, or deployment inspection were performed. Runtime acceptance retained in the repository is dated through 2026-08-12.
 
 ## Coverage matrix
@@ -109,3 +111,22 @@ No custom agent or agent TOML was added. For market-data reviews, `default` can 
 ### Follow-up
 
 Repeat the full governance checker in a symlink-capable checkout. During the next qualifying documentation or market-data task, record whether Codex selects the right skill and produces the expected evidence. Use a concrete review or routing gap to justify any further capability change.
+
+## Frozen compatibility and historical references
+
+The active English index excludes these entries. Keep them where their consumers or retained evidence require them.
+
+| Frozen reference | Reason |
+| --- | --- |
+| `docs/full-guide.md`, `docs/INDEX.md`, `docs/INDEX_EN.md`, `docs/DEPLOY.md`, `docs/alerts.md`, and `docs/analysis-context-pack.md` | Documentation regression tests check these paths, command strings, or original-language text. Inherited settings also publish links into the old full guide. |
+| `docs/LLM_CONFIG_GUIDE.md` | Legacy settings and editor help use its path and anchor IDs. The compatibility page directs readers to the English guide. |
+| `SKILL.md` | Original external stock-analysis skill bundle. Preserve its instructions and examples as shipped. |
+| `docs/openclaw-skill-integration.md` | Original external skill setup and copyable bundle example. The current external client and authentication integration were outside this review. |
+| `docs/docker/zeabur-deployment.md` | Platform-specific deployment record. No current Zeabur acceptance is recorded in this review. |
+| Published release entries and pre-policy notes in `docs/CHANGELOG.md` | Release automation and regression tests use the existing release history. Maintained Unreleased entries use English. |
+
+### Consolidation follow-up
+
+- The Windows checkout still materializes `CLAUDE.md` as ordinary link text. The full governance check requires a worktree with symlink support. Git records mode `120000` and target `AGENTS.md`.
+- The inherited configuration registry coverage test still reports active `.env.example` keys absent from the registry or its explicit hidden set. The environment template, registry, and test were outside the documentation refactor.
+- The maintained SSI integration guide still carries older phase sections. Its current production section and the dated acceptance owners establish the evidence boundary.

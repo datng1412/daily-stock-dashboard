@@ -1,8 +1,12 @@
 # 📖 完整配置与部署指南
 
+> Frozen compatibility reference. The documentation regression suite depends on the exact text below. See the [inherited configuration guide](full-guide_EN.md) for maintained English guidance.
+
 本文档包含 A股智能分析系统的完整配置说明，适合需要高级功能或特殊部署方式的用户。
 
 > 💡 快速上手请参考 [README.md](../README.md)，本文档为进阶配置。
+
+<a name="project-structure"></a>
 
 ## 📁 项目结构
 
@@ -25,7 +29,7 @@ daily_stock_analysis/
 
 ## 📑 目录
 
-- [项目结构](#项目结构)
+- [项目结构](#project-structure)
 - [GitHub Actions 详细配置](#github-actions-详细配置)
 - [环境变量完整列表](#环境变量完整列表)
 - [Docker 部署](#docker-部署)
@@ -1143,7 +1147,7 @@ LITELLM_FALLBACK_MODELS=anthropic/claude-sonnet-4-6,openai/gpt-5.4-mini
 
 **依赖说明**：`requirements.txt` 中保留 `openai>=1.0.0`，因 LiteLLM 内部依赖 OpenAI SDK 作为统一接口；显式保留可确保版本兼容性，用户无需单独配置。
 
-**视觉模型（图片提取股票代码）**：详见 [LLM 配置指南 - Vision](LLM_CONFIG_GUIDE.md#41-vision-模型图片识别股票代码)。
+**视觉模型（图片提取股票代码）**：详见 [LLM 配置指南 - Vision](LLM_CONFIG_GUIDE_EN.md#advanced-feature-vision-model-config)。
 
 从图片提取股票代码（如 `/api/v1/stocks/extract-from-image`）使用统一视觉模型接入，底层采用 LiteLLM Vision 与 OpenAI `image_url` 格式，支持 Gemini、Claude、OpenAI、DeepSeek 等 Vision-capable 模型。返回 `items`（code、name、confidence）及兼容的 `codes` 数组。
 
@@ -1243,6 +1247,8 @@ python main.py --debug
 | `take_profit_trigger_rate` | 止盈触发率（仅统计配置了止盈的记录） |
 
 ---
+
+<a name="webui-与-api-服务"></a>
 
 ## 本地 WebUI 管理界面
 

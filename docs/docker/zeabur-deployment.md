@@ -1,5 +1,7 @@
 # Zeabur 部署指南
 
+> Frozen deployment reference. Current platform compatibility has not been verified. See the [maintained deployment guide](../DEPLOY_EN.md) for repository-supported entry points.
+
 本指南详细介绍如何在 Zeabur 上部署 A股自选股智能分析系统，包括 WebUI 和 Discord 机器人功能。
 
 ## 目录

@@ -1,5 +1,7 @@
 # 实时告警中心
 
+> Frozen compatibility reference. The documentation regression suite depends on the exact text below. See the [VN alert contract](VN_DATA_CONTRACT.md#vn-alert-1-completed-session-rule-contract) and [VN alert API](API_CATALOG.md#vn-alert-1-through-the-generic-alert-api) for maintained English guidance.
+
 本文档记录 Issue #1202 告警中心的运行基线、数据契约、分阶段实现范围和兼容边界。
 
 ## 当前基线

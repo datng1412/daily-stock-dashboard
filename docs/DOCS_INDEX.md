@@ -1,50 +1,58 @@
-# StockClock documentation map
+# StockClock documentation index
 
-Navigation updated 2026-11-03. Start here for reading order and subject ownership. See the [documentation audit](DOCUMENTATION_AUDIT.md) for the prior review and its evidence baseline.
+## Reading order
 
-## Reading order for an AI coding task
+1. Start with [README](../README.md) for setup and [AGENTS.md](../AGENTS.md) for engineering rules.
+2. Read [Project State](PROJECT_STATE.md), [Decisions](DECISIONS.md), and the [active roadmap](VN_DASHBOARD_ROADMAP.md#active-roadmap) before changing implementation.
+3. Use the [task template](CODEX_TASK_TEMPLATE.md) and [review checklist](REVIEW_CHECKLIST.md) for scoped work. Read the relevant owner below and verify against code, schemas, configuration, and tests.
 
-1. Read [AGENTS.md](../AGENTS.md): scope, security, source integrity, tests, and git boundaries.
-2. Read [PROJECT_STATE](PROJECT_STATE.md), active [roadmap](VN_DASHBOARD_ROADMAP.md), and [DECISIONS](DECISIONS.md): accepted capabilities, limitations, and product constraints.
-3. Use [task template](CODEX_TASK_TEMPLATE.md), [review checklist](REVIEW_CHECKLIST.md), and the relevant runbook below.
-4. Inspect the actual implementation, schema, configuration, and nearby tests for the requested change. Read only relevant topic documents next.
+## Product and engineering owners
 
-For product or architecture onboarding, start with the [PRD](PRD.md) and [Architecture Overview](ARCHITECTURE.md), then follow the relevant subject owner below.
-
-## Subject owners
-
-| Subject | Maintained authority | Supporting reference / boundary |
+| Subject | Maintained owner | Scope |
 | --- | --- | --- |
-| Product purpose, users, and scope | [PRD](PRD.md) | Current journeys and proposed opportunities. [VN product spec](VN_PRODUCT_SPEC.md) retains screen and phase designs. [Product offering](VN_PRODUCT_OFFERING.md) is the Vietnamese user overview. |
-| Capability status and evidence | [PROJECT_STATE](PROJECT_STATE.md) | Keep implementation, deterministic verification, retained runtime acceptance, and current deployment availability distinct. |
-| Next work and deferred work | Active [VN_DASHBOARD_ROADMAP](VN_DASHBOARD_ROADMAP.md) | Its historical phase archive is evidence, not priority. Next product phase is unassigned. |
-| Engineering/product decisions | [DECISIONS](DECISIONS.md) | Superseded phase sequencing is marked historical. |
-| Architecture and persistence | [Architecture Overview](ARCHITECTURE.md) | Runtime topology, request and provider ownership, persistence, jobs, security, deployment, and verification entrypoints. |
-| API surface | [API_CATALOG](API_CATALOG.md) | Executable `api/v1/endpoints/` and `api/v1/schemas/` settle signatures; generic alerts use [alerts](alerts.md). Static OpenAPI artifacts may lag. |
-| Data semantics | [VN_DATA_CONTRACT](VN_DATA_CONTRACT.md) | [DATA_DICTIONARY](DATA_DICTIONARY.md) owns field meanings/units; schemas and normalization code settle exact shapes. |
-| Provider ownership/limitations | Current section of [SSI integration](SSI_FASTCONNECT_INTEGRATION.md) | [Capability matrix](SSI_DATA_CAPABILITY_MATRIX.md) and [remaining audit](SSI_REMAINING_DATA_AUDIT.md) contain dated investigations. |
-| UI behavior | [UI_STATES](UI_STATES.md) | Implemented state flow and frontend tests settle behavior; preserve null, stale, partial, and unavailable states. |
-| Local setup | [README_VN](README_VN.md), [RUNBOOK_VN](RUNBOOK_VN.md) | [Windows runbook](RUNBOOK_LOCAL_WINDOWS.md); check script signatures before copied commands. |
-| Production deployment | [Docker/Render runbook](RUNBOOK_DOCKER_RENDER.md) | `docker/Dockerfile`, `docker/entrypoint.sh`, launcher and CI are executable authority. Compose is not a complete SSI production template. |
-| Configuration/security | [SECURITY_AND_SECRETS](SECURITY_AND_SECRETS.md) | `src/config.py`, `src/core/config_registry.py`, `.env.example`; never read out local secret values. |
-| Validation and acceptance | [TEST_STRATEGY](TEST_STRATEGY.md), [REVIEW_CHECKLIST](REVIEW_CHECKLIST.md) | `AGENTS.md`, `.github/workflows/ci.yml`, `scripts/ci_gate.sh`, and relevant tests. Historical command names require path checks. |
-| Logs and health | [Docker/Render runbook](RUNBOOK_DOCKER_RENDER.md), [SSI integration](SSI_FASTCONNECT_INTEGRATION.md) | `/api/health` proves HTTP readiness, not market-data availability; route-specific health/observability and source freshness are separate. |
-| API budgets | [SSI integration](SSI_FASTCONNECT_INTEGRATION.md), [alerts](alerts.md) | Service bounds are not entitlement or contractual rate limits. Cold RS can use 42 exact-date index reads; configure exact scopes and reuse caches. No verified monthly cost model exists. |
-| Git and AI governance | [AGENTS.md](../AGENTS.md) | `CLAUDE.md` is the tracked symlink; Copilot instructions are layered supplements. Preserve work, use scoped English commit descriptions, and obtain explicit commit/push authorization. |
-| StockClock Codex skills | [market-data-integrity](../.agents/skills/market-data-integrity/SKILL.md), [stockclock-doc-sync](../.agents/skills/stockclock-doc-sync/SKILL.md) | Use the first to trace VN data contracts and the second to reconcile maintained claims. [Issue and PR workflows](../.claude/skills/README.md) remain separate. |
-| General inherited app | [README](../README.md), [English index](INDEX_EN.md), [Chinese index](INDEX.md) | Multi-market analysis, bots, portfolio, desktop, and AI-report capabilities are not implied VN provider capabilities. |
-| Audit findings and remaining gaps | [DOCUMENTATION_AUDIT](DOCUMENTATION_AUDIT.md) | Sixteen-area assessment, Phase 7 AI capability audit, evidence boundaries, and prioritized follow-ups. |
+| Product | [PRD](PRD.md) | Purpose, target users, requirements, boundaries, and proposals |
+| Architecture | [Architecture](ARCHITECTURE.md) | Runtime, module ownership, persistence, jobs, and deployment topology |
+| Status and acceptance | [Project State](PROJECT_STATE.md) | Capability status, evidence dates, and limitations |
+| Priorities | [VN roadmap](VN_DASHBOARD_ROADMAP.md#active-roadmap) | Phase criteria and backlog. The next phase is unassigned. |
+| Decisions | [Decisions](DECISIONS.md) | Rationale and active product and engineering guardrails |
+| Public VN API | [API catalog](API_CATALOG.md) | Route inventory and compatibility, including VN alert routes |
+| Data semantics | [VN data contract](VN_DATA_CONTRACT.md) | Source ownership, freshness, finality, coverage, and null/zero |
+| Field definitions | [Data dictionary](DATA_DICTIONARY.md) | Units, field meaning, and provenance |
+| Presentation | [UI states](UI_STATES.md) | Loading, freshness, partial, unavailable, and diagnostic behavior |
+| SSI integration | [SSI integration](SSI_FASTCONNECT_INTEGRATION.md#current-production-contract) | Provider ownership, configuration, request budgets, and caveats |
+| Local VN operations | [VN runbook](RUNBOOK_VN.md) | Live setup, injected test mode, smoke checks, and triage. See [Windows steps](RUNBOOK_LOCAL_WINDOWS.md). |
+| VN deployment | [Docker and Render runbook](RUNBOOK_DOCKER_RENDER.md) | Runtime settings, health, and deployment limits |
+| Configuration and security | [Security and secrets](SECURITY_AND_SECRETS.md) | Secret handling, auth, and operational boundaries |
+| Diagnostics | [Observability](OBSERVABILITY.md) and [Error taxonomy](ERROR_TAXONOMY.md) | Health, failure classification, and safe diagnostics |
+| Verification | [Test strategy](TEST_STRATEGY.md) and [Release checklist](RELEASE_CHECKLIST.md) | Deterministic checks, runtime acceptance, and release gates |
+| Change history | [Changelog](CHANGELOG.md) | English Unreleased entries and original published release records |
+| AI governance | [AGENTS.md](../AGENTS.md) | Collaboration policy, Git boundaries, and routing to the [data integrity](../.agents/skills/market-data-integrity/SKILL.md) and [documentation sync](../.agents/skills/stockclock-doc-sync/SKILL.md) skills |
 
-## Current architecture
+## Inherited application
 
-The [Architecture Overview](ARCHITECTURE.md) owns the current system diagram and layer map.
+The inherited multi-market analysis, backtesting, portfolio, bot, and desktop capabilities have separate configuration and acceptance from StockClock's SSI workspace.
 
-## Evidence and history policy
+| Subject | Maintained owner |
+| --- | --- |
+| Setup and configuration | [Inherited configuration guide](full-guide_EN.md) |
+| LLM configuration | [LLM guide](LLM_CONFIG_GUIDE_EN.md) and [provider examples](llm-providers.md) |
+| Notification routing and setup | [Notifications](notifications.md) |
+| Automation and server deployment | [Deployment guide](DEPLOY_EN.md) |
+| Bot integration | [Bot guide](bot-command_EN.md) and [Feishu setup](bot/feishu-bot-config.md) |
+| Desktop builds | [Desktop packaging](desktop-package.md) |
+| Settings help metadata | [Settings help](settings-help.md) |
+| Stock index and screening tools | [Tushare symbol lists](TUSHARE_STOCK_LIST_GUIDE.md) and [AlphaSift integration](alphasift-integration.md) |
+| Troubleshooting | [FAQ](FAQ_EN.md) |
+| Contributing | [Contributing guide](CONTRIBUTING_EN.md) |
 
-Implementation is checked in code/schema/config/tests first. Dated retained acceptance establishes what was verified at that time; neither code presence nor documentation review proves current credentials, entitlement, provider uptime, or deployed state. This audit makes no new network/deployment acceptance claim.
+## Evidence and history
 
-The roadmap's archive, V3 migration documents, [legacy realtime architecture](VIETNAM_REALTIME_ARCHITECTURE.md), and named early-phase sections preserve historical designs and failed gates. Read the current production summaries first. Do not execute obsolete V2 commands or restore former Mozyfin/KBS routing from history.
+Code, schemas, configuration, and executable tests establish what is implemented. Dated acceptance records establish what was observed at that time. A documentation review does not establish current provider, credential, entitlement, or deployment health.
+
+For dated investigations, start with [SSI V3 migration](SSI_FASTCONNECT_V3_MIGRATION.md), [SSI capability matrix](SSI_DATA_CAPABILITY_MATRIX.md), or the [prior documentation audit](DOCUMENTATION_AUDIT.md). Prior screen designs and provider qualification records are supporting evidence. The active roadmap owns future work. The [market-data candidate notes](resources/realtime-data/README.md) and [news candidate notes](resources/news-sources/README.md) require approval before provider use.
+
+Some frozen files remain at exact paths for application help, external integrations, or regression checks. Follow the maintained owners above. Earlier phase plans and deleted translations remain in Git history.
 
 ## Maintenance
 
-Edit the subject owner and link to it instead of copying a new contract. When changing fields, update schema/normalizer/tests plus the catalog, contract, and dictionary as applicable; UI state changes also update UI_STATES. Record evidence dates and outstanding gates in PROJECT_STATE/roadmap, and add one flat changelog line. Do not change acceptance status on the strength of prose edits. Check added links/paths and `git diff --check`; run the AI asset checker for governance edits. Preserve dated history with explicit supersession notes.
+Apply the [English-only policy](../AGENTS.md#documentation-policy). Edit the affected subject owner and link to it from summaries. Preserve dated evidence and required compatibility references. Check links, anchors, and the staged and unstaged scope before handoff.

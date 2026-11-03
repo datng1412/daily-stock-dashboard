@@ -1,7 +1,5 @@
 # Vietnam Dashboard Product Spec
 
-For a non-technical, product-facing overview in Vietnamese, see `docs/VN_PRODUCT_OFFERING.md`.
-
 The [PRD](PRD.md) owns product purpose and scope. Use [PROJECT_STATE](PROJECT_STATE.md) for current capability status and the active [roadmap](VN_DASHBOARD_ROADMAP.md) for priorities. This document preserves VN screen designs and phase history. Read phase-specific MVP, provider, and availability statements in their original design context.
 
 ## Product Goal

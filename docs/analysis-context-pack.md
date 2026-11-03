@@ -1,5 +1,7 @@
 # AnalysisContextPack：P0 盘点、P1/P2 契约、P3 Runtime Consumption、P4 可见性与 P5 数据质量
 
+> Frozen compatibility reference. The documentation regression suite depends on the exact text below. See the [inherited configuration guide](full-guide_EN.md#analysiscontextpack-prompt-summary-issue-1389-p3) for maintained English guidance.
+
 本页是 Issue #1389 的专题文档，用于记录当前 DSA 分析上下文的真实来源、消费路径、字段状态边界，以及 `AnalysisContextPack` 内部契约、builder、运行态消费、低敏可见性和数据质量评分边界。P0 负责现状盘点和契约边界；P1 只新增内部 schema/envelope、block catalog、类型约定和脱敏序列化；P2 只从 pipeline 已有 artifacts 组装 pack；P3 只把低敏摘要接入普通分析和 Agent 初始 Prompt；P4 只把低敏 overview 接入历史详情、同步分析响应、completed task status 和 Web 报告页；P5 在同一 `PACK_VERSION = "1.0"` 内补齐数据质量评分、`fetch_failed` 状态、Prompt 数据限制和 overview 低敏展示。
 
 ## 术语与边界

@@ -12,4 +12,4 @@ applyTo: "README.md,docs/**,AGENTS.md,CLAUDE.md,.github/**,.agents/skills/**,.cl
 - Avoid widening permissions, secret exposure, or destructive automation without a clearly documented need.
 - Preserve the repository's opt-in auto-tag behavior (`#patch`, `#minor`, `#major`) unless the change explicitly updates release policy.
 - When creating, reviewing, or suggesting PRs, prefer PR titles in `<type>: <change summary>` form and omit tool/agent source prefixes such as `[codex]`, `codex`, `autocode`, or `copilot`; treat this as non-blocking guidance, not a review hard blocker.
-- If only one language version of a document is updated, explain why the counterpart was not synchronized.
+- Follow the [English documentation policy](../../AGENTS.md#documentation-policy). Maintain one owner per topic, and retain dated evidence and required legacy compatibility explicitly.

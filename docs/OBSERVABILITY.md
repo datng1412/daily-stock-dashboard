@@ -91,3 +91,11 @@ Handoff snapshots showed SSI realtime and trade tape can be unavailable in obser
 - Provider unavailable and cache errors are not conflated.
 - No secret-bearing fields appear.
 - Technical details remain diagnostics, not primary UI copy.
+
+## Inherited analysis report diagnostics
+
+The inherited analysis pipeline correlates an async task with its `task_id` and a synchronous run with its `query_id` through `trace_id`. Provider attempts capture the operation, source, success, timing, sanitized errors, fallback, and record count where available. Diagnostics are best-effort and remain separate from provider selection, analysis completion, and history persistence. See [diagnostic assembly](../src/services/run_diagnostics.py).
+
+`GET /api/v1/history/{record_id}/diagnostics` accepts a history ID or query ID and returns a summary and sanitized `copy_text`. Missing historical evidence stays `unknown`. Treat report status and data diagnostics as separate signals. The [history route](../api/v1/endpoints/history.py) and [report diagnostics component](../apps/dsa-web/src/components/report/ReportDiagnostics.tsx) own the API and UI boundaries.
+
+The Phase 0–3 records are available in Git history for [0e6a00af](https://github.com/datng1412/daily-stock-dashboard/tree/0e6a00af9033b05e2e0946727cc23126e79cc7b3/docs/).

@@ -260,3 +260,19 @@ TELEGRAM_WEBHOOK_SECRET=      # Webhook secret token
 1. Create a new file in `bot/commands/`.
 2. Subclass `BotCommand` and implement the `execute` method.
 3. Register the command in the dispatcher startup code.
+
+## Platform setup
+
+### DingTalk
+
+Create an enterprise application, add robot capability, publish the app, and add the bot to the group. Match the [DingTalk Stream configuration](../bot/platforms/dingtalk_stream.py) and [environment example](../.env.example) for Stream mode. HTTP mode requires a reachable webhook. For the earlier portal workflow, see the [bot capability screenshot](bot/add-dingding-bot.png) and [Stream mode screenshot](bot/configbot.png).
+
+### Discord
+
+For outbound-only delivery, set `DISCORD_WEBHOOK_URL` from a channel webhook. For bot delivery, create an application and bot, grant the required channel permissions, and set `DISCORD_BOT_TOKEN` and `DISCORD_MAIN_CHANNEL_ID`. Invite the bot with the bot and application-command scopes for slash commands. Test with `/help`, `/analyze`, and `/market_review` as appropriate.
+
+For inbound HTTP interactions, set `DISCORD_INTERACTIONS_PUBLIC_KEY` to the application public key. The webhook verifies Ed25519 signatures. Check the token, channel ID, registration, and permissions if the bot is silent. Use the [notification guide](notifications.md) for outbound configuration and checks.
+
+### Feishu
+
+Use the [Feishu setup](bot/feishu-bot-config.md) to distinguish group notifications from app and Stream credentials.
