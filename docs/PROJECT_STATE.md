@@ -100,6 +100,23 @@ established bounded 45-second readiness deadline rather than 20 seconds.
   and is not an official industry index. A current group with no other member,
   such as FPT's observed software group, remains unavailable.
 
+## VN Holdings Concentration Snapshot feasibility (2026-11-03)
+
+Phase 8.1 is `NEEDS_VALIDATION`. An offline probe at `6cc44dca` exercised the
+daily chart route with eight synthetic positions and SSI-shaped fixtures.
+All eight reconciled on one observed prior date. A holiday-shaped gap, a
+current-day candle, and unusable or wrong-date marks demonstrated why the
+snapshot needs an observed reference date and full exact-date coverage.
+Eight cold chart requests produced 24 simulated SSI page reads. Eight
+immediate warm requests produced zero. The
+[daily chart caveats](SSI_FASTCONNECT_INTEGRATION.md#v3-daily-history-completeness-and-freshness)
+describe the finality and stale-cache limits.
+
+The 113 focused backend tests passed. Live SSI is `NOT_VERIFIED`. Live
+valuation coverage, same-date price and share-basis reconciliation, latency at
+the proposed eight-position cap, and the investor's five-review workflow are
+pending. `NEXT` remains unassigned.
+
 ## Fix-when-touched technical debt
 
 Large Vietnam dashboard page decomposition, VN30 hydration performance,

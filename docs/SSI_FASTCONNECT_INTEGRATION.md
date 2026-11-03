@@ -351,6 +351,16 @@ V3 daily OHLC is normalized from `securitiesSummary`. Long requests are retrieve
 
 Daily history marked complete exposes sanitized diagnostics including `requested_from`, `requested_to`, `page_count`, provider/normalized row counts, `min_date`, `max_date`, `latest_completed_session`, `freshness_status`, `cache_hit`, and `cache_source`. An incomplete or materially stale response is not a successful cache replacement, is not canonical when a newer SSI DailyStockPrice row exists, and does not feed technical indicators.
 
+`latest_completed_session` is a weekday-based reference calculated by the
+adapter. The actual observed date comes from the candle's provider trading date.
+Daily chart responses have trading dates without per-candle finality and can
+include a current-day candle. On refresh failure, a previously successful chart
+can retain `status=ok` and old completeness diagnostics alongside
+`cache_source=provider_backed_stale`. Consumers that require aligned marks need
+to check the exact candle date, price and cache provenance separately. The
+[holdings feasibility record](PROJECT_STATE.md#vn-holdings-concentration-snapshot-feasibility-2026-11-03)
+documents the offline checks and pending live evidence.
+
 The retained V3 intraday service request uses the supported `interval=1m`; requested dashboard cadence remains separate and is compared with observed provider cadence.
 
 ## SSI-V3-M1-R2 production status (2026-07-23)
