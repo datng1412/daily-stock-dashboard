@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [documentation] Add the StockClock PRD and architecture overview, link their subject owners, and clarify the optional stale streaming snapshot boundary.
 - [documentation] Add StockClock Codex skills for VN market-data integrity and documentation sync, with evidence requirements for delegation and future capability changes.
 - [documentation] Audit repository documentation, add a current authority/navigation map and coverage matrix, align SSI V3 onboarding and agent guidance, and distinguish retained acceptance from historical phase plans.
 - [fix] Preserve valid compact VN trigger diagnostics and working Alerts deep links instead of truncating JSON mid-object.

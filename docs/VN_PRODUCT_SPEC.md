@@ -2,13 +2,11 @@
 
 For a non-technical, product-facing overview in Vietnamese, see `docs/VN_PRODUCT_OFFERING.md`.
 
-Current scope/status is maintained in [PROJECT_STATE](PROJECT_STATE.md) and the active [roadmap](VN_DASHBOARD_ROADMAP.md). Named phase sections here preserve feature design history, not an executable backlog. Completed/current Foreign Flow, breadth, sectors, relative strength, and completed-session alerts now exist; an older section saying a feature does not exist describes that phase only.
+The [PRD](PRD.md) owns product purpose and scope. Use [PROJECT_STATE](PROJECT_STATE.md) for current capability status and the active [roadmap](VN_DASHBOARD_ROADMAP.md) for priorities. This document preserves VN screen designs and phase history. Read phase-specific MVP, provider, and availability statements in their original design context.
 
 ## Product Goal
 
-The Vietnam dashboard is a data-quality-first market inspection workspace for VN tickers. It helps users inspect official daily market data, source coverage, freshness, and unavailable provider states without turning the product into a trading-decision tool.
-
-This is not an AI stock advisor. It does not provide buy, sell, hold, target-price, portfolio, or order-placement recommendations. The product is a market-data quality dashboard.
+The Vietnam dashboard is a data-quality-first market inspection workspace. It helps a personal investor inspect daily market data, source coverage, freshness, and unavailable provider states before doing further research. Labels describe market conditions and data quality. The [product boundary](DECISIONS.md#vietnam-dashboard-product-boundary) governs recommendations and trading actions.
 
 ## Phase 4.12E-3 — On-demand symbol foreign-flow inspection
 

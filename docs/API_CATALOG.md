@@ -17,9 +17,10 @@ Global rules:
 Current Foreign Flow is `PRODUCTION_READY`. Retained active-session evidence
 covers the process-shared SSI V3 stream, symbol route, current VN30 and Industry
 aggregation, FastAPI, and desktop/mobile browser publication. Completed
-DailyStockPrice history remains the accepted authority, current values remain
-provisional and non-persistent, and no route starts or owns the provider
-connection.
+DailyStockPrice history remains the accepted authority. Current values stay
+provisional and outside completed history. The [optional streaming snapshot](VN_DATA_CONTRACT.md#persisted-last-known-streaming-metadata)
+can retain last-known normalized room rows as stale operational data. Provider
+connections remain lifecycle-owned.
 
 ## Verified manual HOSE proprietary-flow EOD
 
@@ -254,7 +255,7 @@ Implemented contract notes:
 - DailyOhlc and DailyStockPrice can disagree on same ticker/date.
 - `daily_stock_price` exposes `status`, `quality_status`, `source=SSI DailyStockPrice`, `date`, `date_match`, `staleness_reason`, normalized enrichment fields, `missing_fields`, value-specific `units`, and sanitized diagnostics.
 - `indicators.foreign_net_5d_latest_available`, `indicators.foreign_net_20d_latest_available`, `indicators.foreign_net_latest_available_date`, and `indicators.foreign_net_history_count` are populated from the same bounded per-symbol DailyStockPrice recent window when enough returned `foreign_net_volume` rows exist.
-- Top-level compatibility fields are `daily_stock_price_date`, `daily_stock_price_date_match`, and `daily_stock_price_staleness_reason`. A mismatch never changes `latest_price` or the daily row status.
+- Top-level compatibility fields are `daily_stock_price_date`, `daily_stock_price_date_match`, and `daily_stock_price_staleness_reason`. A date mismatch alone leaves price ownership unchanged. When DailyOhlc history fails freshness and a newer eligible DailyStockPrice close is available, the existing price degradation is explicitly partial.
 - Row-level partial-data issue codes can include `daily_ohlcv_missing`, `daily_stock_price_missing`, `ta_insufficient_history`, `rsi_missing`, `ma_state_insufficient_data`, `foreign_flow_missing`, `provider_empty`, and `provider_error`. They explain missing display cells without synthesizing values or changing `latest_price`.
 
 Future changes:

@@ -14,8 +14,10 @@ implemented. Current Foreign Flow is `PRODUCTION_READY`: bounded active-session
 evidence now covers official `ForeignRoomMessage` publication through the
 process-shared manager, symbol current route, current-VN30/current-Industry
 aggregation, FastAPI, and a real desktop/mobile browser. Current values remain
-provisional and non-persistent; stale transport state retains last-known values
-with an explicit stale/disconnected status.
+provisional and stay outside completed history. Stale transport state retains
+last-known values with an explicit stale/disconnected status. The [optional
+streaming snapshot](#bounded-persisted-last-known-rows) can retain normalized
+room rows for stale restart display. Current aggregates stay process-local.
 
 VN-BREADTH-1 reuses the sole V3 provider through exact current
 IndexComponents membership and a minimal 55-row DailyOhlc history reader. The

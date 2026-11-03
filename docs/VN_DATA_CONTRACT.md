@@ -384,7 +384,9 @@ algorithm.
 
 ### Persisted last-known streaming metadata
 
-When the optional lifecycle snapshot is enabled, normalized restored live rows may add `snapshot_source="persisted"`, `snapshot_captured_at`, `snapshot_trading_date`, `snapshot_schema_version=1`, `is_stale=true`, and `cache_status="persisted_stale"`. These fields are additive diagnostics/freshness metadata only. They never make X current/live, never replace `latest_price` or DailyOhlc, and never change empty/null contracts when no persisted row exists. During active sessions the user-facing state is waiting for live SSI updates; after close it is last-known stale data.
+When the optional lifecycle snapshot is enabled, restored normalized rows can carry `snapshot_source="persisted"`, `snapshot_captured_at`, `snapshot_trading_date`, the file's `snapshot_schema_version`, `is_stale=true`, and `cache_status="persisted_stale"`. These are freshness diagnostics. Restored rows are last-known data and cannot supply a fresh live quote, replace `latest_price` or DailyOhlc, or change empty/null contracts when no persisted row exists.
+
+The snapshot can include normalized foreign-room rows. A restored row remains stale and provisional when eligible for the current-symbol view. Current aggregates stay process-local. Completed history and completed-session alerts remain independent of the snapshot. [Snapshot store](../data_provider/ssi_streaming_snapshot_store.py) · [Streaming manager](../data_provider/ssi_streaming_realtime.py)
 
 This is the Phase 2 public contract. Missing live objects and lists must not be represented by placeholder objects or fake metric rows.
 
