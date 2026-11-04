@@ -120,10 +120,37 @@ complete, and stale-refresh states. The narrow table scrolled inside its
 container with no page-level overflow. All chart responses in these checks
 were injected fixtures.
 
-The dated gate below establishes chart-route feasibility. Product acceptance
-still requires a newly authorized live application run and the personal
-five-review pilot. The chart carries no instrument type or reliable adjustment
-basis. Users attest VN equity identity and same-date share basis.
+Final local acceptance on 2026-11-04 passed in Chrome on Windows at
+1366 × 768 and 390 × 844 (mobile emulation). FastAPI served the production
+bundle and existing chart route with sanitized data injected at the provider
+boundary. Browser response overrides exercised stale, missing-date and
+unavailable marks. A separate request through the SSI-disabled chart path
+returned no candles and showed 0/1 eligibility.
+
+Both viewports passed navigation, add/edit/remove/clear, duplicate rejection,
+the eight-position cap, browser-local reload persistence, and explicit Load
+and Refresh. The fixture selected 2026-11-03 in Vietnam time, excluded today
+and future candles, and produced 343,000 VND, a 29.2% largest holding and
+61.2% top-three weight at 8/8 coverage. At 5/8 coverage the current total and
+weights were withheld and the previous confirmed result remained separately
+dated. Editing cleared both results and required a new load and confirmation.
+Each batch issued one chart GET per ticker with only `symbol` and `range`,
+at most two in flight, and no request body. No API traffic was observed over
+35 seconds of simulated idle time. The mobile table scrolled within its
+container without page-level overflow. A single share is displayed as
+`1 shares`, a copy issue observed on both viewports.
+
+The final regression run passed 241 focused frontend tests with a 20-second
+timeout and 11 backend daily-chart lineage and freshness tests. ESLint,
+TypeScript and the Vite production build passed.
+
+Phase 9 status is `IMPLEMENTED_PENDING_ACCEPTANCE`. Live application
+acceptance is `NOT_VERIFIED`. The prior chart-route feasibility gate used its
+entire authorized budget. This acceptance run made zero live SSI requests
+and had no newly authorized budget. A live application run and the personal
+five-review pilot remain pending. The chart carries no instrument type or
+reliable adjustment basis. Users attest VN equity identity and same-date
+share basis.
 
 An independent market-data review was selected during implementation for the
 high-risk valuation boundary. The implementation and read-only reviewer both
