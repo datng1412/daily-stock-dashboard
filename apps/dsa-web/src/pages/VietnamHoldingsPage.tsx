@@ -160,7 +160,7 @@ export default function VietnamHoldingsPage() {
           <ul className="grid gap-2 sm:grid-cols-2">
             {holdings.map((row) => (
               <li key={row.ticker} className="flex flex-wrap items-center justify-between gap-x-2 rounded-lg border border-border/70 px-3 py-2">
-                <span className="text-sm"><strong>{row.ticker}</strong> · {price.format(row.shares)} shares</span>
+                <span className="text-sm"><strong>{row.ticker}</strong> · {price.format(row.shares)} {row.shares === 1 ? 'share' : 'shares'}</span>
                 <span className="flex gap-1">
                   <Button size="xsm" variant="ghost" aria-label={'Edit ' + row.ticker} onClick={() => {
                     setEditing(row.ticker);

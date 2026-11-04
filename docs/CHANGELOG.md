@@ -12,6 +12,7 @@ Published release entries are preserved as historical records in their original 
 ## [Unreleased]
 
 - [new feature] Add a browser-local VN Holdings Concentration Snapshot with date-confirmed share quantities, SSI daily price eligibility, and full-coverage concentration metrics.
+- [fix] Display `1 share` for a single share in the VN holdings list.
 - [documentation] Record Phase 9 fixture-based desktop and mobile acceptance and passing regression checks. Live SSI application acceptance remains pending a new authorized request budget.
 
 - [documentation] Record the bounded live SSI holdings gate: 8/8 exact-date prices reconciled, 25 cold/auth HTTP requests and zero warm requests, with a frontend-only snapshot scope and explicit finality, share-date, volume, and validation limits.

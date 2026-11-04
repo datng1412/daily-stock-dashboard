@@ -100,6 +100,18 @@ describe('holdings input and eligibility', () => {
 });
 
 describe('holdings snapshot page', () => {
+  it('uses singular and plural labels for saved quantities and rejects zero shares', () => {
+    openPage();
+    expect(screen.getByText('· 1 share', { exact: true })).toBeVisible();
+    expect(screen.getByText('· 2 shares', { exact: true })).toBeVisible();
+
+    fireEvent.change(screen.getByLabelText('VN equity ticker'), { target: { value: 'VCB' } });
+    fireEvent.change(screen.getByLabelText('Whole shares'), { target: { value: '0' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add holding' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('positive whole-share quantity');
+    expect(screen.getByRole('heading', { name: 'Holdings 2/8' })).toBeVisible();
+  });
+
   it('saves edits locally and rejects duplicate normalized tickers without requesting charts', () => {
     const page = openPage();
     fireEvent.change(screen.getByLabelText('VN equity ticker'), { target: { value: 'fpt.vn' } });

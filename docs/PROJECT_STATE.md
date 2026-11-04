@@ -137,12 +137,15 @@ dated. Editing cleared both results and required a new load and confirmation.
 Each batch issued one chart GET per ticker with only `symbol` and `range`,
 at most two in flight, and no request body. No API traffic was observed over
 35 seconds of simulated idle time. The mobile table scrolled within its
-container without page-level overflow. A single share is displayed as
-`1 shares`, a copy issue observed on both viewports.
+container without page-level overflow. Both viewports exposed the `1 shares`
+copy issue. The subsequent polish uses `1 share` for one and `shares` for
+plural quantities. Saved holdings still require positive whole shares.
 
 The final regression run passed 241 focused frontend tests with a 20-second
 timeout and 11 backend daily-chart lineage and freshness tests. ESLint,
 TypeScript and the Vite production build passed.
+After the quantity-label polish, 242 focused frontend tests passed with the
+same timeout. ESLint, TypeScript and the Vite production build passed again.
 
 Phase 9 status is `IMPLEMENTED_PENDING_ACCEPTANCE`. Live application
 acceptance is `NOT_VERIFIED`. The prior chart-route feasibility gate used its
