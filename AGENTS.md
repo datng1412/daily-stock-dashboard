@@ -87,16 +87,26 @@ For stock-related UI or API behavior:
 * `AGENTS.md` is the single source of truth for AI collaboration rules in this repository.
 * `CLAUDE.md` must be a symlink pointing to `AGENTS.md`, for compatibility with the Claude ecosystem.
 * `.github/copilot-instructions.md` and `.github/instructions/*.instructions.md` are mirrors or layered supplements for GitHub Copilot / Coding Agent. If they conflict with this file, `AGENTS.md` takes precedence.
-* The project-specific Codex workflows live in `.agents/skills/`. Use [market-data-integrity](.agents/skills/market-data-integrity/SKILL.md) when reviewing changes or regressions in VN market-data semantics. Use [stockclock-doc-sync](.agents/skills/stockclock-doc-sync/SKILL.md) when a completed phase changes documented behavior, acceptance, or limitations, or when auditing those claims. Follow each skill's evidence checks and use [DOCS_INDEX](docs/DOCS_INDEX.md) to find the maintained authority.
 * Existing issue and PR workflows live in `.claude/skills/`. Treat their `.claude/reviews/` outputs as local artifacts by default.
 * The root-level `SKILL.md` and `docs/openclaw-skill-integration.md` are product or external integration documentation. They are not the source of truth for repository collaboration rules.
-* When the user requests delegation or a high-risk cross-layer change warrants a separate review, use a built-in subagent for a bounded, independent check when the session permits it. Give it the scope, relevant contract, and expected evidence. Request file/line findings and checks run or pending, avoid concurrent edits to the same files, and verify its findings before incorporating them.
-* When a recurring workflow, repeated failure, or specialized review need emerges, evaluate reuse first. Add or update a repository skill or agent only when repository evidence demonstrates a reusable need that current capabilities cannot meet, the scope is clear and distinct, the result can be validated, and the benefit justifies maintenance. Keep policy here and the detailed workflow in one skill. Keep user-level configuration untouched and obtain explicit approval before installing external capabilities or dependencies.
 * When modifying AI collaboration governance assets, run:
 
 ```bash
 python scripts/check_ai_assets.py
 ```
+
+### Adaptive AI Task Routing
+
+* Select repository skills by the requested outcome and leave unrelated skills unloaded. Use [stockclock-doc-sync](.agents/skills/stockclock-doc-sync/SKILL.md) for audits of maintained claims and for phase changes that affect documented behavior, evidence, or limitations. Use [market-data-integrity](.agents/skills/market-data-integrity/SKILL.md) to review or change VN market-data semantics, including SSI provenance, OHLCV, prices, freshness, finality, coverage, and valuation eligibility. Use both when the task requires a data trace and documentation reconciliation. Share the trace and read only the relevant owners, contracts, and checks from [the documentation index](docs/DOCS_INDEX.md).
+* Assess scope, dependencies, risk, and whether work can be separated. Handle small tasks directly. When the session permits delegation, use it for medium tasks where a bounded investigation or cross-reference check adds value, and for large tasks with separable inspection, testing, or review. Keep integration and acceptance with the main agent.
+* When the user requests delegation or a high-risk cross-layer market-data change warrants independent review, use a built-in subagent when the session permits. Give it the affected contract, scope, and expected evidence. Keep edits disjoint, avoid repeated investigation, and verify returned findings. If delegation is unavailable, perform the review directly and record the limitation. Live provider checks require separately authorized acceptance scope.
+* Keep the main session on its active model and reasoning settings. For work that already warrants a built-in subagent, choose a model and effort together when the session exposes both overrides and the signed-in account supports the combination. Use these preferences:
+  * Light inspection, discovery, formatting, or a small isolated change uses a fast model with `low` or `medium` effort.
+  * Medium fixes, routine frontend work, or focused test generation uses a capable model with `medium` or `high` effort.
+  * Complex implementation, architecture, or debugging uses a strong coding model with `high` effort.
+  * High-risk SSI correctness, financial calculations, provenance, concurrency, or security reviews use a strong coding model with `high` or `xhigh` effort. Preserve review depth when optimizing cost.
+* If either override or the supported combination cannot be verified, omit both overrides and inherit the parent settings. When delegation is unavailable, work directly. For routing acceptance, record requested settings, runtime-reported settings, and any gaps in verification separately.
+* Report the skills used, any delegation performed, checks and evidence, and remaining acceptance gaps. Prefer existing skills and built-in agents. Add or revise a repository skill or agent only for a demonstrated, reusable need with distinct scope and a verifiable benefit. Keep detailed procedures in the owning skill, keep user-level configuration untouched, and obtain explicit approval before installing external capabilities or dependencies.
 
 ## 3. Repository entry points
 
