@@ -232,11 +232,19 @@ is next.
   Trigger JSON/deep-link serialization and mobile intrinsic-width overflow were
   repaired and regression-checked during acceptance.
 
+### Phase 9 — VN Holdings Concentration Snapshot MVP
+
+The frontend implementation follows the [approved holdings scope](PROJECT_STATE.md#bounded-implementation-scope-after-go).
+The [Phase 9 capability record](PROJECT_STATE.md#vn-holdings-concentration-snapshot-mvp)
+tracks deterministic and browser validation separately from dated chart-route
+feasibility. Live application acceptance and the personal five-review pilot are
+pending. A fresh live run requires separate authorization.
+
 ## Backlog classification
 
 | Class | Items |
 | --- | --- |
-| `NEXT` | Unassigned after VN-ALERT-1 acceptance |
+| `NEXT` | Unassigned beyond Phase 9 implementation and acceptance |
 | `LATER` | eventual risk-mode synthesis |
 | `BLOCKED` | VN30 futures/F1M/basis/open interest/futures volume; automated proprietary source; HOSE-wide breadth until an authoritative scalable universe is proven; fundamentals/corporate actions without a provider/legal contract |
 | `DEFERRED` | Proprietary product expansion; broader stock-detail polish; macro/risk asset integration; optional news-provider expansion |

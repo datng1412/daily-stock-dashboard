@@ -10,6 +10,15 @@ Current runtime is SSI V3 only. Use existing `tests/test_ssi_v3_*.py`, provider 
 
 Documentation-only work checks links/paths, configuration and command names, current-state consistency, secret exposure, and `git diff --check`. AI asset edits additionally run `python scripts/check_ai_assets.py`. No install, build, server, broad suite, or provider call is required solely for prose changes. For implementation, follow the AGENTS validation matrix and record any pending live/browser evidence explicitly.
 
+## VN holdings snapshot frontend validation
+
+Run `npm run test -- VietnamHoldingsPage.test.tsx` from `apps/dsa-web`.
+The fixture cases cover input storage, observed-date alignment, SSI lineage,
+stale and incomplete history, concentration math, date-bound confirmation,
+the two-request cap and cancellation. Use intercepted chart responses for
+desktop and mobile browser validation. Live product acceptance requires its
+own authorization and remains separate from these checks.
+
 ## SSI-V3-M2 market-data authenticity
 
 ## SSI-V3-M2.1 daily-OHLC lineage

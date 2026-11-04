@@ -1530,6 +1530,13 @@ export type VietnamChartResponse = {
   actualSource?: string | null;
   fallbackUsed?: boolean;
   fallbackReason?: string | null;
+  providerVersion?: string | null;
+  endpoint?: string | null;
+  diagnostics?: {
+    complete?: boolean;
+    freshnessStatus?: string | null;
+    cacheSource?: string | null;
+  } | null;
   timeframe: string;
   range: '1M' | '3M' | '6M' | '1Y' | string;
   latestDate?: string | null;

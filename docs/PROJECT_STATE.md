@@ -100,6 +100,36 @@ established bounded 45-second readiness deadline rather than 20 seconds.
   and is not an official industry index. A current group with no other member,
   such as FPT's observed software group, remains unavailable.
 
+## VN Holdings Concentration Snapshot MVP
+
+Phase 9 is implemented at `/vietnam/holdings`, linked from Vietnam Market Overview.
+It values up to eight browser-local VN equity holdings using the existing SSI V3
+daily chart. Quantities require confirmation for the displayed date. The snapshot
+withholds the total and weights when any holding lacks an eligible mark and
+keeps a prior confirmed result separately dated during refresh or failure.
+See the [valuation rules](VN_DATA_CONTRACT.md#vn-holdings-snapshot-valuation)
+and [presentation states](UI_STATES.md#vn-holdings-concentration-snapshot).
+
+On 2026-11-04, 20 holdings tests and 221 Vietnam Dashboard regression tests
+passed in the final run with a 20-second test timeout. Nine initial dashboard
+failures passed in isolated checks on both the starting revision and the
+implementation. ESLint, TypeScript and the Vite production build passed.
+The production frontend passed intercepted Chrome
+checks at 1366 × 768 and 390 × 844 for the on-demand, date confirmation,
+complete, and stale-refresh states. The narrow table scrolled inside its
+container with no page-level overflow. All chart responses in these checks
+were injected fixtures.
+
+The dated gate below establishes chart-route feasibility. Product acceptance
+still requires a newly authorized live application run and the personal
+five-review pilot. The chart carries no instrument type or reliable adjustment
+basis. Users attest VN equity identity and same-date share basis.
+
+An independent market-data review was selected during implementation for the
+high-risk valuation boundary. The implementation and read-only reviewer both
+resolved to GPT-6.1 Sol with high effort in the active chat. The reviewer
+inherited the parent settings.
+
 ## VN Holdings Concentration Snapshot feasibility (2026-11-03)
 
 Phase 8.1 is `NEEDS_VALIDATION`. An offline probe at `6cc44dca` exercised the

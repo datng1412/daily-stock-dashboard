@@ -11,6 +11,8 @@ Published release entries are preserved as historical records in their original 
 
 ## [Unreleased]
 
+- [new feature] Add a browser-local VN Holdings Concentration Snapshot with date-confirmed share quantities, SSI daily price eligibility, and full-coverage concentration metrics.
+
 - [documentation] Record the bounded live SSI holdings gate: 8/8 exact-date prices reconciled, 25 cold/auth HTTP requests and zero warm requests, with a frontend-only snapshot scope and explicit finality, share-date, volume, and validation limits.
 - [documentation] Consolidate StockClock navigation and setup around English subject owners, with frozen compatibility references and dated evidence kept separate.
 

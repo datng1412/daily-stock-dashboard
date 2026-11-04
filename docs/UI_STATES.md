@@ -11,6 +11,19 @@ Rules that apply to every state:
 - Missing object data renders as `null`.
 - Missing list data renders as `[]`.
 
+## VN Holdings Concentration Snapshot
+
+Vietnam Market Overview links to `/vietnam/holdings`. Add, edit, remove and
+clear affect only the browser-local list. Load or Refresh starts up to two
+concurrent daily chart requests. The price preview shows the observed date,
+eligible count, and per-holding mark or reason, including stale history,
+missing exact-date marks, and request failure. Confirm shares for the displayed
+date before viewing position values. Incomplete coverage suppresses the total
+and all weights. A previous confirmed snapshot for the same holdings appears
+separately with its date during refresh or failure. Results stay in page memory.
+The values table scrolls
+horizontally inside its container on narrow screens.
+
 ## Verified manual Proprietary EOD states
 
 The Proprietary tab now renders `Dữ liệu tự doanh HOSE cuối ngày` from the

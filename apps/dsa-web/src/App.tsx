@@ -21,6 +21,7 @@ const PortfolioPage = lazy(() => import('./pages/PortfolioPage'));
 const AlertsPage = lazy(() => import('./pages/AlertsPage'));
 const StockScreeningPage = lazy(() => import('./pages/StockScreeningPage'));
 const VietnamDashboardPage = lazy(() => import('./pages/VietnamDashboardPage'));
+const VietnamHoldingsPage = lazy(() => import('./pages/VietnamHoldingsPage'));
 const VietnamCompanyResearchPage = lazy(() => import('./pages/VietnamCompanyResearchPage'));
 const ForeignFlowPage = lazy(() => import('./pages/ForeignFlowPage'));
 
@@ -82,6 +83,7 @@ const AppContent: React.FC = () => {
         <Route path="/chat" element={<ChatPage />} />
         <Route path="/portfolio" element={<PortfolioPage />} />
         <Route path="/vietnam" element={<VietnamDashboardPage />} />
+        <Route path="/vietnam/holdings" element={<VietnamHoldingsPage />} />
         <Route path="/vietnam/company/:ticker" element={<VietnamCompanyResearchPage />} />
         <Route path="/foreign-flow" element={<ForeignFlowPage />} />
         <Route path="/screening" element={<StockScreeningPage />} />

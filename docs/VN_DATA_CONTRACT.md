@@ -4,6 +4,24 @@
 
 This document defines the public data contract for the VN dashboard and company research page. It is intentionally data-quality-first: valid daily SSI data should remain visible even when optional live or enrichment sections are unavailable.
 
+## VN holdings snapshot valuation
+
+The browser-only snapshot selects the newest valid observed candle date
+strictly before today in Vietnam time across the requested SSI V3 daily charts.
+It excludes current-day candles and uses neither the adapter's weekday reference
+nor an older common date. Every holding needs a matching symbol, 6M range and
+daily timeframe, SSI V3 `securitiesSummary` lineage, explicit no-fallback
+provenance, complete fresh diagnostics, and a provider or process-memory cache
+source. Stale-cache recovery is ineligible even when cached diagnostics still
+report complete and fresh history.
+
+Each exact-date mark must have one valid positive OHLC row with positive
+`volume`. The mark is the raw close in VND/share. The position value multiplies
+this close by the whole shares the user confirms for that date and share basis.
+Every holding must qualify before the snapshot displays total value, weights,
+largest holding or top-three weight. The chart carries no instrument type.
+Ticker format is screened locally and VN equity identity is user-confirmed.
+
 ## Verified manual HOSE proprietary-flow EOD
 
 The Proprietary product is a separate completed-session aggregate sourced by a

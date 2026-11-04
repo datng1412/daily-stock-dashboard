@@ -6597,6 +6597,9 @@ const VietnamDashboardPage: React.FC = () => {
           <p className="mt-1 max-w-3xl text-sm text-secondary-text">
             Scan your watchlist first, then inspect completed-session price, flow, technical, and optional live context.
           </p>
+          <a href="/vietnam/holdings" className="mt-3 inline-block text-sm font-medium text-secondary-text underline hover:text-foreground">
+            VN Holdings Concentration Snapshot
+          </a>
         </div>
       </header>
 
